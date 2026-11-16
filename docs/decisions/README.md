@@ -11,3 +11,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0005](0005-fuzz-normalisation.md) | What the fuzz test treats as equal |
 | [0006](0006-client-shells.md) | The shell supplies document types; one client build loads from a host, Vite or `file://` |
 | [0007](0007-history-paths.md) | History entries carry the file's path at each commit, so versions from before a rename open |
+| [0008](0008-markdown-cues.md) | No toolbar or top bar; formatting comes from typing markdown; history starts closed |

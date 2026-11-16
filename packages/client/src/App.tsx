@@ -1,4 +1,5 @@
-// The client: a fixed three-pane layout around one live editor.
+// The client: a file tree, one live editor, and a history sidebar that starts closed.
+// Everything else lives in the status bar, so the page is mostly the document.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { TypeRegistry, type DocumentType } from '@kuraa/kernel';
@@ -6,6 +7,7 @@ import { HostApi, type CommitInfo, type TreeFile, type WorkspaceInfo } from './a
 import { Editor, type EditorStatus } from './Editor.js';
 import { FileTree, HistoryPanel, SettingsDialog, StatusBar } from './panels.js';
 import { ReadOnlyCode, ReadOnlyDoc } from './ReadOnly.js';
+import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
 
 export interface AppProps {
@@ -41,6 +43,9 @@ export function App({ types, overrides, defaults }: AppProps) {
   const [viewing, setViewing] = useState<{ commit: CommitInfo; text: string } | null>(null);
   const [viewSource, setViewSource] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [showSource, setShowSource] = useState(false);
+  const [notice, setNotice] = useState<{ kind: 'info' | 'warn'; text: string } | null>(null);
 
   const pathRef = useRef(path);
   pathRef.current = path;
@@ -48,6 +53,8 @@ export function App({ types, overrides, defaults }: AppProps) {
     if (next === pathRef.current) return;
     setViewing(null);
     setStatus(null);
+    setNotice(null);
+    setShowSource(false);
     setPath(next);
   }, []);
 
@@ -95,6 +102,19 @@ export function App({ types, overrides, defaults }: AppProps) {
     }
   };
 
+  const saveVersion = async () => {
+    if (!path) return;
+    const message = (await askText('Name this version', `Update ${path}`, 'Save version'))?.trim();
+    if (!message) return;
+    try {
+      await api.version(path, message);
+      setNotice({ kind: 'info', text: `Saved version “${message}”.` });
+      setHistoryKey((k) => k + 1);
+    } catch (e) {
+      setNotice({ kind: 'warn', text: (e as Error).message });
+    }
+  };
+
   const sync = async () => {
     setSyncing(true);
     try {
@@ -111,20 +131,9 @@ export function App({ types, overrides, defaults }: AppProps) {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <strong className="brand">kuraa</strong>
-        <span className="muted">
-          {workspace ? <>{workspace.name} · <code>{workspace.branch}</code>{workspace.head ? <> @ <code>{workspace.head.slice(0, 7)}</code></> : null}</> : settings.hostUrl}
-        </span>
-        <span className="topbar-path">{path ?? ''}</span>
-        <button type="button" onClick={sync} disabled={syncing || !workspace} title="Commit, fetch, merge and push against the upstream remote">
-          {syncing ? 'Syncing…' : 'Sync'}
-        </button>
-        <button type="button" onClick={() => setEditingSettings(true)}>Settings</button>
-      </header>
       {error && <div className="banner warn" role="alert">{error} <button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
 
-      <div className="panes">
+      <div className={`panes${historyOpen ? ' history-open' : ''}`}>
         <FileTree api={api} files={files} selected={path} onSelect={select} onChanged={refreshTree} onError={setError} />
 
         <main className="pane pane-centre">
@@ -138,7 +147,7 @@ export function App({ types, overrides, defaults }: AppProps) {
           {path && type && !versionMismatch && !editingSettings && (
             <div className="centre-stack">
               <div style={{ display: viewing ? 'none' : 'contents' }}>
-                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} />
+                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} />
               </div>
               {viewing && (
                 <div className="editor-pane past-version" data-testid="past-version">
@@ -159,10 +168,27 @@ export function App({ types, overrides, defaults }: AppProps) {
           )}
         </main>
 
-        <HistoryPanel api={api} path={type ? path : null} refreshKey={historyKey} viewing={viewing?.commit.hash ?? null} onView={view} />
+        {historyOpen && <HistoryPanel api={api} path={type ? path : null} refreshKey={historyKey} viewing={viewing?.commit.hash ?? null} onView={view} />}
       </div>
 
-      <StatusBar status={status} path={path} workspace={workspace ? `${workspace.name} on ${workspace.branch}` : 'Not connected'} />
+      <StatusBar
+        status={status}
+        notice={notice ?? status?.notice ?? null}
+        path={path}
+        workspace={workspace ? `${workspace.name} on ${workspace.branch}${workspace.head ? ` @ ${workspace.head.slice(0, 7)}` : ''}` : settings.hostUrl || 'Not connected'}
+      >
+        {path && type && !viewing && (
+          <>
+            <button type="button" className={showSource ? 'active' : ''} onClick={() => setShowSource((v) => !v)} data-testid="toggle-source">Source</button>
+            <button type="button" onClick={() => void saveVersion()}>Save version</button>
+          </>
+        )}
+        <button type="button" className={historyOpen ? 'active' : ''} onClick={() => setHistoryOpen((v) => !v)} aria-pressed={historyOpen}>History</button>
+        <button type="button" onClick={() => void sync()} disabled={syncing || !workspace} title="Commit, fetch, merge and push against the upstream remote">
+          {syncing ? 'Syncing…' : 'Sync'}
+        </button>
+        <button type="button" onClick={() => setEditingSettings(true)}>Settings</button>
+      </StatusBar>
 
       {editingSettings && (
         <SettingsDialog

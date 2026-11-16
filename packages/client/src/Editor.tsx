@@ -8,7 +8,6 @@ import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
 import { editorCommands, editorPlugins, type EditorCommand } from './commands.js';
 import { SourceView } from './ReadOnly.js';
-import { askText } from './ask.js';
 
 export interface EditorStatus {
   connection: ConnectionStatus;
@@ -28,14 +27,15 @@ interface Props {
   type: DocumentType;
   onStatus(status: EditorStatus): void;
   onCommitted(): void;
+  /** Show the file's markdown source (read-only) instead of the editor. */
+  showSource: boolean;
 }
 
-export function Editor({ api, settings, path, type, onStatus, onCommitted }: Props) {
+export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource }: Props) {
   const mount = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showSource, setShowSource] = useState(false);
   const [, force] = useState(0);
   const connection = useRef<RoomConnection | null>(null);
   const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null });
@@ -97,7 +97,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted }: Pro
         // y-prosemirror dispatches while the view is still being constructed, so use `this`, not `pmView`.
         dispatchTransaction(this: EditorView, tr) {
           this.updateState(this.state.apply(tr));
-          force((x) => x + 1);
+          force((x) => x + 1); // the source view follows the live document
         },
       });
       setView(pmView);
@@ -121,49 +121,8 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted }: Pro
     connection.current?.setUser(user);
   }, [user]);
 
-  const run = (c: EditorCommand) => {
-    if (!view) return;
-    c.command(view.state, view.dispatch, view);
-    view.focus();
-  };
-
-  const saveVersion = async () => {
-    const message = (await askText('Name this version', `Update ${path}`, 'Save version'))?.trim();
-    if (!message) return;
-    try {
-      await api.version(path, message);
-      update({ notice: { kind: 'info', text: `Saved version “${message}”.` } });
-    } catch (e) {
-      update({ notice: { kind: 'warn', text: (e as Error).message } });
-    }
-  };
-
-  const groups = ['history', 'mark', 'block', 'insert'] as const;
   return (
     <div className="editor-pane">
-      <div className="toolbar" role="toolbar">
-        {groups.map((g) => (
-          <div className="toolbar-group" key={g}>
-            {commands.current.filter((c) => c.group === g).map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={view && c.active?.(view.state) ? 'active' : ''}
-                title={`${c.title}${c.keys ? ` (${c.keys.replace('Mod', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl')})` : ''}`}
-                disabled={!view || !c.command(view.state, undefined, view)}
-                onMouseDown={(e) => { e.preventDefault(); run(c); }}
-              >
-                {c.icon ?? c.title}
-              </button>
-            ))}
-          </div>
-        ))}
-        <div className="toolbar-spacer" />
-        <button type="button" className={showSource ? 'active' : ''} onClick={() => setShowSource((s) => !s)} data-testid="toggle-source">
-          {showSource ? 'Editor' : 'Source'}
-        </button>
-        <button type="button" onClick={saveVersion} disabled={!view}>Save version</button>
-      </div>
       {error && <div className="banner warn">Could not open {path}: {error}</div>}
       {loading && !error && <div className="loading">Opening {path}…</div>}
       <div className="editor-scroll" style={{ display: showSource ? 'none' : undefined }}>

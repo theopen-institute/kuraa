@@ -109,23 +109,34 @@ class CodeView implements NodeView {
       { key: 'ArrowLeft', run: () => this.escape('char', -1) },
       { key: 'ArrowDown', run: () => this.escape('line', 1) },
       { key: 'ArrowRight', run: () => this.escape('char', 1) },
+      { key: 'Mod-Enter', run: () => this.exitBelow() },
       {
-        key: 'Mod-Enter',
+        // The markdown cue: a closing fence on the last line, then Enter, ends the block.
+        key: 'Enter',
         run: () => {
-          // Leave the code block and continue in a new paragraph below.
-          const pos = this.getPos();
-          if (pos === undefined) return false;
-          const after = pos + this.node.nodeSize;
-          const { state } = this.view;
-          const para = state.schema.nodes.paragraph!.create();
-          const tr = state.tr.insert(after, para);
-          tr.setSelection(TextSelection.create(tr.doc, after + 1));
-          this.view.dispatch(tr.scrollIntoView());
-          this.view.focus();
-          return true;
+          const { state } = this.cm;
+          const { main } = state.selection;
+          const line = state.doc.lineAt(main.head);
+          if (!main.empty || line.number !== state.doc.lines || !/^\s*(`{3,}|~{3,})\s*$/.test(line.text)) return false;
+          return this.exitBelow(line.number > 1 ? line.from - 1 : line.from, line.to);
         },
       },
     ];
+  }
+
+  /** Leave the code block for a new paragraph below it, first removing [from, to) of its text. */
+  private exitBelow(from?: number, to?: number): boolean {
+    const pos = this.getPos();
+    if (pos === undefined) return false;
+    const { state } = this.view;
+    const tr = state.tr;
+    if (from !== undefined && to !== undefined && to > from) tr.delete(pos + 1 + from, pos + 1 + to);
+    const after = tr.mapping.map(pos + this.node.nodeSize);
+    tr.insert(after, state.schema.nodes.paragraph!.create());
+    tr.setSelection(TextSelection.create(tr.doc, after + 1));
+    this.view.dispatch(tr.scrollIntoView());
+    this.view.focus();
+    return true;
   }
 
   private escape(unit: 'line' | 'char', dir: 1 | -1): boolean {

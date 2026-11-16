@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: E2E.url, trace: 'retain-on-failure' },
   projects: [
-    { name: 'web', testMatch: /collab\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'web', testMatch: /(collab|cues)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
   ],
   webServer: {

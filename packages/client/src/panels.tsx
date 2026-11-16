@@ -173,12 +173,21 @@ export function HistoryPanel({ api, path, refreshKey, viewing, onView }: History
   );
 }
 
-export function StatusBar({ status, path, workspace }: { status: EditorStatus | null; path: string | null; workspace: string }) {
+interface StatusBarProps {
+  status: EditorStatus | null;
+  notice: EditorStatus['notice'];
+  path: string | null;
+  workspace: string;
+  /** Quiet controls shown at the right-hand end. */
+  children?: ReactNode;
+}
+
+export function StatusBar({ status, notice, path, workspace, children }: StatusBarProps) {
   const conn = status?.connection ?? 'disconnected';
   const label: Record<string, string> = { connecting: 'Connecting…', connected: 'Connected', disconnected: 'Offline', unauthorized: 'Token rejected' };
   return (
     <footer className="status" data-testid="status">
-      <span className={`conn conn-${conn}`} title={path ? `Room ${status?.room?.room ?? ''}` : ''}>
+      <span className={`conn conn-${conn}`} title={path ? `${workspace}\nRoom ${status?.room?.room ?? ''}` : workspace}>
         <span className="dot" />{path ? label[conn] : workspace}
       </span>
       {path && status && (
@@ -197,7 +206,8 @@ export function StatusBar({ status, path, workspace }: { status: EditorStatus | 
           </span>
         </>
       )}
-      {status?.notice && <span className={`notice ${status.notice.kind}`}>{status.notice.text}</span>}
+      {notice && <span className={`notice ${notice.kind}`}>{notice.text}</span>}
+      <span className="status-actions">{children}</span>
     </footer>
   );
 }

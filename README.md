@@ -46,6 +46,11 @@ in, and a `git clone` command. Useful options:
 Everyone who has the URL and token can edit. Each person sets a display name, an email (for
 co-author credit) and a cursor colour under **Settings** in the client.
 
+The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
+so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
+full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Source, Save version,
+History, Sync and Settings are at the right of the status bar.
+
 The repository is also served over git's HTTP protocol at `/git`, with the token as the password:
 
 ```sh
@@ -90,6 +95,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | M1, M6, M7 | `packages/format-*/test`: identity, locality, oracle, fixed point, fuzz and totality on the 22-file corpus in [fixtures/corpus](fixtures/corpus/) |
 | M2–M5, M9 | `packages/host/test`: headless clients against a real host and git repo |
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
+| — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; and it joins a shared host |
 
 ## Layout
@@ -101,7 +107,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension point |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI |
-| `packages/client` | The React client: file tree, editor, history, status, settings |
+| `packages/client` | The React client: file tree, editor with markdown cues, history, status, settings |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |
 

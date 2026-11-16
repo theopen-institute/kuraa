@@ -57,15 +57,23 @@ The repository is also served over git's HTTP protocol at `/git`, with the token
 git clone http://kuraa:<token>@127.0.0.1:4321/git notes
 ```
 
-## Run the web client in development
+If the folder is not a git repository yet, add `--init` to make it one, committing what is
+already there.
 
-Start a host as above (without `--static`), then:
+## Develop
 
 ```sh
-pnpm web:dev
+pnpm dev                          # uses .dev-workspace/ (created the first time, git-ignored)
+pnpm dev --dir ~/research/notes
 ```
 
-Open <http://localhost:5173> and enter the host's URL and token in **Settings**.
+Open <http://127.0.0.1:5173>. There is nothing to configure: the dev server puts the host behind
+its own address and gives the page the token. Client changes apply in place without a reload;
+changes to the host, session, kernel or format packages restart the host, and open editors
+reconnect without losing anything typed. Ctrl+C writes and commits pending edits before exiting.
+
+To point the dev client at some other host instead, run `pnpm web:dev` and enter that host's
+URL and token in **Settings**.
 
 ## Run the desktop app
 
@@ -96,7 +104,8 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | M2–M5, M9 | `packages/host/test`: headless clients against a real host and git repo |
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
-| M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; and it joins a shared host |
+| M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
+| — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
 
 ## Layout
 
@@ -110,6 +119,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/client` | The React client: file tree, editor with markdown cues, history, status, settings |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |
+| `scripts/dev.ts` | `pnpm dev`: host under `tsx watch`, client under Vite, one origin |
 
 ## Known limits
 

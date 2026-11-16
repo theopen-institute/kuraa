@@ -11,6 +11,7 @@ export default defineConfig({
   projects: [
     { name: 'web', testMatch: /(collab|cues)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
+    { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],
   webServer: {
     // A shared host on a fresh workspace, serving the built web client.

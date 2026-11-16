@@ -9,6 +9,7 @@
     "start": "pnpm run build && node start.mjs"
   },
   "dependencies": {
+    "@kuraa/client": "workspace:*",
     "@kuraa/host": "workspace:*"
   },
   "devDependencies": {

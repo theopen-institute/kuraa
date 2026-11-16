@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "dev": "tsx scripts/dev.ts",
     "host": "tsx packages/host/src/cli.ts",
     "web:dev": "pnpm --filter @kuraa/web dev",
     "web:build": "pnpm --filter @kuraa/web build",

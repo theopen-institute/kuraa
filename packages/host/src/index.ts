@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Host, type HostOptions } from './host.js';
 
 export { Host, HttpError, DEFAULT_TIMINGS, type HostOptions, type HostTimings } from './host.js';
+export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
 
 export interface RunningHost {
   host: Host;

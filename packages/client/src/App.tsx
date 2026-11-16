@@ -9,6 +9,7 @@ import { FileTree, HistoryPanel, SettingsDialog, StatusBar } from './panels.js';
 import { ReadOnlyCode, ReadOnlyDoc } from './ReadOnly.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
+import { webShell, type Shell } from './shell.js';
 
 export interface AppProps {
   /** Document types this client can edit. Must be the same implementations the host loads. */
@@ -17,11 +18,13 @@ export interface AppProps {
   overrides?: Partial<Settings>;
   /** Suggestions from the shell, used only where nothing is stored (e.g. name and email from git). */
   defaults?: Partial<Settings>;
+  /** The program the client runs in; a plain web page if omitted. */
+  shell?: Shell;
 }
 
 const OPEN_KEY = 'kuraa:open-file';
 
-export function App({ types, overrides, defaults }: AppProps) {
+export function App({ types, overrides, defaults, shell = webShell }: AppProps) {
   const registry = useMemo(() => {
     const r = new TypeRegistry();
     for (const t of types) r.register(t);
@@ -193,6 +196,7 @@ export function App({ types, overrides, defaults }: AppProps) {
       {editingSettings && (
         <SettingsDialog
           initial={settings}
+          shell={shell}
           onCancel={isComplete(settings) ? () => setEditingSettings(false) : undefined}
           onSave={(s) => {
             saveSettings(s);

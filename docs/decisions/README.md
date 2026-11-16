@@ -12,3 +12,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0006](0006-client-shells.md) | The shell supplies document types; one client build loads from a host, Vite or `file://` |
 | [0007](0007-history-paths.md) | History entries carry the file's path at each commit, so versions from before a rename open |
 | [0008](0008-markdown-cues.md) | No toolbar or top bar; formatting comes from typing markdown; history starts closed |
+| [0009](0009-shell-boundary.md) | The host does all file and git work; the client sees its shell through one interface; `pnpm dev` |

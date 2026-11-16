@@ -9,6 +9,7 @@ import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
 import { Git } from './git.js';
+import { initWorkspace } from './workspace.js';
 import { createRequestHandler } from './http.js';
 
 export interface HostTimings {
@@ -32,6 +33,8 @@ export interface HostOptions {
   /** Remote to fetch from and push to. Defaults to `origin` when it exists. */
   upstream?: string;
   identity?: { name: string; email: string };
+  /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
+  init?: boolean;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }
@@ -122,7 +125,11 @@ export class Host {
   }
 
   async start(): Promise<AddressInfo> {
-    if (!(await this.git.isRepo())) throw new Error(`Not a git repository: ${this.dir}`);
+    if (!(await this.git.isRepo())) {
+      if (!this.options.init) throw new Error(`Not a git repository: ${this.dir}`);
+      await initWorkspace(this.dir);
+      this.log(`initialised a git repository in ${this.dir}`);
+    }
     this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
     await mkdir(this.cacheDir, { recursive: true });
     await this.ensureIdentity();

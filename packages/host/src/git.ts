@@ -1,7 +1,13 @@
 // The system git binary, called as a child process.
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 export interface GitResult { stdout: string; stderr: string; code: number }
+
+// Git runs in its own process group, so Ctrl+C in the host's terminal (which goes
+// to the whole foreground group) cannot kill a commit half-way. The host stops
+// on that signal by finishing its git work first. (Not on Windows, where a
+// detached child would get its own console window.)
+const OWN_GROUP = process.platform !== 'win32';
 
 export class Git {
   constructor(readonly dir: string, private env: Record<string, string> = {}) {}
@@ -12,14 +18,20 @@ export class Git {
 
   run(args: string[], opts: { input?: string; allowFail?: boolean } = {}): Promise<GitResult> {
     return new Promise((resolve, reject) => {
-      const child = execFile('git', args, { cwd: this.dir, env: { ...process.env, ...this.env }, maxBuffer: 256 * 1024 * 1024 }, (err, stdout, stderr) => {
-        const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0;
-        if (code !== 0 && !opts.allowFail) reject(new Error(`git ${args.join(' ')} failed (${code}): ${stderr || stdout}`));
+      const child = spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env }, detached: OWN_GROUP });
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
+      child.stdout.on('data', (d: Buffer) => out.push(d));
+      child.stderr.on('data', (d: Buffer) => err.push(d));
+      child.on('error', reject);
+      child.on('close', (exit, signal) => {
+        const stdout = Buffer.concat(out).toString('utf8');
+        const stderr = Buffer.concat(err).toString('utf8');
+        const code = exit ?? 1;
+        if (code !== 0 && !opts.allowFail) reject(new Error(`git ${args.join(' ')} failed (${signal ? `killed by ${signal}` : code}): ${stderr || stdout}`));
         else resolve({ stdout, stderr, code });
       });
-      if (opts.input !== undefined) {
-        child.stdin?.end(opts.input);
-      }
+      child.stdin.end(opts.input);
     });
   }
 
@@ -65,6 +77,6 @@ export class Git {
 
   /** Spawn a git subcommand with streaming IO (for http-backend). */
   spawn(args: string[], env: Record<string, string>) {
-    return spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...env } });
+    return spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...env }, detached: OWN_GROUP });
   }
 }

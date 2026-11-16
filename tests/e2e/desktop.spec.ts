@@ -68,6 +68,17 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await openNotes(page);
     await expect(page).toHaveTitle(`notes.md · ${basename(dir)} · kuraa`);
 
+    // The connection comes through the preload bridge, so a reload keeps it.
+    await page.reload();
+    await openNotes(page);
+
+    // The app manages this host: Settings has no host or token, and offers the shell's actions.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByLabel('Display name')).toHaveValue('Desk Top');
+    await expect(page.getByLabel('Host URL')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open another folder…' })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
     // New and Rename ask in an in-app dialog (Electron has no window.prompt).
     await page.getByRole('button', { name: /New/ }).click();
     await page.getByTestId('ask').locator('input').fill('field/day-one.md');
@@ -145,4 +156,48 @@ test('joins a shared host without starting one', async () => {
     await host.close();
   }
   expect(existsSync(join(dir, '.git'))).toBe(true);
+});
+
+test('the launcher opens a folder that is not yet a repository, and joins a host', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
+  writeFileSync(join(dir, 'notes.md'), NOTES);
+  const shared = makeRepo();
+  const host = await startHost({ dir: shared, port: 0, host: '127.0.0.1', timings: { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 } });
+  const { app, page } = await launch([], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
+  try {
+    // Native dialogs cannot be clicked from a test: answer them in the main process.
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [folder] })) as typeof dialog.showOpenDialog;
+      dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox;
+    }, dir);
+
+    await page.getByRole('button', { name: 'Open folder…' }).click();
+    await openNotes(page);
+    expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
+    await typeAtEnd(page, 'Light rain', ' Opened from the launcher.');
+    await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Opened from the launcher.');
+
+    // Settings → Join a shared host: back to the launcher; the embedded host stops and commits.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Join a shared host…' }).click();
+    await expect(page.getByRole('button', { name: 'Open folder…' })).toBeVisible();
+    expect(git(dir, 'status', '--porcelain')).toBe('');
+    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Opened from the launcher.');
+
+    await page.getByLabel('Host URL').fill(host.url);
+    await page.getByLabel('Access token').fill('wrong');
+    await page.getByRole('button', { name: 'Join' }).click();
+    await expect(page.getByRole('alert')).toContainText('rejected the token');
+    await page.getByLabel('Access token').fill(host.token);
+    await page.getByRole('button', { name: 'Join' }).click();
+    await openNotes(page);
+    await expect(page).toHaveTitle(`notes.md · ${basename(shared)} · kuraa`);
+
+    // Joined, not managed: Settings shows the host and token.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByLabel('Host URL')).toHaveValue(host.url);
+  } finally {
+    await app.close();
+    await host.close();
+  }
 });

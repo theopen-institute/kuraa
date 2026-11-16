@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
@@ -10,7 +10,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
-import { startHost, type RunningHost } from '../src/index.js';
+import { gitIdentity, inspectFolder, startHost, type RunningHost } from '../src/index.js';
 
 const NOTES = `---
 title: Field notes
@@ -263,5 +263,35 @@ describe('host', () => {
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('Delete drafts/renamed.Rmd');
     expect(git(dir, 'status', '--porcelain')).toBe('');
     expect((await api('/api/files', { method: 'POST', body: JSON.stringify({ path: '../escape.md' }) })).status).toBe(400);
+  });
+});
+
+// What shells use instead of running git themselves.
+describe('workspace helpers', () => {
+  it('inspects a folder, and the host initialises it only when asked', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kuraa-init-')));
+    try {
+      writeFileSync(join(dir, 'notes.md'), NOTES);
+      expect(await inspectFolder(dir)).toEqual({ dir, repoRoot: null, entries: 1 });
+      await expect(startHost({ dir, port: 0 })).rejects.toThrow('Not a git repository');
+      expect(existsSync(join(dir, '.git'))).toBe(false);
+
+      const running = await startHost({ dir, port: 0, init: true, timings: FAST });
+      try {
+        expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
+        expect(git(dir, 'ls-files')).toBe('notes.md');
+        const res = await fetch(`${running.url}/api/tree`, { headers: { authorization: `Bearer ${running.token}` } });
+        expect(res.status).toBe(200);
+      } finally {
+        await running.close();
+      }
+      expect((await inspectFolder(dir)).repoRoot).toBe(dir);
+
+      git(dir, 'config', 'user.name', 'Folder Person');
+      git(dir, 'config', 'user.email', 'folder@example.org');
+      expect(await gitIdentity(dir)).toEqual({ name: 'Folder Person', email: 'folder@example.org' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

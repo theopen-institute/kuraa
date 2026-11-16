@@ -6,14 +6,15 @@ import { stdout } from 'node:process';
 
 rmSync('build', { recursive: true, force: true });
 mkdirSync('build', { recursive: true });
-const common = {
-  bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'], sourcemap: 'inline', logLevel: 'warning',
+const common = { bundle: true, format: 'cjs', external: ['electron'], sourcemap: 'inline', logLevel: 'warning' };
+await build({
+  ...common, platform: 'node', target: 'node22', entryPoints: ['src/main.ts'], outfile: 'build/main.cjs',
   // Some dependencies call createRequire(import.meta.url), which a CommonJS bundle lacks.
   define: { 'import.meta.url': '__importMetaUrl' },
   banner: { js: "const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;" },
-};
-await build({ ...common, entryPoints: ['src/main.ts'], outfile: 'build/main.cjs' });
-await build({ ...common, entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs' });
+});
+// The preload runs sandboxed, where require() offers little beyond 'electron': no shim, no Node built-ins.
+await build({ ...common, platform: 'browser', target: 'chrome140', entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs' });
 if (!existsSync('../web/dist/index.html')) throw new Error('Build the web client first: pnpm --filter @kuraa/web build');
 cpSync('../web/dist', 'build/web', { recursive: true });
 cpSync('static', 'build/static', { recursive: true });

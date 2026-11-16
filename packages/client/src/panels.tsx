@@ -4,6 +4,7 @@ import type { CommitInfo, HostApi, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
 import { askConfirm, askText } from './ask.js';
+import type { Shell } from './shell.js';
 
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—');
 const when = (iso: string) => {
@@ -212,7 +213,7 @@ export function StatusBar({ status, notice, path, workspace, children }: StatusB
   );
 }
 
-export function SettingsDialog({ initial, onSave, onCancel }: { initial: Settings; onSave(s: Settings): void; onCancel?: () => void }) {
+export function SettingsDialog({ initial, shell, onSave, onCancel }: { initial: Settings; shell: Shell; onSave(s: Settings): void; onCancel?: () => void }) {
   const [s, setS] = useState(initial);
   const field = (key: keyof Settings, label: string, props: InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="field">
@@ -233,8 +234,14 @@ export function SettingsDialog({ initial, onSave, onCancel }: { initial: Setting
         {field('name', 'Display name', { required: true, autoFocus: true })}
         {field('email', 'Email, for co-author credit', { type: 'email' })}
         {field('color', 'Cursor colour', { type: 'color' })}
-        {field('hostUrl', 'Host URL', { required: true, type: 'url' })}
-        {field('token', 'Access token', { required: true, type: 'password', autoComplete: 'off' })}
+        {!shell.managesHost && field('hostUrl', 'Host URL', { required: true, type: 'url' })}
+        {!shell.managesHost && field('token', 'Access token', { required: true, type: 'password', autoComplete: 'off' })}
+        {(shell.openFolder || shell.leave) && (
+          <div className="modal-shell">
+            {shell.openFolder && <button type="button" onClick={shell.openFolder}>Open another folder…</button>}
+            {shell.leave && <button type="button" onClick={shell.leave}>Join a shared host…</button>}
+          </div>
+        )}
         <div className="modal-actions">
           {onCancel && <button type="button" onClick={onCancel}>Cancel</button>}
           <button type="submit" className="primary">Save</button>

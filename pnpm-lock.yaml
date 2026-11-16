@@ -214,6 +214,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@kuraa/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@kuraa/host':
         specifier: workspace:*
         version: link:../../packages/host
@@ -233,6 +236,12 @@ importers:
       '@kuraa/format-rmarkdown':
         specifier: workspace:*
         version: link:../../packages/format-rmarkdown
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
     devDependencies:
       '@vitejs/plugin-react':
         specifier: ^6.3.0

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DocumentType } from '@kuraa/kernel';
 import { connectRoom, type ConnectionStatus, type Peer, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
-import { EditorState } from 'prosemirror-state';
+import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import type { HostApi, RoomInfo } from './api.js';
 import type { Settings } from './settings.js';
@@ -50,6 +50,30 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   const userRef = useRef(user);
   userRef.current = user;
   const engines = runEngines.join(',');
+
+  /**
+   * A click in the editor's empty space (the padding below or above the text,
+   * or the margins beside it) lands outside ProseMirror's element. Put the
+   * cursor where it would be expected: the end of the document below the text,
+   * the start above it, and the nearest point on the line beside it.
+   */
+  const onBlankMouseDown = (e: React.MouseEvent) => {
+    if (!view || e.button !== 0 || e.shiftKey || view.dom.contains(e.target as Node)) return;
+    e.preventDefault();
+    const { doc } = view.state;
+    const box = view.dom.getBoundingClientRect();
+    let selection: Selection;
+    if (e.clientY >= box.bottom) selection = Selection.atEnd(doc);
+    else if (e.clientY <= box.top) selection = Selection.atStart(doc);
+    else {
+      const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
+      const hit = view.posAtCoords({ left, top: e.clientY });
+      selection = hit ? TextSelection.near(doc.resolve(hit.pos)) : Selection.atEnd(doc);
+    }
+    // Focus first, so a cursor inside a code block can hand focus on to its CodeMirror.
+    view.focus();
+    view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
+  };
 
   const update = (patch: Partial<EditorStatus>) => {
     statusRef.current = { ...statusRef.current, ...patch };
@@ -156,7 +180,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     <div className="editor-pane">
       {error && <div className="banner warn">Could not open {path}: {error}</div>}
       {loading && !error && <div className="loading">Opening {path}…</div>}
-      <div className="editor-scroll" style={{ display: showSource ? 'none' : undefined }}>
+      <div className="editor-scroll" style={{ display: showSource ? 'none' : undefined }} onMouseDown={onBlankMouseDown}>
         <div ref={mount} className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} />
       </div>
       {showSource && view && (

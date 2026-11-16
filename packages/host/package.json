@@ -8,13 +8,13 @@
   },
   "dependencies": {
     "@kuraa/format-pandoc": "workspace:*",
+    "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/kernel": "workspace:*",
+    "@kuraa/session": "workspace:*",
     "prosemirror-model": "^1.25.13",
     "ws": "^8.23.0"
   },
   "devDependencies": {
-    "@kuraa/format-rmarkdown": "workspace:*",
-    "@kuraa/session": "workspace:*",
     "@types/ws": "^8.18.2",
     "prosemirror-transform": "^1.12.5"
   }

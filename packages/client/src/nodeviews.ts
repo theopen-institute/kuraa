@@ -1,0 +1,218 @@
+// Client implementations of the node view hints that document types declare.
+import type { NodeViewHint } from '@kuraa/kernel';
+import type { Node as PMNode } from 'prosemirror-model';
+import { Selection, TextSelection } from 'prosemirror-state';
+import type { EditorView as PMView, NodeView, NodeViewConstructor } from 'prosemirror-view';
+import { EditorView as CMView, keymap as cmKeymap, drawSelection, lineNumbers, type ViewUpdate, type KeyBinding } from '@codemirror/view';
+import { defaultKeymap, indentWithTab } from '@codemirror/commands';
+import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, type LanguageSupport } from '@codemirror/language';
+import { markdown } from '@codemirror/lang-markdown';
+import { yaml } from '@codemirror/lang-yaml';
+import { python } from '@codemirror/lang-python';
+import { r } from '@codemirror/legacy-modes/mode/r';
+import { stex } from '@codemirror/legacy-modes/mode/stex';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import type { Extension } from '@codemirror/state';
+
+export function languageFor(name: string | undefined): Extension | LanguageSupport | [] {
+  const n = (name ?? '').toLowerCase().replace(/^[{.]+/, '').split(/[\s,}]/)[0] ?? '';
+  switch (n) {
+    case 'r': return StreamLanguage.define(r);
+    case 'python': case 'py': return python();
+    case 'yaml': case 'yml': return yaml();
+    case 'latex': case 'tex': return StreamLanguage.define(stex);
+    case 'bash': case 'sh': case 'shell': return StreamLanguage.define(shell);
+    case 'markdown': case 'md': return markdown();
+    default: return [];
+  }
+}
+
+/** A text block edited in CodeMirror, kept in sync with ProseMirror (and so with the room). */
+class CodeView implements NodeView {
+  dom: HTMLElement;
+  private cm: CMView;
+  private updating = false;
+  private label: HTMLElement | null = null;
+  private input: HTMLInputElement | null = null;
+
+  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'code' }>) {
+    this.dom = document.createElement('div');
+    this.dom.className = `code-node code-node-${node.type.name}`;
+    const header = document.createElement('div');
+    header.className = 'code-node-header';
+    const h = hint.header;
+    const editableAttr = h?.attr || hint.languageAttr;
+    if (editableAttr) {
+      if (h?.prefix) header.append(Object.assign(document.createElement('span'), { className: 'code-node-affix', textContent: h.prefix }));
+      this.input = document.createElement('input');
+      this.input.className = 'code-node-attr';
+      this.input.spellcheck = false;
+      this.input.value = String(node.attrs[editableAttr] ?? '');
+      this.input.placeholder = hint.languageAttr ? 'language' : '';
+      this.input.addEventListener('change', () => this.setAttr(editableAttr, this.input!.value));
+      header.append(this.input);
+      if (h?.suffix) header.append(Object.assign(document.createElement('span'), { className: 'code-node-affix', textContent: h.suffix }));
+    } else if (h?.prefix) {
+      this.label = Object.assign(document.createElement('span'), { className: 'code-node-label', textContent: h.prefix });
+      header.append(this.label);
+    }
+    if (header.childNodes.length) this.dom.append(header);
+
+    const language = languageFor(hint.language ?? (hint.languageAttr ? String(node.attrs[hint.languageAttr] ?? '') : undefined));
+    this.cm = new CMView({
+      doc: node.textContent,
+      extensions: [
+        cmKeymap.of([...this.cmKeymap(), indentWithTab, ...defaultKeymap]),
+        drawSelection(),
+        lineNumbers(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        language,
+        CMView.lineWrapping,
+        CMView.editable.of(view.editable),
+        CMView.updateListener.of((u) => this.forward(u)),
+      ],
+    });
+    this.dom.append(this.cm.dom);
+  }
+
+  private setAttr(name: string, value: string) {
+    const pos = this.getPos();
+    if (pos === undefined) return;
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [name]: value }));
+  }
+
+  private forward(update: ViewUpdate) {
+    if (this.updating || !this.cm.hasFocus) return;
+    const pos = this.getPos();
+    if (pos === undefined) return;
+    let offset = pos + 1;
+    const { main } = update.state.selection;
+    const selFrom = offset + main.from;
+    const selTo = offset + main.to;
+    const pmSel = this.view.state.selection;
+    if (update.docChanged || pmSel.from !== selFrom || pmSel.to !== selTo) {
+      const tr = this.view.state.tr;
+      update.changes.iterChanges((fromA, toA, fromB, toB, text) => {
+        if (text.length) tr.replaceWith(offset + fromA, offset + toA, this.view.state.schema.text(text.toString()));
+        else tr.delete(offset + fromA, offset + toA);
+        offset += toB - fromB - (toA - fromA);
+      });
+      tr.setSelection(TextSelection.create(tr.doc, selFrom, selTo));
+      this.view.dispatch(tr);
+    }
+  }
+
+  private cmKeymap(): KeyBinding[] {
+    return [
+      { key: 'ArrowUp', run: () => this.escape('line', -1) },
+      { key: 'ArrowLeft', run: () => this.escape('char', -1) },
+      { key: 'ArrowDown', run: () => this.escape('line', 1) },
+      { key: 'ArrowRight', run: () => this.escape('char', 1) },
+      {
+        key: 'Mod-Enter',
+        run: () => {
+          // Leave the code block and continue in a new paragraph below.
+          const pos = this.getPos();
+          if (pos === undefined) return false;
+          const after = pos + this.node.nodeSize;
+          const { state } = this.view;
+          const para = state.schema.nodes.paragraph!.create();
+          const tr = state.tr.insert(after, para);
+          tr.setSelection(TextSelection.create(tr.doc, after + 1));
+          this.view.dispatch(tr.scrollIntoView());
+          this.view.focus();
+          return true;
+        },
+      },
+    ];
+  }
+
+  private escape(unit: 'line' | 'char', dir: 1 | -1): boolean {
+    const { state } = this.cm;
+    const { main } = state.selection;
+    if (!main.empty) return false;
+    if (unit === 'line') {
+      const line = state.doc.lineAt(main.head);
+      if (dir < 0 ? line.from > 0 : line.to < state.doc.length) return false;
+    } else if (dir < 0 ? main.from > 0 : main.to < state.doc.length) return false;
+    const pos = this.getPos();
+    if (pos === undefined) return false;
+    const target = pos + (dir < 0 ? 0 : this.node.nodeSize);
+    const selection = Selection.near(this.view.state.doc.resolve(target), dir);
+    this.view.dispatch(this.view.state.tr.setSelection(selection).scrollIntoView());
+    this.view.focus();
+    return true;
+  }
+
+  setSelection(anchor: number, head: number) {
+    this.cm.focus();
+    this.updating = true;
+    this.cm.dispatch({ selection: { anchor, head } });
+    this.updating = false;
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false;
+    this.node = node;
+    const attr = this.hint.header?.attr || this.hint.languageAttr;
+    if (this.input && attr && document.activeElement !== this.input) this.input.value = String(node.attrs[attr] ?? '');
+    if (this.updating) return true;
+    const next = node.textContent;
+    const cur = this.cm.state.doc.toString();
+    if (next !== cur) {
+      let start = 0;
+      let curEnd = cur.length;
+      let nextEnd = next.length;
+      while (start < curEnd && cur.charCodeAt(start) === next.charCodeAt(start)) start++;
+      while (curEnd > start && nextEnd > start && cur.charCodeAt(curEnd - 1) === next.charCodeAt(nextEnd - 1)) { curEnd--; nextEnd--; }
+      this.updating = true;
+      this.cm.dispatch({ changes: { from: start, to: curEnd, insert: next.slice(start, nextEnd) } });
+      this.updating = false;
+    }
+    return true;
+  }
+
+  selectNode() { this.cm.focus(); }
+  stopEvent(e: Event) { return this.dom.contains(e.target as Node) && !(e.type === 'mousedown' && e.target === this.dom); }
+  ignoreMutation() { return true; }
+  destroy() { this.cm.destroy(); }
+}
+
+/** An inline atom shown as a chip; double-click to edit its source. */
+class AtomView implements NodeView {
+  dom: HTMLElement;
+  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'atom' }>) {
+    this.dom = document.createElement('span');
+    this.dom.className = `atom ${hint.className ?? ''}`;
+    this.render();
+    this.dom.title = 'Double-click to edit';
+    this.dom.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      if (!this.view.editable) return;
+      const value = window.prompt(`Edit ${this.node.type.name.replace(/_/g, ' ')}`, String(this.node.attrs[this.hint.attr] ?? ''));
+      const pos = this.getPos();
+      if (value === null || pos === undefined) return;
+      this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [this.hint.attr]: value }));
+    });
+  }
+  private render() {
+    const v = String(this.node.attrs[this.hint.attr] ?? '');
+    const name = this.node.type.name;
+    this.dom.textContent = name === 'math_inline' ? `$${v}$` : name === 'footnote_ref' ? `[^${v}]` : v;
+  }
+  update(node: PMNode) {
+    if (node.type !== this.node.type) return false;
+    this.node = node;
+    this.render();
+    return true;
+  }
+  ignoreMutation() { return true; }
+}
+
+export function buildNodeViews(hints: Record<string, NodeViewHint>): Record<string, NodeViewConstructor> {
+  const out: Record<string, NodeViewConstructor> = {};
+  for (const [name, hint] of Object.entries(hints)) {
+    out[name] = (node, view, getPos) => (hint.kind === 'code' ? new CodeView(node, view, getPos, hint) : new AtomView(node, view, getPos, hint));
+  }
+  return out;
+}

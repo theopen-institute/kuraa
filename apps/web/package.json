@@ -1,0 +1,20 @@
+{
+  "name": "@kuraa/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@kuraa/client": "workspace:*",
+    "@kuraa/format-pandoc": "workspace:*",
+    "@kuraa/format-rmarkdown": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.3.0",
+    "vite": "^8.3.8"
+  }
+}

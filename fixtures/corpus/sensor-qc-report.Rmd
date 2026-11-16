@@ -1,0 +1,104 @@
+---
+title: "Stream Sensor QC Report — Q3"
+author: "Hydrology group"
+date: "2024-10-04"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: false
+    includes:
+      in_header: assets/header.html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 8, fig.height = 3.5)
+library(data.table)
+raw <- fread("loggers/q3_all_stations.csv")
+qc <- readRDS("loggers/q3_qc_flags.rds")
+```
+
+# Summary
+
+Six stations were active in Q3. Between them they logged
+`r format(nrow(raw), big.mark = ",")` fifteen-minute readings of stage,
+water temperature and conductivity. After automatic and manual QC,
+`r round(100 * mean(qc$flag == "ok"), 1)`% of readings were accepted
+without modification.
+
+# Station status
+
+| Station | Location             | Status        | Gaps (h) |
+|---------|----------------------|---------------|---------:|
+| S01     | Upper weir           | OK            |        0 |
+| S02     | Footbridge           | OK            |        3 |
+| S03     | Confluence           | Battery fault |      142 |
+| S04     | Mill race            | OK            |        0 |
+| S05     | Lower ford           | Silted        |       18 |
+| S06     | Estuary limit        | OK            |        6 |
+
+# QC procedure
+
+Each reading was checked in this order:
+
+1. **Range check.** Values outside physically plausible bounds were
+   flagged. The bounds are stored per station:
+
+   ```{r bounds, echo=TRUE}
+   bounds <- fread("config/station_bounds.csv")
+   bounds[station %in% c("S03", "S05")]
+   ```
+
+2. **Spike check.** A reading differing from both neighbours by more
+   than three times the rolling MAD was flagged as a spike.
+
+   ```{r spikes, echo=TRUE, eval=FALSE}
+   raw[, mad := frollapply(stage, 9, mad, align = "center"), by = station]
+   raw[, spike := abs(stage - shift(stage)) > 3 * mad &
+                  abs(stage - shift(stage, -1)) > 3 * mad]
+   ```
+
+3. **Flatline check.** Six or more identical consecutive readings were
+   flagged.
+4. **Manual review.** Flagged periods were plotted and reviewed by
+   eye; the reviewer could accept, correct or reject each one.
+
+# Station S03
+
+The S03 logger lost power on 11 August. The replacement battery was
+fitted on 17 August, giving a gap of about six days. We have not
+attempted to fill it.
+
+```{r fig-s03, fig.cap="Stage at S03 around the battery fault. Shaded area: no data."}
+s03 <- raw[station == "S03" & between(time, as.POSIXct("2024-08-05"), as.POSIXct("2024-08-24"))]
+plot(s03$time, s03$stage, type = "l", xlab = "", ylab = "Stage (m)")
+rect(as.POSIXct("2024-08-11"), -10, as.POSIXct("2024-08-17"), 10,
+     col = adjustcolor("grey", 0.4), border = NA)
+```
+
+# Station S05
+
+S05 shows a gradual upward drift in stage from mid-July which is not
+matched at S04 or S06. On the site visit on 2 September the sensor was
+found partly buried in silt. Readings from 15 July to 2 September have
+been flagged as *suspect*, not rejected; the drift is small (about
+4 cm) and a correction may be possible later.
+
+# Conductivity
+
+Conductivity readings are temperature-compensated to 25 °C using
+
+$$
+\kappa_{25} = \frac{\kappa_T}{1 + a\,(T - 25)}
+$$
+
+with $a = 0.0191$ per °C. The coefficient was checked against lab
+measurements of grab samples in July and found adequate.
+
+# Actions
+
+- Replace the S03 battery pack with the higher-capacity model before
+  winter.
+- Move the S05 sensor about 30 cm upstream, out of the silt trap.
+- Ask the data manager (data.manager@example.org) to push the QC'd
+  series to the public portal.

@@ -1,0 +1,102 @@
+---
+title: "Power Analysis for the Reading Intervention Trial"
+author: "Trial Statistician"
+date: "2024-01-15"
+output:
+  bookdown::html_document2:
+    toc: true
+    fig_caption: true
+  bookdown::pdf_document2:
+    toc: false
+params:
+  icc: 0.15
+  n_per_class: 22
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+library(pwr)
+library(reticulate)
+use_virtualenv("~/.venvs/trial-power")
+```
+
+# Design
+
+The trial will randomise whole classes, not individual pupils, to
+either the structured phonics intervention or business as usual.
+Outcomes are measured on the standardised reading test at the end of
+the school year. Because pupils within a class are more alike than
+pupils in different classes, the effective sample size is smaller than
+the number of pupils.
+
+The design effect for a cluster-randomised trial with $m$ pupils per
+class and intraclass correlation $\rho$ is
+
+$$
+\text{DE} = 1 + (m - 1)\rho .
+$$
+
+With $m =$ `r params$n_per_class` and $\rho =$ `r params$icc`, the
+design effect is `r 1 + (params$n_per_class - 1) * params$icc`.
+
+# Assumptions
+
+- Minimum detectable effect: $d = 0.25$, in line with the median effect
+  of comparable interventions [@slavin2009].
+- Two-sided $\alpha = 0.05$, power $1 - \beta = 0.80$.
+- ICC of `r params$icc`, taken from the pilot data and consistent with
+  @hedges2007 for reading outcomes in primary schools.
+- Attrition of 10% of pupils by follow-up.
+
+# Calculation in R
+
+```{r power-r}
+n_indiv <- pwr.t.test(d = 0.25, power = 0.80, sig.level = 0.05)$n
+de <- 1 + (params$n_per_class - 1) * params$icc
+n_per_arm <- ceiling(n_indiv * de / 0.9)
+n_classes <- ceiling(n_per_arm / params$n_per_class)
+```
+
+Ignoring clustering, we would need `r ceiling(n_indiv)` pupils per arm.
+After inflating for the design effect and attrition, we need
+`r n_per_arm` pupils per arm, which is `r n_classes` classes per arm.
+
+# Cross-check in Python
+
+A colleague's simulation code, run through reticulate, gives a
+similar answer:
+
+```{python sim, eval=TRUE}
+import numpy as np
+from statsmodels.stats.power import TTestIndPower
+
+icc = r.params["icc"]
+m = r.params["n_per_class"]
+de = 1 + (m - 1) * icc
+n = TTestIndPower().solve_power(effect_size=0.25, power=0.8, alpha=0.05)
+print(round(n * de / 0.9))
+```
+
+```{python}
+# simulation-based check, 2,000 replications
+rng = np.random.default_rng(20240115)
+```
+
+# Sensitivity
+
+```{r fig-sens, fig.cap="Classes per arm required as a function of the ICC.", echo=FALSE, fig.height=3}
+iccs <- seq(0.05, 0.25, by = 0.01)
+k <- sapply(iccs, function(r) ceiling(n_indiv * (1 + (params$n_per_class - 1) * r) / 0.9 / params$n_per_class))
+plot(iccs, k, type = "s", xlab = "ICC", ylab = "Classes per arm")
+```
+
+| ICC  | Design effect | Classes per arm |
+|-----:|--------------:|----------------:|
+| 0.10 |          3.10 |              36 |
+| 0.15 |          4.15 |              48 |
+| 0.20 |          5.20 |              60 |
+
+If the ICC turns out higher than 0.15, the trial will be underpowered
+for $d = 0.25$. Recruiting 50 classes per arm gives some margin.
+
+# References

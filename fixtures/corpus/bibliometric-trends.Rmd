@@ -1,0 +1,99 @@
+---
+title: "Publication Trends in Citizen Science, 2000–2023"
+author:
+  - name: Ana Beatriz Lourenço
+  - name: Kenji Matsumoto
+date: "2024-03-11"
+output:
+  pdf_document:
+    toc: false
+    citation_package: biblatex
+    latex_engine: lualatex
+  html_document:
+    df_print: paged
+bibliography: citsci.bib
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+library(bibliometrix)
+library(ggplot2)
+recs <- convert2df("data/wos_export_2024-02.txt", dbsource = "wos", format = "plaintext")
+```
+
+# Introduction
+
+The term "citizen science" has spread rapidly through the research
+literature since the early 2000s [@bonney2009; @silvertown2009]. This
+short analysis describes how fast, in which fields, and where.
+
+We searched the Web of Science Core Collection on 20 February 2024
+for records with "citizen science" or "citizen scientist\*" in the
+title, abstract or keywords. After removing duplicates and editorials
+we retained `r nrow(recs)` records.
+
+# Growth over time
+
+```{r fig-growth, fig.cap="Records per year. The 2023 count may be incomplete.", fig.height=3.5}
+yr <- as.data.frame(table(recs$PY))
+names(yr) <- c("year", "n")
+ggplot(yr, aes(as.integer(as.character(year)), n)) +
+  geom_line() +
+  scale_y_log10() +
+  labs(x = NULL, y = "Records (log scale)")
+```
+
+Annual output grew roughly exponentially until about 2016 and has
+grown more slowly since. Fitting $\log n_t = a + b t$ to the years
+2005--2016 gives a doubling time of about
+`r round(log(2) / coef(lm(log(n) ~ as.integer(as.character(year)), data = subset(yr, as.integer(as.character(year)) %in% 2005:2016)))[2], 1)`
+years.
+
+# Fields
+
+```{python fields}
+import pandas as pd
+cats = pd.read_csv("data/wos_categories.csv")
+top = cats.groupby("category").size().sort_values(ascending=False).head(8)
+print(top.to_string())
+```
+
+Ecology and environmental sciences together account for about half of
+all records. Astronomy, which was prominent in the late 2000s because
+of Galaxy Zoo [@lintott2008], is now a much smaller share. The
+fastest-growing categories since 2018 are public health and education
+research.
+
+| Category                       | Records | Share  |
+|:-------------------------------|--------:|-------:|
+| Ecology                        |   2,914 |  27.1% |
+| Environmental Sciences         |   2,301 |  21.4% |
+| Biodiversity Conservation      |   1,187 |  11.0% |
+| Multidisciplinary Sciences     |     642 |   6.0% |
+| Public, Environmental Health   |     598 |   5.6% |
+| Education & Educational Res.   |     411 |   3.8% |
+
+: Top Web of Science categories, 2000--2023.
+
+# Geography
+
+Authors from the United States appear on `r round(100 * mean(grepl("USA", recs$AU_CO)), 0)`%
+of records, and from the United Kingdom on about a fifth. Output from
+Brazil, China and South Africa has grown fastest in relative terms.
+Research on citizen science in Japan (市民科学) uses the term less
+often in English-language abstracts, so it is probably undercounted
+here [cf. @kobori2016, p. 7].
+
+# Limitations
+
+- Web of Science under-represents non-English and grey literature.
+- Many projects that are citizen science in practice use other terms
+  ("volunteer monitoring", "community-based monitoring",
+  "participatory sensing") and are missed by our query.
+- Category assignments are at the journal level.
+
+```{r}
+```
+
+# References {-}

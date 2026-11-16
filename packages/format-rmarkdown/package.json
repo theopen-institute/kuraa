@@ -1,0 +1,14 @@
+{
+  "name": "@kuraa/format-rmarkdown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kuraa/format-pandoc": "workspace:*",
+    "@kuraa/kernel": "workspace:*",
+    "prosemirror-model": "^1.25.13"
+  }
+}

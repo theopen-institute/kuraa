@@ -1,0 +1,34 @@
+{
+  "name": "kuraa",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "host": "tsx packages/host/src/cli.ts",
+    "web:dev": "pnpm --filter @kuraa/web dev",
+    "web:build": "pnpm --filter @kuraa/web build",
+    "desktop": "pnpm --filter @kuraa/desktop start"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
+    "fast-check": "^4.10.2",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-transform": "^1.12.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}

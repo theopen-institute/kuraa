@@ -1,0 +1,102 @@
+---
+title: "Regression Notes: Rent Burden and Commuting Distance"
+author: "D. Okonkwo-Reyes"
+date: "Draft of 9 July 2024"
+output:
+  pdf_document:
+    number_sections: true
+    keep_tex: true
+    fig_caption: true
+  html_notebook: default
+header-includes:
+  - \usepackage{amsmath}
+bibliography: housing.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", out.width = "75%")
+library(fixest)
+library(modelsummary)
+hh <- arrow::read_parquet("data/household_panel_w5.parquet")
+```
+
+# Question
+
+Do households with a higher rent burden commute further, once we
+control for income, household composition and region? The idea, from
+@glaeser2008 and others, is that households trade housing costs
+against commuting costs. The panel has `r nrow(hh)` household-waves
+from `r dplyr::n_distinct(hh$hh_id)` households.
+
+Rent burden is defined as monthly rent divided by net monthly
+household income. A household paying $900 rent on an income of $3,000
+has a burden of 0.30.
+
+# Model
+
+The baseline specification is
+
+$$
+\log(\text{dist}_{it}) = \alpha_i + \lambda_t + \beta \, \text{burden}_{it}
+  + \mathbf{x}_{it}'\boldsymbol{\gamma} + \varepsilon_{it}
+$$
+
+with household fixed effects $\alpha_i$ and wave fixed effects
+$\lambda_t$. Standard errors are clustered by household. The
+coefficient of interest is $\beta$; a positive value means that within
+the same household, years with higher burden are years with longer
+commutes.
+
+```{r m1}
+m1 <- feols(log(commute_km) ~ rent_burden + log(income) + n_children |
+              hh_id + wave,
+            data = hh, cluster = ~hh_id)
+```
+
+```{r m2}
+m2 <- feols(log(commute_km) ~ rent_burden * urban + log(income) +
+              n_children | hh_id + wave,
+            data = hh, cluster = ~hh_id)
+```
+
+```{r tbl-models, echo=FALSE}
+modelsummary(list("Baseline" = m1, "Urban interaction" = m2),
+             stars = TRUE, gof_omit = "AIC|BIC|RMSE")
+```
+
+# Results so far
+
+The baseline estimate is $\hat\beta =$ `r round(coef(m1)["rent_burden"], 3)`,
+which would imply that a 10-point increase in burden is associated
+with roughly a `r round(100 * (exp(0.1 * coef(m1)["rent_burden"]) - 1), 1)`%
+longer commute. The interaction model suggests the relationship is
+concentrated in urban areas, which makes sense: rural households have
+fewer housing options within any given distance.
+
+```{r fig-margins, fig.cap="Predicted log commute distance by rent burden, urban vs. rural.", echo=FALSE}
+plot_predictions <- marginaleffects::plot_predictions
+plot_predictions(m2, condition = c("rent_burden", "urban"))
+```
+
+## Caveats
+
+1. Reverse causality is plausible: a new job further away could push
+   a household to move somewhere cheaper. The fixed effects do not
+   rule this out.
+2. Commute distance is self-reported and heaped at round numbers
+   (5, 10, 20 km).
+3. The panel loses about 8% of households per wave, and attrition is
+   higher among renters [@lynn2009, ch. 4].
+
+# Things to try
+
+- Instrument rent burden with local rent index changes, following
+  @saiz2010.
+- Re-estimate with commute *time* rather than distance.
+- Check whether results change if we drop households that moved
+  between waves.
+
+```{r}
+```
+
+# References

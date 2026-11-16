@@ -1,0 +1,110 @@
+---
+title: "Interview Coding Summary: Round 2"
+subtitle: "Community food projects study"
+author:
+  - Mireille Fontaine
+  - Gareth Pryce
+date: "2024-06-21"
+output:
+  word_document:
+    reference_docx: templates/report-style.docx
+  html_document:
+    theme: flatly
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(knitr)
+codes <- readr::read_csv("coding/round2_codes_long.csv")
+interviews <- readr::read_csv("coding/round2_interviews.csv")
+```
+
+## Purpose of this note
+
+This note summarises the second round of coding for the interviews
+with volunteers and coordinators at community food projects. It is
+meant for the project team, not for publication. Quotes are included
+to give a flavour of each theme; full extracts are in the NVivo file.
+
+In total we coded `r nrow(interviews)` interviews, with a median
+length of `r median(interviews$duration_min)` minutes. Two coders
+(MF and GP) coded every transcript independently, then met to resolve
+disagreements.
+
+## Agreement
+
+```{r kappa}
+k <- irr::kappa2(codes[, c("coder_mf", "coder_gp")])
+```
+
+Cohen's κ across all codes was `r round(k$value, 2)` before
+reconciliation. Agreement was lowest for the *stigma* and *dignity*
+codes, which overlap a great deal; we have since merged them (see
+below).
+
+## Changes to the codebook
+
+The following changes were agreed at the reconciliation meeting:
+
+1. *Stigma* and *dignity* merged into a single parent code,
+   **dignity and stigma**, with two children.
+2. New code *infrastructure* for talk about buildings, fridges, vans
+   and storage. To check how often it was applied:
+
+   ```{r infra-count}
+   codes |> filter(code == "infrastructure") |> count(interview_id)
+   ```
+
+3. *Volunteer burnout* split into *burnout* and *turnover*, since
+   participants clearly treated these as different problems.
+4. Retired codes are kept in the codebook with a note, so the round 1
+   coding can still be read.
+
+## Themes
+
+### Dignity and stigma
+
+The most frequently applied code. Coordinators described a range of
+practices intended to make the projects feel less like charity:
+
+- letting people choose items rather than receiving a fixed parcel;
+- running the project alongside a café or social meal;
+- avoiding asking for proof of need.
+
+> We don't ask for referral slips any more. People were embarrassed to
+> bring them, and honestly it didn't stop anyone who didn't need it,
+> because almost nobody comes here who doesn't need it. (Coordinator,
+> project 04)
+
+### Infrastructure
+
+Talk about physical infrastructure came up far more than we expected.
+Almost every coordinator raised storage, and particularly cold
+storage, as a constraint on what they could accept from donors.
+
+```{r fig-infra, fig.cap="Interviews mentioning each infrastructure sub-code.", fig.height=3.5}
+codes |>
+  filter(parent == "infrastructure") |>
+  count(code) |>
+  ggplot2::ggplot(ggplot2::aes(n, reorder(code, n))) +
+  ggplot2::geom_col() +
+  ggplot2::labs(x = "Interviews", y = NULL)
+```
+
+### Burnout and turnover
+
+Burnout was mostly discussed by long-standing volunteers, turnover by
+coordinators. Several described a "core" of two or three people
+holding the project together.
+
+## Next steps
+
+- [ ] MF to update the codebook document and circulate
+- [ ] GP to recode round 1 transcripts for *infrastructure*
+- [ ] Both to draft the theme summaries for the advisory group meeting
+  on 15 July
+
+```{r}
+```

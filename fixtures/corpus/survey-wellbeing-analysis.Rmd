@@ -1,0 +1,106 @@
+---
+title: "Student Wellbeing Survey 2024: Descriptive Analysis"
+author: "Institutional Research Office"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    df_print: kable
+  pdf_document:
+    latex_engine: xelatex
+bibliography: wellbeing.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(survey)
+df <- read_csv("data/wellbeing_2024_clean.csv")
+des <- svydesign(ids = ~1, weights = ~final_wt, data = df)
+```
+
+# Overview
+
+The 2024 wellbeing survey ran from 4 to 29 March. It was sent to all
+enrolled students, and `r nrow(df)` completed responses were received,
+a response rate of `r scales::percent(nrow(df) / 18450, accuracy = 0.1)`.
+Results below are weighted to the student population by faculty, level
+of study and sex.
+
+Wellbeing was measured with the short Warwick-Edinburgh Mental
+Wellbeing Scale [SWEMWBS, @stewartbrown2009], which has seven items
+scored 1--5. Raw totals were converted to metric scores using the
+published conversion table, giving a range of 7.00 to 35.00.
+
+# Overall wellbeing
+
+```{r overall}
+m <- svymean(~swemwbs_metric, des, na.rm = TRUE)
+```
+
+The weighted mean SWEMWBS score was `r round(coef(m), 1)` (SE
+`r round(SE(m), 2)`). This is slightly below the 2022 figure and about
+two points below published population norms for adults of a similar
+age [@ng2017, p. 3].
+
+```{r fig-dist, fig.cap="Distribution of SWEMWBS metric scores, weighted.", fig.width=7, fig.height=4}
+ggplot(df, aes(x = swemwbs_metric, weight = final_wt)) +
+  geom_histogram(binwidth = 1, fill = "grey60", colour = "white") +
+  labs(x = "SWEMWBS metric score", y = "Weighted count") +
+  theme_minimal()
+```
+
+# Differences between groups
+
+```{r by-group}
+by_level <- svyby(~swemwbs_metric, ~level, des, svymean, na.rm = TRUE)
+by_level
+```
+
+Postgraduate research students reported the lowest mean scores, and
+first-year undergraduates the highest. The gap between them is about
+`r round(diff(range(coef(by_level))), 1)` points.
+
+| Group                    | Mean | 95% CI       |
+|:-------------------------|-----:|:-------------|
+| Undergraduate, year 1    | 22.4 | 22.0 -- 22.8 |
+| Undergraduate, year 2+   | 21.6 | 21.3 -- 21.9 |
+| Taught postgraduate      | 21.9 | 21.4 -- 22.4 |
+| Research postgraduate    | 20.8 | 20.1 -- 21.5 |
+
+: Weighted mean SWEMWBS score by level of study.
+
+The differences are modest in size. A difference of three points is
+sometimes treated as the minimal important difference for individuals
+[@shah2018], and none of the group differences reaches that.
+
+# Item-level results
+
+```{r items, fig.cap="Percentage answering 'often' or 'all of the time' to each item.", echo=FALSE}
+items <- df |>
+  select(starts_with("swem_")) |>
+  pivot_longer(everything()) |>
+  group_by(name) |>
+  summarise(pct = weighted.mean(value >= 4, w = df$final_wt, na.rm = TRUE))
+ggplot(items, aes(x = pct, y = reorder(name, pct))) +
+  geom_col() +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = NULL, y = NULL)
+```
+
+The item with the lowest endorsement was "I've been feeling relaxed",
+endorsed 'often' or 'all of the time' by only about a quarter of
+respondents. This mirrors the 2022 results.
+
+# Notes on method
+
+- Missing item responses were not imputed. Respondents missing more
+  than one item were excluded from the scale score
+  (`r sum(is.na(df$swemwbs_metric))` cases).
+- Weights were trimmed at the 1st and 99th percentiles.
+- Confidence intervals use the Taylor linearisation variance estimator
+  from the **survey** package [@lumley2004].
+
+# References

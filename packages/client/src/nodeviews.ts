@@ -5,28 +5,9 @@ import { Selection, TextSelection } from 'prosemirror-state';
 import type { EditorView as PMView, NodeView, NodeViewConstructor } from 'prosemirror-view';
 import { EditorView as CMView, keymap as cmKeymap, drawSelection, lineNumbers, type ViewUpdate, type KeyBinding } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, type LanguageSupport } from '@codemirror/language';
-import { markdown } from '@codemirror/lang-markdown';
-import { yaml } from '@codemirror/lang-yaml';
-import { python } from '@codemirror/lang-python';
-import { r } from '@codemirror/legacy-modes/mode/r';
-import { stex } from '@codemirror/legacy-modes/mode/stex';
-import { shell } from '@codemirror/legacy-modes/mode/shell';
-import type { Extension } from '@codemirror/state';
+import { syntaxHighlighting } from '@codemirror/language';
+import { highlighter, languageSupport } from './languages.js';
 import { askText } from './ask.js';
-
-export function languageFor(name: string | undefined): Extension | LanguageSupport | [] {
-  const n = (name ?? '').toLowerCase().replace(/^[{.]+/, '').split(/[\s,}]/)[0] ?? '';
-  switch (n) {
-    case 'r': return StreamLanguage.define(r);
-    case 'python': case 'py': return python();
-    case 'yaml': case 'yml': return yaml();
-    case 'latex': case 'tex': return StreamLanguage.define(stex);
-    case 'bash': case 'sh': case 'shell': return StreamLanguage.define(shell);
-    case 'markdown': case 'md': return markdown();
-    default: return [];
-  }
-}
 
 /** A text block edited in CodeMirror, kept in sync with ProseMirror (and so with the room). */
 class CodeView implements NodeView {
@@ -59,15 +40,15 @@ class CodeView implements NodeView {
     }
     if (header.childNodes.length) this.dom.append(header);
 
-    const language = languageFor(hint.language ?? (hint.languageAttr ? String(node.attrs[hint.languageAttr] ?? '') : undefined));
+    const language = languageSupport(hint.language ?? (hint.languageAttr ? String(node.attrs[hint.languageAttr] ?? '') : undefined));
     this.cm = new CMView({
       doc: node.textContent,
       extensions: [
         cmKeymap.of([...this.cmKeymap(), indentWithTab, ...defaultKeymap]),
         drawSelection(),
         lineNumbers(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        language,
+        syntaxHighlighting(highlighter),
+        language ?? [],
         CMView.lineWrapping,
         CMView.editable.of(view.editable),
         CMView.updateListener.of((u) => this.forward(u)),

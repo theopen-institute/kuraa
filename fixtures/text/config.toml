@@ -1,0 +1,9 @@
+# Instrument settings
+[logger]
+interval_s = 300
+stations = ["SM-01", "SM-02", "SM-03"]
+enabled = true
+
+[logger.calibration]
+offset = -0.25
+date = 2024-05-14

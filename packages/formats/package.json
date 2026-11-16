@@ -1,0 +1,15 @@
+{
+  "name": "@kuraa/formats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kuraa/format-pandoc": "workspace:*",
+    "@kuraa/format-rmarkdown": "workspace:*",
+    "@kuraa/format-text": "workspace:*",
+    "@kuraa/kernel": "workspace:*"
+  }
+}

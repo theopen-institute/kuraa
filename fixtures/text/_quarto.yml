@@ -1,0 +1,21 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Saltmarsh field methods"
+  author:
+    - name: Mateus Rocha
+      orcid: 0000-0002-1825-0097
+  chapters:
+    - index.qmd
+    - sampling.qmd   # quadrats and cores
+    - analysis.Rmd
+
+bibliography: references.bib
+format:
+  html:
+    theme: cosmo
+    toc: true
+  pdf:
+    documentclass: scrreprt

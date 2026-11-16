@@ -10,8 +10,7 @@
   },
   "dependencies": {
     "@kuraa/client": "workspace:*",
-    "@kuraa/format-pandoc": "workspace:*",
-    "@kuraa/format-rmarkdown": "workspace:*",
+    "@kuraa/formats": "workspace:*",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

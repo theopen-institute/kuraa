@@ -9,6 +9,7 @@ import { Transform } from 'prosemirror-transform';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
+import { textSchema } from '@kuraa/format-text';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { gitIdentity, inspectFolder, startHost, type RunningHost } from '../src/index.js';
 
@@ -83,7 +84,7 @@ describe('host', () => {
   const roomFor = async (path: string) => (await (await api(`/api/rooms?path=${encodeURIComponent(path)}`)).json()) as { room: string; generation: string };
   const connect = async (path: string, user = ALICE) => {
     const { room } = await roomFor(path);
-    const s = /\.rmd$/i.test(path) ? rmarkdown.schema : schema;
+    const s = /\.rmd$/i.test(path) ? rmarkdown.schema : /\.(md|markdown)$/i.test(path) ? schema : textSchema;
     const c = connectHeadless({ url: running.url.replace(/^http/, 'ws') + '/collab', room, token: running.token, user, schema: s });
     clients.push(c);
     await c.ready;
@@ -106,7 +107,7 @@ describe('host', () => {
     expect((await fetch(running.url + '/api/workspace')).status).toBe(401);
     const ws = await (await api('/api/workspace')).json();
     expect(ws.branch).toBe('main');
-    expect(ws.types.map((t: { id: string }) => t.id)).toEqual(['pandoc-markdown', 'rmarkdown']);
+    expect(ws.types.map((t: { id: string }) => t.id)).toEqual(expect.arrayContaining(['pandoc-markdown', 'rmarkdown', 'text', 'text-r', 'text-bibtex']));
     const tree = await (await api('/api/tree')).json();
     expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown' });
   });
@@ -247,6 +248,36 @@ describe('host', () => {
     } finally {
       rmSync(clone, { recursive: true, force: true });
     }
+  });
+
+  it('edits a source file line by line, keeping its line endings, and merges outside edits', async () => {
+    const script = 'library(dplyr)\r\n\r\nx <- c(1, 2, 3)\r\nmean(x)\r\n';
+    writeFileSync(join(dir, 'clean.R'), script);
+    writeFileSync(join(dir, 'rebuild'), '#!/usr/bin/env Rscript\nsource("clean.R")\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Scripts');
+
+    const tree = (await (await api('/api/tree')).json()) as { files: { path: string; type: string | null }[] };
+    const typeOf = (p: string) => tree.files.find((f) => f.path === p)?.type;
+    expect(typeOf('clean.R')).toBe('text-r');
+    expect(typeOf('rebuild')).toBe('text-r');
+
+    const c = await connect('clean.R');
+    expect(c.read().childCount).toBe(5);
+    // Type inside line 3, before its closing parenthesis, as an editor would.
+    let pos = 0;
+    for (let i = 0; i < 2; i++) pos += c.read().child(i).nodeSize;
+    const at = pos + 1 + c.read().child(2).textContent.indexOf(')');
+    c.write(new Transform(c.read()).insert(at, textSchema.text(', 4')).doc);
+    await until(() => file('clean.R').includes('c(1, 2, 3, 4)'), 5000, 'flush');
+    expect(file('clean.R')).toBe('library(dplyr)\r\n\r\nx <- c(1, 2, 3, 4)\r\nmean(x)\r\n');
+
+    // Another program edits a different line.
+    writeFileSync(join(dir, 'clean.R'), file('clean.R').replace('mean(x)', 'median(x)'));
+    await until(() => c.read().child(3).textContent === 'median(x)', 5000, 'outside edit in the room');
+    expect(c.read().child(2).textContent).toBe('x <- c(1, 2, 3, 4)');
+    await until(() => git(dir, 'status', '--porcelain', '--', 'clean.R') === '', 5000, 'commit');
+    expect(git(dir, 'show', 'HEAD:clean.R')).toBe('library(dplyr)\r\n\r\nx <- c(1, 2, 3, 4)\r\nmedian(x)');
   });
 
   it('creates, renames and deletes files, committing each change', async () => {

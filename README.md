@@ -1,6 +1,7 @@
 # kuraa
 
-A git-backed editor for collections of Pandoc markdown and R Markdown files, with live co-editing.
+A git-backed editor for collections of Pandoc markdown and R Markdown files, and the source files
+around them (R, Python, YAML, BibTeX, LaTeX and more), with live co-editing.
 
 The files in git are the source of truth. A host process holds the working tree, relays live edits
 between clients (Yjs over Hocuspocus), writes them back to the files, commits them with everyone
@@ -100,10 +101,11 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | Milestone | Test |
 | --- | --- |
 | M0 | `pnpm check` |
-| M1, M6, M7 | `packages/format-*/test`: identity, locality, oracle, fixed point, fuzz and totality on the 22-file corpus in [fixtures/corpus](fixtures/corpus/) |
+| M1, M6, M7 | `packages/format-*/test`: identity, locality, oracle, fixed point, fuzz and totality on the 22-file corpus in [fixtures/corpus](fixtures/corpus/); exact round trips and matching for source files in [fixtures/text](fixtures/text/) |
 | M2–M5, M9 | `packages/host/test`: headless clients against a real host and git repo |
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
+| — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
 
@@ -114,6 +116,8 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension point |
+| `packages/format-text` | Plain-text and source files, one node per line; `createTextType` is its extension point |
+| `packages/formats` | `standardTypes`: the list the host and the web client both load |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI |
 | `packages/client` | The React client: file tree, editor with markdown cues, history, status, settings |

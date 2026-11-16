@@ -6,10 +6,12 @@ import { EditorState as PMState } from 'prosemirror-state';
 import { EditorView as PMView } from 'prosemirror-view';
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, lineNumbers } from '@codemirror/view';
-import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
+import { syntaxHighlighting } from '@codemirror/language';
+import { highlighter } from './languages.js';
 import { markdown } from '@codemirror/lang-markdown';
 import type { HostApi } from './api.js';
 import { buildNodeViews } from './nodeviews.js';
+import { highlightPlugin } from './lines.js';
 
 /** Plain text in a read-only CodeMirror editor. */
 export function ReadOnlyCode({ text, testId }: { text: string; testId?: string }) {
@@ -25,7 +27,7 @@ export function ReadOnlyCode({ text, testId }: { text: string; testId?: string }
         extensions: [
           lineNumbers(),
           markdown(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          syntaxHighlighting(highlighter),
           EditorView.lineWrapping,
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
@@ -65,13 +67,14 @@ export function SourceView({ api, path, type, doc }: { api: HostApi; path: strin
 export function ReadOnlyDoc({ text, type }: { text: string; type: DocumentType }) {
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const layout = type.editor?.layout;
     const view = new PMView(mount.current!, {
-      state: PMState.create({ doc: type.parse(text).doc }),
+      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout)] : [] }),
       editable: () => false,
       nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
-      attributes: { class: 'prose' },
+      attributes: { class: layout ? 'lines-doc' : 'prose' },
     });
     return () => view.destroy();
   }, [text, type]);
-  return <div className="editor-mount" ref={mount} />;
+  return <div className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} ref={mount} />;
 }

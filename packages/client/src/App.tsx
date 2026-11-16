@@ -159,11 +159,13 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
                       Version <code>{viewing.commit.hash.slice(0, 7)}</code>, “{viewing.commit.subject}” ({new Date(viewing.commit.date).toLocaleString()}). Read only.
                     </span>
                     <div className="toolbar-spacer" />
-                    <button type="button" className={viewSource ? 'active' : ''} onClick={() => setViewSource((v) => !v)}>{viewSource ? 'Rendered' : 'Source'}</button>
+                    {!type.editor?.layout && (
+                      <button type="button" className={viewSource ? 'active' : ''} onClick={() => setViewSource((v) => !v)}>{viewSource ? 'Rendered' : 'Source'}</button>
+                    )}
                     <button type="button" className="primary" onClick={() => setViewing(null)}>Back to live</button>
                   </div>
                   <div className="editor-scroll">
-                    {viewSource ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} />}
+                    {viewSource && !type.editor?.layout ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} />}
                   </div>
                 </div>
               )}
@@ -182,7 +184,9 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
       >
         {path && type && !viewing && (
           <>
-            <button type="button" className={showSource ? 'active' : ''} onClick={() => setShowSource((v) => !v)} data-testid="toggle-source">Source</button>
+            {!type.editor?.layout && (
+              <button type="button" className={showSource ? 'active' : ''} onClick={() => setShowSource((v) => !v)} data-testid="toggle-source">Source</button>
+            )}
             <button type="button" onClick={() => void saveVersion()}>Save version</button>
           </>
         )}

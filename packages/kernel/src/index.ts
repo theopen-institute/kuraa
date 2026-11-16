@@ -25,10 +25,20 @@ export interface CommandContribution {
   run: (ctx: unknown) => boolean;
 }
 
+/**
+ * How the client lays out a whole document, again as data. Without one, a
+ * document is rich text. `lines` is a source file: the document is a sequence
+ * of `line` nodes, one per line of the file, whose `eolAttr` attribute holds
+ * the line's terminator; the client shows it monospaced with line numbers and
+ * highlights it as `language`, a name its language registry knows.
+ */
+export type LayoutHint = { kind: 'lines'; line: string; eolAttr: string; language?: string };
+
 export interface EditorContribution {
   /** Opaque to the kernel: ProseMirror plugins built by the client. */
   plugins?(ctx: unknown): unknown[];
   nodeViews?: Record<string, NodeViewHint>;
+  layout?: LayoutHint;
   commands?: CommandContribution[];
 }
 

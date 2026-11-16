@@ -230,12 +230,9 @@ importers:
       '@kuraa/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@kuraa/format-pandoc':
+      '@kuraa/formats':
         specifier: workspace:*
-        version: link:../../packages/format-pandoc
-      '@kuraa/format-rmarkdown':
-        specifier: workspace:*
-        version: link:../../packages/format-rmarkdown
+        version: link:../../packages/formats
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -285,6 +282,12 @@ importers:
       '@kuraa/session':
         specifier: workspace:*
         version: link:../session
+      '@lezer/common':
+        specifier: ^1.5.5
+        version: 1.5.5
+      '@lezer/highlight':
+        specifier: ^1.2.5
+        version: 1.2.5
       prosemirror-commands:
         specifier: ^1.7.2
         version: 1.7.2
@@ -390,7 +393,23 @@ importers:
         specifier: ^1.25.13
         version: 1.25.13
 
-  packages/host:
+  packages/format-text:
+    dependencies:
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+    devDependencies:
+      '@kuraa/format-pandoc':
+        specifier: workspace:*
+        version: link:../format-pandoc
+      '@kuraa/format-rmarkdown':
+        specifier: workspace:*
+        version: link:../format-rmarkdown
+
+  packages/formats:
     dependencies:
       '@kuraa/format-pandoc':
         specifier: workspace:*
@@ -398,6 +417,18 @@ importers:
       '@kuraa/format-rmarkdown':
         specifier: workspace:*
         version: link:../format-rmarkdown
+      '@kuraa/format-text':
+        specifier: workspace:*
+        version: link:../format-text
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+
+  packages/host:
+    dependencies:
+      '@kuraa/formats':
+        specifier: workspace:*
+        version: link:../formats
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -411,6 +442,15 @@ importers:
         specifier: ^8.23.0
         version: 8.23.0
     devDependencies:
+      '@kuraa/format-pandoc':
+        specifier: workspace:*
+        version: link:../format-pandoc
+      '@kuraa/format-rmarkdown':
+        specifier: workspace:*
+        version: link:../format-rmarkdown
+      '@kuraa/format-text':
+        specifier: workspace:*
+        version: link:../format-text
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2

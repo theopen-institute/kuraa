@@ -1,0 +1,15 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath}
+\usepackage[style=authoryear]{biblatex}
+\addbibresource{references.bib}
+
+% Methods appendix, built separately from the book.
+\begin{document}
+\section{Sampling design}
+Quadrats were placed every \SI{5}{\metre} along each transect, following \textcite{bertness2007}.
+The expected count per quadrat is
+\begin{equation}
+  \mathbb{E}[N] = \lambda A, \qquad \lambda \sim \mathrm{Gamma}(\alpha, \beta).
+\end{equation}
+\printbibliography
+\end{document}

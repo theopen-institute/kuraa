@@ -13,6 +13,21 @@
   --warn-soft: #fdeee4;
   --code-bg: #f1eee8;
   --selected: #e9e5dd;
+  /* Syntax tokens (tok-* classes from languages.ts) */
+  --tok-comment: #8a8478;
+  --tok-keyword: #8b3a8f;
+  --tok-string: #2f7a3a;
+  --tok-number: #b4581b;
+  --tok-atom: #1f6fb2;
+  --tok-function: #2457a6;
+  --tok-definition: #6d4bb3;
+  --tok-builtin: #0f7b8a;
+  --tok-property: #8a5a00;
+  --tok-type: #a63f1f;
+  --tok-operator: #6b675f;
+  --tok-meta: #8a5a00;
+  --tok-inserted: #2f7a3a;
+  --tok-deleted: #b42318;
   --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --serif: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -33,6 +48,20 @@
     --warn-soft: #3b2418;
     --code-bg: #2a2926;
     --selected: #2e2d29;
+    --tok-comment: #8f8a7f;
+    --tok-keyword: #d9a3e0;
+    --tok-string: #9fd49a;
+    --tok-number: #f0b37e;
+    --tok-atom: #8cc4f2;
+    --tok-function: #8fb6f5;
+    --tok-definition: #c7b3ff;
+    --tok-builtin: #7fd3dc;
+    --tok-property: #e6c27a;
+    --tok-type: #f19b80;
+    --tok-operator: #a8a49b;
+    --tok-meta: #e6c27a;
+    --tok-inserted: #9fd49a;
+    --tok-deleted: #ff9b8f;
     color-scheme: dark;
   }
 }
@@ -172,4 +201,33 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 @media (max-width: 900px) {
   .panes, .panes.history-open { grid-template-columns: 200px minmax(0, 1fr); }
   .pane-right { display: none; }
+}
+
+/* Syntax highlighting: the same classes in CodeMirror code blocks and in source files. */
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-keyword { color: var(--tok-keyword); }
+.tok-string { color: var(--tok-string); }
+.tok-escape, .tok-number { color: var(--tok-number); }
+.tok-atom { color: var(--tok-atom); }
+.tok-function { color: var(--tok-function); }
+.tok-definition { color: var(--tok-definition); }
+.tok-builtin { color: var(--tok-builtin); }
+.tok-property { color: var(--tok-property); }
+.tok-type { color: var(--tok-type); }
+.tok-operator { color: var(--tok-operator); }
+.tok-meta { color: var(--tok-meta); }
+.tok-heading, .tok-strong { font-weight: 700; }
+.tok-emphasis { font-style: italic; }
+.tok-link { color: var(--tok-function); text-decoration: underline; }
+.tok-inserted { color: var(--tok-inserted); }
+.tok-deleted { color: var(--tok-deleted); }
+.tok-invalid { text-decoration: underline wavy var(--tok-deleted); }
+
+/* Source files: one ProseMirror node per line, numbered with a CSS counter. */
+.editor-mount-lines { max-width: none; padding: 14px 0 30vh; }
+.lines-doc { font: 13px/1.6 var(--mono); outline: none; counter-reset: line; tab-size: 4; }
+.lines-doc .line { position: relative; counter-increment: line; padding: 0 24px 0 4.75em; min-height: 1.6em; overflow-wrap: anywhere; }
+.lines-doc .line::before {
+  content: counter(line); position: absolute; left: 0; width: 3.4em; text-align: right;
+  color: var(--muted); opacity: 0.55; user-select: none; pointer-events: none;
 }

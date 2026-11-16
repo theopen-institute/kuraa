@@ -8,6 +8,7 @@ import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
 import { editorCommands, editorPlugins, type EditorCommand } from './commands.js';
 import { SourceView } from './ReadOnly.js';
+import { linesPlugins } from './lines.js';
 
 export interface EditorStatus {
   connection: ConnectionStatus;
@@ -85,15 +86,20 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         conn.destroy();
         return;
       }
-      commands.current = editorCommands(type.schema, { undo: conn.undo, redo: conn.redo });
+      const history = { undo: conn.undo, redo: conn.redo };
+      const layout = type.editor?.layout;
+      // Rich text gets the markdown commands and cues; a source file gets line editing.
+      commands.current = layout ? [] : editorCommands(type.schema, history);
       const state = EditorState.create({
         schema: type.schema,
-        plugins: [...conn.plugins(), ...editorPlugins(type.schema, commands.current)],
+        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, history) : editorPlugins(type.schema, commands.current))],
       });
       pmView = new EditorView(mount.current!, {
         state,
         nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
-        attributes: { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
+        attributes: layout
+          ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
+          : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
         // y-prosemirror dispatches while the view is still being constructed, so use `this`, not `pmView`.
         dispatchTransaction(this: EditorView, tr) {
           this.updateState(this.state.apply(tr));
@@ -126,7 +132,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       {error && <div className="banner warn">Could not open {path}: {error}</div>}
       {loading && !error && <div className="loading">Opening {path}…</div>}
       <div className="editor-scroll" style={{ display: showSource ? 'none' : undefined }}>
-        <div ref={mount} className="editor-mount" />
+        <div ref={mount} className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} />
       </div>
       {showSource && view && (
         <SourceView api={api} path={path} type={type} doc={view.state.doc} />

@@ -1,12 +1,11 @@
 // The host: relay, bridge, committer and git peer for one workspace.
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, watch, type FSWatcher } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
-import { pandocMarkdown } from '@kuraa/format-pandoc';
-import { rmarkdown } from '@kuraa/format-rmarkdown';
+import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
@@ -33,6 +32,8 @@ export interface HostOptions {
   /** Remote to fetch from and push to. Defaults to `origin` when it exists. */
   upstream?: string;
   identity?: { name: string; email: string };
+  /** Document types to load. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
+  types?: DocumentType[];
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   timings?: Partial<HostTimings>;
@@ -109,8 +110,7 @@ export class Host {
       GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,
       GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email,
     } : {});
-    this.registry.register(pandocMarkdown);
-    this.registry.register(rmarkdown);
+    for (const type of options.types ?? standardTypes) this.registry.register(type);
   }
 
   log(msg: string): void {
@@ -208,7 +208,26 @@ export class Host {
   }
 
   typeFor(path: string): DocumentType | undefined {
-    return this.registry.resolve(path);
+    const byName = this.registry.resolve(path);
+    if (byName) return byName;
+    // A file with no extension may say what it is on its first line (#!/usr/bin/env Rscript).
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    if (name.includes('.')) return undefined;
+    return this.registry.resolve(path, this.head(path));
+  }
+
+  /** The first bytes of a workspace file, or '' if it cannot be read. */
+  private head(path: string): string {
+    let fd: number | undefined;
+    try {
+      fd = openSync(this.resolvePath(path), 'r');
+      const buf = Buffer.alloc(256);
+      return buf.subarray(0, readSync(fd, buf, 0, 256, 0)).toString('utf8');
+    } catch {
+      return '';
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
   }
 
   // -------------------------------------------------------------------------

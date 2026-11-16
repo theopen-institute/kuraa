@@ -1,0 +1,5 @@
+Field log
+
+Day 1: arrived 08:10, tide falling.
+Day 2: rain; 	cores postponed.
+No final newline here

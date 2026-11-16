@@ -13,3 +13,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0007](0007-history-paths.md) | History entries carry the file's path at each commit, so versions from before a rename open |
 | [0008](0008-markdown-cues.md) | No toolbar or top bar; formatting comes from typing markdown; history starts closed |
 | [0009](0009-shell-boundary.md) | The host does all file and git work; the client sees its shell through one interface; `pnpm dev` |
+| [0010](0010-text-format.md) | Source files as one ProseMirror node per line, highlighted with CodeMirror's parsers |

@@ -33,9 +33,9 @@ export default tseslint.config(
     ),
   },
   {
-    files: ['packages/format-pandoc/src/**', 'packages/format-rmarkdown/src/**'],
+    files: ['packages/format-pandoc/src/**', 'packages/format-rmarkdown/src/**', 'packages/format-text/src/**', 'packages/formats/src/**'],
     rules: merge(
-      restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Format packages import kernel (and other format packages) only.'),
+      restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Format packages (and the formats list) import kernel and other format packages only.'),
       restrict(['prosemirror-state', 'prosemirror-view', 'prosemirror-transform', '@codemirror/*', 'react*', 'node:*'], 'Format packages use prosemirror-model only and run headless.'),
       noYjs,
     ),

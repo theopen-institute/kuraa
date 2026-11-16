@@ -354,15 +354,9 @@ importers:
       '@kuraa/format-pandoc':
         specifier: workspace:*
         version: link:../format-pandoc
-      '@kuraa/format-rmarkdown':
-        specifier: workspace:*
-        version: link:../format-rmarkdown
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@kuraa/session':
-        specifier: workspace:*
-        version: link:../session
       prosemirror-model:
         specifier: ^1.25.13
         version: 1.25.13
@@ -370,9 +364,18 @@ importers:
         specifier: ^8.23.0
         version: 8.23.0
     devDependencies:
+      '@kuraa/format-rmarkdown':
+        specifier: workspace:*
+        version: link:../format-rmarkdown
+      '@kuraa/session':
+        specifier: workspace:*
+        version: link:../session
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      prosemirror-transform:
+        specifier: ^1.12.5
+        version: 1.12.5
 
   packages/kernel:
     dependencies:

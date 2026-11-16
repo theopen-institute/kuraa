@@ -6,7 +6,8 @@
   "exports": {
     "./server": "./src/server.ts",
     "./client": "./src/client.ts",
-    "./model": "./src/model.ts"
+    "./model": "./src/model.ts",
+    "./testing": "./src/testing.ts"
   },
   "dependencies": {
     "@hocuspocus/provider": "^4.8.0",

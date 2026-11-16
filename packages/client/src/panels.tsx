@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode 
 import type { CommitInfo, HostApi, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
+import { askConfirm, askText } from './ask.js';
 
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—');
 const when = (iso: string) => {
@@ -52,18 +53,18 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError }:
     }
   };
 
-  const create = () => {
+  const create = async () => {
     const base = selected?.includes('/') ? selected.slice(0, selected.lastIndexOf('/') + 1) : '';
-    const path = window.prompt('New file path', `${base}untitled.md`);
-    if (path) void act(() => api.createFile(path, ''), path);
+    const path = (await askText('New file path', `${base}untitled.md`, 'Create'))?.trim();
+    if (path) await act(() => api.createFile(path, ''), path);
   };
-  const rename = (from: string) => {
-    const to = window.prompt('Rename to', from);
-    if (to && to !== from) void act(() => api.renameFile(from, to), selected === from ? to : selected);
+  const rename = async (from: string) => {
+    const to = (await askText('Rename to', from, 'Rename'))?.trim();
+    if (to && to !== from) await act(() => api.renameFile(from, to), selected === from ? to : selected);
   };
-  const remove = (path: string) => {
-    if (window.confirm(`Delete ${path}? The deletion is committed; the file stays in history.`)) {
-      void act(() => api.deleteFile(path), selected === path ? null : selected);
+  const remove = async (path: string) => {
+    if (await askConfirm(`Delete ${path}? The deletion is committed; the file stays in history.`, 'Delete', true)) {
+      await act(() => api.deleteFile(path), selected === path ? null : selected);
     }
   };
 
@@ -103,8 +104,8 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError }:
               <span className="tree-icon">{f.type ? '◇' : '·'}</span>{name}
             </button>
             <span className="tree-actions">
-              <button type="button" title="Rename" onClick={() => rename(f.path)}>✎</button>
-              <button type="button" title="Delete" onClick={() => remove(f.path)}>✕</button>
+              <button type="button" title="Rename" onClick={() => void rename(f.path)}>✎</button>
+              <button type="button" title="Delete" onClick={() => void remove(f.path)}>✕</button>
             </span>
           </li>
         );
@@ -116,7 +117,7 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError }:
     <nav className="pane pane-left" aria-label="Files">
       <div className="pane-header">
         <span>Files</span>
-        <button type="button" onClick={create} title="New file">＋ New</button>
+        <button type="button" onClick={() => void create()} title="New file">＋ New</button>
       </div>
       <ul className="tree">{renderFolder(tree, 0)}</ul>
     </nav>

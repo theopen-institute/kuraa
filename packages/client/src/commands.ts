@@ -5,6 +5,7 @@ import { baseKeymap, chainCommands, exitCode, setBlockType, toggleMark, wrapIn, 
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import { InputRule, inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
+import { askText } from './ask.js';
 import type { Plugin } from 'prosemirror-state';
 
 export interface EditorCommand {
@@ -42,14 +43,19 @@ const insertNode = (type: NodeType | undefined, attrs?: Record<string, unknown>)
   return true;
 };
 
-const toggleLink: (schema: Schema) => Command = (schema) => (state, dispatch) => {
+const toggleLink: (schema: Schema) => Command = (schema) => (state, dispatch, view) => {
   const link = schema.marks.link!;
   if (markActive(state, link)) return toggleMark(link)(state, dispatch);
-  if (state.selection.empty) return false;
+  if (state.selection.empty || !view) return false;
   if (dispatch) {
-    const href = window.prompt('Link address', 'https://');
-    if (!href) return false;
-    toggleMark(link, { href })(state, dispatch);
+    void askText('Link address', 'https://', 'Add link').then((href) => {
+      href = href?.trim() ?? '';
+      if (!href || view.isDestroyed) return;
+      // Use the selection as it is now: remote edits made while the dialog was open have moved it.
+      const { from, to, empty } = view.state.selection;
+      if (!empty) view.dispatch(view.state.tr.addMark(from, to, link.create({ href })));
+      view.focus();
+    });
   }
   return true;
 };

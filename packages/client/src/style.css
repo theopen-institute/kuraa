@@ -165,6 +165,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .field { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
 .field input { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
 .field input[type='color'] { padding: 2px; height: 32px; width: 64px; }
+.ask-message { font-size: 14px; color: var(--text); }
+button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 @media (max-width: 900px) {

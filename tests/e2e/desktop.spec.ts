@@ -68,11 +68,26 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await openNotes(page);
     await expect(page).toHaveTitle(`notes.md · ${basename(dir)} · kuraa`);
 
+    // New and Rename ask in an in-app dialog (Electron has no window.prompt).
+    await page.getByRole('button', { name: /New/ }).click();
+    await page.getByTestId('ask').locator('input').fill('field/day-one.md');
+    await page.getByTestId('ask').getByRole('button', { name: 'Create' }).click();
+    await expect(page.getByTestId('file:field/day-one.md')).toBeVisible();
+    await expect.poll(() => existsSync(join(dir, 'field/day-one.md'))).toBe(true);
+    const row = page.locator('li.tree-file', { has: page.getByTestId('file:field/day-one.md') });
+    await row.hover();
+    await row.getByTitle('Rename').click();
+    await page.getByTestId('ask').locator('input').fill('field/day-1.md');
+    await page.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
+    await expect(page.getByTestId('file:field/day-1.md')).toBeVisible();
+    await expect.poll(() => existsSync(join(dir, 'field/day-1.md'))).toBe(true);
+    expect(existsSync(join(dir, 'field/day-one.md'))).toBe(false);
+    await openNotes(page);
+
     // Edit and commit.
     await typeAtEnd(page, 'The tide', ' Desktop edit.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
-    await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
-    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Desktop edit.');
+    await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
     await expect(page.getByTestId('last-commit')).not.toContainText('—');
 
     // M5 (a): another program edits elsewhere in the file while the user types.

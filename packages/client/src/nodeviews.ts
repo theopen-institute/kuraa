@@ -13,6 +13,7 @@ import { r } from '@codemirror/legacy-modes/mode/r';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import type { Extension } from '@codemirror/state';
+import { askText } from './ask.js';
 
 export function languageFor(name: string | undefined): Extension | LanguageSupport | [] {
   const n = (name ?? '').toLowerCase().replace(/^[{.]+/, '').split(/[\s,}]/)[0] ?? '';
@@ -189,10 +190,11 @@ class AtomView implements NodeView {
     this.dom.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (!this.view.editable) return;
-      const value = window.prompt(`Edit ${this.node.type.name.replace(/_/g, ' ')}`, String(this.node.attrs[this.hint.attr] ?? ''));
-      const pos = this.getPos();
-      if (value === null || pos === undefined) return;
-      this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [this.hint.attr]: value }));
+      void askText(`Edit ${this.node.type.name.replace(/_/g, ' ')}`, String(this.node.attrs[this.hint.attr] ?? ''), 'Save').then((value) => {
+        const pos = this.getPos();
+        if (value === null || pos === undefined || this.view.isDestroyed) return;
+        this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [this.hint.attr]: value }));
+      });
     });
   }
   private render() {

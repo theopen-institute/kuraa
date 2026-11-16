@@ -8,6 +8,7 @@ import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
 import { editorCommands, editorPlugins, type EditorCommand } from './commands.js';
 import { SourceView } from './ReadOnly.js';
+import { askText } from './ask.js';
 
 export interface EditorStatus {
   connection: ConnectionStatus;
@@ -127,8 +128,8 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted }: Pro
   };
 
   const saveVersion = async () => {
-    const message = window.prompt('Name this version', `Update ${path}`);
-    if (message === null) return;
+    const message = (await askText('Name this version', `Update ${path}`, 'Save version'))?.trim();
+    if (!message) return;
     try {
       await api.version(path, message);
       update({ notice: { kind: 'info', text: `Saved version “${message}”.` } });

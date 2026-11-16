@@ -54,12 +54,16 @@ export function resolveShell(): ResolvedShell {
   const defaults = { name: take('name'), email: take('email') };
   if (url.href !== location.href) history.replaceState(null, '', url);
 
-  let overrides: Partial<Settings>;
+  // Remembered for this tab, so a reload keeps the connection and the suggested name.
+  let tab: { overrides: Partial<Settings>; defaults: Partial<Settings> };
   try {
-    if (fromLink.hostUrl || fromLink.token) sessionStorage.setItem(TAB_KEY, JSON.stringify(fromLink));
-    overrides = JSON.parse(sessionStorage.getItem(TAB_KEY) ?? '{}') as Partial<Settings>;
+    const stored = JSON.parse(sessionStorage.getItem(TAB_KEY) ?? '{}') as Partial<typeof tab>;
+    tab = { overrides: stored.overrides ?? {}, defaults: stored.defaults ?? {} };
+    if (fromLink.hostUrl || fromLink.token) tab.overrides = fromLink;
+    if (defaults.name || defaults.email) tab.defaults = defaults;
+    sessionStorage.setItem(TAB_KEY, JSON.stringify(tab));
   } catch {
-    overrides = fromLink;
+    tab = { overrides: fromLink, defaults };
   }
-  return { shell: webShell, overrides, defaults };
+  return { shell: webShell, ...tab };
 }

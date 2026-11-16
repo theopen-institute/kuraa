@@ -9,6 +9,7 @@ import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
+import { Runner, findRscript } from './runner.js';
 import { createRequestHandler } from './http.js';
 
 export interface HostTimings {
@@ -34,6 +35,13 @@ export interface HostOptions {
   identity?: { name: string; email: string };
   /** Document types to load. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
   types?: DocumentType[];
+  /**
+   * Allow clients to run R code chunks on this machine. Off by default: anyone
+   * with the token could run any program as the host's user.
+   */
+  run?: boolean;
+  /** Rscript to use; found on PATH or in the usual places if not given. */
+  rscript?: string;
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   timings?: Partial<HostTimings>;
@@ -93,6 +101,7 @@ export class Host {
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
   private relay!: Relay;
+  runner!: Runner;
   private watcher: FSWatcher | null = null;
   private cacheDir = '';
   private queue: Promise<unknown> = Promise.resolve();
@@ -131,6 +140,14 @@ export class Host {
       this.log(`initialised a git repository in ${this.dir}`);
     }
     this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
+    this.runner = new Runner({
+      root: this.dir,
+      stateDir: join(await this.git.gitDir(), 'kuraa'),
+      rscript: this.options.run ? findRscript(this.options.rscript) : null,
+      broadcast: (path, message) => this.broadcastPath(path, message),
+      log: (m) => this.log(m),
+    });
+    if (this.options.run) this.log(this.runner.available ? 'running R chunks is allowed' : 'running R chunks is allowed, but Rscript was not found');
     await mkdir(this.cacheDir, { recursive: true });
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.
@@ -176,6 +193,7 @@ export class Host {
         this.clearTimers(rec);
       }
     });
+    await this.runner.close();
     await this.relay.close();
   }
 
@@ -535,6 +553,11 @@ export class Host {
     } else if (rec.state) {
       rec.state = patchState(rec.state, doc);
     }
+  }
+
+  /** Send a message to everyone with `path` open, on any branch or generation. */
+  broadcastPath(path: string, message: RoomMessage): void {
+    for (const rec of this.records.values()) if (rec.path === path) this.broadcast(rec, message);
   }
 
   private broadcast(rec: RoomRecord, message: RoomMessage): void {

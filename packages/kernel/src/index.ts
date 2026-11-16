@@ -15,7 +15,15 @@ export interface ParsedDocument {
  * See docs/decisions/0002-declarative-node-views.md.
  */
 export type NodeViewHint =
-  | { kind: 'code'; language?: string; languageAttr?: string; header?: { attr: string; prefix?: string; suffix?: string } }
+  | {
+      kind: 'code'; language?: string; languageAttr?: string; header?: { attr: string; prefix?: string; suffix?: string };
+      /**
+       * The block can be run, like a knitr chunk. Its engine is the first word of
+       * `header.attr` if there is one, else `engineAttr`; whether that engine can
+       * run is up to the host.
+       */
+      run?: { engineAttr: string };
+    }
   | { kind: 'atom'; attr: string; className?: string; display?: 'inline' | 'block' };
 
 export interface CommandContribution {

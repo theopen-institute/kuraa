@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { TypeRegistry, type DocumentType } from '@kuraa/kernel';
 import { HostApi, type CommitInfo, type TreeFile, type WorkspaceInfo } from './api.js';
 import { Editor, type EditorStatus } from './Editor.js';
-import { FileTree, HistoryPanel, SettingsDialog, StatusBar } from './panels.js';
+import { FileTree, HistoryPanel, RunControls, SettingsDialog, StatusBar } from './panels.js';
 import { ReadOnlyCode, ReadOnlyDoc } from './ReadOnly.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -23,6 +23,7 @@ export interface AppProps {
 }
 
 const OPEN_KEY = 'kuraa:open-file';
+const NO_ENGINES: string[] = [];
 
 export function App({ types, overrides, defaults, shell = webShell }: AppProps) {
   const registry = useMemo(() => {
@@ -150,7 +151,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
           {path && type && !versionMismatch && !editingSettings && (
             <div className="centre-stack">
               <div style={{ display: viewing ? 'none' : 'contents' }}>
-                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} />
+                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} runEngines={workspace?.run?.engines ?? NO_ENGINES} />
               </div>
               {viewing && (
                 <div className="editor-pane past-version" data-testid="past-version">
@@ -182,6 +183,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
         path={path}
         workspace={workspace ? `${workspace.name} on ${workspace.branch}${workspace.head ? ` @ ${workspace.head.slice(0, 7)}` : ''}` : settings.hostUrl || 'Not connected'}
       >
+        {path && type && !viewing && status?.runner && <RunControls runner={status.runner} />}
         {path && type && !viewing && (
           <>
             {!type.editor?.layout && (

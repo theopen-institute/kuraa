@@ -65,6 +65,8 @@ async function openFolder(path: string): Promise<boolean> {
   host = await startHost({
     dir,
     init: !folder.repoRoot,
+    // Your own folder on your own machine, on loopback with a random token: chunks may run.
+    run: true,
     host: '127.0.0.1',
     port: 0,
     timings: timings(),

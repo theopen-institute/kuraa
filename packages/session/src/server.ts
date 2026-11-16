@@ -9,7 +9,7 @@ import { prosemirrorToYXmlFragment, updateYFragment, yXmlFragmentToProseMirrorRo
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
-export type { PresenceUser, RoomMessage } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RSessionInfo, RSessionState } from './model.js';
 
 /** Either a ProseMirror document to seed a new generation, or a saved state to resume one. */
 export type RoomSeed = { doc: PMNode } | { state: Uint8Array };

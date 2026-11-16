@@ -38,6 +38,7 @@ async function caretIn(page: Page, text: string, where: 'start' | 'end'): Promis
   await page.getByTestId('editor').locator('p', { hasText: text }).click();
   const key = where === 'end' ? (MAC ? 'Meta+ArrowRight' : 'End') : MAC ? 'Meta+ArrowLeft' : 'Home';
   await page.keyboard.press(key);
+  await page.waitForTimeout(100); // see desktop.spec.ts typeAtEnd
 }
 
 test('two browsers co-edit one paragraph and see each other', async ({ browser }) => {

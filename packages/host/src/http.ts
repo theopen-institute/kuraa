@@ -95,7 +95,50 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       branch: await host.git.branch(),
       head: await host.git.head(),
       types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
+      run: {
+        enabled: Boolean(host.options.run),
+        available: host.runner.available,
+        engines: host.options.run && host.runner.available ? ['r'] : [],
+      },
     });
+  }
+
+  // Running chunks: see runner.ts. Progress and outputs reach clients as room messages.
+  if (route === 'GET /api/runs') {
+    const path = host.relPath(str(q.get('path'), 'path'));
+    return send(res, 200, { runs: await host.runner.outputs(path), pending: host.runner.pending(path), session: host.runner.session(path) });
+  }
+
+  if (route.startsWith('POST /api/runs')) {
+    if (!host.options.run) throw new HttpError(403, 'Running code is turned off on this host. Start it with --allow-run to allow it.');
+    if (!host.runner.available) throw new HttpError(503, 'R was not found on the host. Install R, or start the host with --rscript <path>.');
+    const body = await readBody(req);
+    const path = host.relPath(str(body.path, 'path'));
+    if (route === 'POST /api/runs') {
+      if (body.engine !== 'r') throw new HttpError(400, `Cannot run ${String(body.engine)} chunks`);
+      const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
+      if (!chunk || typeof chunk.index !== 'number' || typeof chunk.codeHash !== 'string') throw new HttpError(400, 'Missing chunk');
+      const by = (body.by ?? {}) as { name?: unknown; email?: unknown; color?: unknown };
+      const record = host.runner.run(path, {
+        code: typeof body.code === 'string' ? body.code : '',
+        header: typeof body.header === 'string' ? body.header : 'r',
+        chunk: { label: typeof chunk.label === 'string' ? chunk.label : null, index: chunk.index, codeHash: chunk.codeHash, partial: chunk.partial === true },
+        by: { name: typeof by.name === 'string' ? by.name : 'Anonymous', email: typeof by.email === 'string' ? by.email : '', color: typeof by.color === 'string' ? by.color : '#888888' },
+      });
+      return send(res, 202, record);
+    }
+    if (route === 'POST /api/runs/interrupt') {
+      host.runner.interrupt(path);
+      return send(res, 200, { ok: true });
+    }
+    if (route === 'POST /api/runs/restart') {
+      await host.runner.restart(path);
+      return send(res, 200, { ok: true });
+    }
+    if (route === 'POST /api/runs/clear') {
+      await host.runner.clear(path, body.chunk as never);
+      return send(res, 200, { ok: true });
+    }
   }
 
   if (route === 'GET /api/tree') {

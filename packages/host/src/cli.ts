@@ -1,4 +1,4 @@
-// kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
+// kuraa-host --dir <workspace> [--init] [--allow-run [--rscript path]] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
 import { parseArgs } from 'node:util';
 import { startHost } from './index.js';
 
@@ -6,6 +6,8 @@ const { values } = parseArgs({
   options: {
     dir: { type: 'string', default: '.' },
     init: { type: 'boolean', default: false },
+    'allow-run': { type: 'boolean', default: false },
+    rscript: { type: 'string' },
     port: { type: 'string', default: '4321' },
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
@@ -19,6 +21,8 @@ const { values } = parseArgs({
 const running = await startHost({
   dir: values.dir!,
   init: values.init,
+  run: values['allow-run'],
+  rscript: values.rscript,
   port: Number(values.port),
   host: values.host!,
   token: values.token ?? process.env.KURAA_TOKEN,

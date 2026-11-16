@@ -78,6 +78,6 @@ export const rmarkdown: DocumentType = createPandocType({
   },
 
   nodeViews: {
-    code_chunk: { kind: 'code', language: 'r', header: { attr: 'header', prefix: '{', suffix: '}' } },
+    code_chunk: { kind: 'code', language: 'r', header: { attr: 'header', prefix: '{', suffix: '}' }, run: { engineAttr: 'engine' } },
   },
 });

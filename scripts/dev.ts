@@ -76,7 +76,7 @@ const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
-  '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1',
+  '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1', '--allow-run',
 ], { KURAA_TOKEN: token });
 
 const web = run('web', bin('vite'), ['--port', values.port!, '--strictPort', '--host', '127.0.0.1'], {

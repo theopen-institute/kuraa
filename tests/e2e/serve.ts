@@ -22,6 +22,7 @@ const running = await startHost({
   port: E2E.port,
   host: '127.0.0.1',
   token: E2E.token,
+  run: true,
   staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
   timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   log: (m) => console.log(`[host] ${m}`),

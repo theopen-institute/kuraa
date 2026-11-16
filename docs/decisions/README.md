@@ -14,3 +14,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0008](0008-markdown-cues.md) | No toolbar or top bar; formatting comes from typing markdown; history starts closed |
 | [0009](0009-shell-boundary.md) | The host does all file and git work; the client sees its shell through one interface; `pnpm dev` |
 | [0010](0010-text-format.md) | Source files as one ProseMirror node per line, highlighted with CodeMirror's parsers |
+| [0011](0011-running-chunks.md) | Running R chunks: one R session per document on the host, shared outputs, never in the file |

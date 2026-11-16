@@ -9,6 +9,7 @@ import { buildNodeViews } from './nodeviews.js';
 import { editorCommands, editorPlugins, type EditorCommand } from './commands.js';
 import { SourceView } from './ReadOnly.js';
 import { linesPlugins } from './lines.js';
+import { ChunkRunner, collectChunks } from './runs.js';
 
 export interface EditorStatus {
   connection: ConnectionStatus;
@@ -19,6 +20,8 @@ export interface EditorStatus {
   lastCommitAt: string | null;
   lastCommit: string | null;
   notice: { kind: 'info' | 'warn'; text: string } | null;
+  /** Runs this document's code chunks, when the host allows it and the document has any. */
+  runner: ChunkRunner | null;
 }
 
 interface Props {
@@ -30,18 +33,23 @@ interface Props {
   onCommitted(): void;
   /** Show the file's markdown source (read-only) instead of the editor. */
   showSource: boolean;
+  /** Chunk engines the host can run (e.g. ['r']); empty if it runs nothing. */
+  runEngines: string[];
 }
 
-export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource }: Props) {
+export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource, runEngines }: Props) {
   const mount = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [, force] = useState(0);
   const connection = useRef<RoomConnection | null>(null);
-  const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null });
+  const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
   const commands = useRef<EditorCommand[]>([]);
   const user = useMemo(() => ({ name: settings.name, email: settings.email, color: settings.color }), [settings.name, settings.email, settings.color]);
+  const userRef = useRef(user);
+  userRef.current = user;
+  const engines = runEngines.join(',');
 
   const update = (patch: Partial<EditorStatus>) => {
     statusRef.current = { ...statusRef.current, ...patch };
@@ -54,8 +62,13 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     setLoading(true);
     setError(null);
     setView(null);
-    statusRef.current = { connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null };
+    statusRef.current = { connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null };
     onStatus(statusRef.current);
+
+    const hints = type.editor?.nodeViews ?? {};
+    const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
+    const runner = engines && runnable ? new ChunkRunner(api, path, engines.split(','), () => userRef.current) : null;
+    let chunkTimer: ReturnType<typeof setTimeout> | undefined;
 
     (async () => {
       const room = await api.room(path);
@@ -71,6 +84,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         onPeers: (peers) => update({ peers }),
         onUnsynced: (n) => update({ unsynced: n }),
         onMessage: (m: RoomMessage) => {
+          runner?.receive(m);
           if (m.type === 'flushed') update({ lastFlushAt: m.at });
           else if (m.type === 'committed') {
             update({ lastCommitAt: m.at, lastCommit: m.commit });
@@ -96,7 +110,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       });
       pmView = new EditorView(mount.current!, {
         state,
-        nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
+        nodeViews: buildNodeViews(hints, { runner }),
         attributes: layout
           ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
           : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
@@ -104,8 +118,18 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         dispatchTransaction(this: EditorView, tr) {
           this.updateState(this.state.apply(tr));
           force((x) => x + 1); // the source view follows the live document
+          if (runner && tr.docChanged) {
+            clearTimeout(chunkTimer);
+            const doc = this.state.doc;
+            chunkTimer = setTimeout(() => runner.setChunks(collectChunks(doc, hints)), 150);
+          }
         },
       });
+      if (runner) {
+        runner.setChunks(collectChunks(pmView.state.doc, hints));
+        update({ runner });
+        runner.load().catch((e: Error) => update({ notice: { kind: 'warn', text: `Could not load chunk outputs: ${e.message}` } }));
+      }
       setView(pmView);
       setLoading(false);
     })().catch((err: Error) => {
@@ -117,11 +141,12 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
 
     return () => {
       cancelled = true;
+      clearTimeout(chunkTimer);
       pmView?.destroy();
       connection.current?.destroy();
       connection.current = null;
     };
-  }, [api, path, type, settings.token]);
+  }, [api, path, type, settings.token, engines]);
 
   useEffect(() => {
     connection.current?.setUser(user);

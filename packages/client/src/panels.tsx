@@ -1,10 +1,11 @@
 // The panels around the editor: file tree, history, status bar and settings.
-import { useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
 import type { CommitInfo, HostApi, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
 import { askConfirm, askText } from './ask.js';
 import type { Shell } from './shell.js';
+import type { ChunkRunner } from './runs.js';
 
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—');
 const when = (iso: string) => {
@@ -248,5 +249,23 @@ export function SettingsDialog({ initial, shell, onSave, onCancel }: { initial: 
         </div>
       </form>
     </div>
+  );
+}
+
+const R_STATE: Record<string, string> = { none: 'R not started', starting: 'R starting…', ready: 'R ready', busy: 'R running', stopped: 'R stopped', failed: 'R failed' };
+
+/** The document's R session, in the status bar: state, Run all, Interrupt, Restart. */
+export function RunControls({ runner }: { runner: ChunkRunner }) {
+  useSyncExternalStore((fn) => runner.subscribe(fn), () => runner.version);
+  if (!runner.hasRunnableChunks) return null;
+  const s = runner.session;
+  const act = (p: Promise<unknown>) => void p.catch(() => undefined);
+  return (
+    <>
+      <span className={`r-state r-${s.state}`} title={s.message ?? ''} data-testid="r-state">{R_STATE[s.state] ?? s.state}</span>
+      <button type="button" onClick={() => act(runner.runAll())} title="Run every chunk, top to bottom">Run all</button>
+      {runner.busy && <button type="button" onClick={() => act(runner.interrupt())} title="Interrupt R, and drop queued runs">Interrupt</button>}
+      {s.state !== 'none' && <button type="button" onClick={() => act(runner.restart())} title="A fresh R session: everything defined so far is gone">Restart R</button>}
+    </>
   );
 }

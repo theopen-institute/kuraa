@@ -50,6 +50,9 @@ async function openNotes(page: Page): Promise<void> {
 async function typeAtEnd(page: Page, paragraph: string, text: string): Promise<void> {
   await page.getByTestId('editor').locator('p', { hasText: paragraph }).click();
   await page.keyboard.press(MAC ? 'Meta+ArrowRight' : 'End');
+  // ProseMirror reads a moved caret from selectionchange a moment later; a sync
+  // arriving before that would put the caret back where ProseMirror last saw it.
+  await page.waitForTimeout(100);
   await page.keyboard.type(text, { delay: 20 });
 }
 

@@ -1,0 +1,17 @@
+{
+  "name": "@kuraa/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "build/main.cjs",
+  "scripts": {
+    "build": "pnpm --filter @kuraa/web build && node build.mjs",
+    "start": "pnpm run build && node start.mjs"
+  },
+  "dependencies": {
+    "@kuraa/host": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "45.3.2"
+  }
+}

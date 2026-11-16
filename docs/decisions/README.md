@@ -9,3 +9,5 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0003](0003-pandoc-extension-point.md) | `createPandocType` is the extension point R Markdown builds on |
 | [0004](0004-oracle-known-differences.md) | Pandoc constructs the parser does not yet match, and the oracle allow-list |
 | [0005](0005-fuzz-normalisation.md) | What the fuzz test treats as equal |
+| [0006](0006-client-shells.md) | The shell supplies document types; one client build loads from a host, Vite or `file://` |
+| [0007](0007-history-paths.md) | History entries carry the file's path at each commit, so versions from before a rename open |

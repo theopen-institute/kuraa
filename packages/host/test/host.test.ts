@@ -168,6 +168,18 @@ describe('host', () => {
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('Draft for review');
   });
 
+  it('M4: history follows renames and gives the path each version had', async () => {
+    await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'notes.md', to: 'field/day-one.md' }) });
+    const hist = (await (await api('/api/history?path=field%2Fday-one.md')).json()) as { commits: { hash: string; path: string; subject: string }[] };
+    expect(hist.commits.map((c) => [c.subject, c.path])).toEqual([
+      ['Rename notes.md to field/day-one.md', 'field/day-one.md'],
+      ['Initial', 'notes.md'],
+    ]);
+    const old = await api(`/api/history/${hist.commits[1]!.hash}?path=${encodeURIComponent(hist.commits[1]!.path)}`);
+    expect(old.status).toBe(200);
+    expect(await old.text()).toBe(NOTES);
+  });
+
   it('M5: an outside edit elsewhere in the file reaches clients and survives on disk', async () => {
     const a = await connect('notes.md');
     a.write(insertAt(a.read(), 'Light rain', 'Typing: '));

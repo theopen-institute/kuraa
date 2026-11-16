@@ -20,15 +20,16 @@ export function defaultSettings(): Settings {
   };
 }
 
-export function loadSettings(overrides: Partial<Settings> = {}): Settings {
+/** Stored settings, with `defaults` filling gaps and `overrides` winning. */
+export function loadSettings(overrides: Partial<Settings> = {}, defaults: Partial<Settings> = {}): Settings {
   let stored: Partial<Settings>;
   try {
     stored = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Settings>;
   } catch {
     stored = {};
   }
-  const clean = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v)) as Partial<Settings>;
-  return { ...defaultSettings(), ...stored, ...clean };
+  const clean = (o: Partial<Settings>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v)) as Partial<Settings>;
+  return { ...defaultSettings(), ...clean(defaults), ...clean(stored), ...clean(overrides) };
 }
 
 export function saveSettings(s: Settings): void {

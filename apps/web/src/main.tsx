@@ -4,17 +4,20 @@ import { mountApp, type Settings } from '@kuraa/client';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
 
-// A shell may pass settings in the URL (the desktop app does). They are removed
+// A shell may pass settings in the URL (the desktop app does): host and token
+// override stored settings, name and email only fill gaps. They are removed
 // from the address bar so the token does not linger in history.
 const url = new URL(location.href);
 const overrides: Partial<Settings> = {};
-for (const [param, key] of [['host', 'hostUrl'], ['token', 'token'], ['name', 'name'], ['email', 'email']] as const) {
+const defaults: Partial<Settings> = {};
+const params = [['host', 'hostUrl', overrides], ['token', 'token', overrides], ['name', 'name', defaults], ['email', 'email', defaults]] as const;
+for (const [param, key, target] of params) {
   const value = url.searchParams.get(param);
   if (value) {
-    overrides[key] = value;
+    target[key] = value;
     url.searchParams.delete(param);
   }
 }
-if (Object.keys(overrides).length) history.replaceState(null, '', url);
+if (url.href !== location.href) history.replaceState(null, '', url);
 
-mountApp(document.getElementById('root')!, { types: [pandocMarkdown, rmarkdown], overrides });
+mountApp(document.getElementById('root')!, { types: [pandocMarkdown, rmarkdown], overrides, defaults });

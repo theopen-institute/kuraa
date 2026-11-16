@@ -5,7 +5,11 @@ export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;
 }
-export interface CommitInfo { hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[] }
+export interface CommitInfo {
+  hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[];
+  /** The file's path in this commit; differs from the current path before a rename. */
+  path: string;
+}
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }

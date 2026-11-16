@@ -13,18 +13,20 @@ export interface AppProps {
   types: DocumentType[];
   /** Settings supplied by the shell (desktop app, URL parameters); they win over stored ones. */
   overrides?: Partial<Settings>;
+  /** Suggestions from the shell, used only where nothing is stored (e.g. name and email from git). */
+  defaults?: Partial<Settings>;
 }
 
 const OPEN_KEY = 'kuraa:open-file';
 
-export function App({ types, overrides }: AppProps) {
+export function App({ types, overrides, defaults }: AppProps) {
   const registry = useMemo(() => {
     const r = new TypeRegistry();
     for (const t of types) r.register(t);
     return r;
   }, [types]);
 
-  const [settings, setSettings] = useState<Settings>(() => loadSettings(overrides));
+  const [settings, setSettings] = useState<Settings>(() => loadSettings(overrides, defaults));
   const [editingSettings, setEditingSettings] = useState(() => !isComplete(settings));
   const api = useMemo(() => new HostApi(settings.hostUrl, settings.token), [settings.hostUrl, settings.token]);
 
@@ -72,6 +74,10 @@ export function App({ types, overrides }: AppProps) {
     } catch { /* storage unavailable */ }
   }, [path]);
 
+  useEffect(() => {
+    document.title = [path?.slice(path.lastIndexOf('/') + 1), workspace?.name, 'kuraa'].filter(Boolean).join(' · ');
+  }, [path, workspace]);
+
   const file = files.find((f) => f.path === path) ?? null;
   const type = file?.type ? registry.get(file.type) : undefined;
   const hostType = workspace?.types.find((t) => t.id === file?.type);
@@ -83,7 +89,7 @@ export function App({ types, overrides }: AppProps) {
   const view = async (commit: CommitInfo | null) => {
     if (!commit || !path) return setViewing(null);
     try {
-      setViewing({ commit, text: await api.textAt(commit.hash, path) });
+      setViewing({ commit, text: await api.textAt(commit.hash, commit.path || path) });
     } catch (e) {
       setError((e as Error).message);
     }

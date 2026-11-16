@@ -31,6 +31,7 @@ const running = await startHost({
 console.log(`[kuraa] workspace: ${running.host.dir}`);
 console.log(`[kuraa] url:       ${running.url}`);
 console.log(`[kuraa] token:     ${running.token}`);
+if (values.static) console.log(`[kuraa] open:      ${running.url}/?token=${running.token}`);
 console.log(`[kuraa] git clone: git clone http://kuraa:${running.token}@${running.url.replace(/^https?:\/\//, '')}/git ${running.host.workspace}`);
 
 const stop = async () => {

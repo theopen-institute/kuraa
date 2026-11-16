@@ -178,11 +178,18 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
 
   if (route === 'GET /api/history') {
     const path = host.relPath(str(q.get('path'), 'path'));
-    const log = await host.git.run(['log', '--follow', '-n', '200', '--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e', '--', path], { allowFail: true });
-    const commits = log.stdout.split('\x1e').map((s) => s.trim()).filter(Boolean).map((entry) => {
-      const [hash, author, email, date, subject, body = ''] = entry.split('\x1f');
+    // --follow crosses renames, so each entry also gives the path the file had in that commit
+    // (from --name-only, which git prints after the formatted header).
+    const log = await host.git.run(
+      ['log', '--follow', '-n', '200', '--name-only', '--format=%x1e%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1d', '--', path],
+      { allowFail: true },
+    );
+    const commits = log.stdout.split('\x1e').filter((s) => s.trim()).map((entry) => {
+      const [header = '', names = ''] = entry.split('\x1d');
+      const [hash, author, email, date, subject, body = ''] = header.split('\x1f');
       const coAuthors = [...body.matchAll(/^Co-authored-by:\s*(.+?)\s*<([^>]*)>\s*$/gim)].map((m) => ({ name: m[1], email: m[2] }));
-      return { hash, author, email, date, subject, coAuthors };
+      const pathThen = names.split('\n').map((n) => n.trim()).filter(Boolean).pop() ?? path;
+      return { hash, author, email, date, subject, coAuthors, path: pathThen };
     });
     return send(res, 200, { commits });
   }

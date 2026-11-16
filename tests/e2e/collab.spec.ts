@@ -8,12 +8,24 @@ import { E2E, NOTES } from './env.js';
 
 const PARAGRAPH = 'The tide was already on the turn when we arrived.';
 
-async function open(browser: Browser, name: string, email: string): Promise<Page> {
+/** A fresh file per run, so the test does not depend on earlier runs against the same host. */
+async function createNotes(): Promise<string> {
+  const path = `runs/notes-${Date.now().toString(36)}.md`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: NOTES }),
+  });
+  expect(res.status).toBe(201);
+  return path;
+}
+
+async function open(browser: Browser, name: string, email: string, path: string): Promise<Page> {
   const context = await browser.newContext();
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error(`[${name}] page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${encodeURIComponent(name)}&email=${encodeURIComponent(email)}`);
-  await page.getByTestId('file:notes.md').click();
+  await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('editor')).toBeVisible();
   await expect(page.getByTestId('status')).toContainText('Connected');
   return page;
@@ -29,8 +41,9 @@ async function caretIn(page: Page, text: string, where: 'start' | 'end'): Promis
 }
 
 test('two browsers co-edit one paragraph and see each other', async ({ browser }) => {
-  const alice = await open(browser, 'Alice Ng', 'alice@example.org');
-  const bob = await open(browser, 'Bob Ferreira', 'bob@example.org');
+  const path = await createNotes();
+  const alice = await open(browser, 'Alice Ng', 'alice@example.org', path);
+  const bob = await open(browser, 'Bob Ferreira', 'bob@example.org', path);
 
   // Presence: each sees both people.
   for (const page of [alice, bob]) {
@@ -69,7 +82,7 @@ test('two browsers co-edit one paragraph and see each other', async ({ browser }
   await expect(bob.locator('.ProseMirror-yjs-cursor', { hasText: 'Alice Ng' })).toBeVisible();
 
   // M3 through the UI: the file on disk catches up, and untouched blocks are byte-identical.
-  const file = join(E2E.dir, 'notes.md');
+  const file = join(E2E.dir, path);
   await expect.poll(() => readFileSync(file, 'utf8'), { timeout: 10_000 }).toContain('Bob counted crabs.');
   const onDisk = readFileSync(file, 'utf8');
   expect(onDisk).toContain('Alice saw herons.');

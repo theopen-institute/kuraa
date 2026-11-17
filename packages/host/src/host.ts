@@ -609,6 +609,13 @@ export class Host {
     await rm(this.cacheFile(key), { force: true });
   }
 
+  /** Close the rooms of every open file under a folder (before the folder moves). */
+  async dropRoomsUnder(folder: string): Promise<void> {
+    const prefix = `${folder.replace(/\/+$/, '')}/`;
+    const paths = [...new Set([...this.records.values()].map((r) => r.path).filter((p) => p.startsWith(prefix)))];
+    for (const p of paths) await this.dropRoom(p);
+  }
+
   /** Public view of a room for the HTTP API. */
   describe(rec: RoomRecord) {
     return {

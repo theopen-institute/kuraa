@@ -1,5 +1,5 @@
 // The panels around the editor: the file tree, history, packages, and first-run settings.
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from 'react';
 import type { CommitInfo, HostApi, PackageInfo, PackageResult, TreeFile } from './api.js';
 import type { Settings } from './settings.js';
 import { askConfirm, askNewFile, askText, type FileTypeChoice } from './ask.js';
@@ -116,11 +116,78 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
     }
   };
 
+  // Moving by dragging: a file or folder onto a folder (or anywhere in it), or
+  // onto the workspace name or the top level. A move is a rename (committed).
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const opening = useRef<{ folder: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+  const canDrop = (from: string | null, folder: string) =>
+    !!from && from !== folder && !folder.startsWith(`${from}/`) && folderOf(from) !== folder;
+
+  const move = async (from: string, folder: string) => {
+    const to = `${folder ? `${folder}/` : ''}${from.slice(from.lastIndexOf('/') + 1)}`;
+    // The open file follows: itself moved, or inside a folder that moved.
+    const follow = selected === from ? to : selected?.startsWith(`${from}/`) ? to + selected.slice(from.length) : selected;
+    if (folder) setCollapsed((c) => {
+      const next = new Set(c);
+      next.delete(folder);
+      return next;
+    });
+    await act(() => api.renameFile(from, to), follow);
+  };
+
+  const draggable = (path: string) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.stopPropagation();
+      e.dataTransfer.setData('application/x-kuraa-path', path);
+      e.dataTransfer.setData('text/plain', path);
+      e.dataTransfer.effectAllowed = 'move';
+      setDragging(path);
+    },
+    onDragEnd: () => {
+      setDragging(null);
+      setOver(null);
+    },
+  });
+
+  const dropTarget = (folder: string) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!canDrop(dragging, folder)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      if (over !== folder) setOver(folder);
+      // Hovering a closed folder opens it after a moment.
+      if (folder && collapsed.has(folder) && opening.current?.folder !== folder) {
+        if (opening.current) clearTimeout(opening.current.timer);
+        opening.current = {
+          folder,
+          timer: setTimeout(() => setCollapsed((c) => {
+            const next = new Set(c);
+            next.delete(folder);
+            return next;
+          }), 600),
+        };
+      }
+    },
+    onDrop: (e: DragEvent) => {
+      if (!canDrop(dragging, folder)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const from = dragging!;
+      setDragging(null);
+      setOver(null);
+      void move(from, folder);
+    },
+  });
+
   const renderFolder = (folder: Folder, depth: number): ReactNode => (
     <>
       {[...folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)).map((f) => (
-        <li key={`d:${f.path}`} className="tree-dir">
-          <div className="tree-dir-row">
+        <li key={`d:${f.path}`} className={`tree-dir${over === f.path ? ' drop-target' : ''}${dragging === f.path ? ' dragging' : ''}`} {...dropTarget(f.path)}>
+          <div className="tree-dir-row" {...draggable(f.path)} data-testid={`folder:${f.path}`}>
           <button
             type="button"
             className="tree-row tree-folder"
@@ -145,7 +212,7 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
       {folder.files.map((f) => {
         const name = f.path.slice(f.path.lastIndexOf('/') + 1);
         return (
-          <li key={f.path} className={`tree-file ${selected === f.path ? 'selected' : ''} ${f.type ? '' : 'untyped'}`}>
+          <li key={f.path} className={`tree-file ${selected === f.path ? 'selected' : ''} ${f.type ? '' : 'untyped'}${dragging === f.path ? ' dragging' : ''}`} {...draggable(f.path)}>
             <button
               type="button"
               className="tree-row"
@@ -169,14 +236,14 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
 
   return (
     <nav className="pane pane-left" aria-label="Files">
-      <div className="pane-header">
+      <div className={`pane-header${over === '' ? ' drop-target' : ''}`} {...dropTarget('')}>
         <span className="workspace-name" title={workspaceName} data-testid="workspace-name">{workspaceName}</span>
         <span className="pane-header-actions">
           <button type="button" onClick={() => void create()} title="New file" aria-label="New file">＋</button>
           <button type="button" onClick={() => void newFolder()} title="New folder" aria-label="New folder">⊞</button>
         </span>
       </div>
-      <ul className="tree">{renderFolder(tree, 0)}</ul>
+      <ul className={`tree${over === '' ? ' drop-target' : ''}`} {...dropTarget('')}>{renderFolder(tree, 0)}</ul>
       {footer && <div className="pane-footer">{footer}</div>}
     </nav>
   );

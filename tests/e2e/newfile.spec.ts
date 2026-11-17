@@ -1,6 +1,7 @@
 // The New file dialog offers a type, Markdown by default, and keeps the type
 // and the name's extension in step.
 import { expect, test, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
@@ -78,3 +79,36 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.getByTestId('menu')).toHaveCount(0);
 });
 
+
+test('dragging moves files into folders, and folders to the top level', async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const file = `runs/drag-${stamp}.md`;
+  const folder = `runs/drag-${stamp}-dir`;
+  const call = (path: string, body: object) => fetch(`${E2E.url}${path}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  expect((await call('/api/files', { path: file, content: '# Dragged\n' })).status).toBe(201);
+  expect((await call('/api/folders', { path: folder })).status).toBe(201);
+  await openApp(page);
+  await page.getByTestId(`file:${file}`).click();
+  await expect(page.getByTestId('editor')).toContainText('Dragged');
+
+  // The open file, into the folder: moved on disk, committed as a move, still open.
+  await page.getByTestId(`file:${file}`).dragTo(page.getByTestId(`folder:${folder}`));
+  const moved = `${folder}/drag-${stamp}.md`;
+  await expect(page.getByTestId(`file:${moved}`)).toBeVisible();
+  await expect(page.getByTestId(`file:${file}`)).toHaveCount(0);
+  expect(existsSync(join(E2E.dir, moved))).toBe(true);
+  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Move ${file} to ${folder}/`);
+  await expect(page.locator('.tree-file.selected')).toContainText(`drag-${stamp}.md`);
+  await expect(page.getByTestId('editor')).toContainText('Dragged');
+
+  // The folder, onto the workspace name: to the top level, with what is in it.
+  await page.getByTestId(`folder:${folder}`).dragTo(page.getByTestId('workspace-name'));
+  const top = `drag-${stamp}-dir/drag-${stamp}.md`;
+  await expect(page.getByTestId(`file:${top}`)).toBeVisible();
+  expect(existsSync(join(E2E.dir, top))).toBe(true);
+  expect(existsSync(join(E2E.dir, folder))).toBe(false);
+});

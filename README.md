@@ -57,7 +57,8 @@ so on) and it is formatted as you type; Backspace straight afterwards undoes the
 full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
 
 The sidebar shows the workspace folder, with buttons for a new file (＋) and a new folder (⊞); each
-folder has the same on hover. Everything else is in the **menu**, from the bottom of the sidebar or
+folder has the same on hover. Drag a file or folder onto a folder to move it there, or onto the
+workspace name to move it to the top level; each move is committed. Everything else is in the **menu**, from the bottom of the sidebar or
 ⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
 **Save version**, when it was last written and committed; the code session; the workspace's branch,

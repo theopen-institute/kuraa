@@ -2,7 +2,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, statSync, createReadStream } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { Host } from './host.js';
 import { HttpError } from './host.js';
 
@@ -216,11 +216,17 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     const absTo = host.resolvePath(to);
     if (!existsSync(absFrom)) throw new HttpError(404, 'No such file');
     if (existsSync(absTo)) throw new HttpError(409, 'Target exists');
+    // A folder moves with everything in it, but never into itself.
+    const isFolder = statSync(absFrom).isDirectory();
+    if (isFolder && (to === from || to.startsWith(`${from}/`))) throw new HttpError(400, 'A folder cannot move into itself');
+    // Only the folder changed: a move. Otherwise (the name changed too) a rename.
+    const moveOnly = dirname(from) !== dirname(to) && basename(from) === basename(to);
     const commit = await host.serial(async () => {
-      await host.dropRoom(from);
+      if (isFolder) await host.dropRoomsUnder(from);
+      else await host.dropRoom(from);
       await mkdir(dirname(absTo), { recursive: true });
       await rename(absFrom, absTo);
-      return host.commitPaths([from, to], `Rename ${from} to ${to}`);
+      return host.commitPaths([from, to], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
     return send(res, 200, { from, to, commit });
   }

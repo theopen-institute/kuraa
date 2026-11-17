@@ -118,3 +118,28 @@ test('BibTeX and YAML files are highlighted', async ({ page }) => {
   await expect(editor.locator('.tok-comment')).toHaveText('# a comment');
   await expect(editor.locator('.tok-property, .tok-definition').first()).toHaveText('project');
 });
+
+test('R Markdown code keeps long lines whole and scrolls; markdown code still wraps', async ({ page }) => {
+  const long = `x <- c(${Array.from({ length: 60 }, (_, i) => i).join(', ')})`;
+  const stamp = Date.now().toString(36);
+  const rmd = `runs/wide-${stamp}.Rmd`;
+  const md = `runs/wide-${stamp}.md`;
+  await create(rmd, `# Wide\n\n\`\`\`{r}\n${long}\n\`\`\`\n\n\`\`\`r\n${long}\n\`\`\`\n`);
+  await create(md, `# Wide\n\n\`\`\`r\n${long}\n\`\`\`\n`);
+
+  const check = async (path: string) => {
+    await open(page, path);
+    const editors = page.getByTestId('editor').locator('.code-node .cm-editor');
+    await expect(editors.first()).toBeVisible();
+    return editors.evaluateAll((els) => els.map((el) => ({
+      wraps: el.querySelector('.cm-content')!.classList.contains('cm-lineWrapping'),
+      scrolls: (() => { const s = el.querySelector('.cm-scroller')!; return s.scrollWidth > s.clientWidth; })(),
+      lines: el.querySelectorAll('.cm-line').length,
+    })));
+  };
+  expect(await check(rmd)).toEqual([
+    { wraps: false, scrolls: true, lines: 1 },
+    { wraps: false, scrolls: true, lines: 1 },
+  ]);
+  expect(await check(md)).toEqual([{ wraps: true, scrolls: false, lines: 1 }]);
+});

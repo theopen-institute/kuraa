@@ -72,7 +72,7 @@ class CodeView implements NodeView {
         lineNumbers(),
         syntaxHighlighting(highlighter),
         language ?? [],
-        CMView.lineWrapping,
+        hint.wrap === false ? [] : CMView.lineWrapping,
         CMView.editable.of(view.editable),
         CMView.updateListener.of((u) => this.forward(u)),
       ],

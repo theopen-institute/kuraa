@@ -17,6 +17,8 @@ export interface ParsedDocument {
 export type NodeViewHint =
   | {
       kind: 'code'; language?: string; languageAttr?: string; header?: { attr: string; prefix?: string; suffix?: string };
+      /** Wrap long lines (the default), or keep each line on one line and scroll sideways. */
+      wrap?: boolean;
       /**
        * The block can be run, like a knitr chunk. Its engine is the first word of
        * `header.attr` if there is one, else `engineAttr`; whether that engine can

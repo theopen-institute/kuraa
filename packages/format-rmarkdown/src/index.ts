@@ -1,6 +1,6 @@
 import type { Mark } from 'prosemirror-model';
-import type { DocumentType } from '@kuraa/kernel';
-import { createPandocType, pandocMarks, PANDOC_VERSION } from '@kuraa/format-pandoc';
+import type { DocumentType, NodeViewHint } from '@kuraa/kernel';
+import { createPandocType, pandocMarks, pandocNodeViews, PANDOC_VERSION } from '@kuraa/format-pandoc';
 
 // R Markdown: Pandoc markdown plus knitr code chunks and inline R code.
 // Built only through the PandocExtension point; nothing is executed.
@@ -78,7 +78,9 @@ export const rmarkdown: DocumentType = createPandocType({
     },
   },
 
+  // Code keeps its lines whole and scrolls sideways, as in RStudio.
   nodeViews: {
-    code_chunk: { kind: 'code', language: 'r', header: { attr: 'header', prefix: '{', suffix: '}' }, run: { engineAttr: 'engine' } },
+    code_chunk: { kind: 'code', language: 'r', header: { attr: 'header', prefix: '{', suffix: '}' }, run: { engineAttr: 'engine' }, wrap: false },
+    code_block: { ...pandocNodeViews.code_block!, wrap: false } as NodeViewHint,
   },
 });

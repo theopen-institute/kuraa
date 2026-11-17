@@ -135,7 +135,7 @@ test('the Packages panel installs and removes packages for the workspace', async
   await dialog.getByLabel('Packages to install').fill('hellno');
   await dialog.getByRole('button', { name: 'Install' }).click();
   await expect(dialog.locator('.packages-result')).toHaveText('Installed hellno.', { timeout: 240_000 });
-  await expect(dialog.locator('tr', { hasText: 'hellno' })).toContainText('workspace');
+  await expect(dialog.locator('section', { hasText: 'In this workspace' }).locator('tr', { hasText: 'hellno' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Close' }).click();
 
   await chunk(page, 0).getByRole('button', { name: '▶ Run' }).click();

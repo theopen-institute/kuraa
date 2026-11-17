@@ -8,6 +8,8 @@ import { E2E, NOTES } from './env.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: E2E.dir, encoding: 'utf8' });
 rmSync(E2E.dir, { recursive: true, force: true });
+// Package installs start from nothing too.
+rmSync(join(E2E.dir, '..', 'kuraa-e2e-rdata'), { recursive: true, force: true });
 mkdirSync(E2E.dir, { recursive: true });
 git('init', '-q', '-b', 'main');
 git('config', 'user.name', 'Shared Host');

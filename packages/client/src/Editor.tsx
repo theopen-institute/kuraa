@@ -10,7 +10,7 @@ import { editorCommands, editorPlugins, type EditorCommand } from './commands.js
 import { SourceView } from './ReadOnly.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
-import { noteNumbersPlugin, renumberNotes } from './notes.js';
+import { arrangeNotesPlugin, noteNumbersPlugin } from './notes.js';
 
 export interface EditorStatus {
   connection: ConnectionStatus;
@@ -23,8 +23,6 @@ export interface EditorStatus {
   notice: { kind: 'info' | 'warn'; text: string } | null;
   /** Runs this document's code chunks, when the host allows it and the document has any. */
   runner: ChunkRunner | null;
-  /** Relabels the document's notes 1, 2, 3 in order; null when they already are. */
-  renumberNotes: (() => void) | null;
 }
 
 interface Props {
@@ -47,7 +45,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   const [loading, setLoading] = useState(true);
   const [, force] = useState(0);
   const connection = useRef<RoomConnection | null>(null);
-  const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null, renumberNotes: null });
+  const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
   const commands = useRef<EditorCommand[]>([]);
   const user = useMemo(() => ({ name: settings.name, email: settings.email, color: settings.color }), [settings.name, settings.email, settings.color]);
   const userRef = useRef(user);
@@ -100,26 +98,13 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     setLoading(true);
     setError(null);
     setView(null);
-    statusRef.current = { connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null, renumberNotes: null };
+    statusRef.current = { connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null };
     onStatus(statusRef.current);
 
     const hints = type.editor?.nodeViews ?? {};
     const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
     const runner = engines && runnable ? new ChunkRunner(api, path, engines.split(','), () => userRef.current) : null;
     let chunkTimer: ReturnType<typeof setTimeout> | undefined;
-    // "Renumber notes" is offered only when it would change something.
-    const offerRenumber = (v: EditorView) => {
-      const needed = renumberNotes(v.state, hints) !== null;
-      if (needed === (statusRef.current.renumberNotes !== null)) return;
-      update({
-        renumberNotes: needed
-          ? () => {
-              const tr = renumberNotes(v.state, hints);
-              if (tr) v.dispatch(tr.scrollIntoView());
-            }
-          : null,
-      });
-    };
 
     (async () => {
       const room = await api.room(path);
@@ -157,7 +142,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       commands.current = layout ? [] : editorCommands(type.schema, history);
       const state = EditorState.create({
         schema: type.schema,
-        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, path, history) : [...editorPlugins(type.schema, commands.current), ...noteNumbersPlugin(hints)])],
+        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, path, history) : [...editorPlugins(type.schema, commands.current), ...noteNumbersPlugin(hints), ...arrangeNotesPlugin(hints, conn.isRemote)])],
       });
       pmView = new EditorView(mount.current!, {
         state,
@@ -169,18 +154,16 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         dispatchTransaction(this: EditorView, tr) {
           this.updateState(this.state.apply(tr));
           force((x) => x + 1); // the source view follows the live document
-          if (tr.docChanged) {
+          if (runner && tr.docChanged) {
             clearTimeout(chunkTimer);
             // By the time this runs, construction is over and pmView is set.
             chunkTimer = setTimeout(() => {
               if (!pmView || pmView.isDestroyed) return;
               if (runner) runner.setChunks(collectChunks(pmView.state.doc, hints));
-              offerRenumber(pmView);
             }, 150);
           }
         },
       });
-      offerRenumber(pmView);
       if (runner) {
         runner.setChunks(collectChunks(pmView.state.doc, hints));
         update({ runner });

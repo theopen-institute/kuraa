@@ -10,7 +10,7 @@ import { highlighter, languageSupport } from './languages.js';
 import { chunkOf, describeRun, renderOutputs, type Chunk, type ChunkRunner } from './runs.js';
 import { numberOf } from './notes.js';
 import type { Decoration } from 'prosemirror-view';
-import { askText } from './ask.js';
+import { askConfirm, askText } from './ask.js';
 
 /** What node views can use besides the document: the chunk runner, when the host runs code. */
 export interface NodeViewContext {
@@ -448,17 +448,30 @@ class NoteView implements NodeView {
     // The number the reader will see; the label in the file on hover.
     this.label.textContent = this.number === undefined ? this.value : this.number === null ? '–' : String(this.number);
     this.label.classList.toggle('unused', this.number === null);
-    this.label.title = `[^${this.value}]${this.number === null ? ' · nothing refers to this note' : ''} · click to go to the reference · double-click to rename`;
+    this.label.title = this.number === null
+      ? `[^${this.value}] · nothing refers to this note · click to delete it`
+      : `[^${this.value}] · click to go to the reference · double-click to rename`;
   }
 
   private goToReference() {
     const ref = this.hint.referencedBy;
     const target = findNode(this.view.state.doc, ref.node, ref.attr, this.value);
-    if (!target) return;
+    if (!target) {
+      void this.removeUnused();
+      return;
+    }
     this.view.focus();
     // Just after the reference, where you were typing when you made the note.
     const sel = TextSelection.create(this.view.state.doc, target.pos + target.node.nodeSize);
     this.view.dispatch(this.view.state.tr.setSelection(sel).scrollIntoView());
+  }
+
+  /** A note nothing refers to (its reference was deleted): offer to delete it too. */
+  private async removeUnused() {
+    if (!this.view.editable || !(await askConfirm('Nothing refers to this note any more. Delete it?', 'Delete note', true))) return;
+    const pos = this.getPos();
+    if (pos === undefined || this.view.isDestroyed) return;
+    this.view.dispatch(this.view.state.tr.delete(pos, pos + this.node.nodeSize));
   }
 
   private async rename() {

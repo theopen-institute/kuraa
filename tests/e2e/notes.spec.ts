@@ -1,7 +1,7 @@
-// Footnotes: references show the number a reader will see, with the note on
-// hover; notes show that number, which leads back to the reference. Typing
-// [^label] or ^[text], or ⌥⌘F, makes notes; "Renumber notes" tidies the labels.
-// The file stays plain Pandoc markdown.
+// Footnotes behave as in a word processor: references show the number a reader
+// will see, with the note on hover; notes stay together at the end in that
+// order, each showing its number, which leads back to the reference. Typing
+// [^label] or ^[text], or ⌥⌘F, makes notes. Labels in the file never change.
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,8 +39,6 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
   const note = editor.locator('aside.note');
   await expect(note.locator('.note-label')).toHaveText('1');
   await expect(note.locator('.note-label')).toHaveAttribute('title', /\[\^cores\]/);
-  // "cores" is not "1", so renumbering is offered.
-  await expect(page.getByRole('button', { name: 'Renumber notes' })).toBeVisible();
   await expect(note.locator('.note-body')).toHaveText('Cores were 25 cm deep.');
 
   // ⌘-click a reference: the cursor goes to its note.
@@ -78,16 +76,53 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
     '[^1]: First numbered note.\n',
   );
 
-  // Renumber: labels follow reading order; the button goes away once they do.
-  await page.getByRole('button', { name: 'Renumber notes' }).click();
+  // A footnote inserted before the others takes its place in the notes, in order.
+  await endOf(page, 'Cores were taken at low tide.');
+  await page.keyboard.press('Home');
+  await page.keyboard.type('Early[^early]', { delay: 10 });
+  await page.keyboard.type('An early note.');
+  await expect(editor.locator('aside.note .note-label')).toHaveText(['1', '2', '4', '6']);
+  await expect(editor.locator('aside.note').first().locator('.note-body')).toHaveText('An early note.');
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('[^early]: An early note.\n\n[^cores]:');
   await expect(page.getByRole('button', { name: 'Renumber notes' })).toHaveCount(0);
+});
+
+test('with two people, notes stay in order and are never duplicated', async ({ browser }) => {
+  const path = `runs/notes2-${Date.now().toString(36)}.md`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: 'First point.[^a]\n\nSecond point.\n\n[^a]: Note A.\n' }),
+  });
+  expect(res.status).toBe(201);
+  const open = async (name: string) => {
+    const page = await (await browser.newContext()).newPage();
+    await page.goto(`/?token=${E2E.token}&name=${name}&email=${name.toLowerCase()}%40example.org`);
+    await page.getByTestId(`file:${path}`).click();
+    await expect(page.getByTestId('peers')).toContainText(name);
+    return page;
+  };
+  const ada = await open('Ada');
+  const bo = await open('Bo');
+
+  // Ada adds a note to the second paragraph; Bo adds one before Ada's first.
+  await endOf(ada, 'Second point.');
+  await ada.keyboard.type('[^b]', { delay: 10 });
+  await ada.keyboard.type('Note B.');
+  await bo.getByTestId('editor').locator('p', { hasText: 'First point.' }).click();
+  await bo.keyboard.press(MAC ? 'Meta+ArrowLeft' : 'Home');
+  await bo.waitForTimeout(100);
+  await bo.keyboard.type('Zero.[^z]', { delay: 10 });
+  await bo.keyboard.type('Note Z.');
+
+  for (const page of [ada, bo]) {
+    // (Containment, not equality: the other person's cursor label may sit inside a note.)
+    const bodies = page.getByTestId('editor').locator('aside.note .note-body');
+    await expect(bodies).toHaveCount(3);
+    for (const [i, text] of ['Note Z.', 'Note A.', 'Note B.'].entries()) await expect(bodies.nth(i)).toContainText(text);
+    await expect(page.getByTestId('editor').locator('aside.note .note-label')).toHaveText(['1', '2', '3']);
+  }
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe(
-    'Cores were taken at low tide.[^1] A second visit is planned.^[Weather permitting.]\n\n' +
-    'More text. Depth varied.[^2] So did salinity. ^[Quick aside][^3]\n\n' +
-    '[^1]: Cores were 25 cm deep. With an auger.\n\n' +
-    '[^2]: Measured at low water.\n\n' +
-    '[^3]: First numbered note.\n',
+    'Zero.[^z]First point.[^a]\n\nSecond point.[^b]\n\n[^z]: Note Z.\n\n[^a]: Note A.\n\n[^b]: Note B.\n',
   );
-  // What the reader sees did not change.
-  await expect(editor.locator('.footnote-ref')).toHaveText(['1', '3', '5']);
 });

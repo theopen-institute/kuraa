@@ -4,9 +4,9 @@
 import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { redo, undo, yCursorPlugin, ySyncPlugin, yUndoPlugin, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
+import { redo, undo, yCursorPlugin, ySyncPlugin, ySyncPluginKey, yUndoPlugin, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
-import type { Command, Plugin } from 'prosemirror-state';
+import type { Command, Plugin, Transaction } from 'prosemirror-state';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
 export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RSessionInfo, RSessionState } from './model.js';
@@ -41,6 +41,13 @@ export interface RoomConnection {
   setUser(user: PresenceUser): void;
   /** The room content as ProseMirror, e.g. for a source view. */
   snapshot(schema: Schema): PMNode;
+  /**
+   * Whether a transaction came from the room (another client, the host) or from
+   * undo/redo, rather than from this user's own editing. Plugins that tidy the
+   * document after an edit should act only on this user's edits, so that two
+   * clients never make the same structural change at once.
+   */
+  isRemote(tr: Transaction): boolean;
   destroy(): void;
 }
 
@@ -121,6 +128,7 @@ export function connectRoom(options: RoomOptions): RoomConnection {
     ready,
     plugins: () => [ySyncPlugin(fragment), yCursorPlugin(awareness), yUndoPlugin()],
     undo: (state, dispatch) => (dispatch ? undo(state) : true),
+    isRemote: (tr) => (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin === true,
     redo: (state, dispatch) => (dispatch ? redo(state) : true),
     setUser,
     snapshot: (schema) => yXmlFragmentToProseMirrorRootNode(fragment, schema),

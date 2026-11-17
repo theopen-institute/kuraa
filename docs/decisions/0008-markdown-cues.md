@@ -29,15 +29,21 @@ The workspace name, branch and head moved to the tooltip on the connection indic
 Save version, History, Sync and Settings are quiet links at the right of the status bar. The
 history sidebar starts closed.
 
-**Footnotes.** The editor shows each reference and note with the number a reader will see:
-Pandoc numbers notes in the order their references appear (inline notes included), whatever
-their labels, so the labels in the file are left alone and an edit never relabels other notes.
-The label shows on hover. Hovering a reference shows the note; ⌘-click goes to it. Notes show
-below a rule with their number in the margin: click it to go back to the reference, double-click
-to rename the note and every reference to it. Inline notes (`^[…]`) are chips; double-click to
-edit. New footnotes (⌥⌘F) are labelled one past the highest number in the file.
+**Footnotes behave as in a word processor.** Pandoc numbers notes in the order their references
+appear (inline notes included), whatever their labels, so the editor shows those numbers and
+treats labels as fixed ids that are never rewritten; cut and paste therefore keeps a reference and
+its note together. After each of the user's own edits (not remote ones, not undo), the notes are
+kept together at the end of the document in number order: a new note takes its place, and moving
+a reference moves its note. Notes nothing refers to come last, marked "–"; clicking that offers
+to delete them. Only the editing client arranges, so two clients do not move the same note; an
+identical duplicate, should one arise anyway, is dropped. A file arranged differently elsewhere
+is rearranged on the first edit, not on opening.
 
-**Renumber notes** (in the status bar, shown only when it would change something) is the one
-deliberate edit that tidies the source: it relabels notes 1, 2, 3 in order of first reference
-(references inside notes included), moves the top-level notes to the end of the document in that
-order, and puts notes nothing refers to last. The file holds ordinary Pandoc footnotes throughout.
+The label shows on hover. Hovering a reference shows the note; ⌘-click goes to it. Click a note's
+number to go back to the reference; double-click to rename the note and every reference to it.
+Inline notes (`^[…]`) are chips; double-click to edit. New footnotes (⌥⌘F) are labelled one past
+the highest number in the file. The file holds ordinary Pandoc footnotes throughout.
+
+*Revised:* an earlier version left notes where they were and offered a "Renumber notes" command
+that rewrote labels. Rewriting labels breaks cut and paste of references, and the command was one
+more thing to know about; automatic arrangement replaced it.

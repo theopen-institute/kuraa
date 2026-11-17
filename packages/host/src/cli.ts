@@ -1,6 +1,7 @@
 // kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
 //   running code: --engine r --env podman [--env local] [--plugin <path or package>]...
-//                 [--allow-write] [--allow-network] [--memory 4g] [--cpus 2] [--rscript path] [--podman path]
+//                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
+//                 [--memory 4g] [--cpus 2] [--rscript path] [--podman path]
 import { parseArgs } from 'node:util';
 import { startHost } from './index.js';
 
@@ -13,6 +14,8 @@ const { values } = parseArgs({
     plugin: { type: 'string', multiple: true },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
+    'allow-installs': { type: 'boolean', default: false },
+    'data-dir': { type: 'string' },
     memory: { type: 'string' },
     cpus: { type: 'string' },
     rscript: { type: 'string' },
@@ -37,6 +40,8 @@ const running = await startHost({
         plugins: values.plugin ?? [],
         allowWorkspaceWrite: values['allow-write'],
         allowNetwork: values['allow-network'],
+        allowInstalls: values['allow-installs'],
+        dataDir: values['data-dir'],
         memory: values.memory,
         cpus: values.cpus ? Number(values.cpus) : undefined,
         options: { r: { rscript: values.rscript }, podman: { podman: values.podman } },

@@ -1,6 +1,7 @@
 // Running R chunks from the browser: outputs appear under each chunk, for
 // everyone with the document open, survive a reload, and never touch the file.
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findRscript } from '../../packages/engine-r/src/index.js';
@@ -104,4 +105,50 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
   const text = readFileSync(join(E2E.dir, path), 'utf8');
   expect(text).not.toContain('[1] 42');
   expect(text).toBe(DOC.replace("c(\"a\", \"b\", NA))", "c(\"a\", \"b\", NA)) # edited").replace('x <- 21', 'x <- 21; Sys.sleep(30)'));
+});
+
+const ONLINE = (() => {
+  try {
+    execFileSync('curl', ['-sSf', '--max-time', '10', '-o', '/dev/null', 'https://cloud.r-project.org/web/packages/hellno/index.html'], { stdio: 'ignore' });
+    execFileSync(findRscript()!, ['-e', 'stopifnot(requireNamespace("pak", quietly = TRUE))'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test('the Packages panel installs and removes packages for the workspace', async ({ browser }) => {
+  test.skip(!ONLINE, 'needs the network and pak');
+  test.setTimeout(300_000);
+  const path = `runs/pkgs-${Date.now().toString(36)}.Rmd`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: '# Packages\n\n```{r}\nsuppressPackageStartupMessages(library(hellno)); "hellno works"\n```\n' }),
+  });
+  expect(res.status).toBe(201);
+  const page = await open(browser, 'Pat', path);
+
+  await page.getByRole('button', { name: 'Packages' }).click();
+  const dialog = page.getByTestId('packages');
+  await expect(dialog.getByRole('heading')).toHaveText('R packages');
+  await dialog.getByLabel('Packages to install').fill('hellno');
+  await dialog.getByRole('button', { name: 'Install' }).click();
+  await expect(dialog.locator('.packages-result')).toHaveText('Installed hellno.', { timeout: 240_000 });
+  await expect(dialog.locator('tr', { hasText: 'hellno' })).toContainText('workspace');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+
+  await chunk(page, 0).getByRole('button', { name: '▶ Run' }).click();
+  await expect(output(page, 0)).toContainText('[1] "hellno works"', { timeout: 60_000 });
+  expect(JSON.parse(readFileSync(join(E2E.dir, '.kuraa/r-packages.json'), 'utf8')).requested).toContain('hellno');
+
+  // A URL is not a package name: refused before anything is fetched.
+  await page.getByRole('button', { name: 'Packages' }).click();
+  await dialog.getByLabel('Packages to install').fill('https://example.org/evil.tar.gz');
+  await dialog.getByRole('button', { name: 'Install' }).click();
+  await expect(dialog.locator('.packages-result.warn')).toContainText('Not a package name this host installs');
+
+  await dialog.locator('tr', { hasText: 'hellno' }).getByRole('button', { name: 'Remove' }).click();
+  await expect(dialog.locator('.packages-result')).toContainText('Removed hellno');
+  await expect(dialog.locator('tr', { hasText: 'hellno' })).toHaveCount(0);
 });

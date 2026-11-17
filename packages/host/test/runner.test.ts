@@ -1,7 +1,7 @@
 // Running R chunks through a real host and a real R. Skipped where R is not installed.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hashText } from '@kuraa/kernel';
@@ -213,4 +213,42 @@ describe.skipIf(!PODMAN_OK)('running R chunks in Podman', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 15 * 60_000);
+});
+
+describe.skipIf(!PODMAN_OK)('R packages in Podman', () => {
+  it('installs through a separate container, and sessions see the library read-only', async () => {
+    const dir = makeRepo();
+    const dataDir = mkdtempSync(join(tmpdir(), 'kuraa-poddata-'));
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['podman'], allowInstalls: true, dataDir } });
+    try {
+      const api = (path: string, body?: object) => fetch(running.url + path, {
+        method: body ? 'POST' : 'GET',
+        headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      }).then((r) => r.json() as Promise<Record<string, unknown>>);
+      const run = async (code: string): Promise<string> => {
+        const { id } = await api('/api/runs', { path: DOC, engine: 'r', code, chunk: { label: null, index: 0, codeHash: hashText(code) } });
+        for (let i = 0; i < 9000; i++) {
+          const r = ((await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).runs as RunRecord[]).find((x) => x.id === id);
+          if (r) return r.outputs.map((o) => ('text' in o ? o.text : `[${o.type}]`)).join('');
+          await new Promise((res) => setTimeout(res, 100));
+        }
+        throw new Error('timed out');
+      };
+      // The starter set: the tidyverse is in the environment.
+      expect(await run('suppressPackageStartupMessages(library(dplyr)); nrow(filter(mtcars, cyl == 4))')).toBe('[1] 11\n');
+      // install.packages() in a chunk: the installer has the network; the session does not.
+      expect(await run('install.packages("hellno"); suppressPackageStartupMessages(library(hellno)); "ok"')).toContain('[1] "ok"');
+      expect(await run('tryCatch({ readLines(url("http://example.org")); "reached" }, error = function(e) "no network", warning = function(w) "no network")')).toBe('[1] "no network"\n');
+      // The library is read-only here: code cannot change packages behind the host's back.
+      expect(await run('lib <- .libPaths()[1]; tryCatch({ writeLines("x", file.path(lib, "planted")); "wrote" }, error = function(e) "denied", warning = function(w) "denied")')).toBe('[1] "denied"\n');
+      const manifest = JSON.parse(readFileSync(join(dir, '.kuraa/r-packages.json'), 'utf8'));
+      expect(Object.keys(manifest.packages)).toContain('hellno');
+      expect(manifest.environment).toHaveProperty('dplyr');
+    } finally {
+      await running.close();
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
+    }
+  }, 30 * 60_000);
 });

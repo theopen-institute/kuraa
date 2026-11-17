@@ -284,3 +284,18 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .inline-note::before { content: none; }
 .note-label.unused { color: var(--muted); }
 
+/* The Packages dialog. */
+.modal.packages { width: min(560px, 94vw); }
+.packages-install { display: flex; gap: 8px; }
+.packages-install input { flex: 1; font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.packages-result { font-size: 13px; }
+.packages-result.warn { color: var(--warn); }
+.packages-result pre { font: 11px/1.4 var(--mono); max-height: 200px; overflow: auto; white-space: pre-wrap; }
+.packages-progress { font: 12px var(--mono); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.packages-list { max-height: 320px; overflow: auto; border-top: 1px solid var(--border); }
+.packages-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.packages-list td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.pkg-name { font-family: var(--mono); }
+.pkg-version { font-family: var(--mono); color: var(--muted); }
+.packages-note { font-size: 12px; margin: 0; }
+

@@ -17,7 +17,9 @@ export type RoomMessage =
   | { type: 'conflict'; at: string; savedAs: string }
   | { type: 'reseeded'; at: string; room: string }
   | { type: 'run'; run: RunRecord }
-  | { type: 'run-session'; session: RunSessionInfo };
+  | { type: 'run-session'; session: RunSessionInfo }
+  /** A workspace's packages changed (installed, removed, restored). */
+  | { type: 'packages'; engine: string; message: string };
 
 // Running code chunks. The host runs them; every client with the document open
 // sees the same runs and outputs. Outputs are never written into the file.

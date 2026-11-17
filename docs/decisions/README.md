@@ -17,3 +17,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0011](0011-running-chunks.md) | Running R chunks: one R session per document on the host, shared outputs, never in the file |
 | [0012](0012-format-editor-modules.md) | Each format brings its editor behaviour in an editor module; the client keeps only what is generic |
 | [0013](0013-run-plugins-and-sandboxing.md) | Running code through engine and environment plugins; sandboxed in Podman by default |
+| [0014](0014-packages.md) | Packages: declared per workspace in a committed manifest, stored once per host, installed apart from the data |

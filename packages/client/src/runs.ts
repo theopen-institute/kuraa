@@ -72,6 +72,8 @@ export class ChunkRunner {
   private states = new Map<number, ChunkState>();
   private readonly listeners = new Set<() => void>();
   session: RunSessionInfo;
+  /** The latest news about packages (an install's progress or result), and a counter that changes with it. */
+  packageNews: { engine: string; message: string; at: number } | null = null;
   /** Bumped on every change, for React's useSyncExternalStore. */
   version = 0;
 
@@ -126,6 +128,9 @@ export class ChunkRunner {
     if (m.type === 'run' && m.run.path === this.path) {
       if (m.run.state === 'cancelled') this.runs.delete(m.run.id);
       else this.runs.set(m.run.id, m.run);
+      this.emit();
+    } else if (m.type === 'packages') {
+      this.packageNews = { engine: m.engine, message: m.message, at: Date.now() };
       this.emit();
     } else if (m.type === 'run-session' && m.session.path === this.path) {
       this.session = m.session;
@@ -201,6 +206,24 @@ export class ChunkRunner {
 
   restart(): Promise<unknown> {
     return this.api.restartRuns(this.path);
+  }
+
+  /** The engine whose packages this document's chunks use, if it manages packages. */
+  get packageEngine(): string | null {
+    const engine = this.info.engines.find((e) => e.packages && this.chunks.some((c) => e.handles.includes(c.engine)));
+    return engine?.id ?? null;
+  }
+
+  listPackages(engine: string) {
+    return this.api.packages(engine);
+  }
+
+  installPackages(engine: string, refs: string[]) {
+    return this.api.installPackages(engine, refs, this.user());
+  }
+
+  removePackages(engine: string, names: string[]) {
+    return this.api.removePackages(engine, names, this.user());
   }
 
   async clear(pos: number): Promise<void> {

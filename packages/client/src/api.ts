@@ -8,10 +8,14 @@ export interface WorkspaceInfo {
 }
 export interface RunInfo {
   enabled: boolean;
-  engines: { id: string; label: string; handles: string[] }[];
+  engines: { id: string; label: string; handles: string[]; packages: boolean }[];
+  /** Whether people may install packages here. */
+  allowInstalls: boolean;
   /** Where this workspace's code runs, and whether that is available. */
   environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
+export interface PackageInfo { name: string; version: string; source: 'workspace' | 'environment' }
+export interface PackageResult { ok: boolean; message: string; log: string; restart: boolean }
 export interface RunRequest { path: string; engine: string; code: string; header: string; chunk: ChunkRef; by: { name: string; email: string; color: string } }
 export interface TreeFile { path: string; type: string | null }
 export interface RoomInfo {
@@ -47,7 +51,10 @@ export class HostApi {
     }
     if (!res.ok) {
       let msg = res.statusText;
-      try { msg = ((await res.json()) as { error?: string }).error ?? msg; } catch { /* not JSON */ }
+      try {
+        const body = (await res.json()) as { error?: string; message?: string };
+        msg = body.error ?? body.message ?? msg;
+      } catch { /* not JSON */ }
       throw new ApiError(res.status, msg);
     }
     return res;
@@ -72,5 +79,8 @@ export class HostApi {
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }
   interruptRuns(path: string) { return this.json('/api/runs/interrupt', { method: 'POST', body: JSON.stringify({ path }) }); }
   restartRuns(path: string) { return this.json('/api/runs/restart', { method: 'POST', body: JSON.stringify({ path }) }); }
+  packages(engine: string) { return this.json<{ packages: PackageInfo[] }>(`/api/packages?engine=${encodeURIComponent(engine)}`).then((r) => r.packages); }
+  installPackages(engine: string, refs: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/install', { method: 'POST', body: JSON.stringify({ engine, refs, by }) }); }
+  removePackages(engine: string, names: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/remove', { method: 'POST', body: JSON.stringify({ engine, names, by }) }); }
   clearRuns(path: string, chunk?: ChunkRef) { return this.json('/api/runs/clear', { method: 'POST', body: JSON.stringify({ path, chunk }) }); }
 }

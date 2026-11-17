@@ -64,3 +64,7 @@ network, and still draws plots.
 **Not yet:** other engines (Python would be a plugin), a sandbox on Windows without Podman, macOS's
 built-in sandbox or webR as environments, per-workspace image caching policies (old images are not
 cleaned up), and streaming output while a chunk runs.
+
+*Since 0014:* engines may manage packages (`PackageManager`), installed by a separate process with
+the network and no workspace; `Policy.workspace` may be `none`, and environments take extra
+`mounts` (a package library and cache).

@@ -99,6 +99,25 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     });
   }
 
+  // Packages for an engine (R): declared per workspace, stored once per host.
+  if (route === 'GET /api/packages') {
+    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host.');
+    return send(res, 200, { packages: await host.runner.listPackages(str(q.get('engine'), 'engine')) });
+  }
+  if (route === 'POST /api/packages/install' || route === 'POST /api/packages/remove') {
+    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host.');
+    const body = await readBody(req);
+    const engine = str(body.engine, 'engine');
+    const list = Array.isArray(body.refs) ? body.refs : Array.isArray(body.names) ? body.names : [];
+    const names = list.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 200);
+    const by = (body.by ?? null) as { name?: unknown; email?: unknown; color?: unknown } | null;
+    const user = by && typeof by.name === 'string' ? { name: by.name, email: typeof by.email === 'string' ? by.email : '', color: typeof by.color === 'string' ? by.color : '#888888' } : null;
+    const result = route.endsWith('/install')
+      ? await host.runner.installPackages(engine, names, user)
+      : await host.runner.removePackages(engine, names, user);
+    return send(res, result.ok ? 200 : 422, result);
+  }
+
   // Running chunks: see runner.ts. Progress and outputs reach clients as room messages.
   if (route === 'GET /api/runs') {
     const path = host.relPath(str(q.get('path'), 'path'));

@@ -1,6 +1,6 @@
 // The panels around the editor: file tree, history, status bar and settings.
-import { useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
-import type { CommitInfo, HostApi, TreeFile } from './api.js';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
+import type { CommitInfo, HostApi, PackageInfo, PackageResult, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
 import { askConfirm, askNewFile, askText, type FileTypeChoice } from './ask.js';
@@ -290,6 +290,100 @@ export function RunControls({ runner }: { runner: ChunkRunner }) {
       <button type="button" onClick={() => act(runner.runAll())} title="Run every chunk, top to bottom">Run all</button>
       {runner.busy && <button type="button" onClick={() => act(runner.interrupt())} title="Interrupt, and drop queued runs">Interrupt</button>}
       {s.state !== 'none' && <button type="button" onClick={() => act(runner.restart())} title="A fresh session: everything defined so far is gone">Restart</button>}
+      {runner.packageEngine && <PackagesButton runner={runner} engine={runner.packageEngine} />}
     </>
+  );
+}
+
+function PackagesButton({ runner, engine }: { runner: ChunkRunner; engine: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="The workspace's packages: install, remove">Packages</button>
+      {open && <PackagesDialog runner={runner} engine={engine} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/**
+ * The workspace's packages for an engine: what is installed (in the workspace's
+ * library, or used from the environment), and installing or removing. Installs
+ * run on the host, apart from the workspace; everyone sees the result.
+ */
+function PackagesDialog({ runner, engine, onClose }: { runner: ChunkRunner; engine: string; onClose(): void }) {
+  useSyncExternalStore((fn) => runner.subscribe(fn), () => runner.version);
+  const [list, setList] = useState<PackageInfo[] | null>(null);
+  const [refs, setRefs] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string; log?: string } | null>(null);
+  const label = runner.info.engines.find((e) => e.id === engine)?.label ?? engine;
+  const news = runner.packageNews;
+
+  const refresh = useCallback(() => {
+    runner.listPackages(engine).then(setList, (e: Error) => setResult({ ok: false, message: e.message }));
+  }, [runner, engine]);
+  useEffect(refresh, [refresh, news?.at]);
+
+  const act = async (p: Promise<PackageResult>) => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await p;
+      setResult(r);
+    } catch (e) {
+      setResult({ ok: false, message: (e as Error).message });
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+  const install = () => {
+    const names = refs.split(/[\s,]+/).filter(Boolean);
+    if (names.length) void act(runner.installPackages(engine, names)).then(() => setRefs(''));
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <div className="modal packages" role="dialog" aria-label={`${label} packages`} data-testid="packages">
+        <h2>{label} packages</h2>
+        {runner.info.allowInstalls ? (
+          <form className="packages-install" onSubmit={(e) => { e.preventDefault(); install(); }}>
+            <input value={refs} onChange={(e) => setRefs(e.target.value)} placeholder="dplyr, fixest@0.12.1, bioc::limma, owner/repo" aria-label="Packages to install" disabled={busy} autoFocus />
+            <button type="submit" className="primary" disabled={busy || !refs.trim()}>{busy ? 'Installing…' : 'Install'}</button>
+          </form>
+        ) : (
+          <p className="muted">Installing packages is turned off on this host.</p>
+        )}
+        {busy && news?.engine === engine && <p className="packages-progress muted">{news.message}</p>}
+        {result && (
+          <div className={result.ok ? 'packages-result' : 'packages-result warn'}>
+            {result.message}
+            {!result.ok && result.log && <details><summary>Details</summary><pre>{result.log.slice(-4000)}</pre></details>}
+          </div>
+        )}
+        <div className="packages-list">
+          {list === null ? <p className="muted">Loading…</p> : list.length === 0 ? <p className="muted">No packages installed in this workspace yet. The environment's own packages are available too.</p> : (
+            <table>
+              <tbody>
+                {list.map((p) => (
+                  <tr key={`${p.source}:${p.name}`}>
+                    <td className="pkg-name">{p.name}</td>
+                    <td className="pkg-version">{p.version}</td>
+                    <td className="pkg-source muted">{p.source === 'workspace' ? 'workspace' : 'from the environment'}</td>
+                    <td>
+                      {p.source === 'workspace' && runner.info.allowInstalls && (
+                        <button type="button" disabled={busy} onClick={() => void act(runner.removePackages(engine, [p.name]))} title={`Remove ${p.name} from this workspace`}>Remove</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <p className="muted packages-note">Recorded in .kuraa/r-packages.json, so others get the same packages. In a chunk, install.packages() works too.</p>
+        <div className="modal-actions"><button type="button" onClick={onClose} disabled={busy}>Close</button></div>
+      </div>
+    </div>
   );
 }

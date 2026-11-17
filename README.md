@@ -46,6 +46,8 @@ in, and a `git clone` command. Useful options:
 | `--engine`, `--env` | off | Turn on running code: `--engine r --env podman`. See below |
 | `--plugin` | none | Load a run plugin (engine or environment) by path or package name |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
+| `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
+| `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
 
 Everyone who has the URL and token can edit. Each person sets a display name, an email (for
 co-author credit) and a cursor colour under **Settings** in the client.
@@ -85,7 +87,15 @@ can say what it needs in `.kuraa/run.json`, but cannot loosen what you allow:
 ```
 
 Write access and the network are granted only if the host was started with `--allow-write` or
-`--allow-network`. A run plugin is a module exporting `definePlugin({ name, engines,
+`--allow-network`.
+
+**Packages.** The environment starts with the tidyverse. Install more with `install.packages()` in
+a chunk, or the **Packages** button in the status bar (CRAN names, `name@version`, `bioc::name`, or
+`owner/repo` from GitHub). Installs run apart from your data, with the network; your code keeps
+running without it. Each workspace records its packages in `.kuraa/r-packages.json` (committed),
+so collaborators and other machines get the same ones; each package version is stored once per
+computer. A shared host allows installs only with `--allow-installs`
+([decision 0014](docs/decisions/0014-packages.md)). A run plugin is a module exporting `definePlugin({ name, engines,
 environments })` from `@kuraa/run-kit`; [an example](packages/host/test/fixtures/echo-plugin.mjs).
 
 The repository is also served over git's HTTP protocol at `/git`, with the token as the password:

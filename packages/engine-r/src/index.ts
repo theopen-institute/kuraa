@@ -3,19 +3,27 @@
 // the driver (./driver.ts). Outputs come back in order: text, messages,
 // warnings, errors, data frames as tables, plots as PNG.
 //
+// Packages are declared per workspace and stored once per host (packages.ts):
+// a session sees its workspace's library and the shared cache read-only, and
+// install.packages() in a chunk asks the host, which runs a separate installer.
+//
 // What the workspace may ask of it, in the "r" section of .kuraa/run.json (used
 // by environments that build images, such as Podman):
 //   { "image": "docker.io/rocker/r-ver:4.5", "packages": ["dplyr"],
 //     "system": ["libxml2-dev"], "renv": true }
 // Operator options: { "rscript": "/path/to/Rscript" } (for a plain machine).
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   definePlugin, findExecutable,
-  type ChunkOutput, type Engine, type EngineContext, type EngineSession, type ImageRecipe, type RunRequest, type RunResult, type SandboxProcess,
+  type ChunkOutput, type Engine, type EngineContext, type EngineSession, type RunRequest, type RunResult, type SandboxProcess,
 } from '@kuraa/run-kit';
 import { R_DRIVER, REPLY_PREFIX } from './driver.js';
+import { imageRecipe } from './recipe.js';
+import { layout, rPackages } from './packages.js';
+
+export { DEFAULT_IMAGE, imageRecipe } from './recipe.js';
+export { checkRefs, formatManifest, readManifest, MANIFEST, type Manifest } from './packages.js';
 
 /** Where R lives when it is not on PATH. */
 export const R_SEARCH_PATHS = ['/Library/Frameworks/R.framework/Resources/bin', '/opt/R/current/bin', '/usr/lib/R/bin'];
@@ -25,47 +33,8 @@ export function findRscript(explicit?: string): string | null {
   return findExecutable(explicit ?? process.env.KURAA_RSCRIPT ?? 'Rscript', R_SEARCH_PATHS);
 }
 
-export const DEFAULT_IMAGE = 'docker.io/rocker/r-ver:4.5';
-const NAME = /^[A-Za-z0-9._+-]+$/;
-const IMAGE = /^[A-Za-z0-9./:@_-]+$/;
-
-interface Requirements { image?: unknown; packages?: unknown; system?: unknown; renv?: unknown }
-
-const names = (v: unknown, what: string): string[] => {
-  if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && NAME.test(x))) throw new Error(`.kuraa/run.json: r.${what} must be a list of plain package names.`);
-  return v as string[];
-};
-
-/** A container image with R, the driver's packages, and what the workspace asks for. */
-export function imageRecipe(requirements: unknown, workspace: string): ImageRecipe {
-  const req = (requirements ?? {}) as Requirements;
-  const image = req.image === undefined ? DEFAULT_IMAGE : String(req.image);
-  if (!IMAGE.test(image)) throw new Error('.kuraa/run.json: r.image is not an image name.');
-  const packages = names(req.packages, 'packages');
-  const system = names(req.system, 'system');
-  // System libraries ragg needs to draw plots, then the driver's packages.
-  const lines = [
-    `FROM ${image}`,
-    'RUN apt-get update && apt-get install -y --no-install-recommends \\',
-    `    ${['libfontconfig1-dev', 'libfreetype6-dev', 'libharfbuzz-dev', 'libfribidi-dev', 'libpng-dev', 'libtiff5-dev', 'libjpeg-dev', 'libwebp-dev', ...system].join(' ')} \\`,
-    ' && rm -rf /var/lib/apt/lists/*',
-    `RUN install2.r --error --skipinstalled evaluate jsonlite knitr ragg ${packages.join(' ')}`.trimEnd(),
-  ];
-  const context: Record<string, string> = {};
-  const lockfile = join(workspace, 'renv.lock');
-  if (req.renv === true && existsSync(lockfile)) {
-    context['renv.lock'] = '';
-    lines.push(
-      'COPY renv.lock /tmp/renv.lock',
-      `RUN R -q -e 'install.packages("renv"); renv::restore(lockfile = "/tmp/renv.lock", library = .libPaths()[1], prompt = FALSE)'`,
-    );
-  }
-  return { containerfile: `${lines.join('\n')}\n`, context };
-}
-
 type DriverOutput = Exclude<ChunkOutput, { type: 'image' }> | { type: 'image'; file: string; width: number; height: number };
-interface Reply { type: 'result'; id: string; outputs: DriverOutput[]; interrupted?: boolean }
+interface Reply { type: 'result'; id: string; outputs: DriverOutput[]; interrupted?: boolean; fromEnvironment?: { name: string; version: string }[] }
 
 class RSession implements EngineSession {
   ready: Promise<string>;
@@ -98,13 +67,16 @@ class RSession implements EngineSession {
     if (recipe.context?.['renv.lock'] === '') recipe.context['renv.lock'] = await readFile(join(ctx.workspace, 'renv.lock'), 'utf8');
     // An explicit Rscript applies to a plain machine; inside an image, Rscript is on PATH.
     const rscript = !ctx.environment.sandboxed ? ((ctx.options as { rscript?: string } | undefined)?.rscript ?? process.env.KURAA_RSCRIPT ?? 'Rscript') : 'Rscript';
+    const where = layout(ctx);
+    await Promise.all([where.lib, where.cache].map((d) => mkdir(d, { recursive: true })));
     const proc = await ctx.environment.start({
       name: 'r',
       workspace: ctx.workspace, scratch: ctx.scratch, files: ctx.files, policy: ctx.policy,
+      mounts: where.mounts('read-only'),
       searchPaths: R_SEARCH_PATHS,
       image: recipe,
       // In the workspace root, so a project's .Rprofile (renv, for instance) applies.
-      command: (view) => ({ argv: [rscript, '--no-save', '--no-restore', `${view.files}/driver.R`], cwd: view.workspace, env: { R_KURAA: '1' } }),
+      command: (view) => ({ argv: [rscript, '--no-save', '--no-restore', `${view.files}/driver.R`], cwd: view.workspace, env: { R_KURAA: '1', KURAA_R_LIB: view.inside(where.lib) } }),
       log: ctx.log,
       status: ctx.status,
     }, ctx.environmentOptions);
@@ -151,6 +123,13 @@ class RSession implements EngineSession {
       } else if (msg.type === 'fatal') {
         this.failure = String(msg.message ?? 'R failed to start.');
         this.readyWith.reject(new Error(this.failure));
+      } else if ((msg.type === 'install' || msg.type === 'remove') && this.proc) {
+        // install.packages() / remove.packages() in a chunk: the host does it; the chunk waits.
+        const proc = this.proc;
+        const names = (msg.refs as string[] | undefined) ?? [];
+        void (msg.type === 'install' ? this.ctx.install(names) : this.ctx.remove(names))
+          .catch((e: Error) => ({ ok: false, message: e.message, log: '', restart: false }))
+          .then((r) => proc.stdin.write(JSON.stringify({ type: 'done', ok: r.ok, message: r.message }) + '\n'));
       } else if (msg.type === 'result' && this.waiting?.id === msg.id) {
         const w = this.waiting!;
         this.waiting = null;
@@ -193,6 +172,7 @@ class RSession implements EngineSession {
       }
     }
     if (this.stray.trim()) outputs.push({ type: 'message', text: this.stray });
+    if (reply.fromEnvironment?.length) this.ctx.usedFromEnvironment(reply.fromEnvironment);
     return { outputs, interrupted: reply.interrupted === true };
   }
 
@@ -216,6 +196,7 @@ export const rEngine: Engine = {
   label: 'R',
   handles: ['r'],
   open: (ctx) => new RSession(ctx),
+  packages: rPackages,
 };
 
 export default definePlugin({ name: '@kuraa/engine-r', engines: [rEngine] });

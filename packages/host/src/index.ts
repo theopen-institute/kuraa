@@ -3,7 +3,7 @@ import { Host, type HostOptions } from './host.js';
 
 export { Host, HttpError, DEFAULT_TIMINGS, type HostOptions, type HostTimings } from './host.js';
 export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
-export { type RunOptions, type RunDescription } from './runner.js';
+export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { BUILTIN_PLUGINS, loadRunPlugins, type RunPlugins } from './plugins.js';
 
 export interface RunningHost {

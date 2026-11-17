@@ -55,7 +55,7 @@ function setRunChoice(choice: RunChoice): void {
 
 function runOptions(): RunOptions | undefined {
   const choice = runChoice();
-  return choice === 'off' ? undefined : { engines: ['r'], environments: [choice] };
+  return choice === 'off' ? undefined : { engines: ['r'], environments: [choice], allowInstalls: true };
 }
 
 /** Host timings may be shortened for automated tests. */

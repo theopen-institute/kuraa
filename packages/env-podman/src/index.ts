@@ -19,7 +19,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { definePlugin, findExecutable, mappedView, type Environment, type ImageRecipe, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
+import { definePlugin, findExecutable, mappedView, type Environment, type ImageRecipe, type Mount, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
 
 const run = promisify(execFile);
 const OWN_GROUP = process.platform !== 'win32';
@@ -41,7 +41,7 @@ export function imageTag(recipe: ImageRecipe): string {
 /** `podman run` arguments for a session, from the policy. */
 export function runArgs(opts: {
   name: string; tag: string; policy: Policy;
-  workspace: string; scratch: string; files: string;
+  workspace: string; scratch: string; files: string; mounts?: Mount[];
   argv: string[]; cwd: string; env?: Record<string, string>;
 }): string[] {
   const { policy } = opts;
@@ -54,13 +54,16 @@ export function runArgs(opts: {
     '--userns=keep-id',
     '--env=HOME=/tmp',
     ...Object.entries(opts.env ?? {}).map(([k, v]) => `--env=${k}=${v}`),
-    `--volume=${opts.workspace}:${INSIDE.workspace}:${policy.workspace === 'read-write' ? 'rw' : 'ro'}`,
-    // Hidden paths: an empty, inaccessible tmpfs over each. notmpcopyup matters:
-    // by default Podman copies what is already at the path into the tmpfs, which
-    // would put a copy of .git inside instead of hiding it.
-    ...policy.hide.map((p) => `--mount=type=tmpfs,destination=${INSIDE.workspace}/${p.replace(/^\/+|\/+$/g, '')},tmpfs-size=4k,tmpfs-mode=0,notmpcopyup`),
+    ...(policy.workspace === 'none' ? [] : [
+      `--volume=${opts.workspace}:${INSIDE.workspace}:${policy.workspace === 'read-write' ? 'rw' : 'ro'}`,
+      // Hidden paths: an empty, inaccessible tmpfs over each. notmpcopyup matters:
+      // by default Podman copies what is already at the path into the tmpfs, which
+      // would put a copy of .git inside instead of hiding it.
+      ...policy.hide.map((p) => `--mount=type=tmpfs,destination=${INSIDE.workspace}/${p.replace(/^\/+|\/+$/g, '')},tmpfs-size=4k,tmpfs-mode=0,notmpcopyup`),
+    ]),
     `--volume=${opts.scratch}:${INSIDE.scratch}:rw`,
     `--volume=${opts.files}:${INSIDE.files}:ro`,
+    ...(opts.mounts ?? []).map((m) => `--volume=${m.host}:${m.inside}:${m.access === 'read-write' ? 'rw' : 'ro'}`),
     `--workdir=${opts.cwd}`,
     opts.tag,
     ...opts.argv,
@@ -119,10 +122,10 @@ export const podmanEnvironment: Environment = {
     if (!podman) throw new Error('Podman is not installed.');
     if (!req.image) throw new Error('This engine has no container recipe, so it cannot run in Podman.');
     const tag = await ensureImage(podman, req.image, req);
-    const view = mappedView(req, INSIDE);
+    const view = mappedView(req, INSIDE, req.mounts);
     const { argv, cwd, env } = req.command(view);
     const name = `kuraa-${req.name}-${randomBytes(4).toString('hex')}`;
-    const child = spawn(podman, runArgs({ name, tag, policy: req.policy, workspace: req.workspace, scratch: req.scratch, files: req.files, argv, cwd, env }), {
+    const child = spawn(podman, runArgs({ name, tag, policy: req.policy, workspace: req.workspace, scratch: req.scratch, files: req.files, mounts: req.mounts, argv, cwd, env }), {
       detached: OWN_GROUP, stdio: ['pipe', 'pipe', 'pipe'],
     });
     const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {

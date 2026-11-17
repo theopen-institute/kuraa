@@ -14,8 +14,9 @@
 // operator did not allow, and if the chosen one is unavailable, nothing runs.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type Policy } from '@kuraa/run-kit';
+import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy } from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/server';
 import type { RunPlugins } from './plugins.js';
 
@@ -35,6 +36,21 @@ export interface RunOptions {
   /** Limits for each session. */
   memory?: string;
   cpus?: number;
+  /**
+   * Let people install packages (install.packages() in a chunk, the Packages
+   * panel). Installs run apart from the workspace, with the network.
+   */
+  allowInstalls?: boolean;
+  /** Where engines keep what is shared by every workspace (a package cache). Default: the user's app data folder. */
+  dataDir?: string;
+}
+
+/** The per-user folder for data shared by workspaces on this computer. */
+export function defaultDataDir(): string {
+  const home = homedir();
+  if (process.platform === 'darwin') return join(home, 'Library', 'Application Support', 'kuraa');
+  if (process.platform === 'win32') return join(process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'kuraa');
+  return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'kuraa');
 }
 
 /** What a workspace asks for, in .kuraa/run.json. */
@@ -46,7 +62,9 @@ interface WorkspaceRunConfig {
 
 export interface RunDescription {
   enabled: boolean;
-  engines: { id: string; label: string; handles: string[] }[];
+  engines: { id: string; label: string; handles: string[]; packages: boolean }[];
+  /** Whether people may install packages here. */
+  allowInstalls: boolean;
   /** The environment this workspace runs in, and whether it is there. */
   environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
@@ -71,6 +89,10 @@ export class Runner {
     plugins: RunPlugins;
     options: RunOptions | undefined;
     broadcast: (path: string, message: RoomMessage) => void;
+    /** To everyone with any document of the workspace open. */
+    broadcastAll: (message: RoomMessage) => void;
+    /** Commit workspace files an engine changed (its package manifest), crediting `by`. */
+    commit: (paths: string[], message: string, by: PresenceUser | null) => Promise<void>;
     log: (m: string) => void;
     idleMs?: number;
   }) {
@@ -118,12 +140,13 @@ export class Runner {
   }
 
   async describe(): Promise<RunDescription> {
-    if (!this.enabled) return { enabled: false, engines: [], environment: null };
+    if (!this.enabled) return { enabled: false, engines: [], allowInstalls: false, environment: null };
     const env = this.environmentFor(await this.config())!;
     const status = await this.status(env);
     return {
       enabled: true,
-      engines: this.engines.map((e) => ({ id: e.id, label: e.label, handles: e.handles })),
+      engines: this.engines.map((e) => ({ id: e.id, label: e.label, handles: e.handles, packages: !!e.packages })),
+      allowInstalls: !!this.o.options?.allowInstalls,
       environment: { id: env.id, label: env.label, sandboxed: env.sandboxed, ...status },
     };
   }
@@ -142,6 +165,73 @@ export class Runner {
       memory: opts.memory ?? DEFAULT_POLICY.memory,
       cpus: opts.cpus ?? DEFAULT_POLICY.cpus,
     };
+  }
+
+  private get dataDir(): string {
+    return this.o.options?.dataDir ?? defaultDataDir();
+  }
+
+  private get workspaceKey(): string {
+    return createHash('sha1').update(resolve(this.o.root)).digest('hex').slice(0, 16);
+  }
+
+  private installs: Promise<unknown> = Promise.resolve();
+  private recorded = new Set<string>();
+
+  /** What a package manager works with, for this workspace, crediting `by`. */
+  private async packageContext(engine: Engine, by: PresenceUser | null): Promise<PackageContext> {
+    const config = await this.config();
+    const environment = this.environmentFor(config)!;
+    const status = await this.status(environment);
+    if (!status.available) throw new Error(status.message);
+    return {
+      environment,
+      environmentOptions: this.o.options?.options?.[environment.id],
+      workspace: this.o.root,
+      files: join(this.o.stateDir, 'run', 'engines', engine.id),
+      dataDir: join(this.dataDir, 'engines', engine.id),
+      workspaceKey: this.workspaceKey,
+      policy: this.policy(config),
+      requirements: config[engine.id],
+      options: this.o.options?.options?.[engine.id],
+      log: (m) => this.o.log(`${engine.id} packages: ${m}`),
+      status: (m) => this.o.broadcastAll({ type: 'packages', engine: engine.id, message: m }),
+      commit: (paths, message) => this.o.commit(paths, message, by),
+    };
+  }
+
+  /** One package operation at a time per workspace. */
+  private queueInstall<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.installs.then(fn, fn);
+    this.installs = run.catch(() => undefined);
+    return run;
+  }
+
+  private packagesOf(engineId: string): Engine & { packages: NonNullable<Engine['packages']> } {
+    const engine = this.engines.find((e) => e.id === engineId);
+    if (!engine?.packages) throw new Error(`No engine here manages ${engineId} packages.`);
+    return engine as Engine & { packages: NonNullable<Engine['packages']> };
+  }
+
+  async listPackages(engineId: string): Promise<PackageInfo[]> {
+    const engine = this.packagesOf(engineId);
+    return engine.packages.list(await this.packageContext(engine, null));
+  }
+
+  async installPackages(engineId: string, refs: string[], by: PresenceUser | null): Promise<PackageResult> {
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Installing packages is turned off on this host (start it with --allow-installs).', log: '', restart: false };
+    const engine = this.packagesOf(engineId);
+    const result = await this.queueInstall(async () => engine.packages.install(await this.packageContext(engine, by), refs));
+    this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });
+    return result;
+  }
+
+  async removePackages(engineId: string, names: string[], by: PresenceUser | null): Promise<PackageResult> {
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Changing packages is turned off on this host (start it with --allow-installs).', log: '', restart: false };
+    const engine = this.packagesOf(engineId);
+    const result = await this.queueInstall(async () => engine.packages.remove(await this.packageContext(engine, by), names));
+    this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });
+    return result;
   }
 
   private cacheFile(path: string): string {
@@ -202,8 +292,30 @@ export class Runner {
     const s: Session = { engine, environment, ready: false, info: { path, engine: engine.id, environment: environment.id, state: 'starting', message: null }, session: null! };
     this.sessions.set(key, s);
     this.setInfo(path, s, 'starting', null);
+    // A fresh clone, or another machine: install what the workspace's manifest lists.
+    if (engine.packages && this.o.options?.allowInstalls) {
+      const pkgs = engine.packages;
+      const restored = await this.queueInstall(async () => {
+        const pctx = await this.packageContext(engine, null);
+        return pkgs.restore({ ...pctx, status: (m) => this.setInfo(path, s, 'starting', m) });
+      }).catch((e: Error) => ({ ok: false, message: e.message, log: '', restart: false }));
+      if (restored && !restored.ok) this.o.log(`${engine.id} (${path}): restoring packages failed: ${restored.message}\n${restored.log}`);
+    }
+    const byNow = () => this.active.get(path)?.record.by ? { ...this.active.get(path)!.record.by, email: '' } : null;
     s.session = engine.open({
       environment,
+      dataDir: join(this.dataDir, 'engines', engine.id),
+      workspaceKey: this.workspaceKey,
+      install: (refs) => this.installPackages(engine.id, refs, byNow()),
+      remove: (names) => this.removePackages(engine.id, names, byNow()),
+      usedFromEnvironment: (pkgs) => {
+        const fresh = pkgs.filter((p) => !this.recorded.has(`${engine.id}:${p.name}@${p.version}`));
+        if (!fresh.length || !engine.packages) return;
+        for (const p of fresh) this.recorded.add(`${engine.id}:${p.name}@${p.version}`);
+        const by = byNow();
+        void this.queueInstall(async () => engine.packages!.recordUsed(await this.packageContext(engine, by), fresh))
+          .catch((e: Error) => this.o.log(`could not record packages: ${e.message}`));
+      },
       environmentOptions: this.o.options?.options?.[environment.id],
       workspace: this.o.root,
       scratch: join(this.o.stateDir, 'run', 'scratch', pathHash),

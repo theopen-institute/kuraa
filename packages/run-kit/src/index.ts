@@ -24,8 +24,8 @@ export const RUN_API_VERSION = 1;
 // Policy: what a process may touch. Environments that sandbox enforce it.
 
 export interface Policy {
-  /** How the process sees the workspace. */
-  workspace: 'read-only' | 'read-write';
+  /** How the process sees the workspace; 'none' for helpers that must not see it (package installers). */
+  workspace: 'read-only' | 'read-write' | 'none';
   /** Whether it may use the network. */
   network: boolean;
   /** Memory limit, e.g. '4g'. */
@@ -61,6 +61,13 @@ export interface PathView {
   outside(insidePath: string): string;
 }
 
+/** A further host folder the process sees, at a fixed path inside (a package library, say). */
+export interface Mount {
+  host: string;
+  inside: string;
+  access: 'read-only' | 'read-write';
+}
+
 /** How to build an image the engine runs in, for environments that use images. */
 export interface ImageRecipe {
   /** A Containerfile. */
@@ -76,6 +83,8 @@ export interface StartRequest {
   workspace: string;
   scratch: string;
   files: string;
+  /** Further folders, e.g. a package library and cache. */
+  mounts?: Mount[];
   policy: Policy;
   /**
    * The command, built once the environment's view of the paths is known.
@@ -124,6 +133,16 @@ export interface Environment {
 
 export interface EngineContext {
   environment: Environment;
+  /** The engine's own folder on the host, shared by every workspace (a package cache, say). */
+  dataDir: string;
+  /** A stable short id for the workspace, for per-workspace things kept in dataDir. */
+  workspaceKey: string;
+  /** Install packages for the workspace (the host checks it is allowed, and runs one install at a time). */
+  install(refs: string[]): Promise<PackageResult>;
+  /** Remove packages from the workspace's library. */
+  remove(names: string[]): Promise<PackageResult>;
+  /** Packages the session loaded from the environment itself (not the workspace's library), to record. */
+  usedFromEnvironment(packages: { name: string; version: string }[]): void;
   /** The operator's options for the environment, to pass to its start(). */
   environmentOptions: unknown;
   /** Host folders: see PathView. */
@@ -169,6 +188,54 @@ export interface Engine {
   /** Chunk engine names it runs, as in a knitr header: ['r']. */
   handles: string[];
   open(ctx: EngineContext): EngineSession;
+  /** If the engine manages packages for a workspace. */
+  packages?: PackageManager;
+}
+
+// ---------------------------------------------------------------------------
+// Packages: declared per workspace, stored once per host.
+
+export interface PackageInfo {
+  name: string;
+  version: string;
+  /** In the workspace's own library, or part of the environment (its image). */
+  source: 'workspace' | 'environment';
+}
+
+export interface PackageResult {
+  ok: boolean;
+  /** What to tell the user. */
+  message: string;
+  /** The installer's output, for when something went wrong. */
+  log: string;
+  /** A fresh session is needed to use what changed (e.g. system libraries were added). */
+  restart: boolean;
+}
+
+export interface PackageContext {
+  environment: Environment;
+  environmentOptions: unknown;
+  workspace: string;
+  files: string;
+  dataDir: string;
+  workspaceKey: string;
+  policy: Policy;
+  requirements: unknown;
+  options: unknown;
+  log(message: string): void;
+  status(message: string): void;
+  /** Commit files the manager changed in the workspace (its manifest), crediting whoever asked. */
+  commit(paths: string[], message: string): Promise<void>;
+}
+
+export interface PackageManager {
+  list(ctx: PackageContext): Promise<PackageInfo[]>;
+  install(ctx: PackageContext, refs: string[]): Promise<PackageResult>;
+  remove(ctx: PackageContext, names: string[]): Promise<PackageResult>;
+  /** Bring the workspace's library in line with its manifest (a fresh clone, another machine). Null if nothing to do. */
+  restore(ctx: PackageContext): Promise<PackageResult | null>;
+  /** Record packages a session used from the environment, so the workspace works where the environment lacks them. */
+  recordUsed(ctx: PackageContext, packages: { name: string; version: string }[]): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,9 +265,12 @@ export function findExecutable(name: string, dirs: string[] = []): string | null
   return null;
 }
 
-/** A PathView over fixed folders inside, mapping host folders onto them. */
-export function mappedView(host: { workspace: string; scratch: string; files: string }, inside: { workspace: string; scratch: string; files: string }): PathView {
-  const pairs = (['workspace', 'scratch', 'files'] as const).map((k) => [host[k], inside[k]] as const);
+/** A PathView over fixed folders inside, mapping host folders (and mounts) onto them. */
+export function mappedView(host: { workspace: string; scratch: string; files: string }, inside: { workspace: string; scratch: string; files: string }, mounts: Mount[] = []): PathView {
+  const pairs = [
+    ...mounts.map((m) => [m.host, m.inside] as const),
+    ...(['workspace', 'scratch', 'files'] as const).map((k) => [host[k], inside[k]] as const),
+  ];
   const swap = (path: string, from: 0 | 1) => {
     for (const pair of pairs) {
       const a = pair[from];

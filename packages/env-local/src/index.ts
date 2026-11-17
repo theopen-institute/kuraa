@@ -18,7 +18,8 @@ export const localEnvironment: Environment = {
   },
 
   async start(req) {
-    const view = mappedView(req, req);
+    // Mounts are just host folders here: the process sees everything as it is.
+    const view = mappedView(req, req, (req.mounts ?? []).map((m) => ({ ...m, inside: m.host })));
     const { argv, cwd, env } = req.command(view);
     const program = findExecutable(argv[0]!, req.searchPaths);
     if (!program) throw new Error(`${argv[0]} was not found on this computer.`);

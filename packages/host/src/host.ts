@@ -147,6 +147,12 @@ export class Host {
       plugins: await loadRunPlugins(run?.plugins),
       options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
+      broadcastAll: (message) => {
+        for (const rec of this.records.values()) this.broadcast(rec, message);
+      },
+      commit: async (paths, message, by) => {
+        await this.serial(() => this.commitPaths(paths, message, by && by.email ? [by] : []));
+      },
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) this.log(`running code: ${run!.engines.join(', ')} in ${run!.environments.join(' or ')}`);

@@ -21,10 +21,14 @@ local({
     quit(save = "no", status = 3)
   }
 
+  # The process's real standard output: evaluate() captures what code prints
+  # (stdout() is sunk while a chunk runs), and a request sent from inside a
+  # chunk, such as install.packages(), must still reach the host.
+  out <- if (file.exists("/dev/stdout")) file("/dev/stdout", open = "w") else stdout()
   send <- function(x) {
     json <- jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", na = "null", digits = NA, force = TRUE)
-    cat(PREFIX, json, "\n", sep = "")
-    flush(stdout())
+    cat(PREFIX, json, "\n", sep = "", file = out)
+    flush(out)
   }
 
   or <- function(a, b) if (is.null(a) || length(a) == 0) b else a
@@ -108,6 +112,56 @@ local({
   }
 
   con <- file("stdin", open = "r")
+
+  # The workspace's library comes first; the environment's own packages after it.
+  ws_lib <- Sys.getenv("KURAA_R_LIB")
+  if (nzchar(ws_lib) && dir.exists(ws_lib)) .libPaths(c(ws_lib, .libPaths()))
+  env_libs <- normalizePath(setdiff(.libPaths(), ws_lib), mustWork = FALSE)
+
+  # install.packages() and remove.packages() ask the host: the library is
+  # read-only here and there is no network. The chunk waits for the answer.
+  ask_host <- function(type, pkgs) {
+    pkgs <- as.character(unlist(pkgs))
+    send(list(type = type, refs = I(pkgs)))
+    answer <- jsonlite::fromJSON(readLines(con, n = 1L), simplifyVector = FALSE)
+    if (!isTRUE(answer$ok)) stop(answer$message, call. = FALSE)
+    message(answer$message)
+    invisible(NULL)
+  }
+  hooks <- list(
+    install.packages = function(pkgs, ...) ask_host("install", pkgs),
+    remove.packages = function(pkgs, ...) ask_host("remove", pkgs)
+  )
+  for (name in names(hooks)) {
+    for (env in list(asNamespace("utils"), as.environment("package:utils"))) {
+      unlockBinding(name, env)
+      assign(name, hooks[[name]], envir = env)
+      lockBinding(name, env)
+    }
+  }
+
+  # Packages loaded from the environment itself (not base R, not the workspace's
+  # library): the host records them, so the workspace works where they are missing.
+  # The driver's own packages, and what they load, are not the workspace's: warm
+  # them up now and take what is loaded as the baseline, plus what the driver's
+  # packages depend on (some load only later, like ragg for the first plot).
+  invisible(tryCatch({
+    evaluate::evaluate("NULL", envir = new.env(), output_handler = evaluate::new_output_handler(value = show_value))
+    chunk_options("x, a = 1")
+  }, error = function(e) NULL))
+  infra <- c("evaluate", "jsonlite", "knitr", "ragg")
+  infra <- unique(c(loadedNamespaces(), infra, unlist(tools::package_dependencies(infra, db = utils::installed.packages(), recursive = TRUE))))
+  used_from_environment <- function() {
+    used <- list()
+    for (ns in setdiff(loadedNamespaces(), infra)) {
+      d <- tryCatch(utils::packageDescription(ns), error = function(e) NULL, warning = function(w) NULL)
+      if (!is.list(d) || !is.null(d$Priority)) next
+      where <- tryCatch(normalizePath(dirname(getNamespaceInfo(ns, "path")), mustWork = FALSE), error = function(e) "")
+      if (where %in% env_libs) used[[length(used) + 1L]] <- list(name = ns, version = d$Version)
+    }
+    used
+  }
+
   send(list(type = "ready", r = R.version.string))
   repeat {
     line <- tryCatch(readLines(con, n = 1L, warn = FALSE), interrupt = function(e) NA_character_)
@@ -120,6 +174,7 @@ local({
       error = function(e) list(outputs = list(list(type = "error", text = paste("The runner failed:", conditionMessage(e))))))
     reply$type <- "result"
     reply$id <- req$id
+    reply$fromEnvironment <- tryCatch(used_from_environment(), error = function(e) list())
     send(reply)
   }
 })

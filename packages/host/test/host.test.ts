@@ -107,7 +107,7 @@ describe('host', () => {
     expect((await fetch(running.url + '/api/workspace')).status).toBe(401);
     const ws = await (await api('/api/workspace')).json();
     expect(ws.branch).toBe('main');
-    expect(ws.types.map((t: { id: string }) => t.id)).toEqual(expect.arrayContaining(['pandoc-markdown', 'rmarkdown', 'text', 'text-r', 'text-bibtex']));
+    expect(ws.types.map((t: { id: string }) => t.id)).toEqual(['pandoc-markdown', 'rmarkdown', 'text']);
     const tree = await (await api('/api/tree')).json();
     expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown' });
   });
@@ -259,8 +259,8 @@ describe('host', () => {
 
     const tree = (await (await api('/api/tree')).json()) as { files: { path: string; type: string | null }[] };
     const typeOf = (p: string) => tree.files.find((f) => f.path === p)?.type;
-    expect(typeOf('clean.R')).toBe('text-r');
-    expect(typeOf('rebuild')).toBe('text-r');
+    expect(typeOf('clean.R')).toBe('text');
+    expect(typeOf('rebuild')).toBe('text');
 
     const c = await connect('clean.R');
     expect(c.read().childCount).toBe(5);

@@ -64,17 +64,17 @@ export function SourceView({ api, path, type, doc }: { api: HostApi; path: strin
 }
 
 /** A document rendered by its type, not editable. */
-export function ReadOnlyDoc({ text, type }: { text: string; type: DocumentType }) {
+export function ReadOnlyDoc({ text, type, path }: { text: string; type: DocumentType; path: string }) {
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const layout = type.editor?.layout;
     const view = new PMView(mount.current!, {
-      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout)] : [] }),
+      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout, path)] : [] }),
       editable: () => false,
       nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
       attributes: { class: layout ? 'lines-doc' : 'prose' },
     });
     return () => view.destroy();
-  }, [text, type]);
+  }, [text, type, path]);
   return <div className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} ref={mount} />;
 }

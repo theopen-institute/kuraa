@@ -48,19 +48,27 @@ function changedRange(a: string, b: string) {
 
 interface Highlight {
   text: string;
+  language: string | undefined;
   fragments: readonly TreeFragment[];
   decorations: DecorationSet;
+}
+
+/** The language a lines document is highlighted as: fixed by the type, or from the file's path and first line. */
+export function languageFor(hint: Lines, path: string, doc: PMNode): string | undefined {
+  return hint.language ?? hint.languageOf?.(path, doc.firstChild?.textContent ?? '');
 }
 
 const highlightKey = new PluginKey<Highlight>('lines-highlight');
 
 /** Syntax highlighting for a lines document, re-parsing incrementally after each change. */
-export function highlightPlugin(hint: Lines): Plugin<Highlight> {
-  const lang = languageNamed(hint.language);
+export function highlightPlugin(hint: Lines, path: string): Plugin<Highlight> {
   const compute = (doc: PMNode, previous: Highlight | null): Highlight => {
     const { text, textStarts, docStarts } = textOf(doc);
-    if (!lang || text.length > MAX_HIGHLIGHT) return { text, fragments: [], decorations: DecorationSet.empty };
-    let fragments = previous?.fragments ?? [];
+    const language = languageFor(hint, path, doc);
+    const lang = languageNamed(language);
+    if (!lang || text.length > MAX_HIGHLIGHT) return { text, language, fragments: [], decorations: DecorationSet.empty };
+    // Earlier parse trees are reusable only for the same language (a #! line may have changed it).
+    let fragments = previous && previous.language === language ? previous.fragments : [];
     if (previous && fragments.length) fragments = TreeFragment.applyChanges(fragments, [changedRange(previous.text, text)]);
     const tree: Tree = lang.parser.parse(text, fragments);
     // Map text offsets to document positions; highlightTree reports ranges in order.
@@ -76,7 +84,7 @@ export function highlightPlugin(hint: Lines): Plugin<Highlight> {
       const b = pos(to);
       if (b > a) decorations.push(Decoration.inline(a, b, { class: classes }));
     });
-    return { text, fragments: TreeFragment.addTree(tree, fragments), decorations: DecorationSet.create(doc, decorations) };
+    return { text, language, fragments: TreeFragment.addTree(tree, fragments), decorations: DecorationSet.create(doc, decorations) };
   };
   return new Plugin<Highlight>({
     key: highlightKey,
@@ -120,7 +128,7 @@ function selectedLines(state: EditorState, lineType: NodeType): number[] {
   return out;
 }
 
-function lineCommands(schema: Schema, hint: Lines): Record<string, Command> {
+function lineCommands(schema: Schema, hint: Lines, path: string): Record<string, Command> {
   const lineType = schema.nodes[hint.line]!;
   const inLine = (state: EditorState) => state.selection.$from.parent.type === lineType;
 
@@ -141,7 +149,7 @@ function lineCommands(schema: Schema, hint: Lines): Record<string, Command> {
 
   const indent: Command = (state, dispatch) => {
     if (!inLine(state)) return false;
-    const unit = indentUnit(state.doc, hint.language);
+    const unit = indentUnit(state.doc, languageFor(hint, path, state.doc));
     if (dispatch) {
       const lines = selectedLines(state, lineType);
       const tr = state.tr;
@@ -154,7 +162,7 @@ function lineCommands(schema: Schema, hint: Lines): Record<string, Command> {
 
   const outdent: Command = (state, dispatch) => {
     if (!inLine(state)) return false;
-    const unit = indentUnit(state.doc, hint.language);
+    const unit = indentUnit(state.doc, languageFor(hint, path, state.doc));
     if (dispatch) {
       const tr = state.tr;
       for (const pos of selectedLines(state, lineType).reverse()) {
@@ -229,11 +237,11 @@ function splitPlugin(schema: Schema, hint: Lines): Plugin {
 }
 
 /** Everything a lines document needs in the editor, besides the session's plugins. */
-export function linesPlugins(schema: Schema, hint: Lines, history: { undo: Command; redo: Command }): Plugin[] {
+export function linesPlugins(schema: Schema, hint: Lines, path: string, history: { undo: Command; redo: Command }): Plugin[] {
   return [
-    highlightPlugin(hint),
+    highlightPlugin(hint, path),
     splitPlugin(schema, hint),
-    keymap({ ...lineCommands(schema, hint), 'Mod-z': history.undo, 'Mod-Shift-z': history.redo, 'Mod-y': history.redo }),
+    keymap({ ...lineCommands(schema, hint, path), 'Mod-z': history.undo, 'Mod-Shift-z': history.redo, 'Mod-y': history.redo }),
     keymap(baseKeymap),
     // Copy lines as lines (the default puts a blank line between blocks).
     new Plugin({ props: { clipboardTextSerializer: (slice) => slice.content.textBetween(0, slice.content.size, '\n') } }),

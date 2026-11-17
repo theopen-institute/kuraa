@@ -72,96 +72,105 @@ export function serializeText(doc: Node): string {
   return out;
 }
 
-export interface TextTypeOptions {
-  /** Part of the room key, so stable: 'text', 'text-r'. */
-  id: string;
-  label: string;
-  /** File extensions, with the dot, the usual one first: ['.R']. Matched case-insensitively. */
+/**
+ * Which files a text type claims, and how to colour them. Rules are tried in
+ * order; the first that claims a file gives its language.
+ */
+export interface FileRule {
+  /** File extensions, with the dot: ['.R']. Matched case-insensitively. */
   extensions?: string[];
   /** Whole file names, matched exactly: ['Dockerfile', '.Rprofile']. */
   names?: string[];
-  /** Matched against the first line of files with no extension, e.g. /^#!.*\bRscript\b/. */
+  /** Matched against the first line of files with no extension, e.g. /\bRscript\b/. */
   shebang?: RegExp;
-  /** For the client's highlighter: 'r', 'python', 'yaml', … */
+  /** For the client's highlighter: 'r', 'python', 'yaml', …; none for plain text. */
   language?: string;
+}
+
+export interface TextTypeOptions {
+  /** Part of the room key, so stable. */
+  id: string;
+  label: string;
+  files: FileRule[];
+  /** Extensions offered for new files, the usual one first. */
+  newFileExtensions?: string[];
   priority?: number;
   /** Bump with any schema change. */
   version?: number;
 }
 
+function ruleFor(rules: FileRule[], path: string, head: string): FileRule | undefined {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const lower = name.toLowerCase();
+  const firstLine = !name.includes('.') && head.startsWith('#!') && !head.includes('\0') ? head.slice(0, head.search(/\r|\n|$/)) : '';
+  return rules.find((r) =>
+    r.names?.includes(name) ||
+    r.extensions?.some((e) => lower.endsWith(e.toLowerCase()) && lower.length > e.length) ||
+    (firstLine && r.shebang?.test(firstLine)));
+}
+
 export function createTextType(opts: TextTypeOptions): DocumentType {
-  const extensions = (opts.extensions ?? []).map((e) => e.toLowerCase());
-  const names = new Set(opts.names ?? []);
   return {
     id: opts.id,
     version: opts.version ?? 1,
     label: opts.label,
     priority: opts.priority ?? 0,
-    extensions: opts.extensions ?? [],
-    match(path, head) {
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      if (names.has(name)) return true;
-      const lower = name.toLowerCase();
-      if (extensions.some((e) => lower.endsWith(e) && lower.length > e.length)) return true;
-      if (!opts.shebang || name.includes('.') || !head.startsWith('#!') || head.includes('\0')) return false;
-      return opts.shebang.test(head.slice(0, head.search(/\r|\n|$/)));
-    },
+    extensions: opts.newFileExtensions ?? [],
+    match: (path, head) => ruleFor(opts.files, path, head) !== undefined,
     schema: textSchema,
     parse: (text) => parseText(text),
     serialize: (doc) => serializeText(doc),
-    editor: { layout: { kind: 'lines', line: 'line', eolAttr: 'eol', language: opts.language } },
+    editor: {
+      layout: {
+        kind: 'lines', line: 'line', eolAttr: 'eol',
+        languageOf: (path, head) => ruleFor(opts.files, path, head)?.language,
+      },
+    },
   };
 }
 
-// The general type, below any more specific one.
-export const plainText = createTextType({
+/** The files the text type opens, and the language each is highlighted as. */
+export const textFiles: FileRule[] = [
+  { language: 'r', extensions: ['.R'], names: ['.Rprofile', 'NAMESPACE'], shebang: /\bRscript\b/ },
+  { language: 'python', extensions: ['.py', '.pyw'], shebang: /\bpython[\d.]*\b/ },
+  { language: 'julia', extensions: ['.jl'], shebang: /\bjulia\b/ },
+  { language: 'shell', extensions: ['.sh', '.bash', '.zsh'], names: ['.bashrc', '.bash_profile', '.zshrc', '.profile'], shebang: /\b(ba|z|da|k)?sh\b/ },
+  { language: 'yaml', extensions: ['.yml', '.yaml', '.cff'] },
+  { language: 'json', extensions: ['.json', '.jsonc', '.geojson', '.code-workspace'] },
+  { language: 'toml', extensions: ['.toml'] },
+  { language: 'properties', extensions: ['.ini', '.cfg', '.conf', '.properties', '.env'], names: ['.Renviron', '.editorconfig', '.npmrc', 'DESCRIPTION'] },
+  { language: 'latex', extensions: ['.tex', '.sty', '.cls', '.ltx', '.bbx', '.cbx'] },
+  { language: 'bibtex', extensions: ['.bib'] },
+  { language: 'xml', extensions: ['.xml', '.csl', '.svg', '.xsl', '.opf'] },
+  { language: 'html', extensions: ['.html', '.htm'] },
+  { language: 'css', extensions: ['.css'] },
+  { language: 'scss', extensions: ['.scss'] },
+  { language: 'javascript', extensions: ['.js', '.mjs', '.cjs', '.jsx'], shebang: /\bnode\b/ },
+  { language: 'typescript', extensions: ['.ts', '.mts', '.cts', '.tsx'] },
+  { language: 'lua', extensions: ['.lua'], shebang: /\blua\b/ },
+  { language: 'sql', extensions: ['.sql'] },
+  { language: 'stan', extensions: ['.stan'] },
+  { language: 'diff', extensions: ['.diff', '.patch'] },
+  { language: 'dockerfile', extensions: ['.dockerfile'], names: ['Dockerfile', 'Containerfile'] },
+  {
+    extensions: ['.txt', '.text', '.log', '.csv', '.tsv', '.mk'],
+    names: ['LICENSE', 'LICENCE', 'COPYING', 'AUTHORS', 'NOTICE', 'CITATION', 'Makefile', 'makefile', 'GNUmakefile',
+      '.gitignore', '.gitattributes', '.gitmodules', '.Rbuildignore', '.dockerignore', '.nojekyll'],
+  },
+];
+
+/**
+ * Text files: scripts, data and configuration around the documents, one type
+ * for all of them, below the markdown types. The language each file is
+ * highlighted as comes from its name (see `textFiles`).
+ */
+export const textFile = createTextType({
   id: 'text',
-  label: 'Plain text',
-  extensions: ['.txt', '.text', '.log', '.csv', '.tsv', '.mk'],
-  names: ['LICENSE', 'LICENCE', 'COPYING', 'AUTHORS', 'NOTICE', 'CITATION', 'Makefile', 'makefile', 'GNUmakefile',
-    '.gitignore', '.gitattributes', '.gitmodules', '.Rbuildignore', '.dockerignore', '.nojekyll'],
+  label: 'Text file',
+  files: textFiles,
+  newFileExtensions: ['.txt'],
   priority: -10,
 });
 
-export const rScript = createTextType({
-  id: 'text-r', label: 'R script', language: 'r',
-  extensions: ['.R'], names: ['.Rprofile', 'NAMESPACE'], shebang: /\bRscript\b/,
-});
-export const python = createTextType({
-  id: 'text-python', label: 'Python', language: 'python',
-  extensions: ['.py', '.pyw'], shebang: /\bpython[\d.]*\b/,
-});
-export const julia = createTextType({ id: 'text-julia', label: 'Julia', language: 'julia', extensions: ['.jl'], shebang: /\bjulia\b/ });
-export const shell = createTextType({
-  id: 'text-shell', label: 'Shell script', language: 'shell',
-  extensions: ['.sh', '.bash', '.zsh'], names: ['.bashrc', '.bash_profile', '.zshrc', '.profile'], shebang: /\b(ba|z|da|k)?sh\b/,
-});
-export const yaml = createTextType({ id: 'text-yaml', label: 'YAML', language: 'yaml', extensions: ['.yml', '.yaml', '.cff'] });
-export const json = createTextType({ id: 'text-json', label: 'JSON', language: 'json', extensions: ['.json', '.jsonc', '.geojson', '.code-workspace'] });
-export const toml = createTextType({ id: 'text-toml', label: 'TOML', language: 'toml', extensions: ['.toml'] });
-export const ini = createTextType({
-  id: 'text-ini', label: 'Settings file', language: 'properties',
-  extensions: ['.ini', '.cfg', '.conf', '.properties', '.env'], names: ['.Renviron', '.editorconfig', '.npmrc', 'DESCRIPTION'],
-});
-export const latex = createTextType({ id: 'text-latex', label: 'LaTeX', language: 'latex', extensions: ['.tex', '.sty', '.cls', '.ltx', '.bbx', '.cbx'] });
-export const bibtex = createTextType({ id: 'text-bibtex', label: 'BibTeX', language: 'bibtex', extensions: ['.bib'] });
-export const xml = createTextType({ id: 'text-xml', label: 'XML', language: 'xml', extensions: ['.xml', '.csl', '.svg', '.xsl', '.opf'] });
-export const html = createTextType({ id: 'text-html', label: 'HTML', language: 'html', extensions: ['.html', '.htm'] });
-export const css = createTextType({ id: 'text-css', label: 'CSS', language: 'css', extensions: ['.css'] });
-export const scss = createTextType({ id: 'text-scss', label: 'SCSS', language: 'scss', extensions: ['.scss'] });
-export const javascript = createTextType({
-  id: 'text-javascript', label: 'JavaScript', language: 'javascript',
-  extensions: ['.js', '.mjs', '.cjs', '.jsx'], shebang: /\bnode\b/,
-});
-export const typescript = createTextType({ id: 'text-typescript', label: 'TypeScript', language: 'typescript', extensions: ['.ts', '.mts', '.cts', '.tsx'] });
-export const lua = createTextType({ id: 'text-lua', label: 'Lua', language: 'lua', extensions: ['.lua'], shebang: /\blua\b/ });
-export const sql = createTextType({ id: 'text-sql', label: 'SQL', language: 'sql', extensions: ['.sql'] });
-export const stan = createTextType({ id: 'text-stan', label: 'Stan', language: 'stan', extensions: ['.stan'] });
-export const diff = createTextType({ id: 'text-diff', label: 'Diff', language: 'diff', extensions: ['.diff', '.patch'] });
-export const dockerfile = createTextType({ id: 'text-dockerfile', label: 'Dockerfile', language: 'dockerfile', names: ['Dockerfile', 'Containerfile'], extensions: ['.dockerfile'] });
-
 /** Every text type this package defines. */
-export const textTypes: DocumentType[] = [
-  plainText, rScript, python, julia, shell, yaml, json, toml, ini, latex, bibtex,
-  xml, html, css, scss, javascript, typescript, lua, sql, stan, diff, dockerfile,
-];
+export const textTypes: DocumentType[] = [textFile];

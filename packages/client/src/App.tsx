@@ -166,7 +166,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
                     <button type="button" className="primary" onClick={() => setViewing(null)}>Back to live</button>
                   </div>
                   <div className="editor-scroll">
-                    {viewSource && !type.editor?.layout ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} />}
+                    {viewSource && !type.editor?.layout ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} path={viewing.commit.path || path} />}
                   </div>
                 </div>
               )}

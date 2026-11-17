@@ -7,7 +7,7 @@ import { Transform } from 'prosemirror-transform';
 import { TypeRegistry } from '@kuraa/kernel';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
-import { parseText, serializeText, textSchema, textTypes } from '../src/index.js';
+import { parseText, serializeText, textFile, textSchema, textTypes } from '../src/index.js';
 import { rng } from '../../../tests/format-helpers.js';
 
 const DIR = join(import.meta.dirname, '../../../fixtures/text');
@@ -19,7 +19,7 @@ for (const t of [pandocMarkdown, rmarkdown, ...textTypes]) registry.register(t);
 describe('text: format tests', () => {
   it('has a corpus, and every corpus file has a text type', () => {
     expect(files.length).toBeGreaterThan(10);
-    for (const f of files) expect(registry.resolve(f.name)?.id, f.name).toMatch(/^text/);
+    for (const f of files) expect(registry.resolve(f.name)?.id, f.name).toBe('text');
   });
 
   describe('identity', () => {
@@ -96,35 +96,44 @@ describe('text: format tests', () => {
 
 describe('text: matching', () => {
   const id = (path: string, head = '') => registry.resolve(path, head)?.id ?? null;
+  const layout = textFile.editor!.layout!;
+  const language = (path: string, head = '') => layout.languageOf!(path, head) ?? null;
 
-  it('picks types by extension and name, case-insensitively for extensions', () => {
-    expect(id('analysis/clean.R')).toBe('text-r');
-    expect(id('analysis/clean.r')).toBe('text-r');
-    expect(id('.Rprofile')).toBe('text-r');
-    expect(id('refs/library.bib')).toBe('text-bibtex');
-    expect(id('_quarto.yml')).toBe('text-yaml');
-    expect(id('CITATION.cff')).toBe('text-yaml');
-    expect(id('Dockerfile')).toBe('text-dockerfile');
-    expect(id('Makefile')).toBe('text');
-    expect(id('notes.txt')).toBe('text');
-  });
-
-  it('leaves markdown to the markdown types', () => {
+  it('is one type for all text files, below the markdown types', () => {
+    expect(textTypes.map((t) => t.id)).toEqual(['text']);
+    for (const p of ['analysis/clean.R', 'clean.r', '.Rprofile', 'refs/library.bib', '_quarto.yml', 'CITATION.cff', 'Dockerfile', 'Makefile', 'notes.txt', 'data.csv'])
+      expect(id(p), p).toBe('text');
     expect(id('notes.md')).toBe('pandoc-markdown');
     expect(id('analysis.Rmd')).toBe('rmarkdown');
+    expect(id('photo.png')).toBe(null);
+  });
+
+  it('highlights each file by its name', () => {
+    expect(language('analysis/clean.R')).toBe('r');
+    expect(language('clean.r')).toBe('r');
+    expect(language('.Rprofile')).toBe('r');
+    expect(language('refs/library.bib')).toBe('bibtex');
+    expect(language('_quarto.yml')).toBe('yaml');
+    expect(language('CITATION.cff')).toBe('yaml');
+    expect(language('Dockerfile')).toBe('dockerfile');
+    expect(language('notes.txt')).toBe(null);
+    expect(language('Makefile')).toBe(null);
   });
 
   it('reads the first line of extensionless files', () => {
-    expect(id('bin/rebuild', '#!/usr/bin/env Rscript\nlibrary(x)\n')).toBe('text-r');
-    expect(id('bin/check', '#!/bin/bash\nset -e\n')).toBe('text-shell');
-    expect(id('bin/qc', '#!/usr/bin/env python3\n')).toBe('text-python');
+    expect(id('bin/rebuild', '#!/usr/bin/env Rscript\nlibrary(x)\n')).toBe('text');
+    expect(language('bin/rebuild', '#!/usr/bin/env Rscript')).toBe('r');
+    expect(language('bin/check', '#!/bin/bash')).toBe('shell');
+    expect(language('bin/qc', '#!/usr/bin/env python3')).toBe('python');
     expect(id('bin/blob', '#!\u0000\u0001binary')).toBe(null);
     expect(id('bin/unknown', 'no shebang')).toBe(null);
     // A shebang does not override an extension.
-    expect(id('tool.txt', '#!/usr/bin/env python3\n')).toBe('text');
+    expect(language('tool.txt', '#!/usr/bin/env python3')).toBe(null);
   });
 
-  it('declares the lines layout for the client', () => {
-    for (const t of textTypes) expect(t.editor?.layout).toMatchObject({ kind: 'lines', line: 'line', eolAttr: 'eol' });
+  it('declares the lines layout, and .txt for new files', () => {
+    expect(layout).toMatchObject({ kind: 'lines', line: 'line', eolAttr: 'eol' });
+    expect(textFile.extensions).toEqual(['.txt']);
+    expect(textFile.label).toBe('Text file');
   });
 });

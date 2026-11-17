@@ -130,7 +130,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension point |
-| `packages/format-text` | Plain-text and source files, one node per line; `createTextType` is its extension point |
+| `packages/format-text` | The Text file type for scripts, data and settings files, one node per line, highlighted by file name |
 | `packages/formats` | `standardTypes`: the list the host and the web client both load |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI |

@@ -141,7 +141,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       commands.current = layout ? [] : editorCommands(type.schema, history);
       const state = EditorState.create({
         schema: type.schema,
-        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, history) : editorPlugins(type.schema, commands.current))],
+        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, path, history) : editorPlugins(type.schema, commands.current))],
       });
       pmView = new EditorView(mount.current!, {
         state,

@@ -27,16 +27,19 @@ test('new files default to Markdown; the type and the extension follow each othe
   // Choosing a type changes the extension.
   await type.selectOption('rmarkdown');
   await expect(name).toHaveValue('untitled.Rmd');
-  await type.selectOption('text-r');
-  await expect(name).toHaveValue('untitled.R');
+  await type.selectOption('text');
+  await expect(name).toHaveValue('untitled.txt');
+  // Only three choices: Markdown, R Markdown, Text file.
+  await expect(type.locator('option')).toHaveText(['Pandoc markdown (.md)', 'R Markdown (.Rmd)', 'Text file (.txt)']);
 
-  // Typing a known extension chooses the type.
+  // Typing a known extension chooses the type: a script or data file is a text file.
+  await type.selectOption('pandoc-markdown');
   await name.fill(`runs/new-${stamp}.py`);
-  await expect(type).toHaveValue('text-python');
+  await expect(type).toHaveValue('text');
+  await name.fill(`runs/new-${stamp}.Rmd`);
+  await expect(type).toHaveValue('rmarkdown');
 
   // A name with no extension gets the chosen type's.
-  await type.selectOption('rmarkdown');
-  await expect(name).toHaveValue(`runs/new-${stamp}.Rmd`);
   await name.fill(`runs/report-${stamp}`);
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(page.getByTestId(`file:runs/report-${stamp}.Rmd`)).toBeVisible();

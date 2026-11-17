@@ -1,12 +1,18 @@
 # 0010 · Source files: the text format
 
 `packages/format-text` is the general format for plain-text and source files, as
-`format-pandoc` is for markdown. `createTextType` is its extension point; the package defines
-types for R, Python, Julia, shell, YAML, JSON, TOML, settings files, LaTeX, BibTeX, XML/CSL,
-HTML, CSS/SCSS, JavaScript/TypeScript, Lua, SQL, Stan, diffs, Dockerfiles, and plain text
-(`.txt`, `.csv`, `LICENSE`, `Makefile`, …, at a lower priority than everything else).
-Matching is by extension and file name; a file with no extension may be matched by its
-`#!` line, which the host reads only for such files.
+`format-pandoc` is for markdown. `createTextType` is its extension point. The package defines one
+type, **Text file** (`text`), for everything around the documents: R, Python, Julia and shell
+scripts, YAML, JSON, TOML and settings files, LaTeX, BibTeX, XML/CSL, HTML, CSS/SCSS,
+JavaScript/TypeScript, Lua, SQL, Stan, diffs, Dockerfiles, and plain text (`.txt`, `.csv`,
+`LICENSE`, `Makefile`, …), at a lower priority than the markdown types. A table of file rules
+(`textFiles`) says which files it claims and which language each is highlighted as. Matching is
+by extension and file name; a file with no extension may be matched by its `#!` line, which the
+host reads only for such files.
+
+*Revised:* the first version defined a separate type per language (R script, Python, YAML, …).
+They differed only in which files they claimed and how they were coloured, and made the New file
+menu look like twenty formats. They are now one type; the language comes from each file's name.
 
 **One ProseMirror node per line, not one CodeMirror block.** The document is a sequence of
 `line` nodes holding the line's text, with its terminator (`\n`, `\r\n`, `\r`, or none for the
@@ -23,8 +29,9 @@ A line with no terminator that is not the last (the first half after a split) is
 the file's usual terminator. Line breaks that arrive in text (paste, drop) become new lines with
 that terminator.
 
-**The type declares a layout, as data.** The kernel's `EditorContribution.layout` is
-`{ kind: 'lines', line, eolAttr, language }`, in the spirit of 0002. The client implements it in
+**The type declares a layout.** The kernel's `EditorContribution.layout` is
+`{ kind: 'lines', line, eolAttr, language?, languageOf?(path, head) }`, in the spirit of 0002:
+a fixed language, or a pure function from the file's path and first line to a language name. The client implements it in
 `packages/client/src/lines.ts`: a monospaced, numbered layout; Enter keeps the line's
 indentation; Tab and Shift+Tab indent by the file's unit (a tab, or its smallest run of leading
 spaces); copying gives single newlines; no markdown commands or cues.

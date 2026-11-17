@@ -17,9 +17,17 @@ const when = (iso: string) => {
 
 interface Folder { name: string; path: string; folders: Map<string, Folder>; files: TreeFile[] }
 
+/**
+ * Folders the app keeps for itself, not shown in the sidebar: .kuraa holds the
+ * workspace's run settings and package manifest, which the app manages (the
+ * Packages panel) and commits. They stay ordinary files, for git and other tools.
+ */
+const APP_FOLDERS = ['.kuraa'];
+const shown = (path: string) => !APP_FOLDERS.some((d) => path === d || path.startsWith(`${d}/`));
+
 function buildTree(files: TreeFile[]): Folder {
   const root: Folder = { name: '', path: '', folders: new Map(), files: [] };
-  for (const f of files) {
+  for (const f of files.filter((x) => shown(x.path))) {
     const parts = f.path.split('/');
     let dir = root;
     for (const part of parts.slice(0, -1)) {

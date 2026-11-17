@@ -141,6 +141,11 @@ test('the Packages panel installs and removes packages for the workspace', async
   await chunk(page, 0).getByRole('button', { name: '▶ Run' }).click();
   await expect(output(page, 0)).toContainText('[1] "hellno works"', { timeout: 60_000 });
   expect(JSON.parse(readFileSync(join(E2E.dir, '.kuraa/r-packages.json'), 'utf8')).requested).toContain('hellno');
+  // The manifest is the app's own: it is committed, but not in the sidebar.
+  await page.reload();
+  await expect(page.getByTestId(`file:${path}`)).toBeVisible();
+  await expect(page.locator('[data-testid^="file:.kuraa"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /\.kuraa/ })).toHaveCount(0);
 
   // A URL is not a package name: refused before anything is fetched.
   await page.getByRole('button', { name: 'Packages', exact: true }).click();

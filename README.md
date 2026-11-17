@@ -55,7 +55,9 @@ co-author credit) and a cursor colour under **Settings** in the client.
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
 full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Source, Save version,
-History, Sync and Settings are at the right of the status bar.
+History, Sync and Settings are at the right of the status bar. **Source** shows the markdown, and
+you can edit it there too, alongside others editing the rich view
+([decision 0015](docs/decisions/0015-editable-source.md)).
 
 ## Running R chunks
 

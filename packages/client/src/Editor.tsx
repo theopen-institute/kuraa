@@ -6,7 +6,7 @@ import { EditorView } from 'prosemirror-view';
 import type { HostApi, RoomInfo, RunInfo } from './api.js';
 import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
-import { SourceView } from './ReadOnly.js';
+import { SourceEditor } from './SourceEditor.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
 import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
@@ -47,7 +47,8 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   const [view, setView] = useState<EditorView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [, force] = useState(0);
+  const sourceMount = useRef<HTMLDivElement>(null);
+  const source = useRef<SourceEditor | null>(null);
   const connection = useRef<RoomConnection | null>(null);
   const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
   const user = useMemo(() => ({ name: settings.name, email: settings.email, color: settings.color }), [settings.name, settings.email, settings.color]);
@@ -92,6 +93,24 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     view.focus();
     view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
   };
+
+  // The editable Source view, while it is shown. It starts from the file as it is
+  // on disk, so blocks nobody has touched show exactly as written.
+  useEffect(() => {
+    if (!showSource || !view) return;
+    let cancelled = false;
+    api.fileText(path).catch(() => '').then((onDisk) => {
+      if (cancelled || !sourceMount.current || view.isDestroyed) return;
+      const initial = type.serialize(view.state.doc, onDisk ? type.parse(onDisk) : undefined);
+      source.current = new SourceEditor(sourceMount.current, view, type, initial);
+      source.current.focus();
+    });
+    return () => {
+      cancelled = true;
+      source.current?.destroy();
+      source.current = null;
+    };
+  }, [showSource, view, api, path, type]);
 
   const update = (patch: Partial<EditorStatus>) => {
     statusRef.current = { ...statusRef.current, ...patch };
@@ -164,7 +183,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         // y-prosemirror dispatches while the view is still being constructed, so use `this`, not `pmView`.
         dispatchTransaction(this: EditorView, tr) {
           this.updateState(this.state.apply(tr));
-          force((x) => x + 1); // the source view follows the live document
+          source.current?.documentChanged(tr); // the source view follows the live document
           if (runner && tr.docChanged) {
             clearTimeout(chunkTimer);
             // By the time this runs, construction is over and pmView is set.
@@ -210,7 +229,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
         <div ref={mount} className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} />
       </div>
       {showSource && view && (
-        <SourceView api={api} path={path} type={type} doc={view.state.doc} />
+        <div className="source-view" ref={sourceMount} />
       )}
     </div>
   );

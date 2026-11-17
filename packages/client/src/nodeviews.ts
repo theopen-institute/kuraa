@@ -274,8 +274,22 @@ class CodeView implements NodeView {
     const pos = this.getPos();
     if (pos === undefined) return false;
     const target = pos + (dir < 0 ? 0 : this.node.nodeSize);
-    const selection = Selection.near(this.view.state.doc.resolve(target), dir);
-    this.view.dispatch(this.view.state.tr.setSelection(selection).scrollIntoView());
+    const $target = this.view.state.doc.resolve(target);
+    const found = Selection.findFrom($target, dir, true);
+    // Nothing to move to (the block starts or ends the document): make a paragraph to type in.
+    if (!found) return dir > 0 ? this.exitBelow() : this.exitAbove();
+    this.view.dispatch(this.view.state.tr.setSelection(found).scrollIntoView());
+    this.view.focus();
+    return true;
+  }
+
+  private exitAbove(): boolean {
+    const pos = this.getPos();
+    const paragraph = this.view.state.schema.nodes.paragraph;
+    if (pos === undefined || !paragraph) return false;
+    const tr = this.view.state.tr.insert(pos, paragraph.create());
+    tr.setSelection(TextSelection.create(tr.doc, pos + 1));
+    this.view.dispatch(tr.scrollIntoView());
     this.view.focus();
     return true;
   }

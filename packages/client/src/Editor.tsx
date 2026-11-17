@@ -54,7 +54,8 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   /**
    * A click in the editor's empty space (the padding below or above the text,
    * or the margins beside it) lands outside ProseMirror's element. Put the
-   * cursor where it would be expected: the end of the document below the text,
+   * cursor where it would be expected: the end of the document below the text
+   * (in a new paragraph if the document ends with a code block or the like),
    * the start above it, and the nearest point on the line beside it.
    */
   const onBlankMouseDown = (e: React.MouseEvent) => {
@@ -63,6 +64,16 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     const { doc } = view.state;
     const box = view.dom.getBoundingClientRect();
     let selection: Selection;
+    const last = doc.lastChild;
+    const paragraph = view.state.schema.nodes.paragraph;
+    if (e.clientY >= box.bottom && last && paragraph && !type.editor?.layout && !(last.isTextblock && !last.type.spec.code)) {
+      // The document ends with something you cannot type after (a code block, a
+      // rule, a table): add an empty paragraph to type in. Left empty, it writes nothing.
+      view.focus();
+      const tr = view.state.tr.insert(doc.content.size, paragraph.create());
+      view.dispatch(tr.setSelection(TextSelection.create(tr.doc, doc.content.size + 1)).scrollIntoView());
+      return;
+    }
     if (e.clientY >= box.bottom) selection = Selection.atEnd(doc);
     else if (e.clientY <= box.top) selection = Selection.atStart(doc);
     else {

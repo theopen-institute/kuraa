@@ -50,3 +50,32 @@ test('the same in a source file', async ({ page }) => {
   await expect(page.getByTestId('editor').locator('.line').first()).toHaveText('x <- 1 + 1');
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('x <- 1 + 1');
 });
+
+test('below a document that ends with a code block, a click starts a new paragraph', async ({ page }) => {
+  const path = `runs/click-${Date.now().toString(36)}.md`;
+  const start = '# Another\n\n```{something}\ncode here\n```\n';
+  await openNew(page, path, start);
+  const editor = page.getByTestId('editor');
+
+  await clickBlank(page, 0.5, 40);
+  await page.keyboard.type('More text');
+  await expect(editor.locator('p')).toHaveText('More text');
+  await expect(editor.locator('.code-node')).toContainText('code here');
+  await expect(editor.locator('.code-node')).not.toContainText('More text');
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe(`${start}\nMore text\n`);
+});
+
+test('arrow keys leave a code block that ends or starts the document', async ({ page }) => {
+  const path = `runs/arrows-${Date.now().toString(36)}.md`;
+  await openNew(page, path, '```r\nx <- 1\n```\n');
+  const editor = page.getByTestId('editor');
+  await editor.locator('.cm-line').first().click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.type('After');
+  await editor.locator('.cm-line').first().click();
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.type('Before');
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('Before\n\n```r\nx <- 1\n```\n\nAfter\n');
+});

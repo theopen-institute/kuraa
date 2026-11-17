@@ -12,7 +12,8 @@ import { markdown } from '@codemirror/lang-markdown';
 import type { HostApi } from './api.js';
 import { buildNodeViews } from './nodeviews.js';
 import { highlightPlugin } from './lines.js';
-import { noteNumbersPlugin } from './notes.js';
+import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
+import { askConfirm, askText } from './ask.js';
 
 /** Plain text in a read-only CodeMirror editor. */
 export function ReadOnlyCode({ text, testId }: { text: string; testId?: string }) {
@@ -65,17 +66,19 @@ export function SourceView({ api, path, type, doc }: { api: HostApi; path: strin
 }
 
 /** A document rendered by its type, not editable. */
-export function ReadOnlyDoc({ text, type, path }: { text: string; type: DocumentType; path: string }) {
+export function ReadOnlyDoc({ text, type, path, formatEditor }: { text: string; type: DocumentType; path: string; formatEditor?: FormatEditor }) {
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const layout = type.editor?.layout;
+    const nothing = () => false;
+    const ctx: EditorContext = { schema: type.schema, readOnly: true, history: { undo: nothing, redo: nothing }, isRemote: () => false, ui: { askText, askConfirm } };
     const view = new PMView(mount.current!, {
-      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout, path)] : noteNumbersPlugin(type.editor?.nodeViews ?? {}) }),
+      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout, path)] : (formatEditor?.plugins?.(ctx) ?? []) }),
       editable: () => false,
-      nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
+      nodeViews: { ...buildNodeViews(type.editor?.nodeViews ?? {}), ...(formatEditor?.nodeViews?.(ctx) ?? {}) },
       attributes: { class: layout ? 'lines-doc' : 'prose' },
     });
     return () => view.destroy();
-  }, [text, type, path]);
+  }, [text, type, path, formatEditor]);
   return <div className={type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'} ref={mount} />;
 }

@@ -33,12 +33,29 @@ export default tseslint.config(
     ),
   },
   {
+    // A format's core (schema, parser, serializer) runs on the host too: headless.
     files: ['packages/format-pandoc/src/**', 'packages/format-rmarkdown/src/**', 'packages/format-text/src/**', 'packages/formats/src/**'],
     rules: merge(
       restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Format packages (and the formats list) import kernel and other format packages only.'),
       restrict(['prosemirror-state', 'prosemirror-view', 'prosemirror-transform', '@codemirror/*', 'react*', 'node:*'], 'Format packages use prosemirror-model only and run headless.'),
+      restrict(['./editor', './editor/*', '../editor/*', '@kuraa/*/editor', '@kuraa/editor-kit'], "A format's core must not load its editor module: the host loads the core."),
       noYjs,
     ),
+  },
+  {
+    // A format's editor module (and the list of them): what the format does in the
+    // browser editor. ProseMirror's editing code is allowed; the session, host and
+    // client are not, and the module talks to the client only through editor-kit.
+    files: ['packages/format-*/src/editor/**', 'packages/formats/src/editor.ts'],
+    rules: merge(
+      restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Editor modules reach the client only through @kuraa/editor-kit.'),
+      restrict(['@codemirror/*', 'react*', 'node:*'], 'Editor modules use ProseMirror only.'),
+      noYjs,
+    ),
+  },
+  {
+    files: ['packages/editor-kit/src/**'],
+    rules: merge(restrict(['@kuraa/*', 'react*', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },
   {
     files: ['packages/host/src/**'],

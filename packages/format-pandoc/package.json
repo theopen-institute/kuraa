@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./editor": "./src/editor/index.ts"
   },
   "devDependencies": {
     "prosemirror-transform": "^1.12.5"
   },
   "dependencies": {
+    "@kuraa/editor-kit": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "@types/mdast": "^4.0.4",
     "mdast-util-from-markdown": "^2.1.0",
@@ -25,6 +27,12 @@
     "micromark-extension-gfm-table": "^2.1.2",
     "micromark-extension-gfm-task-list-item": "^2.1.0",
     "micromark-extension-math": "^3.1.0",
-    "prosemirror-model": "^1.25.13"
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-inputrules": "^1.6.0",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-schema-list": "^1.6.0",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-view": "^1.42.9"
   }
 }

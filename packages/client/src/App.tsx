@@ -10,6 +10,7 @@ import { ReadOnlyCode, ReadOnlyDoc } from './ReadOnly.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
 import { webShell, type Shell } from './shell.js';
+import type { FormatEditor } from '@kuraa/editor-kit';
 
 export interface AppProps {
   /** Document types this client can edit. Must be the same implementations the host loads. */
@@ -20,12 +21,14 @@ export interface AppProps {
   defaults?: Partial<Settings>;
   /** The program the client runs in; a plain web page if omitted. */
   shell?: Shell;
+  /** Each type's editor module, by type id: what the type does in the editor. */
+  editors?: Record<string, FormatEditor>;
 }
 
 const OPEN_KEY = 'kuraa:open-file';
 const NO_ENGINES: string[] = [];
 
-export function App({ types, overrides, defaults, shell = webShell }: AppProps) {
+export function App({ types, overrides, defaults, shell = webShell, editors = {} }: AppProps) {
   const registry = useMemo(() => {
     const r = new TypeRegistry();
     for (const t of types) r.register(t);
@@ -151,7 +154,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
           {path && type && !versionMismatch && !editingSettings && (
             <div className="centre-stack">
               <div style={{ display: viewing ? 'none' : 'contents' }}>
-                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} runEngines={workspace?.run?.engines ?? NO_ENGINES} />
+                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} runEngines={workspace?.run?.engines ?? NO_ENGINES} formatEditor={editors[type.id]} />
               </div>
               {viewing && (
                 <div className="editor-pane past-version" data-testid="past-version">
@@ -166,7 +169,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
                     <button type="button" className="primary" onClick={() => setViewing(null)}>Back to live</button>
                   </div>
                   <div className="editor-scroll">
-                    {viewSource && !type.editor?.layout ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} path={viewing.commit.path || path} />}
+                    {viewSource && !type.editor?.layout ? <ReadOnlyCode text={viewing.text} /> : <ReadOnlyDoc text={viewing.text} type={type} path={viewing.commit.path || path} formatEditor={editors[type.id]} />}
                   </div>
                 </div>
               )}

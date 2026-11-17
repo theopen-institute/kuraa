@@ -37,10 +37,8 @@ export const pandocNodeViews: Record<string, NodeViewHint> = {
   math_display: { kind: 'code', language: 'latex', header: { attr: '', prefix: 'math' } },
   raw_inline: { kind: 'atom', attr: 'text', className: 'raw-inline' },
   citation: { kind: 'atom', attr: 'text', className: 'citation' },
-  math_inline: { kind: 'atom', attr: 'tex', className: 'math-inline' },
-  footnote_ref: { kind: 'atom', attr: 'label', className: 'footnote-ref', refersTo: { node: 'footnote_def', attr: 'label' } },
-  footnote_def: { kind: 'note', attr: 'label', referencedBy: { node: 'footnote_ref', attr: 'label' } },
-  inline_note: { kind: 'atom', attr: 'text', className: 'inline-note', numbered: true },
+  math_inline: { kind: 'atom', attr: 'tex', className: 'math-inline', prefix: '$', suffix: '$' },
+  // Footnotes, inline notes and their references are drawn by the editor module (./editor/notes.ts).
 };
 
 export function createPandocType(ext?: PandocExtension): DocumentType {

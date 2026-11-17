@@ -26,23 +26,10 @@ export type NodeViewHint =
     }
   | {
       kind: 'atom'; attr: string; className?: string; display?: 'inline' | 'block';
-      /** The atom names another node by this attribute (a footnote reference names its definition). */
-      refersTo?: { node: string; attr: string };
-      /** The atom is a note, numbered with the others in reading order (an inline note). */
-      numbered?: boolean;
-    }
-  /**
-   * A note definition (a footnote): its content is edited in place, and its
-   * label, in `attr`, links back to the atoms that reference it.
-   */
-  | { kind: 'note'; attr: string; referencedBy: { node: string; attr: string } };
-
-export interface CommandContribution {
-  id: string;
-  title: string;
-  /** Opaque to the kernel; interpreted by the editor host. */
-  run: (ctx: unknown) => boolean;
-}
+      /** Shown around the value, e.g. `$` … `$` for inline math. */
+      prefix?: string;
+      suffix?: string;
+    };
 
 /**
  * How the client lays out a whole document. Without one, a document is rich
@@ -60,12 +47,14 @@ export type LayoutHint = {
   languageOf?(path: string, head: string): string | undefined;
 };
 
+/**
+ * What the client needs to know to show a type, as data. What the type *does*
+ * in the editor (cues, keys, behaviour, its own views) lives in its editor
+ * module; see @kuraa/editor-kit.
+ */
 export interface EditorContribution {
-  /** Opaque to the kernel: ProseMirror plugins built by the client. */
-  plugins?(ctx: unknown): unknown[];
   nodeViews?: Record<string, NodeViewHint>;
   layout?: LayoutHint;
-  commands?: CommandContribution[];
 }
 
 export interface DocumentType {

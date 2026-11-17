@@ -6,12 +6,14 @@ import { EditorView } from 'prosemirror-view';
 import type { HostApi, RoomInfo } from './api.js';
 import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
-import { editorCommands, editorPlugins, type EditorCommand } from './commands.js';
 import { SourceView } from './ReadOnly.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
-import { arrangeNotesPlugin, noteNumbersPlugin } from './notes.js';
-
+import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
+import { keymap } from 'prosemirror-keymap';
+import { baseKeymap } from 'prosemirror-commands';
+import { askConfirm, askText } from './ask.js';
+import { defaultBlock } from './blocks.js';
 export interface EditorStatus {
   connection: ConnectionStatus;
   peers: Peer[];
@@ -36,9 +38,11 @@ interface Props {
   showSource: boolean;
   /** Chunk engines the host can run (e.g. ['r']); empty if it runs nothing. */
   runEngines: string[];
+  /** What the type does in the editor (cues, keys, behaviour), if it has an editor module. */
+  formatEditor?: FormatEditor;
 }
 
-export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource, runEngines }: Props) {
+export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource, runEngines, formatEditor }: Props) {
   const mount = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +50,6 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   const [, force] = useState(0);
   const connection = useRef<RoomConnection | null>(null);
   const statusRef = useRef<EditorStatus>({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
-  const commands = useRef<EditorCommand[]>([]);
   const user = useMemo(() => ({ name: settings.name, email: settings.email, color: settings.color }), [settings.name, settings.email, settings.color]);
   const userRef = useRef(user);
   userRef.current = user;
@@ -65,16 +68,16 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     const { doc } = view.state;
     const box = view.dom.getBoundingClientRect();
     let selection: Selection;
-    const paragraph = view.state.schema.nodes.paragraph;
+    const block = defaultBlock(view.state.schema);
     if (e.clientY >= box.bottom) {
       // The end of the document's text, wherever it is (the last paragraph, or the
       // last footnote). Only if that is not somewhere to type (inside a code block,
       // or after a rule) is an empty paragraph added; left empty, it writes nothing.
       selection = Selection.atEnd(doc);
       const textEnd = selection instanceof TextSelection && selection.$head.parent.inlineContent && !selection.$head.parent.type.spec.code;
-      if (!textEnd && paragraph && !type.editor?.layout) {
+      if (!textEnd && block && !type.editor?.layout) {
         view.focus();
-        const tr = view.state.tr.insert(doc.content.size, paragraph.create());
+        const tr = view.state.tr.insert(doc.content.size, block.create());
         view.dispatch(tr.setSelection(TextSelection.create(tr.doc, doc.content.size + 1)).scrollIntoView());
         return;
       }
@@ -140,15 +143,20 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       }
       const history = { undo: conn.undo, redo: conn.redo };
       const layout = type.editor?.layout;
-      // Rich text gets the markdown commands and cues; a source file gets line editing.
-      commands.current = layout ? [] : editorCommands(type.schema, history);
-      const state = EditorState.create({
-        schema: type.schema,
-        plugins: [...conn.plugins(), ...(layout?.kind === 'lines' ? linesPlugins(type.schema, layout, path, history) : [...editorPlugins(type.schema, commands.current), ...noteNumbersPlugin(hints), ...arrangeNotesPlugin(hints, conn.isRemote)])],
-      });
+      // A source file gets line editing; anything else gets its format's editor
+      // module (cues, keys, behaviour), then undo/redo and ProseMirror's base keys.
+      const ctx: EditorContext = { schema: type.schema, readOnly: false, history, isRemote: conn.isRemote, ui: { askText, askConfirm } };
+      const plugins = layout?.kind === 'lines'
+        ? linesPlugins(type.schema, layout, path, history)
+        : [
+            ...(formatEditor?.plugins?.(ctx) ?? []),
+            keymap({ 'Mod-z': history.undo, 'Mod-Shift-z': history.redo, 'Mod-y': history.redo }),
+            keymap(baseKeymap),
+          ];
+      const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins] });
       pmView = new EditorView(mount.current!, {
         state,
-        nodeViews: buildNodeViews(hints, { runner }),
+        nodeViews: { ...buildNodeViews(hints, { runner }), ...(formatEditor?.nodeViews?.(ctx) ?? {}) },
         attributes: layout
           ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
           : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
@@ -187,7 +195,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       connection.current?.destroy();
       connection.current = null;
     };
-  }, [api, path, type, settings.token, engines]);
+  }, [api, path, type, settings.token, engines, formatEditor]);
 
   useEffect(() => {
     connection.current?.setUser(user);

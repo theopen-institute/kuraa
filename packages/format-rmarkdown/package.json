@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./editor": "./src/editor/index.ts"
   },
   "dependencies": {
+    "@kuraa/editor-kit": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "prosemirror-model": "^1.25.13"

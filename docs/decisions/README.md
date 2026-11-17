@@ -15,3 +15,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0009](0009-shell-boundary.md) | The host does all file and git work; the client sees its shell through one interface; `pnpm dev` |
 | [0010](0010-text-format.md) | One Text file type for source and data files: a ProseMirror node per line, highlighted by file name |
 | [0011](0011-running-chunks.md) | Running R chunks: one R session per document on the host, shared outputs, never in the file |
+| [0012](0012-format-editor-modules.md) | Each format brings its editor behaviour in an editor module; the client keeps only what is generic |

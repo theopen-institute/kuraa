@@ -2,14 +2,12 @@
 // change; a tidy document is left alone.
 import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
-import { pandocMarkdown as md } from '@kuraa/format-pandoc';
-import { arrangeNotes } from '../src/notes.js';
-
-const hints = md.editor!.nodeViews!;
+import { pandocMarkdown as md } from '../src/index.js';
+import { arrangeNotes } from '../src/editor/index.js';
 
 function arrange(src: string): string | null {
   const parsed = md.parse(src);
-  const tr = arrangeNotes(EditorState.create({ doc: parsed.doc }), hints);
+  const tr = arrangeNotes(EditorState.create({ doc: parsed.doc }));
   return tr ? md.serialize(tr.doc, parsed) : null;
 }
 
@@ -45,7 +43,7 @@ describe('arranging notes', () => {
       if (node.isText && node.text === 'Note A.') at = pos + 4;
     });
     const state = EditorState.create({ doc: parsed.doc, selection: TextSelection.create(parsed.doc, at) });
-    const tr = arrangeNotes(state, hints)!;
+    const tr = arrangeNotes(state)!;
     const { $from } = tr.selection;
     expect($from.parent.textContent).toBe('Note A.');
     expect($from.parentOffset).toBe(4);

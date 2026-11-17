@@ -29,7 +29,15 @@ The workspace name, branch and head moved to the tooltip on the connection indic
 Save version, History, Sync and Settings are quiet links at the right of the status bar. The
 history sidebar starts closed.
 
-**Footnotes** show as superscript labels; hovering shows the note, ⌘-click goes to it. Notes show
-below a rule with their label in the margin: click the label to go back to the reference,
-double-click it to rename the note and every reference to it. Inline notes (`^[…]`) are chips;
-double-click to edit. The file holds ordinary Pandoc footnotes.
+**Footnotes.** The editor shows each reference and note with the number a reader will see:
+Pandoc numbers notes in the order their references appear (inline notes included), whatever
+their labels, so the labels in the file are left alone and an edit never relabels other notes.
+The label shows on hover. Hovering a reference shows the note; ⌘-click goes to it. Notes show
+below a rule with their number in the margin: click it to go back to the reference, double-click
+to rename the note and every reference to it. Inline notes (`^[…]`) are chips; double-click to
+edit. New footnotes (⌥⌘F) are labelled one past the highest number in the file.
+
+**Renumber notes** (in the status bar, shown only when it would change something) is the one
+deliberate edit that tidies the source: it relabels notes 1, 2, 3 in order of first reference
+(references inside notes included), moves the top-level notes to the end of the document in that
+order, and puts notes nothing refers to last. The file holds ordinary Pandoc footnotes throughout.

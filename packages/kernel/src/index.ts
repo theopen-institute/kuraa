@@ -28,6 +28,8 @@ export type NodeViewHint =
       kind: 'atom'; attr: string; className?: string; display?: 'inline' | 'block';
       /** The atom names another node by this attribute (a footnote reference names its definition). */
       refersTo?: { node: string; attr: string };
+      /** The atom is a note, numbered with the others in reading order (an inline note). */
+      numbered?: boolean;
     }
   /**
    * A note definition (a footnote): its content is edited in place, and its

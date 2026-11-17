@@ -183,6 +183,9 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
         path={path}
         workspace={workspace ? `${workspace.name} on ${workspace.branch}${workspace.head ? ` @ ${workspace.head.slice(0, 7)}` : ''}` : settings.hostUrl || 'Not connected'}
       >
+        {path && type && !viewing && status?.renumberNotes && (
+          <button type="button" onClick={status.renumberNotes} title="Relabel the notes 1, 2, 3 in reading order, and put them at the end in that order">Renumber notes</button>
+        )}
         {path && type && !viewing && status?.runner && <RunControls runner={status.runner} />}
         {path && type && !viewing && (
           <>

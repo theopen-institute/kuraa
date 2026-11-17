@@ -12,6 +12,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import type { HostApi } from './api.js';
 import { buildNodeViews } from './nodeviews.js';
 import { highlightPlugin } from './lines.js';
+import { noteNumbersPlugin } from './notes.js';
 
 /** Plain text in a read-only CodeMirror editor. */
 export function ReadOnlyCode({ text, testId }: { text: string; testId?: string }) {
@@ -69,7 +70,7 @@ export function ReadOnlyDoc({ text, type, path }: { text: string; type: Document
   useEffect(() => {
     const layout = type.editor?.layout;
     const view = new PMView(mount.current!, {
-      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout, path)] : [] }),
+      state: PMState.create({ doc: type.parse(text).doc, plugins: layout ? [highlightPlugin(layout, path)] : noteNumbersPlugin(type.editor?.nodeViews ?? {}) }),
       editable: () => false,
       nodeViews: buildNodeViews(type.editor?.nodeViews ?? {}),
       attributes: { class: layout ? 'lines-doc' : 'prose' },

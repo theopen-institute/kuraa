@@ -1,6 +1,7 @@
-// Footnotes: references show as superscript labels with the note on hover;
-// notes show with their label, which leads back to the reference. Typing
-// [^label] or ^[text], or ⌥⌘F, makes notes; the file stays plain Pandoc markdown.
+// Footnotes: references show the number a reader will see, with the note on
+// hover; notes show that number, which leads back to the reference. Typing
+// [^label] or ^[text], or ⌥⌘F, makes notes; "Renumber notes" tidies the labels.
+// The file stays plain Pandoc markdown.
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,13 +30,17 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
   const editor = page.getByTestId('editor');
 
   // Display.
+  // Numbers in reading order, counting inline notes: [^cores] is 1, the inline note 2.
   const ref = editor.locator('.footnote-ref');
-  await expect(ref).toHaveText('cores');
+  await expect(ref).toHaveText('1');
   await ref.hover();
-  await expect(ref).toHaveAttribute('title', /Cores were 25 cm deep\./);
-  await expect(editor.locator('.inline-note')).toHaveText('Weather permitting.');
+  await expect(ref).toHaveAttribute('title', /Cores were 25 cm deep\.[\s\S]*\[\^cores\]/);
+  await expect(editor.locator('.inline-note')).toHaveText('2Weather permitting.');
   const note = editor.locator('aside.note');
-  await expect(note.locator('.note-label')).toHaveText('cores');
+  await expect(note.locator('.note-label')).toHaveText('1');
+  await expect(note.locator('.note-label')).toHaveAttribute('title', /\[\^cores\]/);
+  // "cores" is not "1", so renumbering is offered.
+  await expect(page.getByRole('button', { name: 'Renumber notes' })).toBeVisible();
   await expect(note.locator('.note-body')).toHaveText('Cores were 25 cm deep.');
 
   // ⌘-click a reference: the cursor goes to its note.
@@ -54,14 +59,15 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
   // The note's label leads back, just after the reference.
   await editor.locator('aside.note').nth(1).locator('.note-label').click();
   await page.keyboard.type(' So did salinity.');
-  await expect(editor.locator('p', { hasText: 'More text.' })).toHaveText('More text. Depth varied.depth So did salinity.');
+  await expect(editor.locator('p', { hasText: 'More text.' })).toHaveText('More text. Depth varied.3 So did salinity.');
 
   // ^[text] makes an inline note; ⌥⌘F a numbered footnote.
   await page.keyboard.type(' ^[Quick aside]', { delay: 10 });
-  await expect(editor.locator('.inline-note').nth(1)).toHaveText('Quick aside');
+  await expect(editor.locator('.inline-note').nth(1)).toHaveText('4Quick aside');
   await page.keyboard.press(MAC ? 'Meta+Alt+KeyF' : 'Control+Alt+KeyF');
   await page.keyboard.type('First numbered note.');
-  await expect(editor.locator('aside.note').nth(2).locator('.note-label')).toHaveText('1');
+  // Labelled [^1] in the file (no numeric labels yet), shown as 5: the fifth note in reading order.
+  await expect(editor.locator('aside.note').nth(2).locator('.note-label')).toHaveText('5');
 
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('First numbered note.');
   expect(readFileSync(join(E2E.dir, path), 'utf8')).toBe(
@@ -71,4 +77,17 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
     '[^depth]: Measured at low water.\n\n' +
     '[^1]: First numbered note.\n',
   );
+
+  // Renumber: labels follow reading order; the button goes away once they do.
+  await page.getByRole('button', { name: 'Renumber notes' }).click();
+  await expect(page.getByRole('button', { name: 'Renumber notes' })).toHaveCount(0);
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe(
+    'Cores were taken at low tide.[^1] A second visit is planned.^[Weather permitting.]\n\n' +
+    'More text. Depth varied.[^2] So did salinity. ^[Quick aside][^3]\n\n' +
+    '[^1]: Cores were 25 cm deep. With an auger.\n\n' +
+    '[^2]: Measured at low water.\n\n' +
+    '[^3]: First numbered note.\n',
+  );
+  // What the reader sees did not change.
+  await expect(editor.locator('.footnote-ref')).toHaveText(['1', '3', '5']);
 });

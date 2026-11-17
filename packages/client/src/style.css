@@ -279,4 +279,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 }
 .note-label:hover { text-decoration: underline; }
 .note-body > :last-child { margin-bottom: 0; }
+.inline-note .note-number { font: 0.85em var(--mono); color: var(--accent); margin-right: 0.35em; }
+.inline-note::before { content: none; }
+.note-label.unused { color: var(--muted); }
 

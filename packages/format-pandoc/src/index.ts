@@ -40,7 +40,7 @@ export const pandocNodeViews: Record<string, NodeViewHint> = {
   math_inline: { kind: 'atom', attr: 'tex', className: 'math-inline' },
   footnote_ref: { kind: 'atom', attr: 'label', className: 'footnote-ref', refersTo: { node: 'footnote_def', attr: 'label' } },
   footnote_def: { kind: 'note', attr: 'label', referencedBy: { node: 'footnote_ref', attr: 'label' } },
-  inline_note: { kind: 'atom', attr: 'text', className: 'inline-note' },
+  inline_note: { kind: 'atom', attr: 'text', className: 'inline-note', numbered: true },
 };
 
 export function createPandocType(ext?: PandocExtension): DocumentType {

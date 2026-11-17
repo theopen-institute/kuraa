@@ -81,18 +81,18 @@ function ensureNote(tr: Transaction, schema: Schema, label: string): Transaction
   return tr.setSelection(TextSelection.create(tr.doc, end + 2)).scrollIntoView();
 }
 
-/** ⌥⌘F: a footnote with the next free number, and its note at the end. */
+/** ⌥⌘F: a footnote labelled one past the highest number, and its note at the end. */
 const insertFootnote = (schema: Schema): Command => (state, dispatch) => {
   const ref = schema.nodes.footnote_ref;
   const { $from } = state.selection;
   if (!ref || !schema.nodes.footnote_def || !$from.parent.inlineContent || $from.parent.type.spec.code) return false;
   if (dispatch) {
-    const used = new Set<string>();
-    state.doc.descendants((node) => {
-      if (node.type === ref || node.type === schema.nodes.footnote_def) used.add(String(node.attrs.label));
-    });
+    // One more than the highest numeric label: never reuses a number out of order.
     let k = 1;
-    while (used.has(String(k))) k++;
+    state.doc.descendants((node) => {
+      const label = String(node.attrs.label ?? '');
+      if ((node.type === ref || node.type === schema.nodes.footnote_def) && /^\d+$/.test(label)) k = Math.max(k, Number(label) + 1);
+    });
     const tr = state.tr.replaceSelectionWith(ref.create({ label: String(k) }), false);
     dispatch(ensureNote(tr, schema, String(k)));
   }

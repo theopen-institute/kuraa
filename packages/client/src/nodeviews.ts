@@ -8,6 +8,8 @@ import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { highlighter, languageSupport } from './languages.js';
 import { chunkOf, describeRun, renderOutputs, type Chunk, type ChunkRunner } from './runs.js';
+import { numberOf } from './notes.js';
+import type { Decoration } from 'prosemirror-view';
 import { askText } from './ask.js';
 
 /** What node views can use besides the document: the chunk runner, when the host runs code. */
@@ -352,7 +354,9 @@ const shorten = (text: string, n: number) => (text.length > n ? `${text.slice(0,
  */
 class AtomView implements NodeView {
   dom: HTMLElement;
-  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'atom' }>) {
+  private number: number | null | undefined;
+  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'atom' }>, decorations: readonly Decoration[] = []) {
+    this.number = numberOf(decorations);
     this.dom = document.createElement('span');
     this.dom.className = `atom ${hint.className ?? ''}`;
     this.render();
@@ -371,7 +375,7 @@ class AtomView implements NodeView {
       this.dom.addEventListener('mouseenter', () => {
         const target = findNode(this.view.state.doc, ref.node, ref.attr, this.node.attrs[this.hint.attr]);
         const text = target ? shorten(target.node.textContent.trim(), 300) || '(empty note)' : 'No note with this label yet.';
-        this.dom.title = `${text}\n\n⌘-click to go to the note · double-click to change the label`;
+        this.dom.title = `${text}\n\n[^${String(this.node.attrs[this.hint.attr])}] · ⌘-click to go to the note · double-click to change the label`;
       });
       this.dom.addEventListener('mousedown', (e) => {
         if (!(e.metaKey || e.ctrlKey)) return;
@@ -387,11 +391,19 @@ class AtomView implements NodeView {
   private render() {
     const v = String(this.node.attrs[this.hint.attr] ?? '');
     const name = this.node.type.name;
-    this.dom.textContent = name === 'math_inline' ? `$${v}$` : name === 'inline_note' ? shorten(v, 60) : v;
+    // Numbered notes show the number the reader will see, not the label in the file.
+    if (this.hint.refersTo && this.number != null) this.dom.textContent = String(this.number);
+    else if (this.hint.numbered) {
+      this.dom.replaceChildren(
+        Object.assign(document.createElement('sup'), { className: 'note-number', textContent: this.number != null ? String(this.number) : '' }),
+        document.createTextNode(shorten(v, 60)),
+      );
+    } else this.dom.textContent = name === 'math_inline' ? `$${v}$` : v;
   }
-  update(node: PMNode) {
+  update(node: PMNode, decorations: readonly Decoration[] = []) {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    this.number = numberOf(decorations);
     this.render();
     return true;
   }
@@ -407,15 +419,16 @@ class NoteView implements NodeView {
   dom: HTMLElement;
   contentDOM: HTMLElement;
   private label: HTMLButtonElement;
+  private number: number | null | undefined;
 
-  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'note' }>) {
+  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'note' }>, decorations: readonly Decoration[] = []) {
+    this.number = numberOf(decorations);
     this.dom = document.createElement('aside');
     this.dom.className = `note note-${node.type.name}`;
     this.label = document.createElement('button');
     this.label.type = 'button';
     this.label.className = 'note-label';
     this.label.contentEditable = 'false';
-    this.label.title = 'Go to the reference · double-click to rename';
     this.label.addEventListener('mousedown', (e) => e.preventDefault());
     this.label.addEventListener('click', (e) => {
       if (e.detail === 1) this.goToReference();
@@ -432,7 +445,10 @@ class NoteView implements NodeView {
   }
 
   private render() {
-    this.label.textContent = this.value;
+    // The number the reader will see; the label in the file on hover.
+    this.label.textContent = this.number === undefined ? this.value : this.number === null ? '–' : String(this.number);
+    this.label.classList.toggle('unused', this.number === null);
+    this.label.title = `[^${this.value}]${this.number === null ? ' · nothing refers to this note' : ''} · click to go to the reference · double-click to rename`;
   }
 
   private goToReference() {
@@ -458,9 +474,10 @@ class NoteView implements NodeView {
     this.view.dispatch(tr);
   }
 
-  update(node: PMNode) {
+  update(node: PMNode, decorations: readonly Decoration[] = []) {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    this.number = numberOf(decorations);
     this.render();
     return true;
   }
@@ -471,10 +488,10 @@ class NoteView implements NodeView {
 export function buildNodeViews(hints: Record<string, NodeViewHint>, ctx: NodeViewContext = {}): Record<string, NodeViewConstructor> {
   const out: Record<string, NodeViewConstructor> = {};
   for (const [name, hint] of Object.entries(hints)) {
-    out[name] = (node, view, getPos) =>
+    out[name] = (node, view, getPos, decorations) =>
       hint.kind === 'code' ? new CodeView(node, view, getPos, hint, ctx)
-      : hint.kind === 'note' ? new NoteView(node, view, getPos, hint)
-      : new AtomView(node, view, getPos, hint);
+      : hint.kind === 'note' ? new NoteView(node, view, getPos, hint, decorations)
+      : new AtomView(node, view, getPos, hint, decorations);
   }
   return out;
 }

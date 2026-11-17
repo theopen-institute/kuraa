@@ -18,6 +18,8 @@ export interface PandocExtension {
   label: string;
   priority?: number;
   match(path: string, head: string): boolean;
+  /** Extensions for new files, the usual one first. */
+  extensions?: string[];
   /** Added after the Pandoc nodes. A spec with an existing name replaces it. */
   nodes?: Record<string, NodeSpec>;
   marks?: Record<string, MarkSpec>;
@@ -53,6 +55,7 @@ export function createPandocType(ext?: PandocExtension): DocumentType {
     label: ext?.label ?? 'Pandoc markdown',
     priority: ext?.priority ?? 0,
     match: ext?.match ?? ((path) => /\.(md|markdown)$/i.test(path)),
+    extensions: ext?.extensions ?? (ext ? [] : ['.md', '.markdown']),
     schema,
     parse,
     serialize,

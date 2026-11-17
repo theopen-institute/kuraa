@@ -59,6 +59,8 @@ export interface DocumentType {
   /** Higher wins when several types match the same file. */
   priority?: number;
   match(path: string, head: string): boolean;
+  /** Extensions for new files of this type, the usual one first: ['.md'], ['.R']. */
+  extensions?: string[];
   schema: Schema;
   /** Must not throw on any UTF-8 input. Unrecognised syntax becomes raw nodes. */
   parse(text: string): ParsedDocument;

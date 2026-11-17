@@ -138,7 +138,7 @@ export function App({ types, overrides, defaults, shell = webShell }: AppProps) 
       {error && <div className="banner warn" role="alert">{error} <button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
 
       <div className={`panes${historyOpen ? ' history-open' : ''}`}>
-        <FileTree api={api} files={files} selected={path} onSelect={select} onChanged={refreshTree} onError={setError} />
+        <FileTree api={api} files={files} selected={path} onSelect={select} onChanged={refreshTree} onError={setError} registry={registry} />
 
         <main className="pane pane-centre">
           {!path && <div className="empty">Choose a file on the left, or create one.</div>}

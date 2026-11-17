@@ -18,6 +18,7 @@ export const rmarkdown: DocumentType = createPandocType({
   version: PANDOC_VERSION * 1000 + RMARKDOWN_VERSION,
   label: 'R Markdown',
   priority: 10,
+  extensions: ['.Rmd'],
   match: (path) => /\.rmd$/i.test(path),
 
   nodes: {

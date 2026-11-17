@@ -76,7 +76,7 @@ export interface TextTypeOptions {
   /** Part of the room key, so stable: 'text', 'text-r'. */
   id: string;
   label: string;
-  /** Lower-case file extensions, with the dot: ['.r']. */
+  /** File extensions, with the dot, the usual one first: ['.R']. Matched case-insensitively. */
   extensions?: string[];
   /** Whole file names, matched exactly: ['Dockerfile', '.Rprofile']. */
   names?: string[];
@@ -97,6 +97,7 @@ export function createTextType(opts: TextTypeOptions): DocumentType {
     version: opts.version ?? 1,
     label: opts.label,
     priority: opts.priority ?? 0,
+    extensions: opts.extensions ?? [],
     match(path, head) {
       const name = path.slice(path.lastIndexOf('/') + 1);
       if (names.has(name)) return true;
@@ -124,7 +125,7 @@ export const plainText = createTextType({
 
 export const rScript = createTextType({
   id: 'text-r', label: 'R script', language: 'r',
-  extensions: ['.r'], names: ['.Rprofile', 'NAMESPACE'], shebang: /\bRscript\b/,
+  extensions: ['.R'], names: ['.Rprofile', 'NAMESPACE'], shebang: /\bRscript\b/,
 });
 export const python = createTextType({
   id: 'text-python', label: 'Python', language: 'python',

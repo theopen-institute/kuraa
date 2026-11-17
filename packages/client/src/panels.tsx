@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttri
 import type { CommitInfo, HostApi, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
-import { askConfirm, askText } from './ask.js';
+import { askConfirm, askNewFile, askText, type FileTypeChoice } from './ask.js';
+import type { TypeRegistry } from '@kuraa/kernel';
 import type { Shell } from './shell.js';
 import type { ChunkRunner } from './runs.js';
 
@@ -40,9 +41,20 @@ interface FileTreeProps {
   onSelect(path: string): void;
   onChanged(selectPath?: string | null): void;
   onError(message: string): void;
+  /** The document types this client opens; offered when creating a file. */
+  registry: TypeRegistry;
 }
 
-export function FileTree({ api, files, selected, onSelect, onChanged, onError }: FileTreeProps) {
+/** Types offered for new files: documents first (Markdown leading), then text and source files by name. */
+function fileTypeChoices(registry: TypeRegistry): FileTypeChoice[] {
+  const choices = registry.all()
+    .filter((t) => t.extensions?.length)
+    .map((t) => ({ id: t.id, label: t.label, extension: t.extensions![0]!, group: t.editor?.layout ? 'Text and source files' : 'Documents' }));
+  const rank = (c: FileTypeChoice) => (c.group === 'Documents' ? 0 : 1);
+  return choices.sort((a, b) => rank(a) - rank(b) || (a.id === 'pandoc-markdown' ? -1 : b.id === 'pandoc-markdown' ? 1 : a.label.localeCompare(b.label)));
+}
+
+export function FileTree({ api, files, selected, onSelect, onChanged, onError, registry }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -57,7 +69,12 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError }:
 
   const create = async () => {
     const base = selected?.includes('/') ? selected.slice(0, selected.lastIndexOf('/') + 1) : '';
-    const path = (await askText('New file path', `${base}untitled.md`, 'Create'))?.trim();
+    const path = await askNewFile({
+      folder: base,
+      types: fileTypeChoices(registry),
+      defaultType: 'pandoc-markdown',
+      typeOf: (p) => registry.resolve(p)?.id ?? null,
+    });
     if (path) await act(() => api.createFile(path, ''), path);
   };
   const rename = async (from: string) => {

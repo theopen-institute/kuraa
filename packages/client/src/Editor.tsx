@@ -65,18 +65,20 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
     const { doc } = view.state;
     const box = view.dom.getBoundingClientRect();
     let selection: Selection;
-    const last = doc.lastChild;
     const paragraph = view.state.schema.nodes.paragraph;
-    if (e.clientY >= box.bottom && last && paragraph && !type.editor?.layout && !(last.isTextblock && !last.type.spec.code)) {
-      // The document ends with something you cannot type after (a code block, a
-      // rule, a table): add an empty paragraph to type in. Left empty, it writes nothing.
-      view.focus();
-      const tr = view.state.tr.insert(doc.content.size, paragraph.create());
-      view.dispatch(tr.setSelection(TextSelection.create(tr.doc, doc.content.size + 1)).scrollIntoView());
-      return;
-    }
-    if (e.clientY >= box.bottom) selection = Selection.atEnd(doc);
-    else if (e.clientY <= box.top) selection = Selection.atStart(doc);
+    if (e.clientY >= box.bottom) {
+      // The end of the document's text, wherever it is (the last paragraph, or the
+      // last footnote). Only if that is not somewhere to type (inside a code block,
+      // or after a rule) is an empty paragraph added; left empty, it writes nothing.
+      selection = Selection.atEnd(doc);
+      const textEnd = selection instanceof TextSelection && selection.$head.parent.inlineContent && !selection.$head.parent.type.spec.code;
+      if (!textEnd && paragraph && !type.editor?.layout) {
+        view.focus();
+        const tr = view.state.tr.insert(doc.content.size, paragraph.create());
+        view.dispatch(tr.setSelection(TextSelection.create(tr.doc, doc.content.size + 1)).scrollIntoView());
+        return;
+      }
+    } else if (e.clientY <= box.top) selection = Selection.atStart(doc);
     else {
       const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
       const hit = view.posAtCoords({ left, top: e.clientY });

@@ -79,3 +79,18 @@ test('arrow keys leave a code block that ends or starts the document', async ({ 
   await page.keyboard.type('Before');
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('Before\n\n```r\nx <- 1\n```\n\nAfter\n');
 });
+
+test('below the footnotes, a click goes to the end of the last note and adds nothing', async ({ page }) => {
+  const path = `runs/click-notes-${Date.now().toString(36)}.md`;
+  const start = 'Main text.[^a]\n\n[^a]: The note.\n';
+  await openNew(page, path, start);
+  const editor = page.getByTestId('editor');
+
+  await clickBlank(page, 0.5, 40);
+  await clickBlank(page, 0.5, 40);
+  await clickBlank(page, 0.5, 40);
+  await page.keyboard.type(' More.');
+  await expect(editor.locator('aside.note .note-body')).toHaveText('The note. More.');
+  await expect(editor.locator('p')).toHaveCount(2); // the main paragraph and the note's
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('Main text.[^a]\n\n[^a]: The note. More.\n');
+});

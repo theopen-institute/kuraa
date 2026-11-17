@@ -1,4 +1,4 @@
-// pnpm dev [--dir <folder>] [--port 5173]
+// pnpm dev [--dir <folder>] [--port 5173] [--env local|podman] [--allow-write] [--allow-network]
 //
 // The web client against a live host, for development, in one command:
 //   - the host runs under `tsx watch`, so it restarts when host, session, kernel
@@ -10,6 +10,10 @@
 //     nothing to paste.
 // Without --dir it uses .dev-workspace/ in this repository (git-ignored),
 // creating it with a sample file the first time.
+//
+// R chunks run on this computer (--env local, the default here: not sandboxed)
+// or in a Podman container (--env podman). --allow-write and --allow-network let
+// the workspace ask for those in .kuraa/run.json. KURAA_DEV_ENV still works.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -22,7 +26,13 @@ const ROOT = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({
   // `pnpm dev -- --dir x` passes the `--` through.
   args: process.argv.slice(2).filter((a) => a !== '--'),
-  options: { dir: { type: 'string' }, port: { type: 'string', default: '5173' } },
+  options: {
+    dir: { type: 'string' },
+    port: { type: 'string', default: '5173' },
+    env: { type: 'string' },
+    'allow-write': { type: 'boolean', default: false },
+    'allow-network': { type: 'boolean', default: false },
+  },
 });
 
 const SAMPLE = `---
@@ -77,8 +87,10 @@ const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
   '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1',
-  // Your own machine, for development: R runs as you, not sandboxed. Pass --env podman to try the container.
-  '--engine', 'r', '--env', process.env.KURAA_DEV_ENV ?? 'local',
+  // R runs on this computer unless --env podman: see the top of this file.
+  '--engine', 'r', '--env', values.env ?? process.env.KURAA_DEV_ENV ?? 'local',
+  ...(values['allow-write'] ? ['--allow-write'] : []),
+  ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });
 
 const web = run('web', bin('vite'), ['--port', values.port!, '--strictPort', '--host', '127.0.0.1'], {

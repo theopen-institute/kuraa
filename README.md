@@ -102,7 +102,10 @@ already there.
 ```sh
 pnpm dev                          # uses .dev-workspace/ (created the first time, git-ignored)
 pnpm dev --dir ~/research/notes
+pnpm dev --env podman             # run R chunks in a Podman container (default: on this computer)
 ```
+
+`--allow-write` and `--allow-network` let the workspace ask for those in `.kuraa/run.json`.
 
 Open <http://127.0.0.1:5173>. There is nothing to configure: the dev server puts the host behind
 its own address and gives the page the token. Client changes apply in place without a reload;

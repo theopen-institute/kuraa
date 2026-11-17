@@ -332,7 +332,24 @@ class CodeView implements NodeView {
   }
 }
 
-/** An inline atom shown as a chip; double-click to edit its source. */
+/** The first node of `type` whose `attr` equals `value`, with its position. */
+function findNode(doc: PMNode, type: string, attr: string, value: unknown): { node: PMNode; pos: number } | null {
+  let found: { node: PMNode; pos: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (found) return false;
+    if (node.type.name === type && node.attrs[attr] === value) found = { node, pos };
+    return true;
+  });
+  return found;
+}
+
+const shorten = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+
+/**
+ * An inline atom shown as a chip; double-click to edit its source. An atom that
+ * refers to another node (a footnote reference) shows that node's text on hover,
+ * and ⌘-click (Ctrl-click) goes to it.
+ */
 class AtomView implements NodeView {
   dom: HTMLElement;
   constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'atom' }>) {
@@ -349,11 +366,28 @@ class AtomView implements NodeView {
         this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [this.hint.attr]: value }));
       });
     });
+    const ref = hint.refersTo;
+    if (ref) {
+      this.dom.addEventListener('mouseenter', () => {
+        const target = findNode(this.view.state.doc, ref.node, ref.attr, this.node.attrs[this.hint.attr]);
+        const text = target ? shorten(target.node.textContent.trim(), 300) || '(empty note)' : 'No note with this label yet.';
+        this.dom.title = `${text}\n\n⌘-click to go to the note · double-click to change the label`;
+      });
+      this.dom.addEventListener('mousedown', (e) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        e.preventDefault();
+        const target = findNode(this.view.state.doc, ref.node, ref.attr, this.node.attrs[this.hint.attr]);
+        if (!target) return;
+        this.view.focus();
+        const sel = Selection.near(this.view.state.doc.resolve(target.pos + 1));
+        this.view.dispatch(this.view.state.tr.setSelection(sel).scrollIntoView());
+      });
+    }
   }
   private render() {
     const v = String(this.node.attrs[this.hint.attr] ?? '');
     const name = this.node.type.name;
-    this.dom.textContent = name === 'math_inline' ? `$${v}$` : name === 'footnote_ref' ? `[^${v}]` : v;
+    this.dom.textContent = name === 'math_inline' ? `$${v}$` : name === 'inline_note' ? shorten(v, 60) : v;
   }
   update(node: PMNode) {
     if (node.type !== this.node.type) return false;
@@ -364,10 +398,83 @@ class AtomView implements NodeView {
   ignoreMutation() { return true; }
 }
 
+/**
+ * A note definition (a footnote): content edited in place, with its label in
+ * the margin. Clicking the label goes back to the first reference to it;
+ * double-clicking renames the note and every reference.
+ */
+class NoteView implements NodeView {
+  dom: HTMLElement;
+  contentDOM: HTMLElement;
+  private label: HTMLButtonElement;
+
+  constructor(private node: PMNode, private view: PMView, private getPos: () => number | undefined, private hint: Extract<NodeViewHint, { kind: 'note' }>) {
+    this.dom = document.createElement('aside');
+    this.dom.className = `note note-${node.type.name}`;
+    this.label = document.createElement('button');
+    this.label.type = 'button';
+    this.label.className = 'note-label';
+    this.label.contentEditable = 'false';
+    this.label.title = 'Go to the reference · double-click to rename';
+    this.label.addEventListener('mousedown', (e) => e.preventDefault());
+    this.label.addEventListener('click', (e) => {
+      if (e.detail === 1) this.goToReference();
+    });
+    this.label.addEventListener('dblclick', () => void this.rename());
+    this.contentDOM = document.createElement('div');
+    this.contentDOM.className = 'note-body';
+    this.dom.append(this.label, this.contentDOM);
+    this.render();
+  }
+
+  private get value(): string {
+    return String(this.node.attrs[this.hint.attr] ?? '');
+  }
+
+  private render() {
+    this.label.textContent = this.value;
+  }
+
+  private goToReference() {
+    const ref = this.hint.referencedBy;
+    const target = findNode(this.view.state.doc, ref.node, ref.attr, this.value);
+    if (!target) return;
+    this.view.focus();
+    // Just after the reference, where you were typing when you made the note.
+    const sel = TextSelection.create(this.view.state.doc, target.pos + target.node.nodeSize);
+    this.view.dispatch(this.view.state.tr.setSelection(sel).scrollIntoView());
+  }
+
+  private async rename() {
+    if (!this.view.editable) return;
+    const next = (await askText('Rename note', this.value, 'Rename'))?.trim();
+    const pos = this.getPos();
+    if (!next || next === this.value || pos === undefined || this.view.isDestroyed) return;
+    const { referencedBy: ref, attr } = this.hint;
+    const tr = this.view.state.tr.setNodeAttribute(pos, attr, next);
+    tr.doc.descendants((node, p) => {
+      if (node.type.name === ref.node && node.attrs[ref.attr] === this.value) tr.setNodeAttribute(p, ref.attr, next);
+    });
+    this.view.dispatch(tr);
+  }
+
+  update(node: PMNode) {
+    if (node.type !== this.node.type) return false;
+    this.node = node;
+    this.render();
+    return true;
+  }
+  stopEvent(e: Event) { return this.label.contains(e.target as Node); }
+  ignoreMutation(m: { type: string; target: Node }) { return m.type !== 'selection' && this.label.contains(m.target); }
+}
+
 export function buildNodeViews(hints: Record<string, NodeViewHint>, ctx: NodeViewContext = {}): Record<string, NodeViewConstructor> {
   const out: Record<string, NodeViewConstructor> = {};
   for (const [name, hint] of Object.entries(hints)) {
-    out[name] = (node, view, getPos) => (hint.kind === 'code' ? new CodeView(node, view, getPos, hint, ctx) : new AtomView(node, view, getPos, hint));
+    out[name] = (node, view, getPos) =>
+      hint.kind === 'code' ? new CodeView(node, view, getPos, hint, ctx)
+      : hint.kind === 'note' ? new NoteView(node, view, getPos, hint)
+      : new AtomView(node, view, getPos, hint);
   }
   return out;
 }

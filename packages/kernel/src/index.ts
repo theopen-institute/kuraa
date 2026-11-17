@@ -24,7 +24,16 @@ export type NodeViewHint =
        */
       run?: { engineAttr: string };
     }
-  | { kind: 'atom'; attr: string; className?: string; display?: 'inline' | 'block' };
+  | {
+      kind: 'atom'; attr: string; className?: string; display?: 'inline' | 'block';
+      /** The atom names another node by this attribute (a footnote reference names its definition). */
+      refersTo?: { node: string; attr: string };
+    }
+  /**
+   * A note definition (a footnote): its content is edited in place, and its
+   * label, in `attr`, links back to the atoms that reference it.
+   */
+  | { kind: 'note'; attr: string; referencedBy: { node: string; attr: string } };
 
 export interface CommandContribution {
   id: string;

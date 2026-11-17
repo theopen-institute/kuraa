@@ -15,6 +15,9 @@ typed, and Backspace straight afterwards turns a conversion back into the typed 
 | `**bold**`, `__bold__`, `*em*`, `_em_`, `~~strike~~` | Strong, emphasis, strikeout |
 | `` `code` ``, `H~2~O`, `x^2^`, `$tex$` | Inline code, subscript, superscript, inline math |
 | `[text](url)` | Link |
+| `[^label]` | Footnote reference; if the note does not exist yet, an empty one is added at the end with the cursor in it |
+| `^[text]` | Inline note |
+| ⌥⌘F (Ctrl+Alt+F) | A numbered footnote and its note |
 
 As in Pandoc, an emphasis cue needs text that neither starts nor ends with a space, and an
 underscore inside a word does not start one. The keyboard shortcuts stay (⌘B, ⌘I, ⌘E and so on).
@@ -25,3 +28,8 @@ toolbar, palette or other interface can be added on top of it later.
 The workspace name, branch and head moved to the tooltip on the connection indicator. Source,
 Save version, History, Sync and Settings are quiet links at the right of the status bar. The
 history sidebar starts closed.
+
+**Footnotes** show as superscript labels; hovering shows the note, ⌘-click goes to it. Notes show
+below a rule with their label in the margin: click the label to go back to the reference,
+double-click it to rename the note and every reference to it. Inline notes (`^[…]`) are chips;
+double-click to edit. The file holds ordinary Pandoc footnotes.

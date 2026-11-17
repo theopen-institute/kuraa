@@ -597,8 +597,8 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
       const after = src[close + 1] ?? '';
       let sp: Special | null = null;
       if (isNote) {
-        const s = clean(src.slice(i - 1, close + 1));
-        sp = { from: abs - 1, to: from + close + 1, make: (marks) => [rawInline(s, marks)] };
+        const s = clean(inner);
+        sp = { from: abs - 1, to: from + close + 1, make: (marks) => [n.inline_note!.create({ text: s }, null, marks)] };
       } else if (after === '{' && !isImage) {
         const attrEnd = src.indexOf('}', close + 1);
         if (attrEnd > 0 && !src.slice(close + 1, attrEnd).includes('\n')) {

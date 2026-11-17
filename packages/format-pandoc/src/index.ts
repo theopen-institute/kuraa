@@ -28,7 +28,7 @@ export interface PandocExtension {
   nodeViews?: Record<string, NodeViewHint>;
 }
 
-export const PANDOC_VERSION = 1;
+export const PANDOC_VERSION = 2;
 
 export const pandocNodeViews: Record<string, NodeViewHint> = {
   code_block: { kind: 'code', languageAttr: 'info' },
@@ -38,7 +38,9 @@ export const pandocNodeViews: Record<string, NodeViewHint> = {
   raw_inline: { kind: 'atom', attr: 'text', className: 'raw-inline' },
   citation: { kind: 'atom', attr: 'text', className: 'citation' },
   math_inline: { kind: 'atom', attr: 'tex', className: 'math-inline' },
-  footnote_ref: { kind: 'atom', attr: 'label', className: 'footnote-ref' },
+  footnote_ref: { kind: 'atom', attr: 'label', className: 'footnote-ref', refersTo: { node: 'footnote_def', attr: 'label' } },
+  footnote_def: { kind: 'note', attr: 'label', referencedBy: { node: 'footnote_ref', attr: 'label' } },
+  inline_note: { kind: 'atom', attr: 'text', className: 'inline-note' },
 };
 
 export function createPandocType(ext?: PandocExtension): DocumentType {

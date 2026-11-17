@@ -206,6 +206,8 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
         return a.display ? `$$${a.tex}$$` : `$${a.tex}$`;
       case 'footnote_ref':
         return `[^${a.label}]`;
+      case 'inline_note':
+        return `^[${a.text}]`;
       default:
         return node.textContent;
     }

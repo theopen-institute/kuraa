@@ -165,6 +165,8 @@ export const pandocNodes: Record<string, NodeSpec> = {
   math_inline: { ...atom('math-inline', 'tex'), attrs: { tex: { default: '' }, display: { default: false } } },
   citation: atom('citation', 'text'),
   footnote_ref: atom('footnote-ref', 'label'),
+  /** An inline note, ^[text]; `text` is the note's markdown source. */
+  inline_note: atom('inline-note', 'text'),
 };
 
 function atom(className: string, attr: string): NodeSpec {

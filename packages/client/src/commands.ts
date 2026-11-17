@@ -2,7 +2,7 @@
 // is there for future interfaces (a toolbar, a palette); for now the editor has no
 // buttons, and formatting comes from typing markdown.
 import type { MarkType, NodeType, Schema } from 'prosemirror-model';
-import { type Command, type EditorState, TextSelection } from 'prosemirror-state';
+import { type Command, type EditorState, type Transaction, TextSelection } from 'prosemirror-state';
 import { baseKeymap, chainCommands, exitCode, setBlockType, toggleMark, wrapIn, lift } from 'prosemirror-commands';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingInputRule } from 'prosemirror-inputrules';
@@ -62,6 +62,43 @@ const toggleLink: (schema: Schema) => Command = (schema) => (state, dispatch, vi
   return true;
 };
 
+/**
+ * After inserting a reference to footnote `label`, make sure the note exists:
+ * if it does not, add an empty one at the end of the document and put the
+ * cursor in it, as word processors do.
+ */
+function ensureNote(tr: Transaction, schema: Schema, label: string): Transaction {
+  const def = schema.nodes.footnote_def;
+  if (!def) return tr;
+  let exists = false;
+  tr.doc.descendants((node) => {
+    if (node.type === def && node.attrs.label === label) exists = true;
+    return !exists;
+  });
+  if (exists) return tr;
+  const end = tr.doc.content.size;
+  tr.insert(end, def.create({ label }, schema.nodes.paragraph!.create()));
+  return tr.setSelection(TextSelection.create(tr.doc, end + 2)).scrollIntoView();
+}
+
+/** ⌥⌘F: a footnote with the next free number, and its note at the end. */
+const insertFootnote = (schema: Schema): Command => (state, dispatch) => {
+  const ref = schema.nodes.footnote_ref;
+  const { $from } = state.selection;
+  if (!ref || !schema.nodes.footnote_def || !$from.parent.inlineContent || $from.parent.type.spec.code) return false;
+  if (dispatch) {
+    const used = new Set<string>();
+    state.doc.descendants((node) => {
+      if (node.type === ref || node.type === schema.nodes.footnote_def) used.add(String(node.attrs.label));
+    });
+    let k = 1;
+    while (used.has(String(k))) k++;
+    const tr = state.tr.replaceSelectionWith(ref.create({ label: String(k) }), false);
+    dispatch(ensureNote(tr, schema, String(k)));
+  }
+  return true;
+};
+
 export function editorCommands(schema: Schema, history: { undo: Command; redo: Command }): EditorCommand[] {
   const m = schema.marks;
   const n = schema.nodes;
@@ -86,6 +123,11 @@ export function editorCommands(schema: Schema, history: { undo: Command; redo: C
     { id: 'history.undo', title: 'Undo', group: 'history', icon: '↶', keys: 'Mod-z', command: history.undo },
     { id: 'history.redo', title: 'Redo', group: 'history', icon: '↷', keys: 'Mod-Shift-z', command: history.redo },
   ];
+  if (n.footnote_ref && n.footnote_def) {
+    cmds.splice(cmds.findIndex((c) => c.id === 'insert.math'), 0, {
+      id: 'insert.footnote', title: 'Footnote', group: 'insert', icon: '¹', keys: 'Mod-Alt-f', command: insertFootnote(schema),
+    });
+  }
   if (n.code_chunk) {
     cmds.splice(cmds.findIndex((c) => c.id === 'insert.math'), 0, {
       id: 'insert.chunk', title: 'Code chunk', group: 'insert', icon: '{ }', keys: 'Mod-Alt-i', command: insertNode(n.code_chunk),
@@ -162,6 +204,12 @@ function markdownRules(schema: Schema): InputRule[] {
     markRule(/(?<![~\\])~([^~\s]+)~$/, m.subscript),
     markRule(/(?<![\^\\])\^([^^\s]+)\^$/, m.superscript),
     markRule(/(?<![`\\])`([^`]+)`$/, m.code),
+    // [^label]: a footnote reference (and an empty note at the end if it has none yet).
+    n.footnote_ref ? new InputRule(/(?<![\\!])\[\^([^\]\s^[]+)\]$/, (state, x, start, end) =>
+      ensureNote(state.tr.replaceWith(start, end, n.footnote_ref!.create({ label: x[1] })), schema, x[1]!)) : null,
+    // ^[text]: an inline note.
+    n.inline_note ? new InputRule(/(?<!\\)\^\[([^[\]]+)\]$/, (state, x, start, end) =>
+      state.tr.replaceWith(start, end, n.inline_note!.create({ text: x[1] }))) : null,
     markRule(/(?<![!\\])\[([^\]]+)\]\(([^)\s]+)\)$/, m.link, (x) => ({ href: x[2] })),
     n.math_inline ? new InputRule(/(?<![\\$\w])\$([^\s$](?:[^$]*[^\s$])?)\$$/, (state, x, start, end) =>
       state.tr.replaceWith(start, end, n.math_inline!.create({ tex: x[1] }))) : null,

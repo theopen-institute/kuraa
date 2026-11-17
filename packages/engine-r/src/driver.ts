@@ -1,5 +1,6 @@
-// The R side of the chunk runner. The host writes this to .git/kuraa/run/ and
-// starts it with Rscript, once per document. It reads one JSON request per line
+// The R side of the R engine. The engine writes this into its files folder and
+// starts it with Rscript, once per document, in whatever environment the host
+// chose (a container, or this computer). It reads one JSON request per line
 // on stdin, evaluates the code with evaluate (as knitr does) in the global
 // environment, and writes one JSON reply per line on stdout, prefixed so that
 // stray output from user code cannot be mistaken for a reply.

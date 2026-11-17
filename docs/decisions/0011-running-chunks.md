@@ -44,3 +44,8 @@ all, Interrupt and Restart R.
 **Not yet:** output while a chunk is still running (it appears when the chunk finishes), inline
 `` `r expr` `` previews, HTML widgets (plotly, leaflet), chunk options written as `#|` comments,
 engines other than R, and a variable browser.
+
+*Since 0013:* the R runner is now the `engine-r` plugin, and where it runs is an environment
+plugin. "Off unless allowed" became `--engine r --env <environment>`; the desktop app runs chunks
+in a Podman container by default, and on this computer only if chosen in its Run Code menu.
+Session messages are `run-session` (with the engine and environment), not `r-session`.

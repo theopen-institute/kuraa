@@ -54,6 +54,14 @@ export default tseslint.config(
     ),
   },
   {
+    // Run plugins and their contract: host side (Node), never the client or editor.
+    files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**'],
+    rules: merge(
+      restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'react*', '@codemirror/*', 'prosemirror-*'], 'Run plugins depend on @kuraa/run-kit only.'),
+      noYjs,
+    ),
+  },
+  {
     files: ['packages/editor-kit/src/**'],
     rules: merge(restrict(['@kuraa/*', 'react*', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },

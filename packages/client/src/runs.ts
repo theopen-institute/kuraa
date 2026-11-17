@@ -6,9 +6,9 @@
 // in an earlier pass is not offered to later ones, so a chunk inserted above
 // another does not take over its output.
 import { hashText, type NodeViewHint } from '@kuraa/kernel';
-import type { ChunkOutput, ChunkRef, RoomMessage, RSessionInfo, RunRecord } from '@kuraa/session/model';
+import type { ChunkOutput, ChunkRef, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { Node as PMNode } from 'prosemirror-model';
-import type { HostApi } from './api.js';
+import type { HostApi, RunInfo } from './api.js';
 
 export interface Chunk {
   pos: number;
@@ -71,21 +71,29 @@ export class ChunkRunner {
   private chunks: Chunk[] = [];
   private states = new Map<number, ChunkState>();
   private readonly listeners = new Set<() => void>();
-  session: RSessionInfo;
+  session: RunSessionInfo;
   /** Bumped on every change, for React's useSyncExternalStore. */
   version = 0;
 
   constructor(
     private readonly api: HostApi,
     readonly path: string,
-    readonly engines: string[],
+    /** What the host runs, and where. */
+    readonly info: RunInfo,
     private readonly user: () => { name: string; email: string; color: string },
   ) {
-    this.session = { path, state: 'none', message: null };
+    this.session = { path, engine: null, environment: null, state: 'none', message: null };
   }
 
   canRun(engine: string): boolean {
-    return this.engines.includes(engine.toLowerCase());
+    return this.info.engines.some((e) => e.handles.includes(engine.toLowerCase()));
+  }
+
+  /** The engine's name for the session's engine, or for the document's chunks: 'R'. */
+  get engineLabel(): string {
+    const byId = this.info.engines.find((e) => e.id === this.session.engine);
+    const used = this.info.engines.find((e) => this.chunks.some((c) => e.handles.includes(c.engine)));
+    return (byId ?? used)?.label ?? 'Code';
   }
 
   get hasRunnableChunks(): boolean {
@@ -119,7 +127,7 @@ export class ChunkRunner {
       if (m.run.state === 'cancelled') this.runs.delete(m.run.id);
       else this.runs.set(m.run.id, m.run);
       this.emit();
-    } else if (m.type === 'r-session' && m.session.path === this.path) {
+    } else if (m.type === 'run-session' && m.session.path === this.path) {
       this.session = m.session;
       this.emit();
     }

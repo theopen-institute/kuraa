@@ -9,7 +9,8 @@ import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { connectHeadless } from '@kuraa/session/testing';
 import type { ChunkOutput, RunRecord } from '@kuraa/session/model';
 import { startHost, type RunningHost } from '../src/index.js';
-import { findRscript } from '../src/runner.js';
+import { findRscript } from '@kuraa/engine-r';
+import { findPodman } from '@kuraa/env-podman';
 
 const HAS_R = findRscript() !== null;
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -64,7 +65,7 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
   beforeEach(async () => {
     dir = makeRepo();
     index = 0;
-    running = await startHost({ dir, port: 0, run: true, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
+    running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['local'] }, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
   });
 
   afterEach(async () => {
@@ -147,10 +148,10 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
       await new Promise((r) => setTimeout(r, 200));
       const states = c.messages.filter((m) => m.type === 'run').map((m) => (m as { run: RunRecord }).run.state);
       expect(states).toEqual(['queued', 'running', 'done', 'queued', 'running', 'done']);
-      expect(c.messages.some((m) => m.type === 'r-session' && m.session.state === 'ready')).toBe(true);
+      expect(c.messages.some((m) => m.type === 'run-session' && m.session.state === 'ready' && m.session.engine === 'r' && m.session.environment === 'local')).toBe(true);
 
       await running.close();
-      running = await startHost({ dir, port: 0, run: true });
+      running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['local'] } });
       const { runs } = (await (await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).json()) as { runs: RunRecord[] };
       expect(runs.map((r) => r.id)).toEqual([second.id]); // the same label replaced the earlier run
       expect(git(dir, 'status', '--porcelain')).toBe(''); // nothing written into the workspace
@@ -167,4 +168,49 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
     const res = await api('/api/runs', { method: 'POST', body: JSON.stringify({ path: DOC, engine: 'r', code: '1', chunk: { index: 0, codeHash: 'x' } }) });
     expect(res.status).toBe(403);
   });
+});
+
+// The same, in a real container. Skipped unless Podman is installed and running;
+// the first run builds the R image, which takes a few minutes.
+const PODMAN_OK = (() => {
+  const podman = findPodman();
+  if (!podman) return false;
+  try {
+    execFileSync(podman, ['info'], { stdio: 'ignore', timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!PODMAN_OK)('running R chunks in Podman', () => {
+  it('runs R where it cannot see your files, write the workspace, see .git, or reach the network', async () => {
+    const dir = makeRepo();
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['podman'] } });
+    try {
+      const api = (path: string, init: RequestInit = {}) =>
+        fetch(running.url + path, { ...init, headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' } });
+      const run = async (code: string): Promise<string> => {
+        const res = await api('/api/runs', { method: 'POST', body: JSON.stringify({ path: DOC, engine: 'r', code, chunk: { label: null, index: 0, codeHash: hashText(code) } }) });
+        const { id } = (await res.json()) as RunRecord;
+        for (let i = 0; i < 9000; i++) {
+          const { runs } = (await (await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).json()) as { runs: RunRecord[] };
+          const r = runs.find((x) => x.id === id);
+          if (r) return r.outputs.map((o) => ('text' in o ? o.text : `[${o.type}]`)).join('');
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        throw new Error('timed out');
+      };
+      expect(await run('x <- 21; x * 2')).toBe('[1] 42\n');
+      expect(await run('file.exists("data.csv")')).toBe('[1] TRUE\n'); // the document's folder
+      expect(await run('dir.exists("/Users") || dir.exists("/home/runner")')).toBe('[1] FALSE\n');
+      expect(await run('tryCatch({ writeLines("x", "new.txt"); "wrote" }, error = function(e) "denied", warning = function(w) "denied")')).toBe('[1] "denied"\n');
+      expect(await run('tryCatch(length(list.files("../.git")), error = function(e) 0L, warning = function(w) 0L)')).toBe('[1] 0\n');
+      expect(await run('tryCatch({ readLines(url("http://example.org")); "reached" }, error = function(e) "no network", warning = function(w) "no network")')).toBe('[1] "no network"\n');
+      expect(await run('plot(1)')).toBe('[image]');
+    } finally {
+      await running.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 15 * 60_000);
 });

@@ -43,8 +43,9 @@ in, and a `git clone` command. Useful options:
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
-| `--allow-run` | off | Let clients run R chunks on this machine. Anyone with the token can then run any program as you |
-| `--rscript` | found on `PATH` | The `Rscript` to run chunks with |
+| `--engine`, `--env` | off | Turn on running code: `--engine r --env podman`. See below |
+| `--plugin` | none | Load a run plugin (engine or environment) by path or package name |
+| `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
 
 Everyone who has the URL and token can edit. Each person sets a display name, an email (for
 co-author credit) and a cursor colour under **Settings** in the client.
@@ -56,14 +57,36 @@ History, Sync and Settings are at the right of the status bar.
 
 ## Running R chunks
 
-Where the host allows it (`--allow-run`; always for a folder opened in the desktop app, and in
-`pnpm dev`), each R chunk has **Run** and **Run above** in its header. ⇧⌘↩ runs the chunk; ⌘↩ runs
+Where the host runs code, each R chunk has **Run** and **Run above** in its header. ⇧⌘↩ runs the chunk; ⌘↩ runs
 the current line or the selection. Output appears under the chunk for everyone with the document
 open: text, messages, warnings, errors, data frames as tables, and plots at the chunk's
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
-runs; **Interrupt**, **Restart R** and **Run all** are in the status bar. Outputs are kept in
-`.git/kuraa/`, never in the `.Rmd`. Running needs R with the `evaluate` and `jsonlite` packages.
-See [decision 0011](docs/decisions/0011-running-chunks.md).
+runs; **Interrupt**, **Restart** and **Run all** are in the status bar, which also says where code
+runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
+
+Code runs through plugins: an **engine** (R) in an **environment**, which is where it runs and
+what it may touch ([decision 0013](docs/decisions/0013-run-plugins-and-sandboxing.md)):
+
+- **Podman** (`--env podman`, the desktop app's default): a container with no network, the
+  workspace read-only and `.git` hidden, and nothing else of your computer visible. Install it
+  once: `brew install podman`, `podman machine init`, `podman machine start`. The first run builds
+  an R image, which takes a few minutes.
+- **Local** (`--env local`, and `pnpm dev`): R on your computer, as you. Not sandboxed.
+
+The desktop app's **Run Code** menu switches between the two, or turns running off. A workspace
+can say what it needs in `.kuraa/run.json`, but cannot loosen what you allow:
+
+```json
+{
+  "environment": "podman",
+  "r": { "packages": ["dplyr", "ggplot2"], "system": ["libxml2-dev"], "renv": true },
+  "access": { "workspace": "read-write" }
+}
+```
+
+Write access and the network are granted only if the host was started with `--allow-write` or
+`--allow-network`. A run plugin is a module exporting `definePlugin({ name, engines,
+environments })` from `@kuraa/run-kit`; [an example](packages/host/test/fixtures/echo-plugin.mjs).
 
 The repository is also served over git's HTTP protocol at `/git`, with the token as the password:
 
@@ -128,13 +151,16 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
+| `packages/run-kit` | The contract for run plugins: engines, environments, the sandbox policy |
+| `packages/engine-r` | The R engine: runs `r` chunks through `evaluate` |
+| `packages/env-podman`, `packages/env-local` | Environments: a locked-down container; a plain process |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension points; `/editor`: chunk fences |
 | `packages/format-text` | The Text file type for scripts, data and settings files, one node per line, highlighted by file name |
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
-| `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI |
+| `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI, run plugin registry |
 | `packages/client` | The React client: file tree, editor with markdown cues, history, status, settings |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |

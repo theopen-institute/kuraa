@@ -1,10 +1,16 @@
 // The host's HTTP API. Client and host meet only over HTTP and WebSocket.
-import type { ChunkRef, RSessionInfo, RunRecord } from '@kuraa/session/model';
+import type { ChunkRef, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 
 export interface WorkspaceInfo {
   name: string; branch: string; head: string | null; types: { id: string; label: string; version: number }[];
-  /** Whether this host runs code chunks, and for which engines. */
-  run?: { enabled: boolean; available: boolean; engines: string[] };
+  /** Whether this host runs code chunks: with which engines, in which environment. */
+  run?: RunInfo;
+}
+export interface RunInfo {
+  enabled: boolean;
+  engines: { id: string; label: string; handles: string[] }[];
+  /** Where this workspace's code runs, and whether that is available. */
+  environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
 export interface RunRequest { path: string; engine: string; code: string; header: string; chunk: ChunkRef; by: { name: string; email: string; color: string } }
 export interface TreeFile { path: string; type: string | null }
@@ -62,7 +68,7 @@ export class HostApi {
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
-  runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
+  runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }
   interruptRuns(path: string) { return this.json('/api/runs/interrupt', { method: 'POST', body: JSON.stringify({ path }) }); }
   restartRuns(path: string) { return this.json('/api/runs/restart', { method: 'POST', body: JSON.stringify({ path }) }); }

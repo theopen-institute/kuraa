@@ -264,7 +264,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .out-table-foot { font: 11px var(--font); color: var(--muted); padding-top: 3px; }
 .r-state { color: var(--muted); }
 .r-busy, .r-starting { color: var(--accent); }
-.r-failed { color: var(--warn); }
+.r-failed, .r-state.unavailable { color: var(--warn); }
+.r-state.unsandboxed::after { content: ' ⚠'; color: var(--warn); }
 
 /* Notes. References are superscript labels; inline notes are small chips with their text;
    note definitions sit in a block with their label in the margin. */

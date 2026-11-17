@@ -7,8 +7,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@kuraa/engine-r": "workspace:*",
+    "@kuraa/env-local": "workspace:*",
+    "@kuraa/env-podman": "workspace:*",
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",
+    "@kuraa/run-kit": "workspace:*",
     "@kuraa/session": "workspace:*",
     "prosemirror-model": "^1.25.13",
     "ws": "^8.23.0"

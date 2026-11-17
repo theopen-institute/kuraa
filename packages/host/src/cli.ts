@@ -1,4 +1,6 @@
-// kuraa-host --dir <workspace> [--init] [--allow-run [--rscript path]] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
+// kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
+//   running code: --engine r --env podman [--env local] [--plugin <path or package>]...
+//                 [--allow-write] [--allow-network] [--memory 4g] [--cpus 2] [--rscript path] [--podman path]
 import { parseArgs } from 'node:util';
 import { startHost } from './index.js';
 
@@ -6,8 +8,15 @@ const { values } = parseArgs({
   options: {
     dir: { type: 'string', default: '.' },
     init: { type: 'boolean', default: false },
-    'allow-run': { type: 'boolean', default: false },
+    engine: { type: 'string', multiple: true },
+    env: { type: 'string', multiple: true },
+    plugin: { type: 'string', multiple: true },
+    'allow-write': { type: 'boolean', default: false },
+    'allow-network': { type: 'boolean', default: false },
+    memory: { type: 'string' },
+    cpus: { type: 'string' },
     rscript: { type: 'string' },
+    podman: { type: 'string' },
     port: { type: 'string', default: '4321' },
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
@@ -21,8 +30,18 @@ const { values } = parseArgs({
 const running = await startHost({
   dir: values.dir!,
   init: values.init,
-  run: values['allow-run'],
-  rscript: values.rscript,
+  run: values.engine?.length || values.env?.length
+    ? {
+        engines: values.engine ?? [],
+        environments: values.env ?? [],
+        plugins: values.plugin ?? [],
+        allowWorkspaceWrite: values['allow-write'],
+        allowNetwork: values['allow-network'],
+        memory: values.memory,
+        cpus: values.cpus ? Number(values.cpus) : undefined,
+        options: { r: { rscript: values.rscript }, podman: { podman: values.podman } },
+      }
+    : undefined,
   port: Number(values.port),
   host: values.host!,
   token: values.token ?? process.env.KURAA_TOKEN,

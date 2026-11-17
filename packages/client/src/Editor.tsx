@@ -3,7 +3,7 @@ import type { DocumentType } from '@kuraa/kernel';
 import { connectRoom, type ConnectionStatus, type Peer, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
 import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import type { HostApi, RoomInfo } from './api.js';
+import type { HostApi, RoomInfo, RunInfo } from './api.js';
 import type { Settings } from './settings.js';
 import { buildNodeViews } from './nodeviews.js';
 import { SourceView } from './ReadOnly.js';
@@ -36,13 +36,13 @@ interface Props {
   onCommitted(): void;
   /** Show the file's markdown source (read-only) instead of the editor. */
   showSource: boolean;
-  /** Chunk engines the host can run (e.g. ['r']); empty if it runs nothing. */
-  runEngines: string[];
+  /** What the host runs, and where; null if it runs nothing. */
+  run: RunInfo | null;
   /** What the type does in the editor (cues, keys, behaviour), if it has an editor module. */
   formatEditor?: FormatEditor;
 }
 
-export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource, runEngines, formatEditor }: Props) {
+export function Editor({ api, settings, path, type, onStatus, onCommitted, showSource, run, formatEditor }: Props) {
   const mount = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,8 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
   const user = useMemo(() => ({ name: settings.name, email: settings.email, color: settings.color }), [settings.name, settings.email, settings.color]);
   const userRef = useRef(user);
   userRef.current = user;
-  const engines = runEngines.join(',');
+  // Reconnect only when what the host runs changes, not on every workspace refresh.
+  const runKey = run?.enabled ? JSON.stringify(run) : '';
 
   /**
    * A click in the editor's empty space (the padding below or above the text,
@@ -108,7 +109,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
 
     const hints = type.editor?.nodeViews ?? {};
     const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
-    const runner = engines && runnable ? new ChunkRunner(api, path, engines.split(','), () => userRef.current) : null;
+    const runner = runKey && runnable ? new ChunkRunner(api, path, JSON.parse(runKey) as RunInfo, () => userRef.current) : null;
     let chunkTimer: ReturnType<typeof setTimeout> | undefined;
 
     (async () => {
@@ -195,7 +196,7 @@ export function Editor({ api, settings, path, type, onStatus, onCommitted, showS
       connection.current?.destroy();
       connection.current = null;
     };
-  }, [api, path, type, settings.token, engines, formatEditor]);
+  }, [api, path, type, settings.token, runKey, formatEditor]);
 
   useEffect(() => {
     connection.current?.setUser(user);

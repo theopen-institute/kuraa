@@ -17,7 +17,7 @@ export type RoomMessage =
   | { type: 'conflict'; at: string; savedAs: string }
   | { type: 'reseeded'; at: string; room: string }
   | { type: 'run'; run: RunRecord }
-  | { type: 'r-session'; session: RSessionInfo };
+  | { type: 'run-session'; session: RunSessionInfo };
 
 // Running code chunks. The host runs them; every client with the document open
 // sees the same runs and outputs. Outputs are never written into the file.
@@ -61,11 +61,14 @@ export interface RunRecord {
   ms: number | null;
 }
 
-export type RSessionState = 'none' | 'starting' | 'ready' | 'busy' | 'stopped' | 'failed';
+export type RunSessionState = 'none' | 'starting' | 'ready' | 'busy' | 'stopped' | 'failed';
 
-export interface RSessionInfo {
+/** A document's session with an engine (R, say), in an environment (a container, say). */
+export interface RunSessionInfo {
   path: string;
-  state: RSessionState;
-  /** Why it failed or stopped, or the R version once ready. */
+  engine: string | null;
+  environment: string | null;
+  state: RunSessionState;
+  /** Progress while starting, why it failed or stopped, or a description once ready (the R version). */
   message: string | null;
 }

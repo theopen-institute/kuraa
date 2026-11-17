@@ -95,11 +95,7 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       branch: await host.git.branch(),
       head: await host.git.head(),
       types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
-      run: {
-        enabled: Boolean(host.options.run),
-        available: host.runner.available,
-        engines: host.options.run && host.runner.available ? ['r'] : [],
-      },
+      run: await host.runner.describe(),
     });
   }
 
@@ -110,16 +106,19 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
   }
 
   if (route.startsWith('POST /api/runs')) {
-    if (!host.options.run) throw new HttpError(403, 'Running code is turned off on this host. Start it with --allow-run to allow it.');
-    if (!host.runner.available) throw new HttpError(503, 'R was not found on the host. Install R, or start the host with --rscript <path>.');
+    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host. Start it with --engine and --env to turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     if (route === 'POST /api/runs') {
-      if (body.engine !== 'r') throw new HttpError(400, `Cannot run ${String(body.engine)} chunks`);
+      const engine = host.runner.engineFor(String(body.engine ?? ''));
+      if (!engine) throw new HttpError(400, `Nothing on this host runs ${String(body.engine)} chunks.`);
+      const { environment } = await host.runner.describe();
+      if (!environment?.available) throw new HttpError(503, environment?.message ?? 'No environment to run code in.');
       const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
       if (!chunk || typeof chunk.index !== 'number' || typeof chunk.codeHash !== 'string') throw new HttpError(400, 'Missing chunk');
       const by = (body.by ?? {}) as { name?: unknown; email?: unknown; color?: unknown };
       const record = host.runner.run(path, {
+        engine,
         code: typeof body.code === 'string' ? body.code : '',
         header: typeof body.header === 'string' ? body.header : 'r',
         chunk: { label: typeof chunk.label === 'string' ? chunk.label : null, index: chunk.index, codeHash: chunk.codeHash, partial: chunk.partial === true },

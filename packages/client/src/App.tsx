@@ -26,7 +26,6 @@ export interface AppProps {
 }
 
 const OPEN_KEY = 'kuraa:open-file';
-const NO_ENGINES: string[] = [];
 
 export function App({ types, overrides, defaults, shell = webShell, editors = {} }: AppProps) {
   const registry = useMemo(() => {
@@ -154,7 +153,7 @@ export function App({ types, overrides, defaults, shell = webShell, editors = {}
           {path && type && !versionMismatch && !editingSettings && (
             <div className="centre-stack">
               <div style={{ display: viewing ? 'none' : 'contents' }}>
-                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} runEngines={workspace?.run?.engines ?? NO_ENGINES} formatEditor={editors[type.id]} />
+                <Editor key={`${api.baseUrl}|${path}`} api={api} settings={settings} path={path} type={type} onStatus={onStatus} onCommitted={onCommitted} showSource={showSource} run={workspace?.run ?? null} formatEditor={editors[type.id]} />
               </div>
               {viewing && (
                 <div className="editor-pane past-version" data-testid="past-version">

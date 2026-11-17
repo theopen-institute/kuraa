@@ -9,7 +9,7 @@ import type { Node as PMNode, Schema } from 'prosemirror-model';
 import type { Command, Plugin, Transaction } from 'prosemirror-state';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
-export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RSessionInfo, RSessionState } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunSessionInfo, RunSessionState } from './model.js';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'unauthorized';
 

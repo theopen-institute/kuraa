@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
+import { findPodman } from '../../packages/env-podman/src/index.js';
 
 const DESKTOP = resolve(import.meta.dirname, '../../apps/desktop');
 const MAIN = join(DESKTOP, 'build/main.cjs');
@@ -28,12 +29,12 @@ function makeRepo(): string {
   return dir;
 }
 
-async function launch(args: string[], timings: object): Promise<{ app: ElectronApplication; page: Page }> {
+async function launch(args: string[], timings: object, extraEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await electron.launch({
     executablePath: ELECTRON,
     args: [MAIN, ...args],
     // VS Code's terminal sets ELECTRON_RUN_AS_NODE, which would start Electron as plain Node.
-    env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings) },
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings), ...extraEnv },
   });
   const page = await app.firstWindow();
   page.on('pageerror', (e) => console.error(`[desktop] page error: ${e.message}`));
@@ -202,5 +203,35 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
   } finally {
     await app.close();
     await host.close();
+  }
+});
+
+const PODMAN_RUNNING = (() => {
+  const podman = findPodman();
+  if (!podman) return false;
+  try {
+    execFileSync(podman, ['info'], { stdio: 'ignore', timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test('runs R chunks in a Podman container by default', async () => {
+  test.skip(!PODMAN_RUNNING, 'Podman is not installed and running');
+  test.setTimeout(15 * 60_000); // the first run builds the R image
+  const dir = makeRepo();
+  writeFileSync(join(dir, 'analysis.Rmd'), '# Analysis\n\n```{r}\nx <- 21\nx * 2\n```\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'Analysis');
+  const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 }, { KURAA_RUN_ENV: 'podman' });
+  try {
+    await page.getByTestId('file:analysis.Rmd').click();
+    await expect(page.getByTestId('status')).toContainText('Connected');
+    await page.locator('.code-node-code_chunk').getByRole('button', { name: '▶ Run' }).click();
+    await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
+    await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
+  } finally {
+    await app.close();
   }
 });

@@ -9,7 +9,8 @@ import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
-import { Runner, findRscript } from './runner.js';
+import { Runner, type RunOptions } from './runner.js';
+import { loadRunPlugins } from './plugins.js';
 import { createRequestHandler } from './http.js';
 
 export interface HostTimings {
@@ -36,12 +37,11 @@ export interface HostOptions {
   /** Document types to load. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
   types?: DocumentType[];
   /**
-   * Allow clients to run R code chunks on this machine. Off by default: anyone
-   * with the token could run any program as the host's user.
+   * Running code chunks: which engines and environments are on (see runner.ts).
+   * Off by default. With the `local` environment, anyone with the token can run
+   * any program as the host's user; a sandboxed one (Podman) confines it.
    */
-  run?: boolean;
-  /** Rscript to use; found on PATH or in the usual places if not given. */
-  rscript?: string;
+  run?: RunOptions;
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   timings?: Partial<HostTimings>;
@@ -140,14 +140,16 @@ export class Host {
       this.log(`initialised a git repository in ${this.dir}`);
     }
     this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
+    const run = this.options.run;
     this.runner = new Runner({
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
-      rscript: this.options.run ? findRscript(this.options.rscript) : null,
+      plugins: await loadRunPlugins(run?.plugins),
+      options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
       log: (m) => this.log(m),
     });
-    if (this.options.run) this.log(this.runner.available ? 'running R chunks is allowed' : 'running R chunks is allowed, but Rscript was not found');
+    if (this.runner.enabled) this.log(`running code: ${run!.engines.join(', ')} in ${run!.environments.join(' or ')}`);
     await mkdir(this.cacheDir, { recursive: true });
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.

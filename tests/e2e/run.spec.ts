@@ -3,7 +3,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findRscript } from '../../packages/host/src/runner.js';
+import { findRscript } from '../../packages/engine-r/src/index.js';
 import { E2E } from './env.js';
 
 const MAC = process.platform === 'darwin';
@@ -93,7 +93,7 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
   await expect(chunk(ada, 0).locator('.chunk-status')).toContainText('Running', { timeout: 30_000 });
   await chunk(ada, 0).getByRole('button', { name: 'Stop' }).click();
   await expect(output(ada, 0)).toContainText('Interrupted.', { timeout: 10_000 });
-  await expect(ada.getByTestId('r-state')).toHaveText('R ready');
+  await expect(ada.getByTestId('r-state')).toHaveText('R ready · on this computer (not sandboxed)');
 
   // Outputs come back after a reload; the file holds only what was typed.
   await bo.reload();

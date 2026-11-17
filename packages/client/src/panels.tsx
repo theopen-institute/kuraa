@@ -269,20 +269,27 @@ export function SettingsDialog({ initial, shell, onSave, onCancel }: { initial: 
   );
 }
 
-const R_STATE: Record<string, string> = { none: 'R not started', starting: 'R starting…', ready: 'R ready', busy: 'R running', stopped: 'R stopped', failed: 'R failed' };
+const STATE: Record<string, string> = { none: 'not started', starting: 'starting…', ready: 'ready', busy: 'running', stopped: 'stopped', failed: 'failed' };
 
-/** The document's R session, in the status bar: state, Run all, Interrupt, Restart. */
+/** The document's code session, in the status bar: engine, environment, Run all, Interrupt, Restart. */
 export function RunControls({ runner }: { runner: ChunkRunner }) {
   useSyncExternalStore((fn) => runner.subscribe(fn), () => runner.version);
   if (!runner.hasRunnableChunks) return null;
   const s = runner.session;
+  const env = runner.info.environment;
   const act = (p: Promise<unknown>) => void p.catch(() => undefined);
+  const where = env ? (env.available ? env.label : `${env.label}: not available`) : '';
+  const title = [s.state === 'starting' || s.state === 'failed' || s.state === 'stopped' ? s.message : null, env?.message].filter(Boolean).join('\n');
   return (
     <>
-      <span className={`r-state r-${s.state}`} title={s.message ?? ''} data-testid="r-state">{R_STATE[s.state] ?? s.state}</span>
+      <span className={`r-state r-${s.state}${env && !env.sandboxed ? ' unsandboxed' : ''}${env && !env.available ? ' unavailable' : ''}`} title={title} data-testid="r-state">
+        {runner.engineLabel} {STATE[s.state] ?? s.state}
+        {s.state === 'starting' && s.message ? ` · ${s.message}` : ''}
+        {where ? ` · ${where}` : ''}
+      </span>
       <button type="button" onClick={() => act(runner.runAll())} title="Run every chunk, top to bottom">Run all</button>
-      {runner.busy && <button type="button" onClick={() => act(runner.interrupt())} title="Interrupt R, and drop queued runs">Interrupt</button>}
-      {s.state !== 'none' && <button type="button" onClick={() => act(runner.restart())} title="A fresh R session: everything defined so far is gone">Restart R</button>}
+      {runner.busy && <button type="button" onClick={() => act(runner.interrupt())} title="Interrupt, and drop queued runs">Interrupt</button>}
+      {s.state !== 'none' && <button type="button" onClick={() => act(runner.restart())} title="A fresh session: everything defined so far is gone">Restart</button>}
     </>
   );
 }

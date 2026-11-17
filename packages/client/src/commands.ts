@@ -1,9 +1,9 @@
 // Editor commands and markdown cues. The command list drives the key bindings and
 // is there for future interfaces (a toolbar, a palette); for now the editor has no
 // buttons, and formatting comes from typing markdown.
-import type { MarkType, NodeType, Schema } from 'prosemirror-model';
+import type { MarkType, Node as PMNode, NodeType, Schema } from 'prosemirror-model';
 import { type Command, type EditorState, type Transaction, TextSelection } from 'prosemirror-state';
-import { baseKeymap, chainCommands, exitCode, setBlockType, toggleMark, wrapIn, lift } from 'prosemirror-commands';
+import { baseKeymap, chainCommands, createParagraphNear, exitCode, liftEmptyBlock, newlineInCode, setBlockType, splitBlock, toggleMark, wrapIn, lift } from 'prosemirror-commands';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingInputRule } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
@@ -81,6 +81,31 @@ function ensureNote(tr: Transaction, schema: Schema, label: string): Transaction
   return tr.setSelection(TextSelection.create(tr.doc, end + 2)).scrollIntoView();
 }
 
+/** The footnote the cursor is in, if any. */
+function noteAt(state: EditorState, schema: Schema): PMNode | null {
+  const def = schema.nodes.footnote_def;
+  if (!def) return null;
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) if ($from.node(d).type === def) return $from.node(d);
+  return null;
+}
+
+/** Enter in a footnote: back to the text, just after the note's first reference. */
+const backFromNote = (schema: Schema): Command => (state, dispatch) => {
+  const note = noteAt(state, schema);
+  const ref = schema.nodes.footnote_ref;
+  if (!note || !ref) return false;
+  let after = -1;
+  state.doc.descendants((node, pos) => {
+    if (after < 0 && node.type === ref && node.attrs.label === note.attrs.label) after = pos + node.nodeSize;
+    return after < 0;
+  });
+  // A note nothing refers to: Enter behaves as usual.
+  if (after < 0) return false;
+  if (dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, after)).scrollIntoView());
+  return true;
+};
+
 /** ⌥⌘F: a footnote labelled one past the highest number, and its note at the end. */
 const insertFootnote = (schema: Schema): Command => (state, dispatch) => {
   const ref = schema.nodes.footnote_ref;
@@ -141,11 +166,19 @@ export function editorPlugins(schema: Schema, cmds: EditorCommand[]): Plugin[] {
   const keys: Record<string, Command> = {};
   for (const c of cmds) if (c.keys) keys[c.keys] = c.command;
   keys['Mod-y'] = cmds.find((c) => c.id === 'history.redo')!.command;
-  keys['Shift-Enter'] = chainCommands(exitCode, (state, dispatch) => {
-    if (dispatch) dispatch(state.tr.replaceSelectionWith(n.hard_break!.create()).scrollIntoView());
-    return true;
-  });
-  keys['Enter'] = chainCommands(fenceOnEnter(schema), splitListItem(n.list_item!));
+  // In a footnote, Enter goes back to the text (just after the reference) and
+  // Shift+Enter starts a new paragraph in the note, as in a word processor.
+  // Elsewhere Shift+Enter is a line break.
+  const newParagraph = chainCommands(splitListItem(n.list_item!), newlineInCode, createParagraphNear, liftEmptyBlock, splitBlock);
+  keys['Shift-Enter'] = chainCommands(
+    (state, dispatch, view) => (noteAt(state, schema) ? newParagraph(state, dispatch, view) : false),
+    exitCode,
+    (state, dispatch) => {
+      if (dispatch) dispatch(state.tr.replaceSelectionWith(n.hard_break!.create()).scrollIntoView());
+      return true;
+    },
+  );
+  keys['Enter'] = chainCommands(backFromNote(schema), fenceOnEnter(schema), splitListItem(n.list_item!));
   keys['Backspace'] = undoInputRule;
   keys['Tab'] = sinkListItem(n.list_item!);
   keys['Shift-Tab'] = liftListItem(n.list_item!);

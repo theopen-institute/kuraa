@@ -39,6 +39,10 @@ to delete them. Only the editing client arranges, so two clients do not move the
 identical duplicate, should one arise anyway, is dropped. A file arranged differently elsewhere
 is rearranged on the first edit, not on opening.
 
+While typing in a note, **Enter goes back to the text**, just after the reference, and
+**Shift+Enter starts a new paragraph** in the note (elsewhere, Shift+Enter is a line break). In a
+note nothing refers to, Enter behaves as usual.
+
 The label shows on hover. Hovering a reference shows the note; ⌘-click goes to it. Click a note's
 number to go back to the reference; double-click to rename the note and every reference to it.
 Inline notes (`^[…]`) are chips; double-click to edit. New footnotes (⌥⌘F) are labelled one past

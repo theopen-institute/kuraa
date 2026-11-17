@@ -126,3 +126,31 @@ test('with two people, notes stay in order and are never duplicated', async ({ b
     'Zero.[^z]First point.[^a]\n\nSecond point.[^b]\n\n[^z]: Note Z.\n\n[^a]: Note A.\n\n[^b]: Note B.\n',
   );
 });
+
+test('in a note, Enter goes back to the text and Shift+Enter starts a new paragraph', async ({ page }) => {
+  const path = `runs/notes3-${Date.now().toString(36)}.md`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: 'Text here. More.\n' }),
+  });
+  expect(res.status).toBe(201);
+  await page.goto(`/?token=${E2E.token}&name=Typist&email=type%40example.org`);
+  await page.getByTestId(`file:${path}`).click();
+  await expect(page.getByTestId('peers')).toContainText('Typist');
+
+  await page.getByTestId('editor').locator('p', { hasText: 'Text here.' }).click();
+  await page.keyboard.press(MAC ? 'Meta+ArrowLeft' : 'Home');
+  await page.waitForTimeout(100);
+  for (let i = 0; i < 'Text here.'.length; i++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('[^a]', { delay: 10 });
+  await page.keyboard.type('The note.');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('Its second paragraph.');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(' Back in the text.');
+
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe(
+    'Text here.[^a] Back in the text. More.\n\n[^a]: The note.\n\n    Its second paragraph.\n',
+  );
+});

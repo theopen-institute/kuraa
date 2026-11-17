@@ -1,15 +1,13 @@
-// The panels around the editor: file tree, history, status bar and settings.
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+// The panels around the editor: the file tree, history, packages, and first-run settings.
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { CommitInfo, HostApi, PackageInfo, PackageResult, TreeFile } from './api.js';
-import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
 import { askConfirm, askNewFile, askText, type FileTypeChoice } from './ask.js';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { Shell } from './shell.js';
+import { SettingsForm } from './Menu.js';
 import type { ChunkRunner } from './runs.js';
 
-const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—');
 const when = (iso: string) => {
   const d = new Date(iso);
   return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString() : d.toLocaleString();
@@ -25,6 +23,9 @@ interface Folder { name: string; path: string; folders: Map<string, Folder>; fil
 const APP_FOLDERS = ['.kuraa'];
 const shown = (path: string) => !APP_FOLDERS.some((d) => path === d || path.startsWith(`${d}/`));
 
+/** git keeps no empty folders: a new folder holds this, which the sidebar does not show. */
+const PLACEHOLDER = '.gitkeep';
+
 function buildTree(files: TreeFile[]): Folder {
   const root: Folder = { name: '', path: '', folders: new Map(), files: [] };
   for (const f of files.filter((x) => shown(x.path))) {
@@ -38,7 +39,7 @@ function buildTree(files: TreeFile[]): Folder {
       }
       dir = next;
     }
-    dir.files.push(f);
+    if (parts[parts.length - 1] !== PLACEHOLDER) dir.files.push(f);
   }
   return root;
 }
@@ -52,6 +53,10 @@ interface FileTreeProps {
   onError(message: string): void;
   /** The document types this client opens; offered when creating a file. */
   registry: TypeRegistry;
+  /** The workspace folder's name, shown at the top. */
+  workspaceName: string;
+  /** At the bottom of the sidebar (the menu button). */
+  footer?: ReactNode;
 }
 
 /** Types offered for new files: documents first (Markdown leading), then text and source files by name. */
@@ -63,7 +68,7 @@ function fileTypeChoices(registry: TypeRegistry): FileTypeChoice[] {
   return choices.sort((a, b) => rank(a) - rank(b) || (a.id === 'pandoc-markdown' ? -1 : b.id === 'pandoc-markdown' ? 1 : a.label.localeCompare(b.label)));
 }
 
-export function FileTree({ api, files, selected, onSelect, onChanged, onError, registry }: FileTreeProps) {
+export function FileTree({ api, files, selected, onSelect, onChanged, onError, registry, workspaceName, footer }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -76,8 +81,11 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
     }
   };
 
-  const create = async () => {
-    const base = selected?.includes('/') ? selected.slice(0, selected.lastIndexOf('/') + 1) : '';
+  /** The folder of the open file: where new things go unless a folder is named. */
+  const here = () => (selected?.includes('/') ? selected.slice(0, selected.lastIndexOf('/') + 1) : '');
+
+  const create = async (folder?: string) => {
+    const base = folder !== undefined ? (folder ? `${folder}/` : '') : here();
     const path = await askNewFile({
       folder: base,
       types: fileTypeChoices(registry),
@@ -86,6 +94,18 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
     });
     if (path) await act(() => api.createFile(path, ''), path);
   };
+  const newFolder = async (inside?: string) => {
+    const base = inside !== undefined ? (inside ? `${inside}/` : '') : here();
+    const path = (await askText('New folder', `${base}new-folder`, 'Create'))?.trim().replace(/\/+$/, '');
+    if (!path) return;
+    setCollapsed((c) => {
+      const next = new Set(c);
+      next.delete(path);
+      return next;
+    });
+    await act(() => api.createFolder(path), selected);
+  };
+
   const rename = async (from: string) => {
     const to = (await askText('Rename to', from, 'Rename'))?.trim();
     if (to && to !== from) await act(() => api.renameFile(from, to), selected === from ? to : selected);
@@ -99,7 +119,8 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
   const renderFolder = (folder: Folder, depth: number): ReactNode => (
     <>
       {[...folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)).map((f) => (
-        <li key={`d:${f.path}`}>
+        <li key={`d:${f.path}`} className="tree-dir">
+          <div className="tree-dir-row">
           <button
             type="button"
             className="tree-row tree-folder"
@@ -113,6 +134,11 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
           >
             <span className="tree-icon">{collapsed.has(f.path) ? '▸' : '▾'}</span>{f.name}
           </button>
+          <span className="tree-actions">
+            <button type="button" title={`New file in ${f.name}`} aria-label={`New file in ${f.name}`} onClick={() => void create(f.path)}>＋</button>
+            <button type="button" title={`New folder in ${f.name}`} aria-label={`New folder in ${f.name}`} onClick={() => void newFolder(f.path)}>⊞</button>
+          </span>
+          </div>
           {!collapsed.has(f.path) && <ul>{renderFolder(f, depth + 1)}</ul>}
         </li>
       ))}
@@ -144,10 +170,14 @@ export function FileTree({ api, files, selected, onSelect, onChanged, onError, r
   return (
     <nav className="pane pane-left" aria-label="Files">
       <div className="pane-header">
-        <span>Files</span>
-        <button type="button" onClick={() => void create()} title="New file">＋ New</button>
+        <span className="workspace-name" title={workspaceName} data-testid="workspace-name">{workspaceName}</span>
+        <span className="pane-header-actions">
+          <button type="button" onClick={() => void create()} title="New file" aria-label="New file">＋</button>
+          <button type="button" onClick={() => void newFolder()} title="New folder" aria-label="New folder">⊞</button>
+        </span>
       </div>
       <ul className="tree">{renderFolder(tree, 0)}</ul>
+      {footer && <div className="pane-footer">{footer}</div>}
     </nav>
   );
 }
@@ -201,117 +231,15 @@ export function HistoryPanel({ api, path, refreshKey, viewing, onView }: History
   );
 }
 
-interface StatusBarProps {
-  status: EditorStatus | null;
-  notice: EditorStatus['notice'];
-  path: string | null;
-  workspace: string;
-  /** Quiet controls shown at the right-hand end. */
-  children?: ReactNode;
-}
-
-export function StatusBar({ status, notice, path, workspace, children }: StatusBarProps) {
-  const conn = status?.connection ?? 'disconnected';
-  const label: Record<string, string> = { connecting: 'Connecting…', connected: 'Connected', disconnected: 'Offline', unauthorized: 'Token rejected' };
-  return (
-    <footer className="status" data-testid="status">
-      <span className={`conn conn-${conn}`} title={path ? `${workspace}\nRoom ${status?.room?.room ?? ''}` : workspace}>
-        <span className="dot" />{path ? label[conn] : workspace}
-      </span>
-      {path && status && (
-        <>
-          <span className="peers" data-testid="peers">
-            {status.peers.map((p) => (
-              <span key={p.clientId} className="peer" title={p.email || p.name} style={{ ['--peer' as string]: p.color }}>
-                {p.name || 'Anonymous'}{p.self ? ' (you)' : ''}
-              </span>
-            ))}
-          </span>
-          {status.unsynced > 0 && <span className="muted">{status.unsynced} unsent</span>}
-          <span className="muted" data-testid="last-flush">Written {time(status.lastFlushAt)}</span>
-          <span className="muted" data-testid="last-commit">
-            Committed {status.lastCommit ? `${status.lastCommit.slice(0, 7)} at ${time(status.lastCommitAt)}` : '—'}
-          </span>
-        </>
-      )}
-      {notice && <span className={`notice ${notice.kind}`}>{notice.text}</span>}
-      <span className="status-actions">{children}</span>
-    </footer>
-  );
-}
-
+/** Settings on their own: the first time, before a host is known. The menu has the same form. */
 export function SettingsDialog({ initial, shell, onSave, onCancel }: { initial: Settings; shell: Shell; onSave(s: Settings): void; onCancel?: () => void }) {
-  const [s, setS] = useState(initial);
-  const field = (key: keyof Settings, label: string, props: InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <label className="field">
-      <span>{label}</span>
-      <input value={s[key]} onChange={(e) => setS({ ...s, [key]: e.target.value })} name={key} {...props} />
-    </label>
-  );
   return (
     <div className="modal-backdrop">
-      <form
-        className="modal"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSave({ ...s, name: s.name.trim(), email: s.email.trim(), hostUrl: s.hostUrl.trim().replace(/\/$/, ''), token: s.token.trim() });
-        }}
-      >
+      <div className="modal">
         <h2>Settings</h2>
-        {field('name', 'Display name', { required: true, autoFocus: true })}
-        {field('email', 'Email, for co-author credit', { type: 'email' })}
-        {field('color', 'Cursor colour', { type: 'color' })}
-        {!shell.managesHost && field('hostUrl', 'Host URL', { required: true, type: 'url' })}
-        {!shell.managesHost && field('token', 'Access token', { required: true, type: 'password', autoComplete: 'off' })}
-        {(shell.openFolder || shell.leave) && (
-          <div className="modal-shell">
-            {shell.openFolder && <button type="button" onClick={shell.openFolder}>Open another folder…</button>}
-            {shell.leave && <button type="button" onClick={shell.leave}>Join a shared host…</button>}
-          </div>
-        )}
-        <div className="modal-actions">
-          {onCancel && <button type="button" onClick={onCancel}>Cancel</button>}
-          <button type="submit" className="primary">Save</button>
-        </div>
-      </form>
+        <SettingsForm initial={initial} shell={shell} onSave={onSave} onCancel={onCancel} autoFocus />
+      </div>
     </div>
-  );
-}
-
-const STATE: Record<string, string> = { none: 'not started', starting: 'starting…', ready: 'ready', busy: 'running', stopped: 'stopped', failed: 'failed' };
-
-/** The document's code session, in the status bar: engine, environment, Run all, Interrupt, Restart. */
-export function RunControls({ runner }: { runner: ChunkRunner }) {
-  useSyncExternalStore((fn) => runner.subscribe(fn), () => runner.version);
-  if (!runner.hasRunnableChunks) return null;
-  const s = runner.session;
-  const env = runner.info.environment;
-  const act = (p: Promise<unknown>) => void p.catch(() => undefined);
-  const where = env ? (env.available ? env.label : `${env.label}: not available`) : '';
-  const title = [s.state === 'starting' || s.state === 'failed' || s.state === 'stopped' ? s.message : null, env?.message].filter(Boolean).join('\n');
-  return (
-    <>
-      <span className={`r-state r-${s.state}${env && !env.sandboxed ? ' unsandboxed' : ''}${env && !env.available ? ' unavailable' : ''}`} title={title} data-testid="r-state">
-        {runner.engineLabel} {STATE[s.state] ?? s.state}
-        {s.state === 'starting' && s.message ? ` · ${s.message}` : ''}
-        {where ? ` · ${where}` : ''}
-      </span>
-      <button type="button" onClick={() => act(runner.runAll())} title="Run every chunk, top to bottom">Run all</button>
-      {runner.busy && <button type="button" onClick={() => act(runner.interrupt())} title="Interrupt, and drop queued runs">Interrupt</button>}
-      {s.state !== 'none' && <button type="button" onClick={() => act(runner.restart())} title="A fresh session: everything defined so far is gone">Restart</button>}
-      {runner.packageEngine && <PackagesButton runner={runner} engine={runner.packageEngine} />}
-    </>
-  );
-}
-
-function PackagesButton({ runner, engine }: { runner: ChunkRunner; engine: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} title="The workspace's packages: install, remove">Packages</button>
-      {/* On the page itself, not inside the status bar, whose styles (no wrapping) it would inherit. */}
-      {open && createPortal(<PackagesDialog runner={runner} engine={engine} onClose={() => setOpen(false)} />, document.body)}
-    </>
   );
 }
 
@@ -320,7 +248,7 @@ function PackagesButton({ runner, engine }: { runner: ChunkRunner; engine: strin
  * library, or used from the environment), and installing or removing. Installs
  * run on the host, apart from the workspace; everyone sees the result.
  */
-function PackagesDialog({ runner, engine, onClose }: { runner: ChunkRunner; engine: string; onClose(): void }) {
+export function PackagesDialog({ runner, engine, onClose }: { runner: ChunkRunner; engine: string; onClose(): void }) {
   useSyncExternalStore((fn) => runner.subscribe(fn), () => runner.version);
   const [list, setList] = useState<PackageInfo[] | null>(null);
   const [refs, setRefs] = useState('');

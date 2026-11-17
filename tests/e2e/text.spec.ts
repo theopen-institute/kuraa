@@ -55,7 +55,10 @@ test('an R script is highlighted, edits keep indentation and CRLF, and paste spl
   await expect(editor.locator('.tok-keyword', { hasText: 'function' })).toHaveCount(1);
   await expect(editor.locator('.tok-atom', { hasText: 'TRUE' })).toHaveCount(1);
   // No markdown machinery: no Source toggle, and markdown cues stay literal.
+  await page.getByTestId('menu-button').click();
+  await expect(page.getByTestId('menu')).toBeVisible();
   await expect(page.getByTestId('toggle-source')).toHaveCount(0);
+  await page.keyboard.press('Escape');
 
   // Enter keeps the indentation of the line it splits.
   await endOf(page, 'n = n())');

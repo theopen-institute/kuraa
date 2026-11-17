@@ -5,7 +5,9 @@ import { createRoot } from 'react-dom/client';
 import { TypeRegistry, type DocumentType } from '@kuraa/kernel';
 import { HostApi, type CommitInfo, type TreeFile, type WorkspaceInfo } from './api.js';
 import { Editor, type EditorStatus } from './Editor.js';
-import { FileTree, HistoryPanel, RunControls, SettingsDialog, StatusBar } from './panels.js';
+import { FileTree, HistoryPanel, PackagesDialog, SettingsDialog } from './panels.js';
+import { Menu, MenuButton } from './Menu.js';
+import type { ChunkRunner } from './runs.js';
 import { ReadOnlyCode, ReadOnlyDoc } from './ReadOnly.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -52,6 +54,19 @@ export function App({ types, overrides, defaults, shell = webShell, editors = {}
   const [historyOpen, setHistoryOpen] = useState(false);
   const [showSource, setShowSource] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'info' | 'warn'; text: string } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [packages, setPackages] = useState<{ runner: ChunkRunner; engine: string } | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault();
+        setMenuOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const pathRef = useRef(path);
   pathRef.current = path;
@@ -140,7 +155,11 @@ export function App({ types, overrides, defaults, shell = webShell, editors = {}
       {error && <div className="banner warn" role="alert">{error} <button type="button" onClick={() => setError(null)}>Dismiss</button></div>}
 
       <div className={`panes${historyOpen ? ' history-open' : ''}`}>
-        <FileTree api={api} files={files} selected={path} onSelect={select} onChanged={refreshTree} onError={setError} registry={registry} />
+        <FileTree
+          api={api} files={files} selected={path} onSelect={select} onChanged={refreshTree} onError={setError} registry={registry}
+          workspaceName={workspace?.name ?? 'Files'}
+          footer={<MenuButton status={status} hasDocument={!!path && !!type} onOpen={() => setMenuOpen(true)} />}
+        />
 
         <main className="pane pane-centre">
           {!path && <div className="empty">Choose a file on the left, or create one.</div>}
@@ -179,27 +198,34 @@ export function App({ types, overrides, defaults, shell = webShell, editors = {}
         {historyOpen && <HistoryPanel api={api} path={type ? path : null} refreshKey={historyKey} viewing={viewing?.commit.hash ?? null} onView={view} />}
       </div>
 
-      <StatusBar
-        status={status}
-        notice={notice ?? status?.notice ?? null}
-        path={path}
-        workspace={workspace ? `${workspace.name} on ${workspace.branch}${workspace.head ? ` @ ${workspace.head.slice(0, 7)}` : ''}` : settings.hostUrl || 'Not connected'}
-      >
-        {path && type && !viewing && status?.runner && <RunControls runner={status.runner} />}
-        {path && type && !viewing && (
-          <>
-            {!type.editor?.layout && (
-              <button type="button" className={showSource ? 'active' : ''} onClick={() => setShowSource((v) => !v)} data-testid="toggle-source">Source</button>
-            )}
-            <button type="button" onClick={() => void saveVersion()}>Save version</button>
-          </>
-        )}
-        <button type="button" className={historyOpen ? 'active' : ''} onClick={() => setHistoryOpen((v) => !v)} aria-pressed={historyOpen}>History</button>
-        <button type="button" onClick={() => void sync()} disabled={syncing || !workspace} title="Commit, fetch, merge and push against the upstream remote">
-          {syncing ? 'Syncing…' : 'Sync'}
-        </button>
-        <button type="button" onClick={() => setEditingSettings(true)}>Settings</button>
-      </StatusBar>
+      <Notice notice={notice ?? status?.notice ?? null} onDismiss={() => setNotice(null)} />
+
+      {menuOpen && (
+        <Menu
+          path={path}
+          type={type}
+          status={status}
+          workspace={workspace}
+          hostUrl={settings.hostUrl}
+          viewing={!!viewing}
+          showSource={showSource}
+          historyOpen={historyOpen}
+          syncing={syncing}
+          settings={settings}
+          shell={shell}
+          onToggleSource={() => setShowSource((v) => !v)}
+          onToggleHistory={() => setHistoryOpen((v) => !v)}
+          onSaveVersion={() => void saveVersion()}
+          onSync={() => void sync()}
+          onSaveSettings={(s) => {
+            saveSettings(s);
+            setSettings(s);
+          }}
+          onPackages={(runner, engine) => setPackages({ runner, engine })}
+          onClose={() => setMenuOpen(false)}
+        />
+      )}
+      {packages && <PackagesDialog runner={packages.runner} engine={packages.engine} onClose={() => setPackages(null)} />}
 
       {editingSettings && (
         <SettingsDialog
@@ -222,4 +248,25 @@ export function mountApp(element: HTMLElement, props: AppProps): () => void {
   const root = createRoot(element);
   root.render(<App {...props} />);
   return () => root.unmount();
+}
+
+/**
+ * What the status bar used to say in passing (an outside edit merged, a
+ * conflict, a version saved): a note in the corner. Information fades; warnings
+ * stay until dismissed.
+ */
+function Notice({ notice, onDismiss }: { notice: { kind: 'info' | 'warn'; text: string } | null; onDismiss(): void }) {
+  const [hidden, setHidden] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice || notice.kind === 'warn') return;
+    const t = setTimeout(() => setHidden(notice.text), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  if (!notice || hidden === notice.text) return null;
+  return (
+    <div className={`notice-toast ${notice.kind}`} role={notice.kind === 'warn' ? 'alert' : 'status'} data-testid="notice">
+      <span>{notice.text}</span>
+      <button type="button" aria-label="Dismiss" onClick={() => { setHidden(notice.text); onDismiss(); }}>×</button>
+    </div>
+  );
 }

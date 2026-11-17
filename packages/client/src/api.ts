@@ -68,6 +68,7 @@ export class HostApi {
   tree() { return this.json<{ files: TreeFile[] }>('/api/tree').then((r) => r.files); }
   room(path: string) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
+  createFolder(path: string) { return this.json('/api/folders', { method: 'POST', body: JSON.stringify({ path }) }); }
   createFile(path: string, content = '') { return this.json('/api/files', { method: 'POST', body: JSON.stringify({ path, content }) }); }
   renameFile(from: string, to: string) { return this.json('/api/files', { method: 'PATCH', body: JSON.stringify({ from, to }) }); }
   deleteFile(path: string) { return this.json(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); }

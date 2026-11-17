@@ -77,14 +77,14 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await openNotes(page);
 
     // The app manages this host: Settings has no host or token, and offers the shell's actions.
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByTestId('menu-button').click();
     await expect(page.getByLabel('Display name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Host URL')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open another folder…' })).toBeVisible();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.keyboard.press('Escape');
 
     // New and Rename ask in an in-app dialog (Electron has no window.prompt).
-    await page.getByRole('button', { name: /New/ }).click();
+    await page.getByRole('button', { name: 'New file', exact: true }).click();
     await page.getByTestId('ask').locator('input').fill('field/day-one.md');
     await page.getByTestId('ask').getByRole('button', { name: 'Create' }).click();
     await expect(page.getByTestId('file:field/day-one.md')).toBeVisible();
@@ -103,7 +103,9 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await typeAtEnd(page, 'The tide', ' Desktop edit.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
     await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
+    await page.getByTestId('menu-button').click();
     await expect(page.getByTestId('last-commit')).not.toContainText('—');
+    await page.keyboard.press('Escape');
 
     // M5 (a): another program edits elsewhere in the file while the user types.
     await typeAtEnd(page, 'The tide', ' Still typing.');
@@ -128,7 +130,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     // M5 (c): a conflicting outside edit to the paragraph being typed in.
     await typeAtEnd(page, 'Mateus', ' Live words.');
     writeFileSync(join(dir, 'notes.md'), read(dir).replace(/Mateus recalibrated[^\n]*/, 'Mateus did not recalibrate anything.'));
-    await expect(page.getByTestId('status')).toContainText('conflicting outside edit', { timeout: 10_000 });
+    await expect(page.getByTestId('notice')).toContainText('conflicting outside edit', { timeout: 10_000 });
     await expect(editorText(page)).toContainText('Live words.');
     await expect.poll(() => readdirSync(dir).some((f) => f.startsWith('notes.md.outside-'))).toBe(true);
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Live words.');
@@ -181,8 +183,8 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
     await typeAtEnd(page, 'Light rain', ' Opened from the launcher.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Opened from the launcher.');
 
-    // Settings → Join a shared host: back to the launcher; the embedded host stops and commits.
-    await page.getByRole('button', { name: 'Settings' }).click();
+    // Menu → Join a shared host: back to the launcher; the embedded host stops and commits.
+    await page.getByTestId('menu-button').click();
     await page.getByRole('button', { name: 'Join a shared host…' }).click();
     await expect(page.getByRole('button', { name: 'Open folder…' })).toBeVisible();
     expect(git(dir, 'status', '--porcelain')).toBe('');
@@ -198,7 +200,7 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
     await expect(page).toHaveTitle(`notes.md · ${basename(shared)} · kuraa`);
 
     // Joined, not managed: Settings shows the host and token.
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByTestId('menu-button').click();
     await expect(page.getByLabel('Host URL')).toHaveValue(host.url);
   } finally {
     await app.close();
@@ -230,6 +232,7 @@ test('runs R chunks in a Podman container by default', async () => {
     await expect(page.getByTestId('status')).toContainText('Connected');
     await page.locator('.code-node-code_chunk').getByRole('button', { name: '▶ Run' }).click();
     await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
+    await page.getByTestId('menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   } finally {
     await app.close();

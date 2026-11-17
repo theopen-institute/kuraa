@@ -38,6 +38,7 @@ async function sourceLine(page: Page, text: string, where: 'start' | 'end'): Pro
 test('edits in the source view reach the document and the file', async ({ browser }) => {
   const path = await create('# Notes\n\nThe tide was out.\n\nLight rain all morning.\n');
   const page = await open(browser, 'Sam', path);
+  await page.getByTestId('menu-button').click();
   await page.getByTestId('toggle-source').click();
   await expect(source(page)).toContainText('The tide was out.');
 
@@ -47,6 +48,7 @@ test('edits in the source view reach the document and the file', async ({ browse
   expect(onDisk(path)).toBe('# Notes\n\nThe tide was out.\n\nLight rain all morning. It cleared by noon.\n\n## Afternoon\n\nCores were **deep**.\n');
 
   // The rich view has the same, with structure.
+  await page.getByTestId('menu-button').click();
   await page.getByTestId('toggle-source').click();
   const editor = page.getByTestId('editor');
   await expect(editor.locator('h2')).toHaveText('Afternoon');
@@ -57,6 +59,7 @@ test('one person in the source view and one in the rich view, in the same paragr
   const path = await create('# Notes\n\nThe tide was out.\n\nLight rain all morning.\n');
   const ada = await open(browser, 'Ada', path);
   const bo = await open(browser, 'Bo', path);
+  await ada.getByTestId('menu-button').click();
   await ada.getByTestId('toggle-source').click();
   await expect(source(ada)).toContainText('The tide was out.');
 

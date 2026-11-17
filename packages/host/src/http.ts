@@ -191,6 +191,23 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     return send(res, 201, { path, commit });
   }
 
+  // A folder. git keeps no empty folders, so it gets a .gitkeep (which clients
+  // hide) and is committed, so collaborators and other clones have it too.
+  if (route === 'POST /api/folders') {
+    const body = await readBody(req);
+    const path = host.relPath(str(body.path, 'path')).replace(/\/+$/, '');
+    if (!path) throw new HttpError(400, 'Missing path');
+    const abs = host.resolvePath(path);
+    if (existsSync(abs)) throw new HttpError(409, 'A file or folder with that name exists');
+    const keep = `${path}/.gitkeep`;
+    const commit = await host.serial(async () => {
+      await mkdir(abs, { recursive: true });
+      await writeFile(join(abs, '.gitkeep'), '');
+      return host.commitPaths([keep], `Create folder ${path}`);
+    });
+    return send(res, 201, { path, commit });
+  }
+
   if (route === 'PATCH /api/files') {
     const body = await readBody(req);
     const from = host.relPath(str(body.from, 'from'));

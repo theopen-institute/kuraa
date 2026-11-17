@@ -43,7 +43,7 @@ test('pnpm dev serves the client against a live host with nothing to configure',
     await expect.poll(() => readFileSync(join(dir, 'notes.md'), 'utf8'), { timeout: 10_000 }).toContain('Light rain all morning. Typed in dev.');
 
     // The dev server supplies the host, so Settings has no host or token.
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByTestId('menu-button').click();
     await expect(page.getByLabel('Host URL')).toHaveCount(0);
   } finally {
     process.kill(-dev.pid!, 'SIGINT');

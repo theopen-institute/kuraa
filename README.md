@@ -54,10 +54,16 @@ co-author credit) and a cursor colour under **Settings** in the client.
 
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
-full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Source, Save version,
-History, Sync and Settings are at the right of the status bar. **Source** shows the markdown, and
-you can edit it there too, alongside others editing the rich view
-([decision 0015](docs/decisions/0015-editable-source.md)).
+full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
+
+The sidebar shows the workspace folder, with buttons for a new file (＋) and a new folder (⊞); each
+folder has the same on hover. Everything else is in the **menu**, from the bottom of the sidebar or
+⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
+others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
+**Save version**, when it was last written and committed; the code session; the workspace's branch,
+**Sync** and who is here; and your settings. The bottom of the sidebar shows whether you are
+connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
+as a note in the corner.
 
 ## Running R chunks
 
@@ -65,8 +71,7 @@ Where the host runs code, each R chunk has **Run** and **Run above** in its head
 the current line or the selection. Output appears under the chunk for everyone with the document
 open: text, messages, warnings, errors, data frames as tables, and plots at the chunk's
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
-runs; **Interrupt**, **Restart** and **Run all** are in the status bar, which also says where code
-runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
+runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also says where code runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
 
 Code runs through plugins: an **engine** (R) in an **environment**, which is where it runs and
 what it may touch ([decision 0013](docs/decisions/0013-run-plugins-and-sandboxing.md)):
@@ -92,7 +97,7 @@ Write access and the network are granted only if the host was started with `--al
 `--allow-network`.
 
 **Packages.** The environment starts with the tidyverse. Install more with `install.packages()` in
-a chunk, or the **Packages** button in the status bar (CRAN names, `name@version`, `bioc::name`, or
+a chunk, or **Packages…** in the menu (CRAN names, `name@version`, `bioc::name`, or
 `owner/repo` from GitHub). Installs run apart from your data, with the network; your code keeps
 running without it. Each workspace records its packages in `.kuraa/r-packages.json` (committed),
 so collaborators and other machines get the same ones; each package version is stored once per

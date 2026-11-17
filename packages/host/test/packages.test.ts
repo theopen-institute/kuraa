@@ -91,6 +91,13 @@ describe.skipIf(!READY)('R packages', () => {
     expect(lstatSync(join(wsLib, 'hellno')).isSymbolicLink()).toBe(true);
     expect(await run(h, 'suppressPackageStartupMessages(library(hellno)); is.function(hellno::data.frame)')).toBe('[1] TRUE\n');
     expect((await call(h, '/api/packages?engine=r')).body.packages).toEqual([{ name: 'hellno', version: manifest.packages.hellno.version, source: 'workspace' }]);
+
+    // Something the environment already has: nothing reinstalled, nothing lost from the manifest.
+    const again = await call(h, '/api/packages/install', { engine: 'r', refs: ['jsonlite'] });
+    expect(String(again.body.message)).toMatch(/^Already available: jsonlite \d/);
+    const after = JSON.parse(readFileSync(join(dir, '.kuraa/r-packages.json'), 'utf8'));
+    expect(Object.keys(after.packages)).toEqual(['hellno']);
+    expect(after.environment).toHaveProperty('jsonlite');
   }, 300_000);
 
   it('install.packages() in a chunk asks the host, and another workspace reuses the cache', async () => {

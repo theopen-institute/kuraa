@@ -43,6 +43,19 @@ local({
   }
   is_link <- function(path) nzchar(Sys.readlink(path))
 
+  # The workspace's library as it is, with a ref that installs each exact version again.
+  listing <- function() {
+    pkgs <- lapply(list.dirs(lib, recursive = FALSE, full.names = FALSE), function(n) {
+      d <- tryCatch(desc_of(file.path(lib, n)), error = function(e) NULL)
+      if (is.null(d)) return(NULL)
+      ref <- if (identical(d$RemoteType, "github")) paste0(d$RemoteUsername, "/", d$RemoteRepo, "@", d$RemoteSha)
+        else if (identical(d$RemoteType, "bioc")) paste0("bioc::", n)
+        else paste0(n, "@", d$Version)
+      list(name = n, version = d$Version, ref = ref)
+    })
+    Filter(Negate(is.null), pkgs)
+  }
+
   # What each ref names: pkg, pkg@1.2.3, bioc::pkg, owner/repo[@ref], github::owner/repo.
   refs <- unlist(req$refs)
   plain <- sub("@.*$", "", sub("^(bioc|cran)::", "", refs))
@@ -58,8 +71,23 @@ local({
       wanted_names <- c(wanted_names, u$name)
     }
   }
+  # Plain names that are already available (in the workspace or the environment)
+  # need nothing: say so, rather than reinstalling them and all they depend on.
+  plain_cran <- grepl("^(cran::)?[A-Za-z][A-Za-z0-9.]*$", refs)
+  present <- vapply(seq_along(refs), function(i) plain_cran[i] && !is.null(version_in(c(lib, image_libs), sub("^cran::", "", refs[i]))), logical(1))
+  already <- refs[present]
+  refs <- refs[!present]
+  wanted_names <- setdiff(wanted_names, sub("^cran::", "", already))
+  # Those the environment provides (not the workspace's library): to record as used.
+  from_env <- lapply(sub("^cran::", "", already), function(n) {
+    if (!is.null(version_in(lib, n))) return(NULL)
+    list(name = n, version = format(version_in(image_libs, n)))
+  })
+  from_env <- Filter(Negate(is.null), from_env)
   if (!length(refs)) {
-    send(list(type = "result", ok = TRUE, message = "Nothing to install.", installed = I(character()), packages = list()))
+    found <- vapply(already, function(n) paste(sub("^cran::", "", n), format(version_in(c(lib, image_libs), sub("^cran::", "", n)))), character(1))
+    send(list(type = "result", ok = TRUE, message = if (length(found)) paste0("Already available: ", paste(found, collapse = ", "), ".") else "Nothing to install.",
+              installed = I(character()), packages = listing(), environment = from_env))
     quit(save = "no", status = 0)
   }
 
@@ -72,7 +100,8 @@ local({
     sr <- tryCatch(pak::pkg_sysreqs(refs, upgrade = FALSE), error = function(e) NULL)
     if (!is.null(sr) && length(sr$packages$system_packages)) {
       need <- unique(unlist(sr$packages$system_packages))
-      have <- system2("dpkg-query", c("-W", paste0("-f=", "$", "{Package}\\n")), stdout = TRUE, stderr = FALSE)
+      # Quoted: system2() runs a shell, which would expand the format string.
+      have <- system2("dpkg-query", c("-W", shQuote(paste0("-f=", "$", "{Package}\\n"))), stdout = TRUE, stderr = FALSE)
       missing <- setdiff(need, have)
       if (length(missing)) fail("Some system libraries are needed first.", system = I(missing))
     }
@@ -143,15 +172,6 @@ local({
   }
   unlink(staging, recursive = TRUE)
 
-  # The library as it now is, with a ref that installs each exact version again.
-  pkgs <- lapply(list.dirs(lib, recursive = FALSE, full.names = FALSE), function(n) {
-    d <- tryCatch(desc_of(file.path(lib, n)), error = function(e) NULL)
-    if (is.null(d)) return(NULL)
-    ref <- if (identical(d$RemoteType, "github")) paste0(d$RemoteUsername, "/", d$RemoteRepo, "@", d$RemoteSha)
-      else if (identical(d$RemoteType, "bioc")) paste0("bioc::", n)
-      else paste0(n, "@", d$Version)
-    list(name = n, version = d$Version, ref = ref)
-  })
-  send(list(type = "result", ok = TRUE, installed = I(link), packages = Filter(Negate(is.null), pkgs)))
+  send(list(type = "result", ok = TRUE, installed = I(link), packages = listing(), environment = from_env))
 })
 `;

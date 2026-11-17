@@ -98,6 +98,8 @@ interface InstallerResult {
   system?: string[];
   installed?: string[];
   packages?: { name: string; version: string; ref: string }[];
+  /** Asked for, and provided by the environment itself: recorded as used from it. */
+  environment?: { name: string; version: string }[];
 }
 
 /** Run the installer: the network, no workspace, the library and cache writable. */
@@ -175,7 +177,10 @@ export const rPackages: PackageManager = {
       await saveManifest(ctx, m, `R packages: add system libraries ${result.system.join(', ')}`);
       ctx.status('Rebuilding the environment with the system libraries the packages need…');
       const again = await runInstaller(ctx, { refs });
-      if (!again.result.ok) return { ok: false, message: again.result.message ?? 'The install failed.', log: again.log, restart: false };
+      if (!again.result.ok) {
+        const still = again.result.system?.length ? `These system libraries are still missing after rebuilding the environment: ${again.result.system.join(', ')}.` : (again.result.message ?? 'The install failed.');
+        return { ok: false, message: still, log: again.log, restart: false };
+      }
       await recordInstall(ctx, refs, again.result);
       return { ok: true, message: `${describe(again.result)} New system libraries were added: restart R to use them.`, log: again.log, restart: true };
     }
@@ -235,13 +240,15 @@ export const rPackages: PackageManager = {
 async function recordInstall(ctx: PackageContext, refs: string[], result: InstallerResult): Promise<void> {
   const m = readManifest(ctx.workspace);
   m.requested = [...new Set([...m.requested, ...refs])];
-  m.packages = Object.fromEntries((result.packages ?? []).map((p) => [p.name, { version: p.version, ref: p.ref }]));
+  // The installer always reports the whole library; without a report, keep what is recorded.
+  if (result.packages) m.packages = Object.fromEntries(result.packages.map((p) => [p.name, { version: p.version, ref: p.ref }]));
+  for (const p of result.environment ?? []) m.environment[p.name] = p.version;
   await saveManifest(ctx, m, `R packages: install ${refs.join(', ')}`);
 }
 
 function describe(result: InstallerResult): string {
   const n = result.installed?.length ?? 0;
-  if (!n) return 'Already installed.';
+  if (!n) return result.message ?? 'Already installed.';
   const shown = result.installed!.slice(0, 6).join(', ');
   return `Installed ${shown}${n > 6 ? ` and ${n - 6} more` : ''}.`;
 }

@@ -245,6 +245,18 @@ describe.skipIf(!PODMAN_OK)('R packages in Podman', () => {
       const manifest = JSON.parse(readFileSync(join(dir, '.kuraa/r-packages.json'), 'utf8'));
       expect(Object.keys(manifest.packages)).toContain('hellno');
       expect(manifest.environment).toHaveProperty('dplyr');
+
+      // Already in the environment: says so at once, and does not reinstall it.
+      const tidy = await api('/api/packages/install', { engine: 'r', refs: ['tidyverse'] });
+      expect(String(tidy.message)).toMatch(/^Already available: tidyverse \d/);
+
+      // A package whose system libraries the image lacks: they are added, the image is
+      // rebuilt, the package installed; after a restart, R loads it.
+      const pdf = await api('/api/packages/install', { engine: 'r', refs: ['pdftools'] });
+      expect(pdf).toMatchObject({ ok: true, restart: true });
+      expect(JSON.parse(readFileSync(join(dir, '.kuraa/r-packages.json'), 'utf8')).system).toContain('libpoppler-cpp-dev');
+      await api('/api/runs/restart', { path: DOC });
+      expect(await run('suppressPackageStartupMessages(library(pdftools)); is.function(pdf_text)')).toBe('[1] TRUE\n');
     } finally {
       await running.close();
       rmSync(dir, { recursive: true, force: true });

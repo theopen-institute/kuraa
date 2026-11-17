@@ -129,7 +129,7 @@ test('the Packages panel installs and removes packages for the workspace', async
   expect(res.status).toBe(201);
   const page = await open(browser, 'Pat', path);
 
-  await page.getByRole('button', { name: 'Packages' }).click();
+  await page.getByRole('button', { name: 'Packages', exact: true }).click();
   const dialog = page.getByTestId('packages');
   await expect(dialog.getByRole('heading')).toHaveText('R packages');
   await dialog.getByLabel('Packages to install').fill('hellno');
@@ -143,7 +143,7 @@ test('the Packages panel installs and removes packages for the workspace', async
   expect(JSON.parse(readFileSync(join(E2E.dir, '.kuraa/r-packages.json'), 'utf8')).requested).toContain('hellno');
 
   // A URL is not a package name: refused before anything is fetched.
-  await page.getByRole('button', { name: 'Packages' }).click();
+  await page.getByRole('button', { name: 'Packages', exact: true }).click();
   await dialog.getByLabel('Packages to install').fill('https://example.org/evil.tar.gz');
   await dialog.getByRole('button', { name: 'Install' }).click();
   await expect(dialog.locator('.packages-result.warn')).toContainText('Not a package name this host installs');

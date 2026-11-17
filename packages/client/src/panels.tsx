@@ -1,5 +1,6 @@
 // The panels around the editor: file tree, history, status bar and settings.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { CommitInfo, HostApi, PackageInfo, PackageResult, TreeFile } from './api.js';
 import type { EditorStatus } from './Editor.js';
 import type { Settings } from './settings.js';
@@ -300,7 +301,8 @@ function PackagesButton({ runner, engine }: { runner: ChunkRunner; engine: strin
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} title="The workspace's packages: install, remove">Packages</button>
-      {open && <PackagesDialog runner={runner} engine={engine} onClose={() => setOpen(false)} />}
+      {/* On the page itself, not inside the status bar, whose styles (no wrapping) it would inherit. */}
+      {open && createPortal(<PackagesDialog runner={runner} engine={engine} onClose={() => setOpen(false)} />, document.body)}
     </>
   );
 }
@@ -318,6 +320,8 @@ function PackagesDialog({ runner, engine, onClose }: { runner: ChunkRunner; engi
   const [result, setResult] = useState<{ ok: boolean; message: string; log?: string } | null>(null);
   const label = runner.info.engines.find((e) => e.id === engine)?.label ?? engine;
   const news = runner.packageNews;
+  const ours = (list ?? []).filter((p) => p.source === 'workspace');
+  const theirs = (list ?? []).filter((p) => p.source === 'environment');
 
   const refresh = useCallback(() => {
     runner.listPackages(engine).then(setList, (e: Error) => setResult({ ok: false, message: e.message }));
@@ -361,26 +365,39 @@ function PackagesDialog({ runner, engine, onClose }: { runner: ChunkRunner; engi
             {!result.ok && result.log && <details><summary>Details</summary><pre>{result.log.slice(-4000)}</pre></details>}
           </div>
         )}
-        <div className="packages-list">
-          {list === null ? <p className="muted">Loading…</p> : list.length === 0 ? <p className="muted">No packages installed in this workspace yet. The environment's own packages are available too.</p> : (
-            <table>
-              <tbody>
-                {list.map((p) => (
-                  <tr key={`${p.source}:${p.name}`}>
-                    <td className="pkg-name">{p.name}</td>
-                    <td className="pkg-version">{p.version}</td>
-                    <td className="pkg-source muted">{p.source === 'workspace' ? 'workspace' : 'from the environment'}</td>
-                    <td>
-                      {p.source === 'workspace' && runner.info.allowInstalls && (
-                        <button type="button" disabled={busy} onClick={() => void act(runner.removePackages(engine, [p.name]))} title={`Remove ${p.name} from this workspace`}>Remove</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        {list === null ? <p className="muted">Loading…</p> : (
+          <div className="packages-list">
+            <section>
+              <h3>In this workspace</h3>
+              {ours.length === 0 ? <p className="muted">None installed yet. The environment's own packages are available too.</p> : (
+                <table>
+                  <tbody>
+                    {ours.map((p) => (
+                      <tr key={p.name}>
+                        <td className="pkg-name">{p.name}</td>
+                        <td className="pkg-version">{p.version}</td>
+                        <td className="pkg-action">
+                          {runner.info.allowInstalls && (
+                            <button type="button" disabled={busy} onClick={() => void act(runner.removePackages(engine, [p.name]))} title={`Remove ${p.name} from this workspace`}>Remove</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+            {theirs.length > 0 && (
+              <details>
+                <summary>From the environment ({theirs.length})</summary>
+                <p className="muted packages-env-note">Part of the environment itself, and recorded because this workspace uses them.</p>
+                <ul className="pkg-chips">
+                  {theirs.map((p) => <li key={p.name}><span className="pkg-name">{p.name}</span> <span className="pkg-version">{p.version}</span></li>)}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
         <p className="muted packages-note">Recorded in .kuraa/r-packages.json, so others get the same packages. In a chunk, install.packages() works too.</p>
         <div className="modal-actions"><button type="button" onClick={onClose} disabled={busy}>Close</button></div>
       </div>

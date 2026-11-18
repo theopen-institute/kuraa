@@ -35,7 +35,13 @@ const props = defineProps<{
   /** Show the Header dialog (if the format has a header). */
   headerOpen?: boolean;
 }>();
-const emit = defineEmits<{ status: [status: EditorStatus]; committed: []; closeHeader: [] }>();
+const emit = defineEmits<{
+  status: [status: EditorStatus];
+  committed: [];
+  closeHeader: [];
+  /** The document's title as it is now, for a type with titles (null: none). */
+  title: [title: string | null];
+}>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
 const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
@@ -95,6 +101,21 @@ function onBlankMouseDown(e: MouseEvent) {
   // Focus first, so a cursor inside a code block can hand focus on to its CodeMirror.
   v.focus();
   v.dispatch(v.state.tr.setSelection(selection).scrollIntoView());
+}
+
+let lastTitle: string | null | undefined;
+/** Whether a change to the first block could change the title: it is (or was) the header, if the format says which block that is. */
+function touchesHeader(before: EditorView['state']['doc'], after: EditorView['state']['doc']) {
+  const node = props.formatEditor?.header?.node;
+  return !node || before.firstChild?.type.name === node || after.firstChild?.type.name === node;
+}
+function reportTitle(doc: EditorView['state']['doc'], force = false) {
+  const titles = props.type.title;
+  if (!titles) return;
+  const title = titles.read(props.type.serialize(doc));
+  if (!force && title === lastTitle) return;
+  lastTitle = title;
+  emit('title', title);
 }
 
 /** Connect to the file's room and build the editor. Returns how to undo it. */
@@ -168,6 +189,8 @@ function open(): () => void {
         this.updateState(this.state.apply(tr));
         source?.documentChanged(tr); // the source view follows the live document
         if (tr.docChanged && props.headerOpen) docVersion.value++;
+        // The title is in the header, the first block: read it again when that changes.
+        if (tr.docChanged && tr.doc.firstChild !== tr.before.firstChild && touchesHeader(tr.before, tr.doc)) reportTitle(tr.doc);
         if (runner && tr.docChanged) {
           clearTimeout(chunkTimer);
           // By the time this runs, construction is over and pmView is set.
@@ -185,6 +208,7 @@ function open(): () => void {
     }
     view.value = markRaw(pmView);
     loading.value = false;
+    reportTitle(pmView.state.doc, true);
   })().catch((err: Error) => {
     if (!cancelled) {
       error.value = err.message;

@@ -109,7 +109,7 @@ describe('host', () => {
     expect(ws.branch).toBe('main');
     expect(ws.types.map((t: { id: string }) => t.id)).toEqual(['pandoc-markdown', 'rmarkdown', 'text']);
     const tree = await (await api('/api/tree')).json();
-    expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown' });
+    expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown', title: 'Field notes' });
   });
 
   it('M2: two clients converge and see each other', async () => {
@@ -278,6 +278,39 @@ describe('host', () => {
     expect(c.read().child(2).textContent).toBe('x <- c(1, 2, 3, 4)');
     await until(() => git(dir, 'status', '--porcelain', '--', 'clean.R') === '', 5000, 'commit');
     expect(git(dir, 'show', 'HEAD:clean.R')).toBe('library(dplyr)\r\n\r\nx <- c(1, 2, 3, 4)\r\nmedian(x)');
+  });
+
+  it('lists documents by title, and gives them new ones, live in open rooms', async () => {
+    writeFileSync(join(dir, 'clean.R'), 'x <- 1\n');
+    const tree = async () => ((await (await api('/api/tree')).json()) as { files: { path: string; title?: string | null }[] }).files;
+    const titleOf = async (p: string) => (await tree()).find((f) => f.path === p)?.title;
+    expect(await titleOf('notes.md')).toBe('Field notes');
+    expect(await titleOf('other.md')).toBe(null);
+    expect((await tree()).find((f) => f.path === 'clean.R')).not.toHaveProperty('title');
+
+    // A new title for an open document: everyone editing it sees it, and it is committed.
+    const c = await connect('notes.md');
+    const patch = (body: object) => api('/api/files', { method: 'PATCH', body: JSON.stringify(body) });
+    expect((await patch({ from: 'notes.md', to: 'notes.md', title: 'Harbour notes: day one' })).status).toBe(200);
+    await until(() => c.read().firstChild!.textContent === 'title: "Harbour notes: day one"', 5000, 'title in the room');
+    expect(file()).toMatch(/^---\ntitle: "Harbour notes: day one"\n---\n\n# Day one/);
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Retitle notes.md: Harbour notes: day one');
+    expect(await titleOf('notes.md')).toBe('Harbour notes: day one');
+    // The open room's title is the live one.
+    c.write(insertAt(c.read(), 'Harbour notes', 'Big '));
+    await until(async () => (await titleOf('notes.md')) === 'Big Harbour notes: day one', 5000, 'live title');
+
+    // Renamed and titled at once: one commit.
+    expect((await patch({ from: 'other.md', to: 'other-things.md', title: 'Other things' })).status).toBe(200);
+    expect(file('other-things.md')).toBe('---\ntitle: Other things\n---\n\n# Other\n');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Rename other.md to other-things.md');
+    expect(git(dir, 'status', '--porcelain', '--', 'other.md', 'other-things.md')).toBe('');
+
+    // No empty titles, and no titles for files that are not documents.
+    expect((await patch({ from: 'other-things.md', to: 'other-things.md', title: '  ' })).status).toBe(400);
+    expect((await patch({ from: 'clean.R', to: 'clean.R', title: 'A script' })).status).toBe(400);
+    expect((await patch({ from: 'other-things.md', to: 'other-things.txt', title: 'Text' })).status).toBe(400);
+    expect(existsSync(join(dir, 'other-things.md'))).toBe(true);
   });
 
   it('creates, renames and deletes files, committing each change', async () => {

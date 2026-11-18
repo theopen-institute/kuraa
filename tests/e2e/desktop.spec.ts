@@ -71,7 +71,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
   const { app, page } = await launch(['--open', dir], { flushMs: 1500, idleCommitMs: 2500, maxCommitMs: 20_000, dropMs: 1000 });
   try {
     await openNotes(page);
-    await expect(page).toHaveTitle(`notes.md · ${basename(dir)} · kuraa`);
+    await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · kuraa`);
 
     // The connection comes through the preload bridge, so a reload keeps it.
     await page.reload();
@@ -84,20 +84,20 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await expect(page.getByRole('button', { name: 'Open another folder…' })).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // New and Rename ask in an in-app dialog (Electron has no window.prompt).
+    // New and Rename ask in in-app dialogs (Electron has no window.prompt).
     await page.getByRole('button', { name: 'New file', exact: true }).click();
-    await page.getByTestId('ask').locator('input').fill('field/day-one.md');
-    await page.getByTestId('ask').getByRole('button', { name: 'Create' }).click();
-    await expect(page.getByTestId('file:field/day-one.md')).toBeVisible();
-    await expect.poll(() => existsSync(join(dir, 'field/day-one.md'))).toBe(true);
-    const row = page.locator('li.tree-file', { has: page.getByTestId('file:field/day-one.md') });
+    await page.getByTestId('new-file').getByLabel('Title').fill('Day one');
+    await page.getByTestId('new-file').getByRole('button', { name: 'Create' }).click();
+    await expect(page.getByTestId('file:day-one.md')).toContainText('Day one');
+    await expect.poll(() => existsSync(join(dir, 'day-one.md'))).toBe(true);
+    const row = page.locator('li.tree-file', { has: page.getByTestId('file:day-one.md') });
     await row.hover();
     await row.getByTitle('Rename').click();
-    await page.getByTestId('ask').locator('input').fill('field/day-1.md');
-    await page.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
-    await expect(page.getByTestId('file:field/day-1.md')).toBeVisible();
-    await expect.poll(() => existsSync(join(dir, 'field/day-1.md'))).toBe(true);
-    expect(existsSync(join(dir, 'field/day-one.md'))).toBe(false);
+    await page.getByTestId('rename').getByLabel('Title').fill('Day 1');
+    await page.getByTestId('rename').getByRole('button', { name: 'Rename' }).click();
+    await expect(page.getByTestId('file:day-1.md')).toContainText('Day 1');
+    await expect.poll(() => existsSync(join(dir, 'day-1.md'))).toBe(true);
+    expect(existsSync(join(dir, 'day-one.md'))).toBe(false);
     await openNotes(page);
 
     // Edit and commit.
@@ -152,7 +152,7 @@ test('joins a shared host without starting one', async () => {
     const { app, page } = await launch(['--join', host.url, '--token', host.token], {});
     try {
       await openNotes(page);
-      await expect(page).toHaveTitle(`notes.md · ${basename(dir)} · kuraa`);
+      await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · kuraa`);
       await typeAtEnd(page, 'Light rain', ' Joined from the desktop.');
       await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Light rain all morning. Joined from the desktop.');
       await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
@@ -198,7 +198,7 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
     await page.getByLabel('Access token').fill(host.token);
     await page.getByRole('button', { name: 'Join' }).click();
     await openNotes(page);
-    await expect(page).toHaveTitle(`notes.md · ${basename(shared)} · kuraa`);
+    await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
 
     // Joined, not managed: Settings shows the host and token.
     await page.getByTestId('menu-button').click();

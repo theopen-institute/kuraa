@@ -24,7 +24,8 @@ export interface ComponentsInfo {
 export interface PackageInfo { name: string; version: string; source: 'workspace' | 'environment' }
 export interface PackageResult { ok: boolean; message: string; log: string; restart: boolean }
 export interface RunRequest { path: string; engine: string; code: string; header: string; chunk: ChunkRef; by: { name: string; email: string; color: string } }
-export interface TreeFile { path: string; type: string | null }
+/** A file in the workspace. A document has a title (null if it has none yet); other files have no `title`. */
+export interface TreeFile { path: string; type: string | null; title?: string | null }
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;
@@ -77,7 +78,8 @@ export class HostApi {
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
   createFolder(path: string) { return this.json('/api/folders', { method: 'POST', body: JSON.stringify({ path }) }); }
   createFile(path: string, content = '') { return this.json('/api/files', { method: 'POST', body: JSON.stringify({ path, content }) }); }
-  renameFile(from: string, to: string) { return this.json('/api/files', { method: 'PATCH', body: JSON.stringify({ from, to }) }); }
+  /** Rename or move a file or folder; for a document, `title` also gives it a new title (`to` may then equal `from`). */
+  renameFile(from: string, to: string, title?: string) { return this.json('/api/files', { method: 'PATCH', body: JSON.stringify({ from, to, title }) }); }
   deleteFile(path: string) { return this.json(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); }
   version(path: string | null, message: string) { return this.json<{ commit: string | null }>('/api/versions', { method: 'POST', body: JSON.stringify({ path, message }) }); }
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }

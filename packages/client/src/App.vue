@@ -55,6 +55,14 @@ const notice = shallowRef<Notice | null>(null);
 const menuOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 const componentsOpen = ref(false);
+/** The open document's title as it is being edited, ahead of the host's list. */
+const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
+/** The files, with the open document's live title. */
+const shownFiles = computed(() => {
+  const live = liveTitle.value;
+  if (!live) return files.value;
+  return files.value.map((f) => (f.path === live.path && 'title' in f && f.title !== live.title ? { ...f, title: live.title } : f));
+});
 /** The Header dialog is open for the open file. */
 const headerOpen = ref(false);
 
@@ -81,6 +89,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 function select(next: string | null) {
   if (next === path.value) return;
   headerOpen.value = false;
+  liveTitle.value = null;
   viewing.value = null;
   status.value = null;
   notice.value = null;
@@ -118,11 +127,13 @@ watch(path, (p) => {
   } catch { /* storage unavailable */ }
 });
 
-watchEffect(() => {
-  document.title = [path.value?.slice(path.value.lastIndexOf('/') + 1), workspace.value?.name, 'kuraa'].filter(Boolean).join(' · ');
-});
+const file = computed(() => shownFiles.value.find((f) => f.path === path.value) ?? null);
+/** What the open file is called: its title, or its filename. */
+const fileName = computed(() => (file.value?.title || path.value?.slice(path.value.lastIndexOf('/') + 1)) ?? null);
 
-const file = computed(() => files.value.find((f) => f.path === path.value) ?? null);
+watchEffect(() => {
+  document.title = [fileName.value, workspace.value?.name, 'kuraa'].filter(Boolean).join(' · ');
+});
 const type = computed(() => (file.value?.type ? registry.value.get(file.value.type) : undefined));
 const hostType = computed(() => workspace.value?.types.find((t) => t.id === file.value?.type));
 const versionMismatch = computed(() => !!type.value && !!hostType.value && hostType.value.version !== type.value.version);
@@ -188,7 +199,7 @@ function useSettings(s: Settings) {
     <div :class="['panes', { 'history-open': historyOpen }]">
       <FileTree
         :api="api"
-        :files="files"
+        :files="shownFiles"
         :selected="path"
         :registry="hostRegistry"
         :workspace-name="workspace?.name ?? 'Files'"
@@ -223,6 +234,7 @@ function useSettings(s: Settings) {
               :header-open="headerOpen"
               @status="(s) => (status = s)"
               @close-header="headerOpen = false"
+              @title="(t) => (liveTitle = { path: path!, title: t })"
               @committed="historyKey++"
             />
           </div>
@@ -258,6 +270,7 @@ function useSettings(s: Settings) {
     <Menu
       v-if="menuOpen"
       :path="path"
+      :name="fileName"
       :type="type"
       :status="status"
       :workspace="workspace"

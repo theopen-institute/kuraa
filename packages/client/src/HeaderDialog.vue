@@ -9,7 +9,7 @@
 import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 import type { HeaderField, HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
-import { entryFor, headerText, mergeHeader, readEntries, today, writeHeader, yamlError, type Entry } from './header.js';
+import { emptyRequired, entryFor, headerText, mergeHeader, readEntries, today, withRequired, writeHeader, yamlError, type Entry } from './header.js';
 import { askConfirm } from './ask.js';
 import { onEscape, vFocus } from './vue.js';
 import HeaderList from './HeaderList.vue';
@@ -44,9 +44,18 @@ const first = readEntries(opened, props.spec);
 if ('error' in first) {
   mode.value = 'yaml';
   problem.value = first.error;
-} else entries.value = first.entries;
+} else entries.value = withRequired(first.entries, props.spec);
 
-const yamlProblem = computed(() => (mode.value === 'yaml' ? yamlError(yaml.value) : null));
+const required = (key: string) => !!props.spec.required?.includes(key);
+const needs = (keys: string[]) => (keys.length ? `A document needs a ${keys.map((k) => props.spec.fields.find((f) => f.key === k)?.label.toLowerCase() ?? k).join(' and a ')}.` : null);
+const yamlProblem = computed(() => {
+  if (mode.value !== 'yaml') return null;
+  const bad = yamlError(yaml.value);
+  if (bad) return bad;
+  const read = readEntries(yaml.value, props.spec);
+  return 'error' in read ? null : needs(emptyRequired(read.entries, props.spec));
+});
+const missing = computed(() => (mode.value === 'fields' ? emptyRequired(entries.value, props.spec) : []));
 const changedMeanwhile = shallowRef(false);
 watch(() => props.version, () => {
   changedMeanwhile.value = live() !== opened;
@@ -109,7 +118,7 @@ function toYaml() {
 }
 
 function toFields() {
-  if (mode.value === 'fields' || yamlProblem.value) return;
+  if (mode.value === 'fields' || yamlError(yaml.value)) return;
   if (yamlEdited.value || problem.value) {
     const read = readEntries(yaml.value, props.spec);
     if ('error' in read) {
@@ -118,7 +127,7 @@ function toFields() {
     }
     base = yaml.value;
     whole.value = true;
-    entries.value = read.entries;
+    entries.value = withRequired(read.entries, props.spec);
     removed.value = [];
     problem.value = null;
   }
@@ -126,7 +135,7 @@ function toFields() {
 }
 
 const label = (e: Entry) => e.field?.label ?? e.key;
-const canSave = computed(() => (mode.value === 'yaml' ? !yamlProblem.value : !entries.value.some((e) => e.error)));
+const canSave = computed(() => (mode.value === 'yaml' ? !yamlProblem.value : !entries.value.some((e) => e.error) && !missing.value.length));
 
 /** Write the whole header, asking first if that would undo someone else's change. */
 async function replace(text: string | null) {
@@ -183,7 +192,7 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
           <p class="muted">{{ name }} · what Pandoc reads from the top of the file</p>
         </div>
         <div v-if="!adding" class="segmented" role="tablist" aria-label="Edit as">
-          <button type="button" role="tab" :aria-selected="mode === 'fields'" :class="{ active: mode === 'fields' }" :disabled="!!yamlProblem" data-testid="header-fields-tab" @click="toFields">Fields</button>
+          <button type="button" role="tab" :aria-selected="mode === 'fields'" :class="{ active: mode === 'fields' }" :disabled="!!yamlError(yaml)" data-testid="header-fields-tab" @click="toFields">Fields</button>
           <button type="button" role="tab" :aria-selected="mode === 'yaml'" :class="{ active: mode === 'yaml' }" data-testid="header-yaml-tab" @click="toYaml">YAML</button>
         </div>
       </div>
@@ -250,11 +259,13 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
               />
             </template>
             <p v-if="e.error" class="header-error">{{ e.error }}</p>
+            <p v-else-if="missing.includes(e.key)" class="header-error" data-testid="header-required">{{ needs([e.key]) }}</p>
             <p v-else-if="e.kind === 'yaml' && e.field && e.field.kind !== 'yaml'" class="header-help">Edited as YAML: it holds more than {{ e.field.kind === 'list' ? 'lines of text' : 'one value' }}.</p>
             <p v-else-if="e.field?.description" class="header-help">{{ e.field.description }}</p>
             <p v-else-if="!e.field" class="header-help">A field of your own.</p>
           </div>
-          <button type="button" class="header-remove" :title="`Remove ${label(e)}`" :aria-label="`Remove ${label(e)}`" @click="remove(i)">✕</button>
+          <span v-if="required(e.key)" class="header-remove-placeholder" />
+          <button v-else type="button" class="header-remove" :title="`Remove ${label(e)}`" :aria-label="`Remove ${label(e)}`" @click="remove(i)">✕</button>
         </div>
       </div>
 

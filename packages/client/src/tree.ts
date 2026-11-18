@@ -2,7 +2,22 @@
 import type { InjectionKey, Ref } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { TreeFile } from './api.js';
-import type { FileTypeChoice } from './ask.js';
+
+export interface FileTypeChoice {
+  id: string;
+  label: string;
+  /** The usual extension for new files of this type, with the dot. */
+  extension: string;
+  /** Heading the type is listed under. */
+  group: string;
+  /** Documents of this type have a title: a new one is asked for its title, not a filename. */
+  titled: boolean;
+}
+
+const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+/** What the sidebar shows for a file: a document's title, or its filename (a document without a title, or not a document). */
+export const shownName = (f: TreeFile): string => f.title || nameOf(f.path);
 
 export interface Folder { name: string; path: string; folders: Map<string, Folder>; files: TreeFile[] }
 
@@ -32,6 +47,12 @@ export function buildTree(files: TreeFile[]): Folder {
     }
     if (parts[parts.length - 1] !== PLACEHOLDER) dir.files.push(f);
   }
+  // Files in the order people read them: by title (or filename), numbers in order.
+  const sort = (dir: Folder) => {
+    dir.files.sort((a, b) => shownName(a).localeCompare(shownName(b), undefined, { numeric: true, sensitivity: 'base' }) || a.path.localeCompare(b.path));
+    for (const d of dir.folders.values()) sort(d);
+  };
+  sort(root);
   return root;
 }
 
@@ -39,7 +60,7 @@ export function buildTree(files: TreeFile[]): Folder {
 export function fileTypeChoices(registry: TypeRegistry): FileTypeChoice[] {
   const choices = registry.all()
     .filter((t) => t.extensions?.length)
-    .map((t) => ({ id: t.id, label: t.label, extension: t.extensions![0]!, group: t.editor?.layout ? 'Text and source files' : 'Documents' }));
+    .map((t) => ({ id: t.id, label: t.label, extension: t.extensions![0]!, group: t.editor?.layout ? 'Text and source files' : 'Documents', titled: !!t.title }));
   const rank = (c: FileTypeChoice) => (c.group === 'Documents' ? 0 : 1);
   return choices.sort((a, b) => rank(a) - rank(b) || (a.id === 'pandoc-markdown' ? -1 : b.id === 'pandoc-markdown' ? 1 : a.label.localeCompare(b.label)));
 }

@@ -92,7 +92,8 @@ export const pandocHeaderFields: HeaderField[] = [
 
 export function headerSpec(extra: HeaderField[] = []): HeaderSpec {
   const keys = new Set(extra.map((f) => f.key));
-  return { node: HEADER_NODE, fields: [...pandocHeaderFields.filter((f) => !keys.has(f.key)), ...extra] };
+  // Every document has a title: the sidebar shows it, and filenames are made from it.
+  return { node: HEADER_NODE, fields: [...pandocHeaderFields.filter((f) => !keys.has(f.key)), ...extra], required: ['title'] };
 }
 
 /** The header block, drawn as nothing. */

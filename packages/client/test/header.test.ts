@@ -136,3 +136,17 @@ describe('the header in the document', () => {
     expect(view.state.doc.firstChild!.type.name).toBe('paragraph');
   });
 });
+
+describe('the title every document has', () => {
+  it('is added first, empty, when the header has none, and saved first', async () => {
+    const { withRequired, emptyRequired } = await import('../src/header.js');
+    const list = withRequired(entries('author: Ada\nlang: fr'), spec);
+    expect(list.map((e) => e.key)).toEqual(['title', 'author', 'lang']);
+    expect(emptyRequired(list, spec)).toEqual(['title']);
+    list[0]!.value = 'At last';
+    expect(emptyRequired(list, spec)).toEqual([]);
+    expect(mergeHeader('author: Ada\nlang: fr', list, [])).toBe('title: At last\nauthor: Ada\nlang: fr');
+    // A header with a title is left as it is.
+    expect(withRequired(entries('title: Here\nauthor: Ada'), spec).map((e) => e.key)).toEqual(['title', 'author']);
+  });
+});

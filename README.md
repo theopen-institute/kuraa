@@ -60,7 +60,10 @@ so on) and it is formatted as you type; Backspace straight afterwards undoes the
 full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
 
 The sidebar shows the workspace folder, with buttons for a new file (＋) and a new folder (⊞); each
-folder has the same on hover. Drag a file or folder onto a folder to move it there, or onto the
+folder has the same on hover. Documents (Markdown and R Markdown) are listed by their **title**;
+text and source files by filename. A new document is asked for its title, and its filename is made
+from it (`Tidal notes: Café` → `tidal-notes-cafe.md`); **Rename…** changes a document's title and
+its filename, together or apart ([decision 0022](docs/decisions/0022-titles-and-filenames.md)). Drag a file or folder onto a folder to move it there, or onto the
 workspace name to move it to the top level; each move is committed. Right-click a file for
 **Open**, **Header…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it and **Rename…** (everything in it goes with it).
 

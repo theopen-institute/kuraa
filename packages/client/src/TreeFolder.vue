@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // One folder's contents in the sidebar: its folders (each drawn by this same
-// component), then its files.
+// component), then its files: documents by title, other files by filename.
 import { computed, inject } from 'vue';
-import { TREE, type Folder } from './tree.js';
+import type { TreeFile } from './api.js';
+import { shownName, TREE, type Folder } from './tree.js';
 
 const props = defineProps<{ folder: Folder; depth: number }>();
 const t = inject(TREE)!;
@@ -10,7 +11,13 @@ const { selected, collapsed, dragging, over } = t;
 
 const folders = computed(() => [...props.folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)));
 const indent = computed(() => ({ paddingLeft: `${8 + props.depth * 14}px` }));
-const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+/** A document still without a title shows its filename, dimmed. */
+const untitled = (f: TreeFile) => f.title === null;
+const tip = (f: TreeFile) => {
+  if (!f.type) return `${f.path}: no document type opens this file`;
+  if (untitled(f)) return `${f.path}: no title yet (Rename… or Header… gives it one)`;
+  return f.title ? `${f.title}\n${f.path}` : f.path;
+};
 </script>
 
 <template>
@@ -42,7 +49,7 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
   <li
     v-for="f in folder.files"
     :key="f.path"
-    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, dragging: dragging === f.path }]"
+    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path }]"
     draggable="true"
     @dragstart="t.dragStart($event, f.path)"
     @dragend="t.dragEnd()"
@@ -53,11 +60,11 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
       class="tree-row"
       :style="indent"
       :disabled="!f.type"
-      :title="f.type ? f.path : `${f.path}: no document type opens this file`"
+      :title="tip(f)"
       :data-testid="`file:${f.path}`"
       @click="t.select(f.path)"
     >
-      <span class="tree-icon">{{ f.type ? '◇' : '·' }}</span>{{ nameOf(f.path) }}
+      <span class="tree-icon">{{ f.type ? '◇' : '·' }}</span><span class="tree-name">{{ shownName(f) }}</span>
     </button>
     <span class="tree-actions">
       <button type="button" title="Rename" @click="t.rename(f.path)">✎</button>

@@ -69,6 +69,8 @@ export interface HeaderSpec {
   node: string;
   /** The fields the format knows, offered when adding one. Others can be added by name. */
   fields: HeaderField[];
+  /** Fields every document has: always shown, first if missing, and never left empty or removed ('title'). */
+  required?: string[];
 }
 
 /** A header field the format knows: how it is called, what it does, and how it is edited. */

@@ -80,8 +80,21 @@ export interface DocumentType {
    * back from the previous source text, byte for byte.
    */
   serialize(doc: Node, previous?: ParsedDocument): string;
+  /**
+   * Documents have a title, shown for them instead of their filename (in the
+   * sidebar, say) and asked for when one is made. Types without (text and
+   * source files) are known by their filename.
+   */
+  title?: DocumentTitle;
   /** Client only. */
   editor?: EditorContribution;
+}
+
+export interface DocumentTitle {
+  /** The title in a file's text, or null if it has none. Never throws. */
+  read(text: string): string | null;
+  /** The text with this title, the rest kept as it was. Throws if the title cannot be put in (a header that does not parse). */
+  write(text: string, title: string): string;
 }
 
 export class TypeRegistry {

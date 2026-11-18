@@ -164,10 +164,15 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
 
   if (route === 'GET /api/tree') {
     const out = await host.git.out(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
-    const files = [...new Set(out.split('\0').filter(Boolean))]
-      .filter((p) => existsSync(join(host.dir, p)))
-      .sort()
-      .map((p) => ({ path: p, type: host.typeFor(p)?.id ?? null }));
+    const branch = await host.git.branch();
+    const paths = [...new Set(out.split('\0').filter(Boolean))].filter((p) => existsSync(join(host.dir, p))).sort();
+    // Documents are shown by their title: null if one has none, absent for files that are not documents.
+    const files = await Promise.all(paths.map(async (p) => {
+      const type = host.typeFor(p);
+      const file: { path: string; type: string | null; title?: string | null } = { path: p, type: type?.id ?? null };
+      if (type?.title) file.title = await host.titleOf(p, branch);
+      return file;
+    }));
     return send(res, 200, { files });
   }
 
@@ -211,13 +216,28 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     return send(res, 201, { path, commit });
   }
 
+  // Rename or move a file or folder; for a document, optionally give it a new
+  // title too (with `to` the same as `from`, only that).
   if (route === 'PATCH /api/files') {
     const body = await readBody(req);
     const from = host.relPath(str(body.from, 'from'));
     const to = host.relPath(str(body.to, 'to'));
+    const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim() : undefined;
     const absFrom = host.resolvePath(from);
     const absTo = host.resolvePath(to);
     if (!existsSync(absFrom)) throw new HttpError(404, 'No such file or folder');
+    if (title !== undefined) {
+      await host.checkTitle(from, title);
+      if (!host.typeFor(to)?.title) throw new HttpError(400, `${to} would not be a document with a title`);
+    }
+    if (to === from) {
+      if (title === undefined) throw new HttpError(400, 'Nothing to change');
+      const commit = await host.serial(async () => {
+        await host.setTitle(from, title);
+        return host.commitPaths([from], `Retitle ${from}: ${title}`);
+      });
+      return send(res, 200, { from, to, commit });
+    }
     if (existsSync(absTo)) throw new HttpError(409, `${to} already exists`);
     // A folder moves with everything in it, but never into itself.
     const isFolder = statSync(absFrom).isDirectory();
@@ -229,6 +249,7 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       else await host.dropRoom(from);
       await mkdir(dirname(absTo), { recursive: true });
       await rename(absFrom, absTo);
+      if (title !== undefined && !isFolder) await host.setTitle(to, title);
       return host.commitPaths([from, to], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
     return send(res, 200, { from, to, commit });

@@ -78,6 +78,8 @@ test('the header is edited in its dialog, not in the page', async ({ page }) => 
       '---\n# Set by the journal\ntitle: "A better title: with a colon"\nauthor:\n  - Ada Lovelace\n  - Grace Hopper\nbibliography:\n  - refs.bib\nlink-citations: true\n---\n\n# An Introduction\n\nThe text.\n',
     );
     await expect(editor).not.toContainText('better title');
+    // The sidebar shows the document by its new title.
+    await expect(page.getByTestId('file:paper.md')).toContainText('A better title: with a colon');
 
     // The Source view shows it as text.
     await page.getByTestId('menu-button').click();
@@ -88,7 +90,7 @@ test('the header is edited in its dialog, not in the page', async ({ page }) => 
   }
 });
 
-test('YAML that does not parse cannot be saved; a document can be given a header', async ({ page }) => {
+test('a document needs a title; YAML that does not parse cannot be saved', async ({ page }) => {
   const { host, dir } = await ownHost();
   try {
     await page.goto(`${host.url}/?token=${host.token}&name=Owner`);
@@ -97,11 +99,19 @@ test('YAML that does not parse cannot be saved; a document can be given a header
 
     await openHeader(page, 'plain.md');
     const dialog = page.getByTestId('header');
-    await expect(dialog).toContainText('no header yet');
+    // Every document has a title: asked for first, and needed to save.
+    await expect(dialog.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('');
+    await expect(dialog.getByTestId('header-required')).toHaveText('A document needs a title.');
+    await expect(dialog.getByTestId('header-save')).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: 'Remove Title' })).toHaveCount(0);
+
     await dialog.getByTestId('header-yaml-tab').click();
     const yaml = dialog.getByTestId('header-yaml');
     await yaml.fill('title: [unclosed');
     await expect(dialog.getByRole('alert')).toBeVisible();
+    await expect(dialog.getByTestId('header-save')).toBeDisabled();
+    await yaml.fill('lang: fr');
+    await expect(dialog.getByRole('alert')).toHaveText('A document needs a title.');
     await expect(dialog.getByTestId('header-save')).toBeDisabled();
     await yaml.fill('title: Fresh\nlang: fr');
     await expect(dialog.getByTestId('header-save')).toBeEnabled();
@@ -111,14 +121,15 @@ test('YAML that does not parse cannot be saved; a document can be given a header
     await expect(dialog.getByRole('combobox', { name: 'Language', exact: true })).toHaveValue('fr');
     await dialog.getByTestId('header-save').click();
     await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Fresh\nlang: fr\n---\n\n# Plain\n\nNo header.\n');
+    // The sidebar shows the new title.
+    await expect(page.getByTestId('file:plain.md')).toContainText('Fresh');
 
-    // Removing every field removes the header.
+    // Other fields can be removed; the title stays.
     await page.getByTestId('menu-button').click();
     await page.getByTestId('menu-header').click();
-    await dialog.getByRole('button', { name: 'Remove Title' }).click();
     await dialog.getByRole('button', { name: 'Remove Language' }).click();
     await dialog.getByTestId('header-save').click();
-    await expect.poll(onDisk(dir, 'plain.md')).toBe('# Plain\n\nNo header.\n');
+    await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Fresh\n---\n\n# Plain\n\nNo header.\n');
   } finally {
     await host.close();
   }

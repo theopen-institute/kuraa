@@ -5,8 +5,10 @@
 import { computed, provide, ref, shallowRef, toRef } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
-import { askConfirm, askNewFile, askText } from './ask.js';
+import { askConfirm, askText } from './ask.js';
 import { buildTree, fileTypeChoices, TREE } from './tree.js';
+import NewFileDialog from './NewFileDialog.vue';
+import RenameDialog from './RenameDialog.vue';
 import TreeFolder from './TreeFolder.vue';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
 
@@ -57,15 +59,21 @@ async function act(fn: () => Promise<unknown>, select?: string | null) {
 /** The folder of the open file: where new things go unless a folder is named. */
 const here = () => (props.selected?.includes('/') ? props.selected.slice(0, props.selected.lastIndexOf('/') + 1) : '');
 
-async function create(folder?: string) {
-  const base = folder !== undefined ? (folder ? `${folder}/` : '') : here();
-  const path = await askNewFile({
-    folder: base,
-    types: fileTypeChoices(props.registry),
-    defaultType: 'pandoc-markdown',
-    typeOf: (p) => props.registry.resolve(p)?.id ?? null,
-  });
-  if (path) await act(() => props.api.createFile(path, ''), path);
+// New files: a document is made with its title (its header), its filename made from that.
+const creating = ref<string | null>(null);
+const paths = computed(() => props.files.map((f) => f.path));
+const typeChoices = computed(() => fileTypeChoices(props.registry));
+const typeOf = (p: string) => props.registry.resolve(p)?.id ?? null;
+
+function create(folder?: string) {
+  creating.value = folder !== undefined ? (folder ? `${folder}/` : '') : here();
+}
+
+async function made(file: { path: string; type: string; title: string | null }) {
+  creating.value = null;
+  const type = props.registry.get(file.type);
+  const content = file.title && type?.title ? type.title.write('', file.title) : '';
+  await act(() => props.api.createFile(file.path, content), file.path);
 }
 
 async function newFolder(inside?: string) {
@@ -76,9 +84,26 @@ async function newFolder(inside?: string) {
   await act(() => props.api.createFolder(path), props.selected);
 }
 
+// Renaming: a document's title and filename together; any other file's name (or path).
+const renaming = ref<TreeFile | null>(null);
+
 async function rename(from: string) {
+  const file = props.files.find((f) => f.path === from);
+  const type = file?.type ? props.registry.get(file.type) : undefined;
+  if (file && type?.title) {
+    renaming.value = file;
+    return;
+  }
   const to = (await askText('Rename to', from, 'Rename'))?.trim();
   if (to && to !== from) await act(() => props.api.renameFile(from, to), props.selected === from ? to : props.selected);
+}
+
+async function renamed(change: { to: string; title: string }) {
+  const file = renaming.value!;
+  renaming.value = null;
+  const title = change.title !== file.title ? change.title : undefined;
+  if (change.to === file.path && title === undefined) return;
+  await act(() => props.api.renameFile(file.path, change.to, title), props.selected === file.path ? change.to : props.selected);
 }
 
 /** Rename (or move, if the path's folder changes) a folder with everything in it. */
@@ -230,5 +255,16 @@ provide(TREE, {
     </ul>
     <div v-if="$slots.footer" class="pane-footer"><slot name="footer" /></div>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" />
+    <NewFileDialog
+      v-if="creating !== null"
+      :folder="creating"
+      :types="typeChoices"
+      default-type="pandoc-markdown"
+      :paths="paths"
+      :type-of="typeOf"
+      @create="made"
+      @cancel="creating = null"
+    />
+    <RenameDialog v-if="renaming" :path="renaming.path" :title="renaming.title ?? null" :paths="paths" @rename="renamed" @cancel="renaming = null" />
   </nav>
 </template>

@@ -17,6 +17,8 @@ import SettingsForm from './SettingsForm.vue';
 
 const props = defineProps<{
   path: string | null;
+  /** What the open file is called: its title, or its filename. */
+  name: string | null;
   type: DocumentType | undefined;
   status: EditorStatus | null;
   workspace: WorkspaceInfo | null;
@@ -44,7 +46,6 @@ const emit = defineEmits<{
 
 onEscape(() => emit('close'));
 
-const name = computed(() => props.path?.slice(props.path.lastIndexOf('/') + 1) ?? '');
 const doc = computed(() => !!props.path && !!props.type && !props.viewing);
 const runner = computed(() => props.status?.runner ?? null);
 

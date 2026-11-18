@@ -1,7 +1,7 @@
 // The host: relay, bridge, committer and git peer for one workspace.
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
@@ -113,6 +113,8 @@ export class Host {
   private cacheDir = '';
   private queue: Promise<unknown> = Promise.resolve();
   private watchTimers = new Map<string, NodeJS.Timeout>();
+  /** Titles read from files, by path, with the file's size and time when read. */
+  private titleCache = new Map<string, { stamp: string; title: string | null }>();
   private closed = false;
   address: AddressInfo | null = null;
 
@@ -544,8 +546,10 @@ export class Host {
    * Merge an outside version of the file into the room. With no unflushed
    * edits, apply it as a minimal difference. Otherwise merge three ways; on
    * conflict the live session wins and the outside version is saved beside it.
+   * Quiet: the change was made in the app (a new title), so no one is told of
+   * an outside change.
    */
-  private async applyOutside(rec: RoomRecord, text: string): Promise<void> {
+  private async applyOutside(rec: RoomRecord, text: string, quiet = false): Promise<void> {
     rec.needsOutsideCheck = false;
     const at = new Date().toISOString();
     const theirs = rec.type.parse(text);
@@ -553,7 +557,7 @@ export class Host {
       this.applyDoc(rec, theirs.doc);
       rec.previous = theirs;
       rec.lastHash = hashText(text);
-      this.broadcast(rec, { type: 'outside-change', at, merged: false });
+      if (!quiet) this.broadcast(rec, { type: 'outside-change', at, merged: false });
       this.log(`outside change applied to ${rec.path}`);
       await this.saveCache(rec);
       return;
@@ -565,7 +569,7 @@ export class Host {
     rec.lastHash = hashText(text);
     if (!merged.conflict) {
       this.applyDoc(rec, rec.type.parse(merged.text).doc);
-      this.broadcast(rec, { type: 'outside-change', at, merged: true });
+      if (!quiet) this.broadcast(rec, { type: 'outside-change', at, merged: true });
       this.log(`outside change merged into ${rec.path}`);
     } else {
       const savedAs = `${rec.path}.outside-${at.replace(/[:.]/g, '-')}`;
@@ -614,6 +618,69 @@ export class Host {
       state: Buffer.from(rec.state).toString('base64'), lastCommit: rec.lastCommit, lastCommitAt: rec.lastCommitAt,
     };
     await this.writeAtomic(this.cacheFile(rec.key), JSON.stringify(entry));
+  }
+
+  // -------------------------------------------------------------------------
+  // Titles
+
+  /**
+   * A document's title: from its open room if it has one (the live text), else
+   * from the file, read again only when it has changed. Null for types without
+   * titles, and documents without one.
+   */
+  async titleOf(path: string, branch: string): Promise<string | null> {
+    const type = this.typeFor(path);
+    if (!type?.title) return null;
+    const rec = this.records.get(`${branch}:${path}`);
+    if (rec) return type.title.read(type.serialize(this.current(rec), rec.previous));
+    const abs = this.resolvePath(path);
+    try {
+      const s = await stat(abs);
+      const stamp = `${s.mtimeMs}:${s.size}:${type.id}`;
+      const hit = this.titleCache.get(path);
+      if (hit?.stamp === stamp) return hit.title;
+      const title = type.title.read(await readFile(abs, 'utf8'));
+      this.titleCache.set(path, { stamp, title });
+      return title;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check that a document can take this title: it has titles, the title is not
+   * empty, and its header can be edited. Throws an HttpError (400) if not.
+   */
+  async checkTitle(path: string, title: string): Promise<void> {
+    const type = this.typeFor(path);
+    if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
+    try {
+      type.title.write(await readFile(this.resolvePath(path), 'utf8'), title);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+  }
+
+  /**
+   * Give a document a new title, on disk and in its open room, if it has one;
+   * people editing it see the change, as anyone's edit. Call inside serial().
+   */
+  async setTitle(path: string, title: string): Promise<void> {
+    const type = this.typeFor(path);
+    if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
+    const rec = this.records.get(`${await this.git.branch()}:${path}`);
+    if (rec) await this.flushNow(rec);
+    const abs = this.resolvePath(path);
+    const text = await readFile(abs, 'utf8');
+    let next: string;
+    try {
+      next = type.title.write(text, title);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    if (next === text) return;
+    await this.writeAtomic(abs, next);
+    if (rec) await this.applyOutside(rec, next, true);
   }
 
   /** Close a file's room and forget its cache (after rename or delete). */

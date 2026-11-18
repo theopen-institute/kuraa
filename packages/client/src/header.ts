@@ -142,6 +142,21 @@ export function readEntries(text: string | null, spec: HeaderSpec): { entries: E
   };
 }
 
+/** The required fields (a title) missing from these entries, added first, empty. */
+export function withRequired(entries: Entry[], spec: HeaderSpec): Entry[] {
+  const fields = new Map(spec.fields.map((f) => [f.key, f]));
+  const missing = (spec.required ?? []).filter((k) => !entries.some((e) => e.key === k));
+  return [...missing.map((k) => entryFor(k, undefined, fields.get(k))), ...entries];
+}
+
+/** The required fields left empty, by label. */
+export function emptyRequired(entries: Entry[], spec: HeaderSpec): string[] {
+  return (spec.required ?? []).filter((k) => {
+    const e = entries.find((x) => x.key === k);
+    return !e || empty(e);
+  });
+}
+
 export const changed = (e: Entry) => e.initial === undefined || JSON.stringify(e.value) !== e.initial;
 
 /** Whether a value is empty, and so the field left out. */
@@ -188,7 +203,10 @@ export function mergeHeader(text: string | null, entries: Entry[], removed: stri
   for (const key of removed) doc.delete(key);
   for (const e of edits) {
     if (empty(e)) doc.delete(e.key);
-    else doc.set(e.key, output(doc, e));
+    else if (!doc.has(e.key) && e === entries[0] && isMap(doc.contents)) {
+      // A field added first (a missing title) goes first.
+      doc.contents.items.unshift(doc.createPair(e.key, output(doc, e)) as (typeof doc.contents.items)[number]);
+    } else doc.set(e.key, output(doc, e));
   }
   const map = doc.contents;
   if (!map || (isMap(map) && map.items.length === 0)) return null;

@@ -7,7 +7,8 @@ import { EditorView as CMView, keymap as cmKeymap, drawSelection, lineNumbers, t
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { highlighter, languageSupport } from './languages.js';
-import { chunkOf, describeRun, renderOutputs, type Chunk, type ChunkRunner } from './runs.js';
+import { chunkOf, describeRun, renderOutputs, type Chunk, type ChunkRunner, type Rebuild } from './runs.js';
+import { chunkName, describeBehind } from './upstream.js';
 import { askText } from './ask.js';
 import { defaultBlock } from './blocks.js';
 
@@ -156,7 +157,7 @@ class CodeView implements NodeView {
       this.shownRun = null;
       return;
     }
-    const { last, pending, stale } = runner.state(pos);
+    const { last, pending, stale, upstream } = runner.state(pos);
 
     if (pending) {
       const status = Object.assign(document.createElement('span'), { className: 'chunk-status' });
@@ -168,15 +169,17 @@ class CodeView implements NodeView {
       if (pending.state === 'running') this.ticker = setInterval(tick, 1000);
       this.actions.replaceChildren(status, this.button('Stop', 'Interrupt R, and drop queued runs', () => this.report(runner.interrupt()), 'stop'));
     } else {
+      // Offered only when the session does not have the chunks above as they now read.
+      const rebuild = runner.rebuild(pos);
       this.actions.replaceChildren(
-        this.button('Run above', 'Run every chunk above this one', () => this.report(runner.runAbove(pos))),
+        ...(rebuild ? [this.button(rebuild.fresh ? 'Run above' : 'Rebuild above', rebuildTitle(rebuild), () => this.report(runner.rebuildAbove(pos)), 'rebuild')] : []),
         this.button('▶ Run', 'Run this chunk (⇧⌘↩). ⌘↩ runs the current line or selection.', () => this.runChunk(), 'run'),
       );
     }
 
     this.output.hidden = !last;
     this.output.classList.toggle('pending', !!pending);
-    this.output.classList.toggle('stale', stale);
+    this.output.classList.toggle('stale', stale || !!upstream);
     if (!last) {
       this.output.replaceChildren();
       this.shownRun = null;
@@ -186,6 +189,13 @@ class CodeView implements NodeView {
     meta.className = 'chunk-meta';
     meta.append(Object.assign(document.createElement('span'), { textContent: describeRun(last) }));
     if (stale) meta.append(Object.assign(document.createElement('span'), { className: 'chunk-stale', textContent: 'code changed since', title: 'The chunk has been edited since this output was produced' }));
+    else if (upstream) {
+      meta.append(Object.assign(document.createElement('span'), {
+        className: 'chunk-stale upstream',
+        textContent: describeBehind(upstream),
+        title: `This output was produced before ${chunkName(upstream.chunk)} ${upstream.why === 'not-run' ? 'had run' : upstream.why === 'changed' ? 'was last edited' : 'had run in full'}, so it may not match the code above. Run the chunks above and this one again to bring it up to date.`,
+      }));
+    }
     meta.append(this.button('×', 'Clear this output', () => this.report(runner.clear(pos)), 'clear'));
     if (this.shownRun === last.id && this.output.firstChild) {
       this.output.firstChild.replaceWith(meta);
@@ -372,4 +382,16 @@ export function buildNodeViews(hints: Record<string, NodeViewHint>, ctx: NodeVie
       hint.kind === 'code' ? new CodeView(node, view, getPos, hint, ctx) : new AtomView(node, view, getPos, hint);
   }
   return out;
+}
+
+/** What Rebuild above does, and why it is offered. */
+function rebuildTitle(r: Rebuild): string {
+  const n = r.chunks.length;
+  const chunks = n === 1 ? 'the chunk above' : `the ${n} chunks above`;
+  if (r.fresh) return `Nothing has run in this session yet: run ${chunks}, so this chunk has what they define.`;
+  const name = chunkName(r.chunk);
+  const why = r.why === 'not-run' ? `${name} has not run in this session`
+    : r.why === 'changed' ? `${name} has changed since it ran in this session`
+    : `${name} did not run in full`;
+  return `${why[0]!.toUpperCase()}${why.slice(1)}: run ${n === 1 ? 'it' : `it and the ${n - 1} below it`} again, so this chunk sees the code above as it now reads.`;
 }

@@ -81,11 +81,25 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
   await ada.keyboard.press(`${MOD}+Enter`);
   await expect(output(ada, 0).locator('.chunk-meta')).toContainText('Ran part', { timeout: 30_000 });
 
-  // Editing the code marks the output as out of date.
+  // Every chunk above ran as it reads (a line run again does not change that): nothing to rebuild.
+  for (const i of [1, 2]) await expect(chunk(ada, i).getByRole('button', { name: /above/ })).toHaveCount(0);
+
+  // Editing the code marks the output as out of date, and the outputs below it that it fed.
   await chunk(ada, 1).locator('.cm-line').first().click();
   await ada.keyboard.press('End');
   await ada.keyboard.type(' # edited');
-  await expect(output(ada, 1).locator('.chunk-stale')).toBeVisible();
+  await expect(output(ada, 1).locator('.chunk-stale')).toHaveText('code changed since');
+  await expect(output(ada, 2).locator('.chunk-stale.upstream')).toHaveText('chunk “table” changed since');
+  await expect(output(bo, 2).locator('.chunk-stale.upstream')).toHaveText('chunk “table” changed since');
+  // Rebuild above runs again from the changed chunk, and only that far.
+  await chunk(bo, 2).getByRole('button', { name: 'Rebuild above' }).click();
+  await expect(output(ada, 1).locator('.chunk-stale')).toHaveCount(0, { timeout: 30_000 });
+  await expect(chunk(ada, 2).getByRole('button', { name: /above/ })).toHaveCount(0);
+  await expect(output(ada, 0).locator('.chunk-meta')).toContainText('Ran part');
+  // The plot still came from the old table until it runs again.
+  await expect(output(ada, 2).locator('.chunk-stale.upstream')).toBeVisible();
+  await chunk(ada, 2).getByRole('button', { name: '▶ Run' }).click();
+  await expect(output(ada, 2).locator('.chunk-stale')).toHaveCount(0, { timeout: 30_000 });
 
   // A long run can be interrupted, and the session carries on.
   await chunk(ada, 0).locator('.cm-line').first().click();

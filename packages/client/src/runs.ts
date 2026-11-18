@@ -9,6 +9,7 @@ import { hashText, type NodeViewHint } from '@kuraa/kernel';
 import type { ChunkOutput, ChunkRef, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { HostApi, RunInfo } from './api.js';
+import { behind, type Behind } from './upstream.js';
 
 export interface Chunk {
   pos: number;
@@ -62,9 +63,18 @@ export interface ChunkState {
   pending: RunRecord | null;
   /** The chunk's code has changed since `last` ran. */
   stale: boolean;
+  /** A chunk above that `last` ran without as it is now (changed since, say), if any. */
+  upstream: Behind<Chunk> | null;
 }
 
-const EMPTY: ChunkState = { last: null, pending: null, stale: false };
+const EMPTY: ChunkState = { last: null, pending: null, stale: false, upstream: null };
+
+/** The chunks above one that would need to run again before it, starting with the first that is behind. */
+export interface Rebuild extends Behind<Chunk> {
+  chunks: Chunk[];
+  /** The session has run nothing yet (there is none, say). */
+  fresh: boolean;
+}
 
 export class ChunkRunner {
   private readonly runs = new Map<string, RunRecord>();
@@ -84,11 +94,21 @@ export class ChunkRunner {
     readonly info: RunInfo,
     private readonly user: () => { name: string; email: string; color: string },
   ) {
-    this.session = { path, engine: null, environment: null, state: 'none', message: null };
+    this.session = { path, engine: null, environment: null, state: 'none', message: null, id: null, steps: [] };
   }
 
   canRun(engine: string): boolean {
-    return this.info.engines.some((e) => e.handles.includes(engine.toLowerCase()));
+    return this.engineId(engine) !== undefined;
+  }
+
+  /** The id of the engine that runs chunks of `engine` (a chunk's engine, e.g. `r`). */
+  private engineId(engine: string): string | undefined {
+    return this.info.engines.find((e) => e.handles.includes(engine.toLowerCase()))?.id;
+  }
+
+  /** The chunks above `c` that the same engine runs: those whose code its session shares. */
+  private above(c: Chunk, engine: string): Chunk[] {
+    return this.chunks.filter((a) => a.pos < c.pos && this.engineId(a.engine) === engine);
   }
 
   /** The engine's name for the session's engine, or for the document's chunks: 'R'. */
@@ -172,7 +192,8 @@ export class ChunkRunner {
       const list = (mine.get(c.pos) ?? []).sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
       const last = [...list].reverse().find((r) => FINISHED.has(r.state)) ?? null;
       const pending = [...list].reverse().find((r) => PENDING.has(r.state)) ?? null;
-      this.states.set(c.pos, { last, pending, stale: !!last && !last.chunk.partial && last.chunk.codeHash !== c.codeHash });
+      const upstream = last?.basis && last.engine ? behind(this.above(c, last.engine), last.basis.steps) : null;
+      this.states.set(c.pos, { last, pending, stale: !!last && !last.chunk.partial && last.chunk.codeHash !== c.codeHash, upstream });
     }
   }
 
@@ -191,9 +212,30 @@ export class ChunkRunner {
     }
   }
 
-  /** Run every runnable chunk before `pos`, in order. */
-  async runAbove(pos: number): Promise<void> {
-    for (const c of this.chunks) if (c.pos < pos && this.canRun(c.engine)) await this.run(c);
+  /**
+   * What would need to run before the chunk at `pos` for it to see the chunks
+   * above as they are now: null if the session has every one of them, run in
+   * full as it now reads (counting runs already queued).
+   */
+  rebuild(pos: number): Rebuild | null {
+    const c = this.chunkAt(pos);
+    const engine = c && this.engineId(c.engine);
+    if (!c || !engine) return null;
+    // The session known here is another engine's (a document with R and Python chunks): no way to tell.
+    if (this.session.id && this.session.engine !== engine) return null;
+    const queued = [...this.runs.values()]
+      .filter((r) => PENDING.has(r.state) && r.engine === engine)
+      .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))
+      .map((r) => ({ label: r.chunk.label, index: r.chunk.index, codeHash: r.chunk.codeHash, complete: !r.chunk.partial }));
+    const steps = [...this.session.steps, ...queued];
+    const above = this.above(c, engine);
+    const b = behind(above, steps);
+    return b && { ...b, chunks: above.slice(above.indexOf(b.chunk)), fresh: steps.length === 0 };
+  }
+
+  /** Run the chunks above `pos` again, from the first the session does not have as it now reads. */
+  async rebuildAbove(pos: number): Promise<void> {
+    for (const c of this.rebuild(pos)?.chunks ?? []) await this.run(c);
   }
 
   async runAll(): Promise<void> {

@@ -26,7 +26,8 @@ fresh session. Idle sessions stop after an hour.
 `.git/kuraa/outputs/` and shown under the chunk. Chunks have no ids in the file, so a client
 matches runs to chunks in passes: by label, then by code, then by position among unlabelled
 chunks; a run claimed in an earlier pass is not offered to later ones. When a chunk's code has
-changed since its output was produced, the output is marked "code changed since".
+changed since its output was produced, the output is marked "code changed since"; when a chunk
+above it has, the output says which (see [0024](0024-out-of-date-outputs.md)).
 
 **Off unless allowed.** Running code means anyone with the token can run programs as the host's
 user. A host runs chunks only when started with `--allow-run` (or `run: true`). The desktop app
@@ -36,7 +37,7 @@ since apps started from the macOS Dock get a short `PATH`; `--rscript` overrides
 
 **In the client** (`packages/client/src/runs.ts`, `nodeviews.ts`): the format declares a code
 block runnable (`run: { engineAttr }` on its node view hint); R Markdown's chunks do. Each chunk
-gets Run and Run above in its header, and ⇧⌘↩ runs it; ⌘↩ runs the current line (then moves to
+gets Run in its header (and Rebuild above when the chunks above need it; see 0024), and ⇧⌘↩ runs it; ⌘↩ runs the current line (then moves to
 the next) or the selection. In a runnable chunk ⌘↩ therefore no longer leaves the block; arrow
 keys at the edges and a closing fence still do. The status bar shows the session and offers Run
 all, Interrupt and Restart R.

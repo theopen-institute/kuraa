@@ -51,10 +51,33 @@ export interface ChunkRef {
 
 export type RunState = 'queued' | 'running' | 'done' | 'failed' | 'interrupted' | 'cancelled';
 
+/**
+ * A chunk's run as a session remembers it. A session's steps, in the order they
+ * ran, say what it holds: which version of which chunk it has run.
+ */
+export interface RunStep {
+  label: string | null;
+  index: number;
+  codeHash: string;
+  /** The whole chunk ran, without an error. */
+  complete: boolean;
+}
+
+/** What a run's outputs were computed from: what its session had run before it. */
+export interface RunBasis {
+  /** The session it ran in. */
+  session: string;
+  steps: RunStep[];
+}
+
 export interface RunRecord {
   id: string;
   path: string;
   chunk: ChunkRef;
+  /** The engine that ran it, by id (absent on runs from older hosts). */
+  engine?: string;
+  /** What its session had run before it (absent on runs that never started, or from older hosts). */
+  basis?: RunBasis;
   state: RunState;
   outputs: ChunkOutput[];
   by: { name: string; color: string };
@@ -73,4 +96,8 @@ export interface RunSessionInfo {
   state: RunSessionState;
   /** Progress while starting, why it failed or stopped, or a description once ready (the R version). */
   message: string | null;
+  /** The live session, if there is one. */
+  id: string | null;
+  /** What the live session has run, in order: none without one. */
+  steps: RunStep[];
 }

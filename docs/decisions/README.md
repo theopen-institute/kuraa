@@ -27,3 +27,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0021](0021-document-header.md) | A document's YAML header is edited in a Header dialog (right-click the file), not in the page |
 | [0022](0022-titles-and-filenames.md) | Documents are known by their title; filenames are made from it, safe for every file system and git |
 | [0023](0023-file-icons.md) | Each document type defines its files' small icon; the client draws them all alike |
+| [0024](0024-out-of-date-outputs.md) | Every run records what its session had run before it, so outputs computed from code that has since changed are flagged, and Rebuild above runs only what is behind |

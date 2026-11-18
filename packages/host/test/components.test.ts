@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RunRecord } from '@kuraa/session/model';
+import type { RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import { defineRunComponent } from '@kuraa/run-kit';
 import { standardRunComponents } from '@kuraa/run-components';
 import { startHost, type RunningHost, type RunOptions } from '../src/index.js';
@@ -121,6 +121,40 @@ describe('run components', () => {
     await expect(startHost({ dir, port: 0, run: { engines: ['r'], environment: 'docker', components: standardRunComponents } })).rejects.toThrow('Unknown environment "docker". Known: podman.');
     const vague = defineRunComponent({ name: 'vague', environments: [{ id: 'vague', label: 'somewhere', check: async () => ({ available: true, message: '' }), start: async () => { throw new Error('no'); } } as never] });
     await expect(startHost({ dir, port: 0, run: { engines: [], components: [vague] } })).rejects.toThrow('vague: the environment "vague" must say whether it is sandboxed.');
+  });
+
+  it('keeps what each session has run, and records it on every run', async () => {
+    await host({ engines: ['echo'], environment: 'fake', components: [ECHO, ENVS] });
+    const runs = async () => (await (await api('/api/runs?path=doc.Rmd')).json()) as { runs: RunRecord[]; session: RunSessionInfo };
+    async function run(index: number, code: string, partial = false): Promise<RunRecord> {
+      const res = await api('/api/runs', { method: 'POST', body: JSON.stringify({ path: 'doc.Rmd', engine: 'echo', code, chunk: { label: null, index, codeHash: code, partial } }) });
+      const { id } = (await res.json()) as RunRecord;
+      for (let i = 0; i < 100; i++) {
+        const done = (await runs()).runs.find((r) => r.id === id);
+        if (done) return done;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error('run did not finish');
+    }
+    const step = (index: number, codeHash: string, complete = true) => ({ label: null, index, codeHash, complete });
+
+    const first = await run(0, 'a');
+    expect(first).toMatchObject({ engine: 'echo', basis: { steps: [] } });
+    const second = await run(1, 'b');
+    expect(second.basis).toEqual({ session: first.basis!.session, steps: [step(0, 'a')] });
+    // Running a chunk again in the same version replaces its earlier step. Part of a
+    // chunk that has run in full leaves that standing; part of one that has not is not all of it.
+    await run(0, 'a');
+    await run(1, 'b', true);
+    await run(2, 'c', true);
+    expect((await runs()).session).toMatchObject({ id: first.basis!.session, state: 'ready', steps: [step(1, 'b'), step(0, 'a'), step(2, 'c', false)] });
+
+    // A fresh session has run nothing.
+    await api('/api/runs/restart', { method: 'POST', body: JSON.stringify({ path: 'doc.Rmd' }) });
+    expect((await runs()).session).toMatchObject({ id: null, state: 'none', steps: [] });
+    const after = await run(1, 'b');
+    expect(after.basis!.steps).toEqual([]);
+    expect(after.basis!.session).not.toBe(first.basis!.session);
   });
 });
 

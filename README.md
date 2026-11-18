@@ -83,8 +83,10 @@ as a note in the corner.
 
 ## Running R chunks
 
-Where the host runs code, each R chunk has **Run** and **Run above** in its header. ⇧⌘↩ runs the chunk; ⌘↩ runs
-the current line or the selection. Output appears under the chunk for everyone with the document
+Where the host runs code, each R chunk has **Run** in its header. ⇧⌘↩ runs the chunk; ⌘↩ runs
+the current line or the selection. An output computed before a chunk above it changed is dimmed
+and says so ("chunk 2 changed since"); when the session does not have the chunks above as they now
+read, the chunk also offers **Rebuild above**, which runs them again from the first that changed. Output appears under the chunk for everyone with the document
 open: text, messages, warnings, errors, data frames as tables, and plots at the chunk's
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
 runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also says where code runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.

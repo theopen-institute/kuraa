@@ -19,7 +19,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunComponent } from '@kuraa/run-kit';
-import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/server';
+import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
 import type { RunComponents } from './components.js';
 
 export interface RunOptions {
@@ -76,10 +76,32 @@ export interface RunDescription {
 }
 
 const MAX_TEXT = 200_000;
+/** The most steps a session's history keeps (the oldest go first). */
+const MAX_STEPS = 1000;
 
 interface Job { record: RunRecord; engine: Engine; code: string; header: string }
 
-interface Session { engine: Engine; environment: Environment; session: EngineSession; info: RunSessionInfo; ready: boolean }
+/**
+ * A document's session with an engine. Its history is what it has run, in order,
+ * so that clients can tell which outputs were computed from code that has since
+ * changed (see decision 0024).
+ */
+interface Session { id: string; engine: Engine; environment: Environment; session: EngineSession; info: RunSessionInfo; ready: boolean; history: RunStep[] }
+
+const NO_SESSION = (path: string, message: string | null = null): RunSessionInfo => ({ path, engine: null, environment: null, state: 'none', message, id: null, steps: [] });
+
+/**
+ * Add a run to a history. An earlier run of the same chunk and code adds nothing
+ * the later one does not, so it goes; but a line or selection run again from a
+ * chunk that has run in full leaves that run standing (the session still has it).
+ */
+function addStep(history: RunStep[], step: RunStep, partial: boolean): void {
+  const same = history.findIndex((h) => h.label === step.label && h.index === step.index && h.codeHash === step.codeHash);
+  if (same >= 0 && partial && history[same]!.complete) return;
+  if (same >= 0) history.splice(same, 1);
+  history.push(step);
+  if (history.length > MAX_STEPS) history.splice(0, history.length - MAX_STEPS);
+}
 
 export class Runner {
   private readonly sessions = new Map<string, Session>();
@@ -295,7 +317,7 @@ export class Runner {
 
   session(path: string): RunSessionInfo {
     const s = [...this.sessions.entries()].find(([k]) => k.startsWith(`${path}\0`))?.[1];
-    return s?.info ?? { path, engine: null, environment: null, state: 'none', message: null };
+    return s?.info ?? NO_SESSION(path);
   }
 
   /** Runs for a document that have not finished, in order. */
@@ -308,7 +330,7 @@ export class Runner {
   run(path: string, req: { engine: Engine; code: string; header: string; chunk: ChunkRef; by: PresenceUser }): RunRecord {
     const record: RunRecord = {
       id: `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`,
-      path, chunk: req.chunk, state: 'queued', outputs: [],
+      path, chunk: req.chunk, engine: req.engine.id, state: 'queued', outputs: [],
       by: { name: req.by.name, color: req.by.color },
       queuedAt: new Date().toISOString(), finishedAt: null, ms: null,
     };
@@ -321,7 +343,8 @@ export class Runner {
   }
 
   private setInfo(path: string, s: Session, state: RunSessionInfo['state'], message: string | null = s.info.message): void {
-    s.info = { path, engine: s.engine.id, environment: s.environment.id, state, message };
+    const live = state !== 'stopped' && state !== 'failed';
+    s.info = { path, engine: s.engine.id, environment: s.environment.id, state, message, id: live ? s.id : null, steps: live ? [...s.history] : [] };
     this.o.broadcast(path, { type: 'run-session', session: s.info });
   }
 
@@ -335,7 +358,7 @@ export class Runner {
     const status = await this.status(environment);
     if (!status.available) throw new Error(status.message);
     const pathHash = createHash('sha1').update(path).digest('hex').slice(0, 12);
-    const s: Session = { engine, environment, ready: false, info: { path, engine: engine.id, environment: environment.id, state: 'starting', message: null }, session: null! };
+    const s: Session = { id: randomBytes(6).toString('hex'), engine, environment, ready: false, history: [], info: NO_SESSION(path), session: null! };
     this.sessions.set(key, s);
     this.setInfo(path, s, 'starting', null);
     // A fresh clone, or another machine: install what the workspace's manifest lists.
@@ -400,6 +423,7 @@ export class Runner {
         s.ready = true;
         this.setInfo(path, s, 'ready', version);
       }
+      record.basis = { session: s.id, steps: [...s.history] };
       this.setInfo(path, s, 'busy');
       try {
         const result = await s.session.run({ id: record.id, code: job.code, header: job.header, dir: dirname(resolve(this.o.root, path)) });
@@ -407,6 +431,8 @@ export class Runner {
         record.state = result.interrupted ? 'interrupted' : record.outputs.some((o) => o.type === 'error') ? 'failed' : 'done';
         if (result.interrupted) record.outputs.push({ type: 'note', text: 'Interrupted.' });
       } finally {
+        const { label, index, codeHash, partial } = record.chunk;
+        addStep(s.history, { label, index, codeHash, complete: !partial && record.state === 'done' }, !!partial);
         if (this.sessions.get(`${path}\0${job.engine.id}`) === s) this.setInfo(path, s, 'ready');
       }
     } catch (e) {
@@ -467,7 +493,7 @@ export class Runner {
     const sessions = this.sessionsOf(path);
     for (const [k] of sessions) this.sessions.delete(k);
     await Promise.all(sessions.map(([, s]) => s.session.stop()));
-    this.o.broadcast(path, { type: 'run-session', session: { path, engine: null, environment: null, state: 'none', message: 'Restarted.' } });
+    this.o.broadcast(path, { type: 'run-session', session: NO_SESSION(path, 'Restarted.') });
   }
 
   /** A document's sessions have been idle for idleMs: stop them to give the memory back. */

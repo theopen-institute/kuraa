@@ -290,6 +290,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .chunk-meta { display: flex; align-items: center; gap: 8px; padding: 3px 8px; font: 11px var(--font); color: var(--muted); }
 .chunk-meta .clear { margin-left: auto; padding: 0 5px; }
 .chunk-stale { color: var(--warn); }
+.chunk-button.rebuild { color: var(--warn); }
 .chunk-output.stale .chunk-outputs { opacity: 0.7; }
 .chunk-outputs { padding: 2px 10px 8px; display: grid; gap: 6px; overflow-x: auto; }
 .chunk-outputs pre { margin: 0; font: 12.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

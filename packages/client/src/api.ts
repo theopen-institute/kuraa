@@ -34,9 +34,11 @@ export interface TreeFile {
 }
 /** The workspace's devices, as the host reports them (pairing is done with kuraa-host, not here). */
 export type PeersInfo =
-  | { enabled: false }
+  | { enabled: false; canInvite: boolean }
   | {
       enabled: true;
+      /** People may make invitations and links here (the operator allows it). */
+      canInvite: boolean;
       device: { name: string; key: string };
       workspace: { id: string; forkedFrom: string | null };
       upstream: { name: string; kind: 'self' | 'device' | 'remote' } | null;
@@ -44,6 +46,15 @@ export type PeersInfo =
       devices: { name: string; key: string; online: boolean; upstream: boolean; related: boolean }[];
       proposals: { device: string; branch: string; commits: number; subject: string }[];
     };
+
+/** A subscription link this device made. */
+export interface SubscriptionLinkInfo {
+  id: string;
+  created: number;
+  /** When it stops working (ms since 1970); 0: never. */
+  expires: number;
+  state: 'active' | 'expired' | 'revoked';
+}
 
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
@@ -107,6 +118,12 @@ export class HostApi {
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   components() { return this.json<ComponentsInfo>('/api/components'); }
   peers() { return this.json<PeersInfo>('/api/peers'); }
+  peerLinks() { return this.json<{ links: SubscriptionLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
+  /** A subscription link lasting `hours` (null: no expiry). Turns syncing on if it is not. */
+  createLink(hours: number | null) { return this.json<SubscriptionLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify({ hours }) }); }
+  /** A one-time invitation, good for a day. Turns syncing on if it is not. */
+  createInvitation() { return this.json<{ invitation: string }>('/api/peers/invitations', { method: 'POST' }).then((r) => r.invitation); }
+  revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   acceptProposal(device: string, branch: string) { return this.json('/api/peers/accept', { method: 'POST', body: JSON.stringify({ device, branch }) }); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }

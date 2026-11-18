@@ -13,7 +13,7 @@ const props = defineProps<{
   /** The shell can open a folder of this computer (the desktop app). */
   canOpenFolder: boolean;
 }>();
-const emit = defineEmits<{ switch: [id: string]; add: []; openFolder: []; remove: [id: string] }>();
+const emit = defineEmits<{ switch: [id: string]; add: []; openFolder: []; remove: [id: string]; invite: [] }>();
 
 const menu = ref<{ x: number; y: number; items: ContextItem[] } | null>(null);
 
@@ -26,6 +26,8 @@ function open(e: MouseEvent) {
       run: () => emit('switch', w.id),
       testid: `workspace:${w.id}`,
     })),
+    // A hub's workspaces may always be shared (the hub allows it).
+    ...(current && !current.error ? [{ label: `Invite people to “${current.name}”…`, run: () => emit('invite'), testid: 'workspace-invite' }] : []),
     { label: 'Add a workspace…', run: () => emit('add'), testid: 'workspace-add' },
     ...(props.canOpenFolder ? [{ label: 'Open a folder…', run: () => emit('openFolder'), testid: 'workspace-open-folder' }] : []),
     ...(current ? [{ label: `Remove “${current.name}” from this list…`, run: () => emit('remove', current.id), danger: true, testid: 'workspace-remove' }] : []),

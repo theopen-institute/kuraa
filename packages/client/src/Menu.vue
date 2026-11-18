@@ -45,6 +45,8 @@ const emit = defineEmits<{
   components: [];
   /** Work from another device was accepted: the files changed. */
   accepted: [];
+  /** Invite people to the workspace. */
+  invite: [];
   close: [];
 }>();
 
@@ -108,7 +110,7 @@ const runner = computed(() => props.status?.runner ?? null);
         </div>
       </section>
 
-      <DevicesSection :api="api" @accepted="emit('accepted')" />
+      <DevicesSection :api="api" @accepted="emit('accepted')" @invite="emit('invite'); emit('close')" />
 
       <section class="menu-section">
         <h3>Components</h3>

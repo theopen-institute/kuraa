@@ -2,13 +2,14 @@
 // The menu's Devices section, when the host is one of the workspace's devices:
 // which devices are paired and which are connected, the upstream, and work
 // other devices sent that waits for this one (the upstream) to accept it.
-// Pairing and removing devices is the operator's, with kuraa-host; the app only
-// shows them. Accepting work is an edit like any other.
+// Removing devices and choosing the upstream are the operator's, with
+// kuraa-host. Inviting people (invitations, subscription links) is here where
+// the operator allows it. Accepting work is an edit like any other.
 import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 
 const props = defineProps<{ api: HostApi }>();
-const emit = defineEmits<{ accepted: [] }>();
+const emit = defineEmits<{ accepted: []; invite: [] }>();
 const info = shallowRef<PeersInfo | null>(null);
 const busy = ref<string | null>(null);
 const error = ref<string | null>(null);
@@ -45,12 +46,17 @@ const online = (i: Extract<PeersInfo, { enabled: true }>) => i.devices.filter((d
 </script>
 
 <template>
+  <section v-if="info && !info.enabled && info.canInvite" class="menu-section" data-testid="devices">
+    <h3>Devices</h3>
+    <p class="menu-facts">This workspace is on this device only. Invite people to work on it with you, from their own devices.</p>
+    <div class="menu-actions"><button type="button" data-testid="invite-button" @click="emit('invite')">Invite people…</button></div>
+  </section>
   <section v-if="info?.enabled" class="menu-section" data-testid="devices">
     <h3>Devices</h3>
     <p class="menu-facts">
       This is {{ info.device.name }}<template v-if="info.upstream?.kind === 'self'">, the upstream</template>.
       <template v-if="info.devices.length">{{ online(info) }} of {{ info.devices.length }} other device{{ info.devices.length === 1 ? '' : 's' }} connected.</template>
-      <template v-else>No other device is paired yet (kuraa-host invite).</template>
+      <template v-else>No other device is paired yet.</template>
     </p>
     <ul v-if="info.devices.length" class="menu-devices">
       <li v-for="d in info.devices" :key="d.key" :title="d.key" :data-testid="`device:${d.name}`">
@@ -71,6 +77,7 @@ const online = (i: Extract<PeersInfo, { enabled: true }>) => i.devices.filter((d
         </li>
       </ul>
     </template>
+    <div v-if="info.canInvite" class="menu-actions"><button type="button" data-testid="invite-button" @click="emit('invite')">Invite people…</button></div>
     <p v-if="error" class="banner warn">{{ error }}</p>
   </section>
 </template>

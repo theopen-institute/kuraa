@@ -51,6 +51,8 @@ export interface NodeEvents {
   welcome?(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>): void;
   /** The members changed (a device paired or removed). */
   members?(): void;
+  /** A device turned this one away, saying why. */
+  refused?(link: PeerLink, reason: string): void;
 }
 
 export class PeerNode {
@@ -184,6 +186,7 @@ export class PeerNode {
     else if (m.type === 'welcome') this.events.welcome?.(link, m);
     else if (m.type === 'bye') {
       this.o.log(`peers: ${link.remote ?? link.key.slice(0, 8)} left: ${m.reason}`);
+      this.events.refused?.(link, String(m.reason));
       link.close();
     }
   }

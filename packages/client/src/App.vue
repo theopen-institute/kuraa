@@ -22,6 +22,7 @@ import ReadOnlyCode from './ReadOnlyCode.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
+import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
 import { askConfirm } from './ask.js';
 
@@ -49,6 +50,15 @@ const hubKnown = ref(false);
 const chosenKey = () => `kuraa:workspace:${settings.value.hostUrl}`;
 const chosen = ref<string | null>(null);
 const addingWorkspace = ref(false);
+/** Inviting people: whether the workspace already syncs with devices. */
+const inviting = shallowRef<{ syncing: boolean } | null>(null);
+async function invite() {
+  let syncing = false;
+  try {
+    syncing = (await api.value.peers()).enabled;
+  } catch { /* shown in the dialog, if it matters */ }
+  inviting.value = { syncing };
+}
 
 async function loadHub(prefer?: string | null) {
   try {
@@ -310,6 +320,7 @@ function useSettings(s: Settings) {
             @add="addingWorkspace = true"
             @open-folder="shell.openFolder?.()"
             @remove="removeWorkspace"
+            @invite="invite"
           />
         </template>
         <template #footer>
@@ -424,8 +435,10 @@ function useSettings(s: Settings) {
       @packages="(runner, engine) => (packages = { runner, engine })"
       @components="componentsOpen = true"
       @accepted="refreshTree(); historyKey++"
+      @invite="invite"
       @close="menuOpen = false"
     />
+    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? 'this workspace'" :syncing="inviting.syncing" @close="inviting = null; if (hub) void loadHub()" />
     <AddWorkspaceDialog v-if="addingWorkspace" :hub="hubApi" @added="workspaceAdded" @cancel="addingWorkspace = false" />
     <ComponentsDialog
       v-if="componentsOpen"

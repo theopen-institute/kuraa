@@ -162,3 +162,52 @@ describe('a hub', () => {
     await until(() => existsSync(join(source, 'reply.md')), 20_000, 'the reply on Ada’s device');
   });
 });
+
+describe('invitations from the app', () => {
+  it('a hub’s workspace makes links and invitations, turning syncing on, and revokes them', async () => {
+    const root = temp('kuraa-hub-');
+    const h = await hub(root);
+    await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Shared' }) });
+    await call(h, '/w/shared/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n' }) });
+    expect(await (await call(h, '/w/shared/api/peers')).json()).toEqual({ enabled: false, canInvite: true });
+    const made = await call(h, '/w/shared/api/peers/links', { method: 'POST', body: JSON.stringify({ hours: 24 }) });
+    expect(made.status).toBe(201);
+    const { link, id } = (await made.json()) as { link: string; id: string };
+    expect(link).toMatch(/^kuraa-link:/);
+    // Syncing is on now, and stays on.
+    expect(await (await call(h, '/w/shared/api/peers')).json()).toMatchObject({ enabled: true, canInvite: true });
+    expect(((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { peers: boolean }[] }).workspaces[0]!.peers).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, '.kuraa-workspaces.json'), 'utf8'))[0].peers).toBe(true);
+    // Someone joins with it, on another hub.
+    const other = await hub();
+    const joined = await call(other, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'From a friend' }) });
+    expect(joined.status).toBe(201);
+    const path = ((await joined.json()) as { workspace: { path: string } }).workspace.path;
+    expect(readFileSync(join(path, 'plan.md'), 'utf8')).toBe('# Plan\n');
+    // An invitation, good once.
+    const inv = (await (await call(h, '/w/shared/api/peers/invitations', { method: 'POST' })).json()) as { invitation: string };
+    expect(inv.invitation).toMatch(/^kuraa-invite:/);
+    // Revoked: listed so, and refused from then on.
+    expect((await call(h, `/w/shared/api/peers/links/${id}`, { method: 'DELETE' })).status).toBe(200);
+    expect(((await (await call(h, '/w/shared/api/peers/links')).json()) as { links: { id: string; state: string }[] }).links).toEqual([expect.objectContaining({ id, state: 'revoked' })]);
+    const late = await call(other, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'Too late' }) });
+    expect(late.status).toBe(400);
+    // Nothing half-made is left behind.
+    expect(existsSync(join(other.hub.root, 'too-late'))).toBe(false);
+  }, 240_000);
+
+  it('a host of one workspace refuses unless its operator allows it', async () => {
+    const dir = temp('kuraa-host-');
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'config', 'user.name', 'A');
+    git(dir, 'config', 'user.email', 'a@example.org');
+    git(dir, 'commit', '-q', '--allow-empty', '-m', 'Initial');
+    const h = await startHost({ dir, timings: FAST });
+    running.push(h);
+    const api = (p: string, init: RequestInit = {}) => fetch(h.url + p, { ...init, headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' } });
+    expect(await (await api('/api/peers')).json()).toEqual({ enabled: false, canInvite: false });
+    const r = await api('/api/peers/links', { method: 'POST', body: JSON.stringify({ hours: 24 }) });
+    expect(r.status).toBe(403);
+    expect(((await r.json()) as { error: string }).error).toContain('--allow-invites');
+  });
+});

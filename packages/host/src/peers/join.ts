@@ -64,10 +64,24 @@ export async function joinWorkspace(o: JoinOptions): Promise<{ dir: string; bran
       ? `Could not reach ${ticket.from.name}: is its host running, with --peer?`
       : 'Could not reach a device of the workspace that takes this link: is one running, with --peer?')), o.timeoutMs ?? 120_000);
     let done = false;
+    // Turned away (a revoked or expired link, an invitation used up): another device may
+    // still let this one in, so wait a little for one before saying why.
+    let refusal: NodeJS.Timeout | undefined;
+    node.events.refused = (link, reason) => {
+      if (done || refusal || (ticket.kind === 'invite' && link.key !== ticket.from.key)) return;
+      const why = reason.replace(/^not paired with this device, and /, '').replace(/^not paired with this device$/, ticket.kind === 'invite' ? 'the invitation was used, or has expired' : 'the link was not accepted');
+      refusal = setTimeout(() => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(new Error(`Could not join: ${why}`));
+      }, ticket.kind === 'invite' ? 0 : 8000);
+    };
     node.events.welcome = (link, m) => {
       if (done || (ticket.kind === 'invite' && link.key !== ticket.from.key)) return;
       done = true;
       clearTimeout(timer);
+      clearTimeout(refusal);
       void (async () => {
         for (const member of m.members) await node.identity.addMember(member.key, member.name);
         if (m.upstream) {

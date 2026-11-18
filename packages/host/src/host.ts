@@ -60,6 +60,13 @@ export interface HostOptions {
    * The first device to do so makes the repository a shared workspace.
    */
   peers?: PeerOptions | boolean;
+  /**
+   * Let people using the app make invitations and subscription links for this
+   * workspace (an operator's choice: --allow-invites; a hub allows it for its
+   * workspaces). Making one starts syncing with devices if it is not on, with
+   * these options.
+   */
+  invites?: { peers?: PeerOptions; onPeersOn?: () => void | Promise<void> };
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }
@@ -235,12 +242,7 @@ export class Host {
     }, { host: this.options.host ?? '127.0.0.1', port: this.options.port ?? 0 });
     this.address = await this.relay.listen();
     this.startWatcher();
-    if (this.options.peers) {
-      // Loaded only when on: it brings Hyperswarm and its native parts.
-      const { Peers } = await import('./peers/peers.js');
-      this.peers = new Peers(this, this.options.peers === true ? {} : this.options.peers, join(await this.git.gitDir(), 'kuraa'));
-      await this.peers.start();
-    }
+    if (this.options.peers) await this.startPeers(this.options.peers === true ? {} : this.options.peers);
     this.log(`host serving ${this.dir} on http://${this.address.address}:${this.address.port}`);
     return this.address;
   }
@@ -678,6 +680,28 @@ export class Host {
 
   // -------------------------------------------------------------------------
   // Merging
+
+  /** Start syncing with this workspace's devices (at start with --peer, or when the first invitation is made). */
+  async startPeers(options: PeerOptions): Promise<Peers> {
+    if (this.peers) return this.peers;
+    // Loaded only when on: it brings Hyperswarm and its native parts.
+    const { Peers } = await import('./peers/peers.js');
+    const peers = new Peers(this, options, join(await this.git.gitDir(), 'kuraa'));
+    await peers.start();
+    this.peers = peers;
+    return peers;
+  }
+
+  /** The workspace's devices, syncing, for making an invitation from the app; refused unless the operator allows it. */
+  async peersForInvites(): Promise<Peers> {
+    const allowed = this.options.invites;
+    if (!allowed) throw new HttpError(403, 'Making invitations from the app is turned off on this host (start it with --allow-invites)');
+    if (this.peers) return this.peers;
+    const peers = await this.startPeers(allowed.peers ?? {});
+    this.log('syncing with other devices is now on, for an invitation');
+    await allowed.onPeersOn?.();
+    return peers;
+  }
 
   /** Where merges keep their temporary index. */
   get tmpDir(): string {

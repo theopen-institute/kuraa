@@ -207,6 +207,21 @@ export class Peers {
     return this.node.identity.createLink(hours);
   }
 
+  /** The subscription links this device made, and whether each still lets people in. */
+  async links(): Promise<{ id: string; created: number; expires: number; state: 'active' | 'expired' | 'revoked' }[]> {
+    const revoked = await this.node.identity.revokedLinks();
+    return (await this.node.identity.links()).map((l) => ({
+      ...l,
+      state: revoked.includes(l.id) ? 'revoked' : l.expires && l.expires < Date.now() ? 'expired' : 'active',
+    }));
+  }
+
+  /** Revoke a subscription link, and tell the other devices. */
+  async revokeLink(id: string): Promise<void> {
+    await this.node.identity.revokeLink(id);
+    await this.node.membersChanged();
+  }
+
   /** Make an invitation for another device to join (CLI: kuraa-host invite). */
   async invitation(hours = 24): Promise<string> {
     const token = await this.node.identity.invite(hours);

@@ -44,6 +44,7 @@ in, and a `git clone` command. Useful options:
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
 | `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below |
 | `--peer` | off | Sync with this workspace's other devices, directly. See below |
+| `--allow-invites` | off | Let people make invitations and links from the app (a hub always does) |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
 | `--engine` | off | Turn on running code: `--engine r`. See below |
@@ -95,7 +96,8 @@ pnpm host --workspaces ~/research --static apps/web/dist
 
 In the app, the workspace's name at the top of the sidebar switches between them and adds new
 ones: a new folder (made a git repository, inside `~/research`), or a workspace someone shared,
-joined with their invitation or subscription link. The desktop app works this way by itself:
+joined with their invitation or subscription link. **Invite people…** (there, and in the menu)
+makes a link or invitation for the open workspace, to send to whoever should join it. The desktop app works this way by itself:
 new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
 any folder on the computer.
 

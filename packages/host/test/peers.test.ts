@@ -338,7 +338,7 @@ describe('subscription links', () => {
     await a.host.peers!.node.identity.revokeLink(id);
     await a.host.peers!.node.membersChanged();
     await until(() => { try { return git(dirB, 'config', '--get-all', 'kuraa.revokedlinks') === id; } catch { return false; } }, 15_000, 'Bo’s device learns of the revocation');
-    await expect(joinBy(link, 'late', 4000)).rejects.toThrow('Could not reach a device of the workspace that takes this link');
+    await expect(joinBy(link, 'late', 20_000)).rejects.toThrow('Could not join: the link was revoked');
     // Expired: refused before looking.
     const expired = await a.host.peers!.subscriptionLink(-1);
     await expect(joinBy(expired, 'later', 4000)).rejects.toThrow('This subscription link has expired');

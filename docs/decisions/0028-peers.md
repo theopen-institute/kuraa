@@ -41,7 +41,12 @@ find each other), punches through home routers, and encrypts every connection wi
 other end proves the key it claims. One connection per device is split into channels (protomux):
 control messages, rooms, and git streams.
 
-- **Pairing** is the operator's, from the command line; the app only shows devices. Two ways:
+- **Pairing** is the operator's, from the command line, and from the app where the operator
+  allows it: a hub allows it for its workspaces (0029), and a host of one workspace with
+  `--allow-invites`. In the app, **Invite people…** (the menu's Devices section, and the workspace
+  menu on a hub) makes either kind, shows it to copy, and lists the links made there to revoke.
+  Making one turns syncing on for the workspace if it was off (a hub remembers that). The dialog
+  says what an invitation gives: a copy that syncs, to read and change everything. Two ways:
   - **An invitation** (`kuraa-host invite`): good once, for 24 hours, with the device that made
     it (only a hash of it is kept there), which must be running when the other joins.
   - **A subscription link** (`kuraa-host link [--hours 168 | --forever]`): good for anyone, any
@@ -53,9 +58,11 @@ control messages, rooms, and git streams.
     link carries the workspace's secret, as an invitation does: anyone who has it can find the
     workspace's devices, though only a good link or invitation lets them in.
 
-  Either way, on the other device `kuraa-host join <invitation or link> --dir <new folder>` finds
+  Either way, on the other device **Add a workspace… → Join from an invitation** (0029), or
+  `kuraa-host join <invitation or link> --dir <new folder>`, finds
   a device that lets it in, learns the members and the upstream from it, fetches, and checks out
-  the branch. A device that joined by a link keeps it (`.git/kuraa/joined-link`) and shows it to
+  the branch. A device turned away (a revoked or expired link, an invitation used up) says why
+  within seconds, unless another device lets it in meanwhile. A device that joined by a link keeps it (`.git/kuraa/joined-link`) and shows it to
   devices it meets that do not know it yet, so they pair with it too.
 - **Who is let in:** a paired device that has not been removed, or a device presenting an
   invitation this device made or a good subscription link. Anyone else is turned away after its

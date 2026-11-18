@@ -13,7 +13,8 @@
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
 //   devices:      --peer [--bootstrap host:port]...   sync with paired devices (see peers/cli.ts
-//                 for invite, join, devices, upstream, fork)
+//                 for invite, join, devices, upstream, fork); --allow-invites lets people make
+//                 invitations and links from the app (a hub always does, for its workspaces)
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { startHost, startHub } from './index.js';
@@ -53,6 +54,7 @@ const { values } = parseArgs({
     static: { type: 'string' },
     upstream: { type: 'string' },
     peer: { type: 'boolean', default: false },
+    'allow-invites': { type: 'boolean', default: false },
     bootstrap: { type: 'string', multiple: true },
     'flush-ms': { type: 'string' },
     'commit-ms': { type: 'string' },
@@ -108,6 +110,7 @@ if (values.workspaces) {
     staticDir: values.static,
     upstream: values.upstream,
     peers: values.peer ? { bootstrap: values.bootstrap } : undefined,
+    invites: values['allow-invites'] ? { peers: { bootstrap: values.bootstrap } } : undefined,
     timings,
     log: (m) => console.log(`[kuraa] ${m}`),
   });

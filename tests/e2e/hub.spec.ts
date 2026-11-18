@@ -82,3 +82,49 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await testnet.destroy();
   }
 });
+
+test('people are invited from the app: a link, joined elsewhere, then revoked', async ({ page }) => {
+  test.setTimeout(120_000);
+  const testnet = await createTestnet(3);
+  const peers = { bootstrap: testnet.bootstrap as never };
+  const mine = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-a-')), staticDir: STATIC, hosts: { timings: TIMINGS }, peers });
+  const theirs = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-b-')), hosts: { timings: TIMINGS }, peers });
+  const hubCall = (h: typeof mine, path: string, body?: object) =>
+    fetch(h.url + path, { method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  try {
+    await hubCall(mine, '/hub/api/workspaces', { kind: 'new', name: 'Field notes' });
+    await page.goto(`${mine.url}/?token=${mine.token}&name=Ada`);
+    await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
+
+    // On this device only, so far: the menu offers to invite people.
+    await page.getByTestId('menu-button').click();
+    await expect(page.getByTestId('devices')).toContainText('on this device only');
+    await page.getByTestId('invite-button').click();
+    const dialog = page.getByTestId('invite');
+    await expect(dialog).toContainText('Making one turns on syncing');
+    await dialog.getByTestId('invite-expiry').selectOption({ label: 'a day' });
+    await dialog.getByTestId('invite-create').click();
+    const code = await dialog.getByTestId('invite-code').inputValue();
+    expect(code).toMatch(/^kuraa-link:/);
+    await expect(dialog.getByTestId('invite-links').locator('li')).toHaveCount(1);
+
+    // Someone joins with it, on their own hub.
+    const joined = await hubCall(theirs, '/hub/api/workspaces', { kind: 'join', invitation: code, name: 'Ada’s notes' });
+    expect(joined.status).toBe(201);
+
+    // Revoked here: it lets no one else in.
+    await dialog.getByTestId('invite-links').getByRole('button', { name: 'Revoke' }).click();
+    await expect(dialog.getByTestId('invite-links')).toContainText('revoked');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+    const late = await hubCall(theirs, '/hub/api/workspaces', { kind: 'join', invitation: code, name: 'Too late' });
+    expect(late.status).toBe(400);
+
+    // The menu now shows the device that joined.
+    await page.getByTestId('menu-button').click();
+    await expect(page.getByTestId('devices')).toContainText('1 of 1 other device connected');
+  } finally {
+    await theirs.close();
+    await mine.close();
+    await testnet.destroy();
+  }
+});

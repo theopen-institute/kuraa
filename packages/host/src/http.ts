@@ -320,7 +320,36 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
   // The workspace's devices, as the app shows them: who this device is, which are paired and
   // connected, the upstream, and work waiting to be accepted. Pairing is the operator's (CLI).
   if (route === 'GET /api/peers') {
-    return send(res, 200, host.peers ? { enabled: true, ...(await host.peers.status()) } : { enabled: false });
+    const canInvite = !!host.options.invites;
+    return send(res, 200, host.peers ? { enabled: true, canInvite, ...(await host.peers.status()) } : { enabled: false, canInvite });
+  }
+
+  // Invitations and subscription links, made from the app where the operator allows it.
+  if (route === 'GET /api/peers/links') {
+    if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this host');
+    if (!host.peers) return send(res, 200, { links: [] });
+    return send(res, 200, { links: await host.peers.links() });
+  }
+
+  if (route === 'POST /api/peers/links') {
+    const body = await readBody(req);
+    const hours = body.hours === null ? null : Number(body.hours);
+    if (hours !== null && !(hours > 0 && hours <= 24 * 366)) throw new HttpError(400, 'A link lasts some hours (up to a year), or has no expiry (null)');
+    const peers = await host.peersForInvites();
+    const link = await peers.subscriptionLink(hours);
+    return send(res, 201, { link, ...(await peers.links()).at(-1)! });
+  }
+
+  if (route === 'POST /api/peers/invitations') {
+    const peers = await host.peersForInvites();
+    return send(res, 201, { invitation: await peers.invitation(24) });
+  }
+
+  const linkAt = /^\/api\/peers\/links\/([0-9a-f]{16})$/.exec(url.pathname);
+  if (req.method === 'DELETE' && linkAt) {
+    const peers = await host.peersForInvites();
+    await peers.revokeLink(linkAt[1]!);
+    return send(res, 200, { ok: true });
   }
 
   if (route === 'POST /api/peers/accept') {

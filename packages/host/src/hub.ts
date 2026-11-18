@@ -10,6 +10,8 @@
 //
 // What may be added is the operator's to decide, as everything about a host is:
 // new workspaces go only in the folder the hub was started with (--workspaces).
+// People may also invite others to its workspaces from the app (invitations and
+// subscription links), which turns syncing on for that workspace.
 // The desktop app, being its own operator, also adds folders the person picks.
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -134,7 +136,17 @@ export class Hub {
     try {
       if (!existsSync(e.dir)) throw new Error(`Its folder is gone: ${e.dir}`);
       const peers = e.peers ? { bootstrap: this.o.peers?.bootstrap, maxFetchBytes: this.o.peers?.maxFetchBytes, remoteSyncMs: this.o.peers?.remoteSyncMs } : undefined;
-      const h = await startHost({ ...this.o.hosts, dir: e.dir, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers, log: (m) => this.log(`[${e.id}] ${m}`) });
+      const h = await startHost({
+        ...this.o.hosts, dir: e.dir, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers, log: (m) => this.log(`[${e.id}] ${m}`),
+        // People may invite others to a hub's workspaces from the app; the first invitation turns syncing on, for good.
+        invites: {
+          peers: { bootstrap: this.o.peers?.bootstrap, maxFetchBytes: this.o.peers?.maxFetchBytes, remoteSyncMs: this.o.peers?.remoteSyncMs },
+          onPeersOn: async () => {
+            e.peers = true;
+            await this.save();
+          },
+        },
+      });
       this.hosts.set(e.id, h);
       this.errors.delete(e.id);
     } catch (err) {

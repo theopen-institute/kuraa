@@ -112,3 +112,33 @@ test('dragging moves files into folders, and folders to the top level', async ({
   expect(existsSync(join(E2E.dir, top))).toBe(true);
   expect(existsSync(join(E2E.dir, folder))).toBe(false);
 });
+
+test('right-clicking a folder renames it, with what is in it', async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const folder = `ren-${stamp}`;
+  const file = `${folder}/inside.md`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path: file, content: '# Inside\n' }),
+  });
+  expect(res.status).toBe(201);
+  await openApp(page);
+  await page.getByTestId(`file:${file}`).click();
+  await expect(page.getByTestId('editor')).toContainText('Inside');
+
+  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
+  await page.getByTestId('context:rename-folder').click();
+  await dialog(page).getByRole('textbox').fill(`${folder}-renamed`);
+  await dialog(page).getByRole('button', { name: 'Rename' }).click();
+
+  // Renamed on disk and committed; the open file follows.
+  const moved = `${folder}-renamed/inside.md`;
+  await expect(page.getByTestId(`file:${moved}`)).toBeVisible();
+  await expect(page.getByTestId(`folder:${folder}`)).toHaveCount(0);
+  expect(existsSync(join(E2E.dir, moved))).toBe(true);
+  expect(existsSync(join(E2E.dir, folder))).toBe(false);
+  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Rename ${folder} to ${folder}-renamed`);
+  await expect(page.locator('.tree-file.selected')).toContainText('inside.md');
+  await expect(page.getByTestId('editor')).toContainText('Inside');
+});

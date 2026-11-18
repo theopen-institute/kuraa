@@ -32,4 +32,5 @@ Saving YAML typed in the dialog writes the whole header, and asks first if someo
 meanwhile. Either is one edit, undone with ⌘Z.
 
 **The sidebar's right-click menu** has Open, Header… (for files whose format has a header), Rename…
-and Delete… for a file, and a new file or folder for a folder or the top level.
+and Delete… for a file; a new file or folder for a folder or the top level, and Rename… for a
+folder (with everything in it; the open file follows, committed as a rename).

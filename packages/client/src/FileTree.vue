@@ -81,6 +81,24 @@ async function rename(from: string) {
   if (to && to !== from) await act(() => props.api.renameFile(from, to), props.selected === from ? to : props.selected);
 }
 
+/** Rename (or move, if the path's folder changes) a folder with everything in it. */
+async function renameFolder(from: string) {
+  const to = (await askText('Rename folder to', from, 'Rename'))?.trim().replace(/\/+$/, '');
+  if (!to || to === from) return;
+  // The open file follows if it is inside; the folder stays open or closed as it was.
+  const selected = props.selected;
+  const follow = selected?.startsWith(`${from}/`) ? to + selected.slice(from.length) : selected;
+  const rekey = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+  try {
+    await props.api.renameFile(from, to);
+    collapsed.value = new Set([...collapsed.value].map(rekey));
+    if (to.includes('/')) expand(folderOf(to));
+    emit('changed', follow);
+  } catch (e) {
+    emit('error', (e as Error).message);
+  }
+}
+
 async function remove(path: string) {
   if (await askConfirm(`Delete ${path}? The deletion is committed; the file stays in history.`, 'Delete', true)) {
     await act(() => props.api.deleteFile(path), props.selected === path ? null : props.selected);
@@ -168,6 +186,7 @@ function contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top
     items = [
       { label: `New file${where}…`, run: () => void create(path), testid: 'context:new-file' },
       { label: `New folder${where}…`, run: () => void newFolder(path), testid: 'context:new-folder' },
+      ...(kind === 'folder' ? [{ label: 'Rename…', run: () => void renameFolder(path), testid: 'context:rename-folder' }] : []),
     ];
   }
   menu.value = { x, y, items };

@@ -62,7 +62,7 @@ full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
 The sidebar shows the workspace folder, with buttons for a new file (＋) and a new folder (⊞); each
 folder has the same on hover. Drag a file or folder onto a folder to move it there, or onto the
 workspace name to move it to the top level; each move is committed. Right-click a file for
-**Open**, **Header…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it.
+**Open**, **Header…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it and **Rename…** (everything in it goes with it).
 
 A Markdown or R Markdown document's **header** (the YAML block at the top: title, authors, date,
 bibliography, PDF and HTML settings, …) is not shown in the page. **Header…** opens it as fields

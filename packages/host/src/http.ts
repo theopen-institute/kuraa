@@ -217,8 +217,8 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     const to = host.relPath(str(body.to, 'to'));
     const absFrom = host.resolvePath(from);
     const absTo = host.resolvePath(to);
-    if (!existsSync(absFrom)) throw new HttpError(404, 'No such file');
-    if (existsSync(absTo)) throw new HttpError(409, 'Target exists');
+    if (!existsSync(absFrom)) throw new HttpError(404, 'No such file or folder');
+    if (existsSync(absTo)) throw new HttpError(409, `${to} already exists`);
     // A folder moves with everything in it, but never into itself.
     const isFolder = statSync(absFrom).isDirectory();
     if (isFolder && (to === from || to.startsWith(`${from}/`))) throw new HttpError(400, 'A folder cannot move into itself');

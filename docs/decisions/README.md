@@ -30,3 +30,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0024](0024-out-of-date-outputs.md) | Every run records what its session had run before it, so outputs computed from code that has since changed are flagged, and Rebuild above runs only what is behind |
 | [0025](0025-merging.md) | Merges read documents (blocks, then words), never stop, and keep a conflict in the document as a block with both versions; the same merge commit on every device |
 | [0026](0026-commit-messages-and-history.md) | Automatic commits name the document, the headings that changed and who edited, with an autosave trailer; history folds them into editing sessions |
+| [0027](0027-room-seeds.md) | A room starts from the git blob of its file, seeded by a fixed client id, so rooms on different devices combine without duplicate text |

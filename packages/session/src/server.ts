@@ -147,6 +147,20 @@ export class Relay {
   }
 }
 
+/**
+ * A room's starting state, the same wherever it is made: the document written
+ * into the room by one fixed client id. Two devices seeding from the same file
+ * (the same git blob) with the same id get identical states, which Yjs takes as
+ * one; so their rooms combine without either's text appearing twice. Edits that
+ * follow use each client's own random id.
+ */
+export function encodeSeed(doc: PMNode, clientID: number): Uint8Array {
+  const ydoc = new Y.Doc();
+  ydoc.clientID = clientID;
+  ydoc.transact(() => prosemirrorToYXmlFragment(doc, ydoc.getXmlFragment(FRAGMENT)));
+  return Y.encodeStateAsUpdate(ydoc);
+}
+
 /** Encode a ProseMirror document as a room state without a running relay (for caches and tests). */
 export function encodeDoc(doc: PMNode): Uint8Array {
   const ydoc = new Y.Doc();
@@ -161,6 +175,11 @@ export function patchState(state: Uint8Array, next: PMNode): Uint8Array {
   const fragment = ydoc.getXmlFragment(FRAGMENT);
   ydoc.transact(() => updateYFragment(ydoc, fragment, next, { mapping: new Map(), isOMark: new Map() }), HOST_ORIGIN);
   return Y.encodeStateAsUpdate(ydoc);
+}
+
+/** Room states combined, as if every edit in each had been made in one room. */
+export function combineStates(...states: Uint8Array[]): Uint8Array {
+  return Y.mergeUpdates(states);
 }
 
 export function decodeDoc(state: Uint8Array, schema: Schema): PMNode {

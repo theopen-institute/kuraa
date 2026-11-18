@@ -6,7 +6,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
-import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
+import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
@@ -62,6 +62,10 @@ interface RoomRecord {
   branch: string;
   type: DocumentType;
   room: string;
+  /**
+   * The git blob the room started from (its seed): rooms anywhere that started
+   * from the same blob, with the same type version, start from the same state.
+   */
   generation: string;
   baseCommit: string | null;
   /** The file text as last written or seen, parsed. */
@@ -69,6 +73,8 @@ interface RoomRecord {
   lastHash: string;
   /** Latest encoded room state; seeds the room when it is reopened. */
   state: Uint8Array | null;
+  /** The text of the blob the room starts from, until it has a state. */
+  seedText: string | null;
   /** Client edits not yet serialized to the file. */
   dirty: boolean;
   /** Flushed but not committed. */
@@ -329,7 +335,8 @@ export class Host {
       rec.needsOutsideCheck = hashText(text) !== cached.lastHash;
     } else {
       const previous = type.parse(text);
-      rec = this.newRecord({ key, path, branch, type, generation: randomBytes(6).toString('hex'), baseCommit: head, previous, lastHash: hashText(text), state: null });
+      rec = this.newRecord({ key, path, branch, type, generation: blobId(text), baseCommit: head, previous, lastHash: hashText(text), state: null });
+      rec.seedText = text;
     }
     this.records.set(key, rec);
     this.byRoom.set(rec.room, rec);
@@ -341,6 +348,7 @@ export class Host {
     const rec: RoomRecord = {
       ...init,
       room: '',
+      seedText: null,
       dirty: false,
       uncommitted: false,
       contributors: new Map(),
@@ -372,7 +380,10 @@ export class Host {
     if (rec.timers.drop) clearTimeout(rec.timers.drop);
     // Only the host creates room content: from saved state, or a fresh seed.
     if (rec.state) return { state: rec.state };
-    rec.state = encodeDoc(rec.previous.doc);
+    rec.state = seedState(rec.type, rec.seedText ?? rec.previous.text);
+    // The file changed after the room was named (an outside change): start from the blob, then make that change.
+    if (rec.seedText !== null && rec.seedText !== rec.previous.text) rec.state = patchState(rec.state, rec.previous.doc);
+    rec.seedText = null;
     void this.saveCache(rec);
     return { state: rec.state };
   }
@@ -790,6 +801,18 @@ export class Host {
   openRooms(): RoomRecord[] {
     return [...this.records.values()];
   }
+}
+
+/** A text's git blob id, as `git hash-object` gives it. */
+export function blobId(text: string): string {
+  const bytes = Buffer.from(text, 'utf8');
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
+
+/** The starting state of a room for a file's text: the same on every device for the same text and type version. */
+export function seedState(type: DocumentType, text: string): Uint8Array {
+  const id = createHash('sha1').update(`${blobId(text)}\0${type.id}@${type.version}`).digest().readUInt32BE(0);
+  return encodeSeed(type.parse(text).doc, id || 1);
 }
 
 export class HttpError extends Error {

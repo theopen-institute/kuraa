@@ -49,4 +49,47 @@ export interface FormatEditor {
   plugins?(ctx: EditorContext): Plugin[];
   /** Node views the format draws itself. They take precedence over the views its hints describe. */
   nodeViews?(ctx: EditorContext): Record<string, NodeViewConstructor>;
+  /**
+   * The document's header (YAML metadata at the top), if the format has one. The
+   * client edits it in its Header dialog; the format keeps it out of the page
+   * (only the Source view shows it as text).
+   */
+  header?: HeaderSpec;
+}
+
+/**
+ * Transactions that change the document's text on purpose rather than by typing
+ * in the page (the Source view, the Header dialog) carry this meta, set to true,
+ * so a format's guards (keeping its header out of reach of typing) let them through.
+ */
+export const DELIBERATE_EDIT = 'kuraa:deliberate-edit';
+
+export interface HeaderSpec {
+  /** The block that holds the header's YAML text. When present, it is the document's first block. */
+  node: string;
+  /** The fields the format knows, offered when adding one. Others can be added by name. */
+  fields: HeaderField[];
+}
+
+/** A header field the format knows: how it is called, what it does, and how it is edited. */
+export interface HeaderField {
+  /** The YAML key: 'title', 'link-citations'. */
+  key: string;
+  /** What people see: 'Title', 'Link citations'. */
+  label: string;
+  /** What it does, in a sentence. */
+  description?: string;
+  /** Where it is listed among the fields to add: 'Title and authors', 'Citations', … */
+  group: string;
+  /**
+   * How its value is edited. text: a line; paragraph: several lines; date: a
+   * line, with today's date a click away; list: several lines of text; boolean:
+   * on or off; number; yaml: the value as YAML (anything structured). A value
+   * that does not fit (a list of authors with affiliations, say) is edited as YAML.
+   */
+  kind: 'text' | 'paragraph' | 'date' | 'list' | 'boolean' | 'number' | 'yaml';
+  /** Usual values, suggested as people type (others are allowed). */
+  choices?: string[];
+  /** Its value when added. Without one: empty, or true for a boolean. */
+  initial?: unknown;
 }

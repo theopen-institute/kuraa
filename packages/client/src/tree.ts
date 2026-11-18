@@ -57,6 +57,8 @@ export interface TreeContext {
   newFolder(inside?: string): void;
   rename(path: string): void;
   remove(path: string): void;
+  /** The right-click menu for a file, a folder, or the top level (''). */
+  contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top'): void;
   dragStart(e: DragEvent, path: string): void;
   dragEnd(): void;
   dragOver(e: DragEvent, folder: string): void;

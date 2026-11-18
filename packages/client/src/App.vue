@@ -55,10 +55,14 @@ const notice = shallowRef<Notice | null>(null);
 const menuOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 const componentsOpen = ref(false);
+/** The Header dialog is open for the open file. */
+const headerOpen = ref(false);
 
 // Each format's editor module, unless this person turned it off (Components).
 const editorsOff = ref(loadEditorsOff());
 const editorFor = (typeId: string) => (editorsOff.value.includes(typeId) ? undefined : props.editors[typeId]);
+// Types whose documents have a header to edit: their editor module (if on) says so.
+const headerTypes = computed(() => props.types.filter((t) => editorFor(t.id)?.header).map((t) => t.id));
 function setEditorsOff(ids: string[]) {
   editorsOff.value = ids;
   saveEditorsOff(ids);
@@ -76,11 +80,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
 function select(next: string | null) {
   if (next === path.value) return;
+  headerOpen.value = false;
   viewing.value = null;
   status.value = null;
   notice.value = null;
   showSource.value = false;
   path.value = next;
+}
+
+/** Open a file (if it is not open) and its Header dialog. */
+function openHeader(next: string) {
+  select(next);
+  viewing.value = null;
+  headerOpen.value = true;
 }
 
 async function refreshTree(selectPath?: string | null) {
@@ -180,7 +192,9 @@ function useSettings(s: Settings) {
         :selected="path"
         :registry="hostRegistry"
         :workspace-name="workspace?.name ?? 'Files'"
+        :header-types="headerTypes"
         @select="select"
+        @header="openHeader"
         @changed="refreshTree"
         @error="(m) => (error = m)"
       >
@@ -206,7 +220,9 @@ function useSettings(s: Settings) {
               :show-source="showSource"
               :run="workspace?.run ?? null"
               :format-editor="editorFor(type.id)"
+              :header-open="headerOpen"
               @status="(s) => (status = s)"
+              @close-header="headerOpen = false"
               @committed="historyKey++"
             />
           </div>
@@ -248,12 +264,14 @@ function useSettings(s: Settings) {
       :host-url="settings.hostUrl"
       :viewing="!!viewing"
       :show-source="showSource"
+      :has-header="!!type && headerTypes.includes(type.id)"
       :history-open="historyOpen"
       :syncing="syncing"
       :settings="settings"
       :shell="shell"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
+      @header="headerOpen = true"
       @save-version="saveVersion"
       @sync="sync"
       @save-settings="useSettings"

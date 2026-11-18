@@ -23,6 +23,8 @@ const props = defineProps<{
   hostUrl: string;
   viewing: boolean;
   showSource: boolean;
+  /** The document has a header to edit. */
+  hasHeader: boolean;
   historyOpen: boolean;
   syncing: boolean;
   settings: Settings;
@@ -31,6 +33,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   toggleSource: [];
   toggleHistory: [];
+  header: [];
   saveVersion: [];
   sync: [];
   saveSettings: [settings: Settings];
@@ -63,6 +66,7 @@ const runner = computed(() => props.status?.runner ?? null);
           >
             {{ showSource ? 'Show the document' : 'Edit the source' }}
           </button>
+          <button v-if="hasHeader" type="button" data-testid="menu-header" @click="emit('header'); emit('close')">Header…</button>
           <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="emit('toggleHistory'); emit('close')">
             {{ historyOpen ? 'Hide history' : 'History' }}
           </button>

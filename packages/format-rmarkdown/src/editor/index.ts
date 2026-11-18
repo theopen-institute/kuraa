@@ -9,12 +9,24 @@ const chunkAttrs = (header: string) => ({ header, engine: /^\s*([A-Za-z][\w-]*)/
 
 export const rmarkdownEditor: FormatEditor = {
   label: 'R Markdown editing',
-  description: 'Markdown editing, plus fences that make code chunks and ⌥⌘I for a new R chunk.',
+  description: 'Markdown editing, plus fences that make code chunks, ⌥⌘I for a new R chunk, and R Markdown’s header fields.',
   ...createPandocEditor({
     fence(info, schema) {
       const chunk = schema.nodes.code_chunk;
       return chunk && info.startsWith('{') ? { type: chunk, attrs: chunkAttrs(info.slice(1, -1)) } : null;
     },
     keys: (schema) => ({ 'Mod-Alt-i': insertNode(schema.nodes.code_chunk) }),
+    headerFields: [
+      {
+        key: 'output',
+        label: 'Output',
+        description: 'What knitting makes. With options (toc: true, …) it is edited as YAML.',
+        group: 'R Markdown',
+        kind: 'text',
+        choices: ['html_document', 'pdf_document', 'word_document', 'html_notebook', 'md_document', 'github_document', 'beamer_presentation', 'ioslides_presentation', 'slidy_presentation', 'powerpoint_presentation'],
+      },
+      { key: 'params', label: 'Parameters', description: 'Values the document reads as params$name, one name: value per line.', group: 'R Markdown', kind: 'yaml', initial: { name: 'value' } },
+      { key: 'always_allow_html', label: 'Allow HTML everywhere', description: 'Keep HTML output (widgets, say) when knitting to PDF or Word.', group: 'R Markdown', kind: 'boolean' },
+    ],
   }),
 };

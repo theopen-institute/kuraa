@@ -27,6 +27,7 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
       :data-testid="`folder:${f.path}`"
       @dragstart="t.dragStart($event, f.path)"
       @dragend="t.dragEnd()"
+      @contextmenu="t.contextMenu($event, f.path, 'folder')"
     >
       <button type="button" class="tree-row tree-folder" :style="indent" @click="t.toggle(f.path)">
         <span class="tree-icon">{{ collapsed.has(f.path) ? '▸' : '▾' }}</span>{{ f.name }}
@@ -45,6 +46,7 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
     draggable="true"
     @dragstart="t.dragStart($event, f.path)"
     @dragend="t.dragEnd()"
+    @contextmenu="t.contextMenu($event, f.path, 'file')"
   >
     <button
       type="button"

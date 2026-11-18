@@ -24,3 +24,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0018](0018-untrusted-users.md) | People using the app are not trusted: code runs only in Podman, nothing in a document runs in the app, configuration is flags |
 | [0019](0019-engine-and-environment-components.md) | Engines and environments are separate components meeting through run-kit; the host imports none; unsandboxed needs a flag |
 | [0020](0020-components.md) | What extends the app (formats, engines, environments) is called a component, in the interface and the code |
+| [0021](0021-document-header.md) | A document's YAML header is edited in a Header dialog (right-click the file), not in the page |

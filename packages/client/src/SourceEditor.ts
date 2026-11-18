@@ -22,6 +22,7 @@
 // reaches the document just after (not inside y-prosemirror's handling of the
 // incoming change, which would ignore it).
 import type { DocumentType } from '@kuraa/kernel';
+import { DELIBERATE_EDIT } from '@kuraa/editor-kit';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Transaction as PMTransaction } from 'prosemirror-state';
 import { StepMap } from 'prosemirror-transform';
@@ -162,6 +163,7 @@ export class SourceEditor {
       tr = this.view.state.tr.replace(whole.start, whole.endA, parsed.slice(whole.start, whole.endB));
     }
     tr.setMeta(FROM_SOURCE, true);
+    tr.setMeta(DELIBERATE_EDIT, true); // the header can be edited here
     this.view.dispatch(tr);
     // The format may have tidied the result (footnotes kept in order, say): show that.
     if (!this.view.state.doc.eq(parsed)) this.fromDocument();

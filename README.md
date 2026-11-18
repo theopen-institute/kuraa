@@ -61,10 +61,18 @@ full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
 
 The sidebar shows the workspace folder, with buttons for a new file (＋) and a new folder (⊞); each
 folder has the same on hover. Drag a file or folder onto a folder to move it there, or onto the
-workspace name to move it to the top level; each move is committed. Everything else is in the **menu**, from the bottom of the sidebar or
+workspace name to move it to the top level; each move is committed. Right-click a file for
+**Open**, **Header…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it.
+
+A Markdown or R Markdown document's **header** (the YAML block at the top: title, authors, date,
+bibliography, PDF and HTML settings, …) is not shown in the page. **Header…** opens it as fields
+to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
+or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
+
+Everything else is in the **menu**, from the bottom of the sidebar or
 ⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
-**Save version**, when it was last written and committed; the code session; the workspace's branch,
+**Header…**, **Save version**, when it was last written and committed; the code session; the workspace's branch,
 **Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // The sidebar: the workspace's name, its files and folders, new files and
-// folders, renaming, deleting, and moving by dragging.
-import { computed, provide, ref, toRef } from 'vue';
+// folders, renaming, deleting, and moving by dragging. Right-click a file or
+// folder for what can be done with it (a document's header, among others).
+import { computed, provide, ref, shallowRef, toRef } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
 import { askConfirm, askNewFile, askText } from './ask.js';
 import { buildTree, fileTypeChoices, TREE } from './tree.js';
 import TreeFolder from './TreeFolder.vue';
+import ContextMenu, { type ContextItem } from './ContextMenu.vue';
 
 const props = defineProps<{
   api: HostApi;
@@ -16,12 +18,16 @@ const props = defineProps<{
   registry: TypeRegistry;
   /** The workspace folder's name, shown at the top. */
   workspaceName: string;
+  /** Types whose documents have a header to edit (their format's editor module says so). */
+  headerTypes?: string[];
 }>();
 const emit = defineEmits<{
   select: [path: string];
   /** Something changed: refresh, and open this file afterwards (null: none; omitted: as is). */
   changed: [selectPath?: string | null];
   error: [message: string];
+  /** Open this file and its Header dialog. */
+  header: [path: string];
 }>();
 
 const tree = computed(() => buildTree(props.files));
@@ -134,6 +140,39 @@ function drop(e: DragEvent, folder: string) {
   void move(from, folder);
 }
 
+// The right-click menu.
+const menu = shallowRef<{ x: number; y: number; items: ContextItem[] } | null>(null);
+
+function contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top') {
+  e.preventDefault();
+  e.stopPropagation();
+  // From the keyboard (the menu key, Shift+F10), there is no pointer: open it by the row.
+  let { clientX: x, clientY: y } = e;
+  if (!x && !y) {
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    x = box.left + 24;
+    y = box.bottom;
+  }
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  let items: ContextItem[];
+  if (kind === 'file') {
+    const file = props.files.find((f) => f.path === path);
+    items = [
+      ...(file?.type ? [{ label: 'Open', run: () => emit('select', path), testid: 'context:open' }] : []),
+      ...(file?.type && props.headerTypes?.includes(file.type) ? [{ label: 'Header…', run: () => emit('header', path), testid: 'context:header' }] : []),
+      { label: 'Rename…', run: () => void rename(path), testid: 'context:rename' },
+      { label: 'Delete…', run: () => void remove(path), danger: true, testid: 'context:delete' },
+    ];
+  } else {
+    const where = kind === 'folder' ? ` in ${name}` : '';
+    items = [
+      { label: `New file${where}…`, run: () => void create(path), testid: 'context:new-file' },
+      { label: `New folder${where}…`, run: () => void newFolder(path), testid: 'context:new-folder' },
+    ];
+  }
+  menu.value = { x, y, items };
+}
+
 provide(TREE, {
   selected: toRef(props, 'selected'),
   collapsed,
@@ -145,6 +184,7 @@ provide(TREE, {
   newFolder: (inside) => void newFolder(inside),
   rename: (path) => void rename(path),
   remove: (path) => void remove(path),
+  contextMenu,
   dragStart,
   dragEnd,
   dragOver,
@@ -161,9 +201,15 @@ provide(TREE, {
         <button type="button" title="New folder" aria-label="New folder" @click="newFolder()">⊞</button>
       </span>
     </div>
-    <ul :class="['tree', { 'drop-target': over === '' }]" @dragover="dragOver($event, '')" @drop="drop($event, '')">
+    <ul
+      :class="['tree', { 'drop-target': over === '' }]"
+      @dragover="dragOver($event, '')"
+      @drop="drop($event, '')"
+      @contextmenu="contextMenu($event, '', 'top')"
+    >
       <TreeFolder :folder="tree" :depth="0" />
     </ul>
     <div v-if="$slots.footer" class="pane-footer"><slot name="footer" /></div>
+    <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" />
   </nav>
 </template>

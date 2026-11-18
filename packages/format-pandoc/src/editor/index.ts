@@ -1,11 +1,12 @@
 // The Pandoc markdown editor: what the format does in the editor. Typing the
 // markdown for a construct turns it into that construct (Backspace straight
 // afterwards turns it back); key bindings for marks, headings and lists;
-// footnotes as a word processor has them (./notes.ts).
+// footnotes as a word processor has them (./notes.ts); the YAML header kept out
+// of the page, for the client's Header dialog (./header.ts).
 //
 // `createPandocEditor` is the extension point, as `createPandocType` is for the
 // format: R Markdown adds its chunks through it.
-import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
+import type { EditorContext, FormatEditor, HeaderField } from '@kuraa/editor-kit';
 import type { Attrs, MarkType, NodeType, Schema } from 'prosemirror-model';
 import { TextSelection, type Command, type EditorState, type Plugin } from 'prosemirror-state';
 import { chainCommands, createParagraphNear, exitCode, lift, liftEmptyBlock, newlineInCode, setBlockType, splitBlock, toggleMark, wrapIn } from 'prosemirror-commands';
@@ -13,8 +14,10 @@ import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirr
 import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingInputRule } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
 import { footnotes } from './notes.js';
+import { headerBehaviour, headerSpec } from './header.js';
 
 export { arrangeNotes } from './notes.js';
+export { pandocHeaderFields } from './header.js';
 
 export interface PandocEditorExtension {
   /**
@@ -26,6 +29,8 @@ export interface PandocEditorExtension {
   keys?(schema: Schema, ctx: EditorContext): Record<string, Command>;
   /** More typing cues, tried before Pandoc's. */
   rules?(schema: Schema): InputRule[];
+  /** More header fields to offer, after Pandoc's (one with the same key replaces Pandoc's). */
+  headerFields?: HeaderField[];
 }
 
 /** Insert a node at the cursor, putting the cursor inside it if it holds text. */
@@ -148,6 +153,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
     plugins(ctx: EditorContext): Plugin[] {
       const { schema } = ctx;
       const notes = footnotes(schema, ctx);
+      const header = headerBehaviour(schema, ctx);
       if (ctx.readOnly) return notes.plugins;
       const n = schema.nodes;
       const m = schema.marks;
@@ -187,14 +193,16 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         inputRules({ rules: [...(ext.rules?.(schema) ?? []), ...notes.rules, ...markdownRules(schema, ext)] }),
         keymap(keys),
         ...notes.plugins,
+        ...header.plugins,
       ];
     },
-    nodeViews: (ctx) => footnotes(ctx.schema, ctx).nodeViews,
+    nodeViews: (ctx) => ({ ...footnotes(ctx.schema, ctx).nodeViews, ...headerBehaviour(ctx.schema, ctx).nodeViews }),
+    header: headerSpec(ext.headerFields),
   };
 }
 
 export const pandocEditor: FormatEditor = {
   ...createPandocEditor(),
   label: 'Markdown editing',
-  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), and footnotes kept numbered and in order.',
+  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), footnotes kept numbered and in order, and the header (title, authors, …) edited in its own dialog.',
 };

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The live editor for one file: a ProseMirror view bound to the file's room, the
-// format's editor module, chunk running, and the editable Source view.
+// format's editor module, chunk running, the editable Source view, and the
+// Header dialog (for formats with a header).
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import { connectRoom, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
@@ -18,6 +19,7 @@ import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
 import { askConfirm, askText } from './ask.js';
 import { defaultBlock } from './blocks.js';
+import HeaderDialog from './HeaderDialog.vue';
 
 const props = defineProps<{
   api: HostApi;
@@ -30,8 +32,10 @@ const props = defineProps<{
   run: RunInfo | null;
   /** What the type does in the editor (cues, keys, behaviour), if it has an editor module. */
   formatEditor?: FormatEditor;
+  /** Show the Header dialog (if the format has a header). */
+  headerOpen?: boolean;
 }>();
-const emit = defineEmits<{ status: [status: EditorStatus]; committed: [] }>();
+const emit = defineEmits<{ status: [status: EditorStatus]; committed: []; closeHeader: [] }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
 const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
@@ -39,6 +43,8 @@ const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 const view = shallowRef<EditorView | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
+/** Goes up with every change to the document while the Header dialog is open. */
+const docVersion = ref(0);
 let source: SourceEditor | null = null;
 let connection: RoomConnection | null = null;
 
@@ -161,6 +167,7 @@ function open(): () => void {
       dispatchTransaction(this: EditorView, tr) {
         this.updateState(this.state.apply(tr));
         source?.documentChanged(tr); // the source view follows the live document
+        if (tr.docChanged && props.headerOpen) docVersion.value++;
         if (runner && tr.docChanged) {
           clearTimeout(chunkTimer);
           // By the time this runs, construction is over and pmView is set.
@@ -237,5 +244,13 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
     </div>
     <div v-if="showSource && view" ref="sourceMount" class="source-view" />
+    <HeaderDialog
+      v-if="headerOpen && view && formatEditor?.header"
+      :view="view"
+      :spec="formatEditor.header"
+      :path="path"
+      :version="docVersion"
+      @close="emit('closeHeader')"
+    />
   </div>
 </template>

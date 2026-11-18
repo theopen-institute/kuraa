@@ -57,11 +57,18 @@ const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null
 const componentsOpen = ref(false);
 /** The open document's title as it is being edited, ahead of the host's list. */
 const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
-/** The files, with the open document's live title. */
+/** The open document's conflicts as it is being edited, likewise. */
+const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
+/** The files, with the open document's live title and conflicts. */
 const shownFiles = computed(() => {
   const live = liveTitle.value;
-  if (!live) return files.value;
-  return files.value.map((f) => (f.path === live.path && 'title' in f && f.title !== live.title ? { ...f, title: live.title } : f));
+  const c = liveConflicts.value;
+  return files.value.map((f) => {
+    let out = f;
+    if (live && f.path === live.path && 'title' in f && f.title !== live.title) out = { ...out, title: live.title };
+    if (c && f.path === c.path && (f.conflicts ?? 0) !== c.count) out = { ...out, conflicts: c.count || undefined };
+    return out;
+  });
 });
 /** The Header dialog is open for the open file. */
 const headerOpen = ref(false);
@@ -90,6 +97,7 @@ function select(next: string | null) {
   if (next === path.value) return;
   headerOpen.value = false;
   liveTitle.value = null;
+  liveConflicts.value = null;
   viewing.value = null;
   status.value = null;
   notice.value = null;
@@ -177,6 +185,7 @@ async function sync() {
   try {
     const r = await api.value.sync();
     error.value = r.ok ? null : r.message;
+    if (r.ok && r.message.includes('conflict')) notice.value = { kind: 'warn', text: `${r.message}.` };
     await refreshTree();
     historyKey.value++;
   } catch (e) {
@@ -235,6 +244,7 @@ function useSettings(s: Settings) {
               @status="(s) => (status = s)"
               @close-header="headerOpen = false"
               @title="(t) => (liveTitle = { path: path!, title: t })"
+              @conflicts="(n) => (liveConflicts = { path: path!, count: n })"
               @committed="historyKey++"
             />
           </div>

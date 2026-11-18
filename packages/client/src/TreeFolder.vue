@@ -66,6 +66,12 @@ const tip = (f: TreeFile) => {
       @click="t.select(f.path)"
     >
       <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>
+      <span
+        v-if="f.conflicts"
+        class="tree-conflict"
+        :data-testid="`conflicts:${f.path}`"
+        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between`"
+      >{{ f.conflicts }} conflict{{ f.conflicts === 1 ? '' : 's' }}</span>
     </button>
     <span class="tree-actions">
       <button type="button" title="Rename" @click="t.rename(f.path)">✎</button>

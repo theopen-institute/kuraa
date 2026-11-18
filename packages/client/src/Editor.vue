@@ -41,6 +41,8 @@ const emit = defineEmits<{
   closeHeader: [];
   /** The document's title as it is now, for a type with titles (null: none). */
   title: [title: string | null];
+  /** How many conflicts the document keeps now, for a type that counts them. */
+  conflicts: [count: number];
 }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
@@ -118,6 +120,23 @@ function reportTitle(doc: EditorView['state']['doc'], force = false) {
   emit('title', title);
 }
 
+let lastConflicts = -1;
+let conflictTimer: ReturnType<typeof setTimeout> | undefined;
+/** Count the document's conflicts again, a moment after it changes. */
+function reportConflicts(doc: EditorView['state']['doc'], now = false) {
+  const count = props.type.conflicts;
+  if (!count) return;
+  clearTimeout(conflictTimer);
+  const run = () => {
+    const n = count(props.type.serialize(doc));
+    if (n === lastConflicts) return;
+    lastConflicts = n;
+    emit('conflicts', n);
+  };
+  if (now) run();
+  else conflictTimer = setTimeout(run, 300);
+}
+
 /** Connect to the file's room and build the editor. Returns how to undo it. */
 function open(): () => void {
   const { api, path, type, formatEditor } = props;
@@ -191,6 +210,7 @@ function open(): () => void {
         if (tr.docChanged && props.headerOpen) docVersion.value++;
         // The title is in the header, the first block: read it again when that changes.
         if (tr.docChanged && tr.doc.firstChild !== tr.before.firstChild && touchesHeader(tr.before, tr.doc)) reportTitle(tr.doc);
+        if (tr.docChanged) reportConflicts(tr.doc);
         if (runner && tr.docChanged) {
           clearTimeout(chunkTimer);
           // By the time this runs, construction is over and pmView is set.
@@ -209,6 +229,7 @@ function open(): () => void {
     view.value = markRaw(pmView);
     loading.value = false;
     reportTitle(pmView.state.doc, true);
+    reportConflicts(pmView.state.doc, true);
   })().catch((err: Error) => {
     if (!cancelled) {
       error.value = err.message;

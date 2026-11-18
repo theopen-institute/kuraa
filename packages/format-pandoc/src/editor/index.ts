@@ -15,9 +15,11 @@ import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingI
 import { keymap } from 'prosemirror-keymap';
 import { footnotes } from './notes.js';
 import { headerBehaviour, headerSpec } from './header.js';
+import { conflictViews } from './conflicts.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
+export { versionLabel } from './conflicts.js';
 
 export interface PandocEditorExtension {
   /**
@@ -196,7 +198,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         ...header.plugins,
       ];
     },
-    nodeViews: (ctx) => ({ ...footnotes(ctx.schema, ctx).nodeViews, ...headerBehaviour(ctx.schema, ctx).nodeViews }),
+    nodeViews: (ctx) => ({ ...footnotes(ctx.schema, ctx).nodeViews, ...headerBehaviour(ctx.schema, ctx).nodeViews, ...conflictViews(!!ctx.readOnly) }),
     header: headerSpec(ext.headerFields),
   };
 }
@@ -204,5 +206,5 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
 export const pandocEditor: FormatEditor = {
   ...createPandocEditor(),
   label: 'Markdown editing',
-  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), footnotes kept numbered and in order, and the header (title, authors, …) edited in its own dialog.',
+  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), footnotes kept numbered and in order, the header (title, authors, …) edited in its own dialog, and conflict blocks shown with a way to choose.',
 };

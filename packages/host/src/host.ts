@@ -12,6 +12,7 @@ import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler } from './http.js';
+import { conflictsIn, mergeCommits, type MergeOutcome } from './merging.js';
 
 export interface HostTimings {
   /** Serialize this long after the last update. */
@@ -115,6 +116,8 @@ export class Host {
   private watchTimers = new Map<string, NodeJS.Timeout>();
   /** Titles read from files, by path, with the file's size and time when read. */
   private titleCache = new Map<string, { stamp: string; title: string | null }>();
+  /** Conflicts counted in files, likewise. */
+  private conflictCache = new Map<string, { stamp: string; count: number }>();
   private closed = false;
   address: AddressInfo | null = null;
 
@@ -618,6 +621,60 @@ export class Host {
       state: Buffer.from(rec.state).toString('base64'), lastCommit: rec.lastCommit, lastCommitAt: rec.lastCommitAt,
     };
     await this.writeAtomic(this.cacheFile(rec.key), JSON.stringify(entry));
+  }
+
+  // -------------------------------------------------------------------------
+  // Merging
+
+  /** Where merges keep their temporary index. */
+  get tmpDir(): string {
+    return join(this.cacheDir, '..', 'tmp');
+  }
+
+  /**
+   * Merge commits as every device does (see merging.ts), reading files with
+   * this host's document types.
+   */
+  merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.registry.resolve(path, head), override, tmpDir: this.tmpDir });
+  }
+
+  /**
+   * Bring a commit into the current branch: a fast-forward, or a merge made as
+   * every device makes it. Open rooms are committed first, and take the result
+   * as an outside change. Call inside serial().
+   */
+  async integrate(ref: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    await this.commitAll();
+    const theirs = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
+    const head = await this.git.head();
+    const outcome = head ? await this.merge(head, theirs, override) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
+    if (outcome.commit !== head) {
+      const r = await this.git.run(['merge', '--ff-only', '-q', outcome.commit], { allowFail: true });
+      if (r.code !== 0) throw new Error(`Could not update the files to ${outcome.commit.slice(0, 7)}: ${(r.stderr || r.stdout).trim()}`);
+      this.log(`${outcome.kind === 'merge' ? 'merged' : 'moved to'} ${outcome.commit.slice(0, 7)}${outcome.conflicts.length ? ` (conflicts kept in ${outcome.conflicts.map((c) => c.path).join(', ')})` : ''}`);
+      await this.checkAll();
+    }
+    return outcome;
+  }
+
+  /** How many conflicts a file keeps: from its open room if it has one, else from the file (read again only when it changed). */
+  async conflictsOf(path: string, branch: string): Promise<number> {
+    const type = this.typeFor(path);
+    if (!type) return 0;
+    const rec = this.records.get(`${branch}:${path}`);
+    if (rec) return conflictsIn(type.serialize(this.current(rec), rec.previous), type);
+    try {
+      const s = await stat(this.resolvePath(path));
+      const stamp = `${s.mtimeMs}:${s.size}:${type.id}`;
+      const hit = this.conflictCache.get(path);
+      if (hit?.stamp === stamp) return hit.count;
+      const count = conflictsIn(await readFile(this.resolvePath(path), 'utf8'), type);
+      this.conflictCache.set(path, { stamp, count });
+      return count;
+    } catch {
+      return 0;
+    }
   }
 
   // -------------------------------------------------------------------------

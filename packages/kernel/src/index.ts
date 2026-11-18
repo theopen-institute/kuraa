@@ -1,6 +1,9 @@
 // The kernel knows nothing about any file format. It holds registries for
 // document types, commands and lifecycle hooks, and runs without a DOM or Node.
 import type { Node, Schema } from 'prosemirror-model';
+import type { MergeResult, MergeSide } from './merge.js';
+
+export { countMarkers, diff3, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
 
 export interface ParsedDocument {
   text: string;
@@ -88,6 +91,17 @@ export interface DocumentType {
   title?: DocumentTitle;
   /** The small icon a file of this type is shown with (in the sidebar); none: a plain mark. */
   icon?(path: string): FileIcon | undefined;
+  /**
+   * Merge two versions of a file made from the same base, as this type
+   * understands it (a document by its blocks, then words). Never fails: a
+   * conflict keeps both versions in the text, in a form the type can open, and
+   * is counted. The result depends only on the arguments, so every device
+   * merging the same versions in the same order gets the same text. Without
+   * it, files are merged line by line (`mergeLines`).
+   */
+  merge?(base: string, a: string, b: string, sides: [MergeSide, MergeSide]): MergeResult;
+  /** How many conflicts a merge left in this text (with `merge`); without it, git's markers are counted. */
+  conflicts?(text: string): number;
   /** Client only. */
   editor?: EditorContribution;
 }

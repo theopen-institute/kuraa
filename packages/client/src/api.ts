@@ -25,7 +25,13 @@ export interface PackageInfo { name: string; version: string; source: 'workspace
 export interface PackageResult { ok: boolean; message: string; log: string; restart: boolean }
 export interface RunRequest { path: string; engine: string; code: string; header: string; chunk: ChunkRef; by: { name: string; email: string; color: string } }
 /** A file in the workspace. A document has a title (null if it has none yet); other files have no `title`. */
-export interface TreeFile { path: string; type: string | null; title?: string | null }
+export interface TreeFile {
+  path: string;
+  type: string | null;
+  title?: string | null;
+  /** Conflicts a merge kept in it, to choose between: absent if none. */
+  conflicts?: number;
+}
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;

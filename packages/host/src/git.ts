@@ -1,7 +1,7 @@
 // The system git binary, called as a child process.
 import { spawn } from 'node:child_process';
 
-export interface GitResult { stdout: string; stderr: string; code: number }
+export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
 // Git runs in its own process group, so Ctrl+C in the host's terminal (which goes
 // to the whole foreground group) cannot kill a commit half-way. The host stops
@@ -16,27 +16,28 @@ export class Git {
     this.env = { ...this.env, ...env };
   }
 
-  run(args: string[], opts: { input?: string; allowFail?: boolean } = {}): Promise<GitResult> {
+  run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string> } = {}): Promise<GitResult> {
     return new Promise((resolve, reject) => {
-      const child = spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env }, detached: OWN_GROUP });
+      const child = spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...opts.env }, detached: OWN_GROUP });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
       child.stdout.on('data', (d: Buffer) => out.push(d));
       child.stderr.on('data', (d: Buffer) => err.push(d));
       child.on('error', reject);
       child.on('close', (exit, signal) => {
-        const stdout = Buffer.concat(out).toString('utf8');
+        const bytes = Buffer.concat(out);
+        const stdout = bytes.toString('utf8');
         const stderr = Buffer.concat(err).toString('utf8');
         const code = exit ?? 1;
         if (code !== 0 && !opts.allowFail) reject(new Error(`git ${args.join(' ')} failed (${signal ? `killed by ${signal}` : code}): ${stderr || stdout}`));
-        else resolve({ stdout, stderr, code });
+        else resolve({ stdout, stderr, code, bytes });
       });
       child.stdin.end(opts.input);
     });
   }
 
-  async out(args: string[]): Promise<string> {
-    return (await this.run(args)).stdout.trim();
+  async out(args: string[], opts: { input?: string | Buffer; env?: Record<string, string> } = {}): Promise<string> {
+    return (await this.run(args, opts)).stdout.trim();
   }
 
   async isRepo(): Promise<boolean> {

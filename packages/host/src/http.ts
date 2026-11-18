@@ -169,8 +169,10 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
     const files = await Promise.all(paths.map(async (p) => {
       const type = host.typeFor(p);
-      const file: { path: string; type: string | null; title?: string | null } = { path: p, type: type?.id ?? null };
+      const file: { path: string; type: string | null; title?: string | null; conflicts?: number } = { path: p, type: type?.id ?? null };
       if (type?.title) file.title = await host.titleOf(p, branch);
+      const conflicts = type ? await host.conflictsOf(p, branch) : 0;
+      if (conflicts) file.conflicts = conflicts;
       return file;
     }));
     return send(res, 200, { files });
@@ -329,16 +331,16 @@ async function sync(host: Host): Promise<{ ok: boolean; message: string; head?: 
   const branch = await host.git.branch();
   await host.git.run(['fetch', remote]);
   const hasRemoteBranch = (await host.git.run(['rev-parse', '--verify', '-q', `${remote}/${branch}`], { allowFail: true })).code === 0;
+  let kept = '';
   if (hasRemoteBranch) {
-    const merge = await host.git.run(['merge', '--no-edit', `${remote}/${branch}`], { allowFail: true });
-    if (merge.code !== 0) {
-      await host.git.run(['merge', '--abort'], { allowFail: true });
-      return { ok: false, message: `Merge with ${remote}/${branch} conflicts; resolve it outside the app for now.` };
-    }
-    await host.checkAll();
+    // Never stops on a conflict: both versions stay in the document, to choose between there.
+    const outcome = await host.integrate(`${remote}/${branch}`);
+    const n = outcome.conflicts.reduce((sum, c) => sum + c.count, 0);
+    if (n) kept = `; ${n} conflict${n === 1 ? '' : 's'} kept in ${outcome.conflicts.map((c) => c.path).join(', ')}, to choose between in the document`;
+    if (outcome.copies.length) kept += `; the other version of ${outcome.copies.length === 1 ? 'a file' : 'some files'} saved as ${outcome.copies.join(', ')}`;
   }
   await host.git.run(['push', remote, `HEAD:${branch}`]);
-  return { ok: true, message: `Synced with ${remote}/${branch}`, head: await host.git.head() };
+  return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head: await host.git.head() };
 }
 
 /** The repository over git's smart HTTP protocol, through `git http-backend`. */

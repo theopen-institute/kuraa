@@ -459,3 +459,19 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .naming-path { font: 13px var(--mono); color: var(--text); overflow-wrap: anywhere; }
 .naming-link { border: 0; padding: 0 2px; color: var(--accent); font-size: 12px; background: none; }
 .naming-error { margin: 0; font-size: 12.5px; color: var(--warn); }
+
+/* Conflict blocks: two versions of a passage a merge kept, side by side in the flow. */
+.conflict-block { margin: 12px 0; border: 1px solid var(--warn); border-radius: 6px; background: var(--warn-soft); }
+.conflict-bar, .conflict-version-bar { display: flex; align-items: center; gap: 8px; font: 12px var(--font); color: var(--warn); user-select: none; }
+.conflict-bar { padding: 4px 10px; }
+.conflict-title { font-weight: 600; }
+.conflict-versions { padding: 0 8px 8px; }
+.conflict-version { margin-top: 6px; border-radius: 4px; background: var(--surface); border: 1px solid var(--border); }
+.conflict-version-bar { padding: 3px 8px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.conflict-version-body { padding: 2px 10px; }
+.conflict-button { margin-left: auto; font: 12px var(--font); padding: 1px 8px; border: 1px solid transparent; background: none; color: var(--accent); cursor: pointer; border-radius: 4px; }
+.conflict-version-bar .conflict-button { margin-left: auto; }
+.conflict-button:hover { background: var(--accent-soft); }
+.tree-conflict { margin-left: 4px; color: var(--warn); font-size: 11px; }
+.conflict-version-body > :first-child { margin-top: 6px; }
+.conflict-version-body > :last-child { margin-bottom: 6px; }

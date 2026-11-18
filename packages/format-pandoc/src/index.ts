@@ -4,10 +4,12 @@ import { pandocMarks, pandocNodes } from './schema.js';
 import { createParser, type ParseHooks } from './parse.js';
 import { createSerializer, type SerializeHooks } from './serialize.js';
 import { pandocTitle } from './title.js';
+import { countConflicts, createMerge } from './merge.js';
 
 export { pandocMarks, pandocNodes, safeUrl } from './schema.js';
 export { parseFragment, type MdNode, type ParseContext, type ParseHooks } from './parse.js';
 export { pandocTitle } from './title.js';
+export { conflictBlock, countConflicts, createMerge, isConflictAttrs, isVersionAttrs } from './merge.js';
 export { escapeText, escapeLineStarts, prefixLines, preserve, type SerializeContext, type SerializeHooks } from './serialize.js';
 
 /**
@@ -69,6 +71,8 @@ export function createPandocType(ext?: PandocExtension): DocumentType {
     parse,
     serialize,
     title: pandocTitle,
+    merge: createMerge(parse),
+    conflicts: countConflicts,
     icon: () => ext?.icon ?? DOCUMENT_ICON,
     editor: { nodeViews: { ...pandocNodeViews, ...(ext?.nodeViews ?? {}) } },
   };

@@ -31,11 +31,6 @@
     "prosemirror-state": "^1.4.4",
     "prosemirror-transform": "^1.12.5",
     "prosemirror-view": "^1.42.9",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
-  },
-  "devDependencies": {
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0"
+    "vue": "^3.5.45"
   }
 }

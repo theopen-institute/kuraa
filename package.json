@@ -9,7 +9,7 @@
   "scripts": {
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "vue-tsc -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "dev": "tsx scripts/dev.ts",
@@ -24,12 +24,15 @@
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
     "eslint": "^10.15.0",
+    "eslint-plugin-vue": "^10.12.1",
     "fast-check": "^4.10.2",
     "prosemirror-model": "^1.25.13",
     "prosemirror-transform": "^1.12.5",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "vue-eslint-parser": "^10.4.2",
+    "vue-tsc": "^3.3.14"
   }
 }

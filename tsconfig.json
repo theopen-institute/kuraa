@@ -12,8 +12,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "tests", "scripts", "*.config.ts"]
+  "include": ["packages/*/src", "packages/*/src/**/*.vue", "packages/*/test", "apps/*/src", "tests", "scripts", "*.config.ts"]
 }

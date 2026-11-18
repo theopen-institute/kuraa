@@ -74,7 +74,7 @@ export class ChunkRunner {
   session: RunSessionInfo;
   /** The latest news about packages (an install's progress or result), and a counter that changes with it. */
   packageNews: { engine: string; message: string; at: number } | null = null;
-  /** Bumped on every change, for React's useSyncExternalStore. */
+  /** Bumped on every change. */
   version = 0;
 
   constructor(

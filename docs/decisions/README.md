@@ -19,3 +19,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0013](0013-run-plugins-and-sandboxing.md) | Running code through engine and environment plugins; sandboxed in Podman by default |
 | [0014](0014-packages.md) | Packages: declared per workspace in a committed manifest, stored once per host, installed apart from the data |
 | [0015](0015-editable-source.md) | The Source view is editable, with character-level merging against the rich view |
+| [0016](0016-vue-client.md) | The client's components are Vue; editor objects are never made reactive; plugins stay framework-free |

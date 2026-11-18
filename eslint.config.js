@@ -1,6 +1,7 @@
 // Lint, including the repository's dependency rules (prototype build spec, "Repository layout").
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import pluginVue from 'eslint-plugin-vue';
 
 const yjsFamily = ['yjs', 'y-prosemirror', 'y-protocols', 'y-indexeddb', '@hocuspocus/*'];
 const restrict = (patterns, message) => ({
@@ -16,6 +17,13 @@ export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  // The client's components: Vue single-file components, their scripts in TypeScript.
+  ...pluginVue.configs['flat/essential'],
+  {
+    files: ['**/*.vue'],
+    languageOptions: { parserOptions: { parser: tseslint.parser, extraFileExtensions: ['.vue'], sourceType: 'module' } },
+    rules: { 'vue/multi-word-component-names': 'off', 'no-undef': 'off' }, // TypeScript checks names
+  },
   {
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
@@ -37,7 +45,7 @@ export default tseslint.config(
     files: ['packages/format-pandoc/src/**', 'packages/format-rmarkdown/src/**', 'packages/format-text/src/**', 'packages/formats/src/**'],
     rules: merge(
       restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Format packages (and the formats list) import kernel and other format packages only.'),
-      restrict(['prosemirror-state', 'prosemirror-view', 'prosemirror-transform', '@codemirror/*', 'react*', 'node:*'], 'Format packages use prosemirror-model only and run headless.'),
+      restrict(['prosemirror-state', 'prosemirror-view', 'prosemirror-transform', '@codemirror/*', 'vue', 'node:*'], 'Format packages use prosemirror-model only and run headless.'),
       restrict(['./editor', './editor/*', '../editor/*', '@kuraa/*/editor', '@kuraa/editor-kit'], "A format's core must not load its editor module: the host loads the core."),
       noYjs,
     ),
@@ -49,7 +57,7 @@ export default tseslint.config(
     files: ['packages/format-*/src/editor/**', 'packages/formats/src/editor.ts'],
     rules: merge(
       restrict(['@kuraa/session*', '@kuraa/host*', '@kuraa/client*'], 'Editor modules reach the client only through @kuraa/editor-kit.'),
-      restrict(['@codemirror/*', 'react*', 'node:*'], 'Editor modules use ProseMirror only.'),
+      restrict(['@codemirror/*', 'vue', 'node:*'], 'Editor modules use ProseMirror only.'),
       noYjs,
     ),
   },
@@ -57,13 +65,13 @@ export default tseslint.config(
     // Run plugins and their contract: host side (Node), never the client or editor.
     files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**'],
     rules: merge(
-      restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'react*', '@codemirror/*', 'prosemirror-*'], 'Run plugins depend on @kuraa/run-kit only.'),
+      restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'vue', '@codemirror/*', 'prosemirror-*'], 'Run plugins depend on @kuraa/run-kit only.'),
       noYjs,
     ),
   },
   {
     files: ['packages/editor-kit/src/**'],
-    rules: merge(restrict(['@kuraa/*', 'react*', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
+    rules: merge(restrict(['@kuraa/*', 'vue', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },
   {
     files: ['packages/host/src/**'],

@@ -182,7 +182,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI, run plugin registry |
-| `packages/client` | The React client: file tree, editor with markdown cues, history, status, settings |
+| `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |
 | `scripts/dev.ts` | `pnpm dev`: host under `tsx watch`, client under Vite, one origin |

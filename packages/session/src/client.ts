@@ -9,6 +9,25 @@ import type { Node as PMNode, Schema } from 'prosemirror-model';
 import type { Command, Plugin, Transaction } from 'prosemirror-state';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
+
+/**
+ * Another person's cursor, as y-prosemirror draws it but with no text of its own
+ * and not editable. y-prosemirror's has invisible characters, and a click past
+ * the end of a line put the caret among them, inside the cursor, where what was
+ * typed never reached the document.
+ */
+function cursorBuilder(user: { name?: string; color?: string }): HTMLElement {
+  const cursor = document.createElement('span');
+  cursor.className = 'ProseMirror-yjs-cursor';
+  cursor.contentEditable = 'false';
+  cursor.style.borderColor = user.color ?? '#888';
+  const label = document.createElement('div');
+  label.style.backgroundColor = user.color ?? '#888';
+  label.textContent = user.name ?? '';
+  cursor.append(label);
+  return cursor;
+}
+
 export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, RunSessionInfo, RunSessionState } from './model.js';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'unauthorized';
@@ -126,7 +145,7 @@ export function connectRoom(options: RoomOptions): RoomConnection {
 
   return {
     ready,
-    plugins: () => [ySyncPlugin(fragment), yCursorPlugin(awareness), yUndoPlugin()],
+    plugins: () => [ySyncPlugin(fragment), yCursorPlugin(awareness, { cursorBuilder }), yUndoPlugin()],
     undo: (state, dispatch) => (dispatch ? undo(state) : true),
     isRemote: (tr) => (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin === true,
     redo: (state, dispatch) => (dispatch ? redo(state) : true),

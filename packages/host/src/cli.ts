@@ -10,9 +10,22 @@
 //
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
+//   devices:      --peer [--bootstrap host:port]...   sync with paired devices (see peers/cli.ts
+//                 for invite, join, devices, upstream, fork)
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { startHost } from './index.js';
+import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
+
+if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
+  try {
+    await peerCommand(process.argv.slice(2));
+    process.exit(0);
+  } catch (e) {
+    console.error(`[kuraa] ${(e as Error).message}`);
+    process.exit(1);
+  }
+}
 
 const { values } = parseArgs({
   options: {
@@ -35,6 +48,8 @@ const { values } = parseArgs({
     token: { type: 'string' },
     static: { type: 'string' },
     upstream: { type: 'string' },
+    peer: { type: 'boolean', default: false },
+    bootstrap: { type: 'string', multiple: true },
     'flush-ms': { type: 'string' },
     'commit-ms': { type: 'string' },
   },
@@ -63,6 +78,7 @@ const running = await startHost({
   token: values.token ?? process.env.KURAA_TOKEN,
   staticDir: values.static,
   upstream: values.upstream,
+  peers: values.peer ? { bootstrap: values.bootstrap } : undefined,
   timings: {
     ...(values['flush-ms'] ? { flushMs: Number(values['flush-ms']) } : {}),
     ...(values['commit-ms'] ? { idleCommitMs: Number(values['commit-ms']) } : {}),

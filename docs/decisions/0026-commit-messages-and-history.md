@@ -2,7 +2,7 @@
 
 The host commits often: 30 seconds after the last edit, at least every 5 minutes while editing
 goes on, and when the last person leaves a document. Each commit is a point to go back to and, with
-peers (0027), how a change reaches a device that does not have the document open. The timings stay;
+peers (0028), how a change reaches a device that does not have the document open. The timings stay;
 what changes is how the commits read.
 
 **Messages.** An automatic commit names the document (its title, else its filename), the parts of

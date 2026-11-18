@@ -245,6 +245,7 @@ function useSettings(s: Settings) {
               @close-header="headerOpen = false"
               @title="(t) => (liveTitle = { path: path!, title: t })"
               @conflicts="(n) => (liveConflicts = { path: path!, count: n })"
+              @files-changed="refreshTree()"
               @committed="historyKey++"
             />
           </div>
@@ -292,6 +293,7 @@ function useSettings(s: Settings) {
       :syncing="syncing"
       :settings="settings"
       :shell="shell"
+      :api="api"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @header="headerOpen = true"
@@ -300,6 +302,7 @@ function useSettings(s: Settings) {
       @save-settings="useSettings"
       @packages="(runner, engine) => (packages = { runner, engine })"
       @components="componentsOpen = true"
+      @accepted="refreshTree(); historyKey++"
       @close="menuOpen = false"
     />
     <ComponentsDialog

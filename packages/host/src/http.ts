@@ -317,33 +317,29 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     return;
   }
 
+  // The workspace's devices, as the app shows them: who this device is, which are paired and
+  // connected, the upstream, and work waiting to be accepted. Pairing is the operator's (CLI).
+  if (route === 'GET /api/peers') {
+    return send(res, 200, host.peers ? { enabled: true, ...(await host.peers.status()) } : { enabled: false });
+  }
+
+  if (route === 'POST /api/peers/accept') {
+    if (!host.peers) throw new HttpError(404, 'This host does not sync with other devices');
+    const body = await readBody(req);
+    const device = str(body.device, 'device');
+    const branch = str(body.branch, 'branch');
+    const status = await host.peers.status();
+    if (!status.proposals.some((p) => p.device === device && p.branch === branch)) throw new HttpError(404, `Nothing from ${device} on ${branch} waits to be accepted`);
+    await host.peers.accept(device, branch);
+    return send(res, 200, { ok: true });
+  }
+
   if (route === 'POST /api/sync') {
-    const result = await host.serial(() => sync(host));
+    const result = await host.syncNow();
     return send(res, result.ok ? 200 : 409, result);
   }
 
   throw new HttpError(404, `No route: ${route}`);
-}
-
-/** Fetch, merge and push against the upstream remote. */
-async function sync(host: Host): Promise<{ ok: boolean; message: string; head?: string | null }> {
-  const remotes = (await host.git.out(['remote'])).split('\n').filter(Boolean);
-  const remote = host.options.upstream ?? (remotes.includes('origin') ? 'origin' : remotes[0]);
-  if (!remote) return { ok: false, message: 'No upstream remote is configured' };
-  await host.commitAll();
-  const branch = await host.git.branch();
-  await host.git.run(['fetch', remote]);
-  const hasRemoteBranch = (await host.git.run(['rev-parse', '--verify', '-q', `${remote}/${branch}`], { allowFail: true })).code === 0;
-  let kept = '';
-  if (hasRemoteBranch) {
-    // Never stops on a conflict: both versions stay in the document, to choose between there.
-    const outcome = await host.integrate(`${remote}/${branch}`);
-    const n = outcome.conflicts.reduce((sum, c) => sum + c.count, 0);
-    if (n) kept = `; ${n} conflict${n === 1 ? '' : 's'} kept in ${outcome.conflicts.map((c) => c.path).join(', ')}, to choose between in the document`;
-    if (outcome.copies.length) kept += `; the other version of ${outcome.copies.length === 1 ? 'a file' : 'some files'} saved as ${outcome.copies.join(', ')}`;
-  }
-  await host.git.run(['push', remote, `HEAD:${branch}`]);
-  return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head: await host.git.head() };
 }
 
 /** The repository over git's smart HTTP protocol, through `git http-backend`. */

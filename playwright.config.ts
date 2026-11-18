@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: E2E.url, trace: 'retain-on-failure' },
   projects: [
-    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts)\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
     { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],

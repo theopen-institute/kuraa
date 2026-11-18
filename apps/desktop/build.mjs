@@ -7,8 +7,10 @@ import { stdout } from 'node:process';
 rmSync('build', { recursive: true, force: true });
 mkdirSync('build', { recursive: true });
 const common = { bundle: true, format: 'cjs', external: ['electron'], sourcemap: 'inline', logLevel: 'warning' };
+// Hyperswarm finds its native parts (sodium, udx) next to its own files: it is loaded from node_modules, not bundled.
+const NATIVE = ['hyperswarm', 'hypercore-crypto', 'hyperdht'];
 await build({
-  ...common, platform: 'node', target: 'node22', entryPoints: ['src/main.ts'], outfile: 'build/main.cjs',
+  ...common, external: [...common.external, ...NATIVE], platform: 'node', target: 'node22', entryPoints: ['src/main.ts'], outfile: 'build/main.cjs',
   // Some dependencies call createRequire(import.meta.url), which a CommonJS bundle lacks.
   define: { 'import.meta.url': '__importMetaUrl' },
   banner: { js: "const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;" },

@@ -9,10 +9,16 @@
   "dependencies": {
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",
-    "@kuraa/run-kit": "workspace:*",
     "@kuraa/run-components": "workspace:*",
+    "@kuraa/run-kit": "workspace:*",
     "@kuraa/session": "workspace:*",
+    "b4a": "^1.9.0",
+    "compact-encoding": "^3.7.0",
+    "hypercore-crypto": "^3.7.0",
+    "hyperdht": "^6.36.0",
+    "hyperswarm": "^4.17.2",
     "prosemirror-model": "^1.25.13",
+    "protomux": "^3.13.1",
     "ws": "^8.23.0"
   },
   "devDependencies": {

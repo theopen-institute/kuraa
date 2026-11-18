@@ -26,6 +26,7 @@
     "eslint": "^10.15.0",
     "eslint-plugin-vue": "^10.12.1",
     "fast-check": "^4.10.2",
+    "hyperdht": "^6.36.0",
     "prosemirror-model": "^1.25.13",
     "prosemirror-transform": "^1.12.5",
     "tsx": "^4.23.15",

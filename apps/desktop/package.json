@@ -11,7 +11,10 @@
   "dependencies": {
     "@kuraa/client": "workspace:*",
     "@kuraa/host": "workspace:*",
-    "@kuraa/run-components": "workspace:*"
+    "@kuraa/run-components": "workspace:*",
+    "hypercore-crypto": "^3.7.0",
+    "hyperdht": "^6.36.0",
+    "hyperswarm": "^4.17.2"
   },
   "devDependencies": {
     "electron": "45.3.2"

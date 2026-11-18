@@ -179,7 +179,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* Collaborators' cursors, from y-prosemirror. */
 .ProseMirror-yjs-cursor {
   position: relative; margin: 0 -1px; border-left: 2px solid; border-color: inherit;
-  word-break: normal; pointer-events: none;
+  word-break: normal; pointer-events: none; user-select: none;
 }
 .ProseMirror-yjs-cursor > div {
   position: absolute; top: -1.35em; left: -2px; padding: 0 4px; border-radius: 3px 3px 3px 0;
@@ -481,3 +481,12 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .history-saves { list-style: none; margin: 0 0 4px 14px; padding: 0; border-left: 1px solid var(--border); }
 .history-saves .history-subject { font-weight: 400; font-size: 13px; }
 .history-merge .history-subject { font-weight: 500; color: var(--muted); }
+/* Devices: paired devices and whether each is connected; work waiting to be accepted. */
+.menu-devices, .menu-proposals { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.menu-devices li { display: flex; align-items: center; gap: 6px; }
+.device-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
+.device-dot.online { background: var(--accent); }
+.device-tag { font-size: 11px; padding: 0 5px; border-radius: 3px; background: var(--selected); color: var(--muted); }
+.device-state { margin-left: auto; font-size: 12px; color: var(--muted); }
+.menu-proposals li { display: flex; align-items: center; gap: 8px; }
+.proposal-what { flex: 1; min-width: 0; overflow-wrap: anywhere; }

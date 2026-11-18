@@ -5,7 +5,7 @@
 // (your settings, and the shell's own actions).
 import { computed } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
-import type { WorkspaceInfo } from './api.js';
+import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
 import type { Shell } from './shell.js';
@@ -13,6 +13,7 @@ import type { EditorStatus } from './types.js';
 import { CONNECTION, time } from './labels.js';
 import { onEscape } from './vue.js';
 import CodeSection from './CodeSection.vue';
+import DevicesSection from './DevicesSection.vue';
 import SettingsForm from './SettingsForm.vue';
 
 const props = defineProps<{
@@ -31,6 +32,7 @@ const props = defineProps<{
   syncing: boolean;
   settings: Settings;
   shell: Shell;
+  api: HostApi;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -41,6 +43,8 @@ const emit = defineEmits<{
   saveSettings: [settings: Settings];
   packages: [runner: ChunkRunner, engine: string];
   components: [];
+  /** Work from another device was accepted: the files changed. */
+  accepted: [];
   close: [];
 }>();
 
@@ -98,11 +102,13 @@ const runner = computed(() => props.status?.runner ?? null);
           </li>
         </ul>
         <div class="menu-actions">
-          <button type="button" :disabled="syncing || !workspace" title="Commit, fetch, merge and push against the upstream remote" @click="emit('sync'); emit('close')">
+          <button type="button" :disabled="syncing || !workspace" title="Commit; bring in the work of connected devices; fetch, merge and push against the upstream remote, if there is one" @click="emit('sync'); emit('close')">
             {{ syncing ? 'Syncing…' : 'Sync' }}
           </button>
         </div>
       </section>
+
+      <DevicesSection :api="api" @accepted="emit('accepted')" />
 
       <section class="menu-section">
         <h3>Components</h3>

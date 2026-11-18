@@ -16,6 +16,8 @@ export type RoomMessage =
   | { type: 'outside-change'; at: string; merged: boolean }
   | { type: 'conflict'; at: string; savedAs: string }
   | { type: 'reseeded'; at: string; room: string }
+  /** Files changed under everyone (a merge from another device): reload the list. */
+  | { type: 'files-changed'; at: string }
   | { type: 'run'; run: RunRecord }
   | { type: 'run-session'; session: RunSessionInfo }
   /** A workspace's packages changed (installed, removed, restored). */

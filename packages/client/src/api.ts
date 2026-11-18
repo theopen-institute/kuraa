@@ -32,6 +32,19 @@ export interface TreeFile {
   /** Conflicts a merge kept in it, to choose between: absent if none. */
   conflicts?: number;
 }
+/** The workspace's devices, as the host reports them (pairing is done with kuraa-host, not here). */
+export type PeersInfo =
+  | { enabled: false }
+  | {
+      enabled: true;
+      device: { name: string; key: string };
+      workspace: { id: string; forkedFrom: string | null };
+      upstream: { name: string; kind: 'self' | 'device' | 'remote' } | null;
+      gated: string[];
+      devices: { name: string; key: string; online: boolean; upstream: boolean; related: boolean }[];
+      proposals: { device: string; branch: string; commits: number; subject: string }[];
+    };
+
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;
@@ -93,6 +106,8 @@ export class HostApi {
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   components() { return this.json<ComponentsInfo>('/api/components'); }
+  peers() { return this.json<PeersInfo>('/api/peers'); }
+  acceptProposal(device: string, branch: string) { return this.json('/api/peers/accept', { method: 'POST', body: JSON.stringify({ device, branch }) }); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }

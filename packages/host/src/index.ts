@@ -5,6 +5,13 @@ export { Host, HttpError, DEFAULT_TIMINGS, type HostOptions, type HostTimings } 
 export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
+export type { JoinOptions } from './peers/join.js';
+export type { PeerOptions, PeersStatus, DeviceInfo, Proposal } from './peers/peers.js';
+
+/** Join a workspace from an invitation (loads the peer layer, and Hyperswarm with it, only when called). */
+export async function joinWorkspace(o: import('./peers/join.js').JoinOptions) {
+  return (await import('./peers/join.js')).joinWorkspace(o);
+}
 
 export interface RunningHost {
   host: Host;

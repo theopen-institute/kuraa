@@ -42,6 +42,8 @@ in, and a `git clone` command. Useful options:
 | `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect |
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
+| `--peer` | off | Sync with this workspace's other devices, directly. See below |
+| `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
 | `--engine` | off | Turn on running code: `--engine r`. See below |
 | `--env` | the only one loaded | Where code runs, by environment: `--env podman` |
@@ -80,6 +82,29 @@ others editing the rich view: [decision 0015](docs/decisions/0015-editable-sourc
 **Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.
+
+## On several devices
+
+A workspace can be on several devices at once, each running its own host with `--peer`, with no
+server in between ([decision 0028](docs/decisions/0028-peers.md)). When people on two devices
+have the same document open, they edit it together live; what is done apart reaches the other
+devices through git as soon as they meet. Merges read documents and never stop: a passage both
+sides changed differently stays in the document with both versions, to choose between there
+([0025](docs/decisions/0025-merging.md)).
+
+```sh
+# On the first device (its host running with --peer):
+pnpm host invite --dir ~/research/notes          # prints a one-time invitation
+# On the other device:
+pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
+pnpm host --dir ~/notes --peer --static apps/web/dist
+```
+
+Paired devices are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device
+has. `pnpm host devices` lists them; `remove-device`, `name` and `fork` manage them.
+`pnpm host upstream <device|self|remote> --gate main` makes one device (or an ordinary remote)
+the workspace's upstream: on gated branches, work from other devices waits for it to be accepted
+(the menu's **Devices** section). In the desktop app, pass `--peer` too.
 
 ## Running R chunks
 
@@ -209,7 +234,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/format-text` | The Text file type for scripts, data and settings files, one node per line, highlighted by file name |
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
-| `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI, run component registry |
+| `packages/host` | Relay, bridge between rooms and files, committer, git peer, merges (`merging.ts`), devices (`peers/`), HTTP API, CLI, run component registry |
 | `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |
@@ -219,7 +244,8 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 
 - Two people typing at exactly the same caret position interleave their keystrokes. Text still
   converges; typing anywhere else in the same paragraph does not interleave.
-- A merge from upstream that conflicts is aborted and reported, not resolved in the app.
+- Conflicts are kept a block at a time (a whole paragraph), not marked within a sentence.
+- Syncing with other devices (`--peer`) does not work on Windows yet (the git remote helper is a shell script).
 - Edits made while disconnected are kept and sent on reconnect. If the host reseeded the file in
   the meantime (for example after its room cache was cleared), the client only warns.
 - The corpus does not yet include real working files from the project's first users.

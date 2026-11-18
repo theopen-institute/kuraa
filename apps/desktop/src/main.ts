@@ -14,6 +14,7 @@
 //   --format <id>...     document formats to turn on (default: all)
 //   --component <spec>...   more run components (engines, environments)
 //   --allow-unsandboxed  allow an environment that is not sandboxed
+//   --peer               sync with the folder's paired devices (pair them with kuraa-host invite / join)
 // The components that ship (@kuraa/run-components: R, Podman containers) are loaded.
 //
 // The window shows only the app's own pages: it does not navigate elsewhere or
@@ -39,7 +40,7 @@ const { values: flags } = parseArgs({
   options: {
     open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
     engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true },
-    component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' },
+    component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' }, peer: { type: 'boolean' },
   },
   strict: false,
 });
@@ -108,6 +109,7 @@ async function openFolder(path: string): Promise<boolean> {
     // What runs and which formats are on: this app's flags.
     run: runOptions(),
     formats: list(flags.format),
+    peers: flags.peer === true,
     host: '127.0.0.1',
     port: 0,
     timings: timings(),

@@ -43,6 +43,8 @@ const emit = defineEmits<{
   title: [title: string | null];
   /** How many conflicts the document keeps now, for a type that counts them. */
   conflicts: [count: number];
+  /** Files changed under everyone (work from another device came in). */
+  filesChanged: [];
 }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
@@ -175,7 +177,11 @@ function open(): () => void {
           emit('committed');
         } else if (m.type === 'outside-change') update({ notice: { kind: 'info', text: m.merged ? 'Merged a change made outside the app.' : 'Applied a change made outside the app.' } });
         else if (m.type === 'conflict') update({ notice: { kind: 'warn', text: `A conflicting outside edit was saved as ${m.savedAs}; the live version was kept.` } });
-        else if (m.type === 'reseeded') update({ notice: { kind: 'warn', text: 'The host reloaded this file. Reopen it to continue.' } });
+        else if (m.type === 'reseeded') {
+          // The room was replaced (joined with another device's): move to the new one.
+          update({ notice: { kind: 'info', text: 'Joined the people editing this on another device.' } });
+          setTimeout(reopen, 50);
+        } else if (m.type === 'files-changed') emit('filesChanged');
       },
     });
     connection = conn;
@@ -247,6 +253,10 @@ function open(): () => void {
 }
 
 let close: (() => void) | null = null;
+function reopen() {
+  close?.();
+  close = open();
+}
 onMounted(() => {
   close = open();
 });

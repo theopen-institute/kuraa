@@ -16,7 +16,7 @@ export class Git {
     this.env = { ...this.env, ...env };
   }
 
-  run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string> } = {}): Promise<GitResult> {
+  run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
     return new Promise((resolve, reject) => {
       const child = spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...opts.env }, detached: OWN_GROUP });
       const out: Buffer[] = [];
@@ -24,7 +24,9 @@ export class Git {
       child.stdout.on('data', (d: Buffer) => out.push(d));
       child.stderr.on('data', (d: Buffer) => err.push(d));
       child.on('error', reject);
+      const timer = opts.timeoutMs ? setTimeout(() => child.kill('SIGTERM'), opts.timeoutMs) : undefined;
       child.on('close', (exit, signal) => {
+        clearTimeout(timer);
         const bytes = Buffer.concat(out);
         const stdout = bytes.toString('utf8');
         const stderr = Buffer.concat(err).toString('utf8');

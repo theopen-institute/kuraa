@@ -1,10 +1,11 @@
 // Running R chunks from the browser: outputs appear under each chunk, for
 // everyone with the document open, survive a reload, and never touch the file.
+// R runs in Podman containers; skipped where Podman is not installed and running.
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findRscript } from '../../packages/engine-r/src/index.js';
+import { podmanWorks } from '../../packages/env-podman/src/index.js';
 import { E2E } from './env.js';
 
 const MAC = process.platform === 'darwin';
@@ -27,7 +28,7 @@ const DOC = [
   '',
 ].join('\n');
 
-test.skip(findRscript() === null, 'R is not installed');
+test.skip(!podmanWorks(), 'Podman is not installed and running');
 
 async function open(browser: Browser, name: string, path: string): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
@@ -95,7 +96,7 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
   await chunk(ada, 0).getByRole('button', { name: 'Stop' }).click();
   await expect(output(ada, 0)).toContainText('Interrupted.', { timeout: 10_000 });
   await ada.getByTestId('menu-button').click();
-  await expect(ada.getByTestId('r-state')).toHaveText('R ready · on this computer (not sandboxed)');
+  await expect(ada.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   await ada.keyboard.press('Escape');
 
   // Outputs come back after a reload; the file holds only what was typed.
@@ -112,7 +113,6 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
 const ONLINE = (() => {
   try {
     execFileSync('curl', ['-sSf', '--max-time', '10', '-o', '/dev/null', 'https://cloud.r-project.org/web/packages/hellno/index.html'], { stdio: 'ignore' });
-    execFileSync(findRscript()!, ['-e', 'stopifnot(requireNamespace("pak", quietly = TRUE))'], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -120,7 +120,7 @@ const ONLINE = (() => {
 })();
 
 test('the Packages panel installs and removes packages for the workspace', async ({ browser }) => {
-  test.skip(!ONLINE, 'needs the network and pak');
+  test.skip(!ONLINE, 'needs the network');
   test.setTimeout(300_000);
   const path = `runs/pkgs-${Date.now().toString(36)}.Rmd`;
   const res = await fetch(`${E2E.url}/api/files`, {

@@ -43,12 +43,12 @@ in, and a `git clone` command. Useful options:
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
-| `--engine`, `--env` | off | Turn on running code: `--engine r --env podman`. See below |
+| `--engine` | off | Turn on running code: `--engine r`. Code runs in Podman containers, always. See below |
+| `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` |
 | `--plugin` | none | Load a run plugin (engine or environment) by path or package name |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
 | `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
 | `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
-| `--allow-plugin-changes` | off | Let the **Plugins** panel turn plugins on and off (desktop and `pnpm dev`: on). Only with `--host 127.0.0.1` |
 
 Everyone who has the URL and token can edit. Each person sets a display name, an email (for
 co-author credit) and a cursor colour under **Settings** in the client.
@@ -75,27 +75,24 @@ open: text, messages, warnings, errors, data frames as tables, and plots at the 
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
 runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also says where code runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
 
-Code runs through plugins: an **engine** (R) in an **environment**, which is where it runs and
-what it may touch ([decision 0013](docs/decisions/0013-run-plugins-and-sandboxing.md)):
+**People using the app are not trusted with the computer the host runs on**; only the content of
+their documents is theirs ([decision 0018](docs/decisions/0018-untrusted-users.md)). Code runs
+through **engine** plugins (R), and only ever in a **Podman container**: no network, the
+workspace read-only and `.git` hidden, nothing else of the computer visible. There is no way to run
+code on the computer itself, and a plugin cannot add one. Install Podman once: `brew install
+podman`, `podman machine init`, `podman machine start`. The first run builds an R image, which
+takes a few minutes. Package installs run in containers too.
 
-- **Podman** (`--env podman`, the desktop app's default): a container with no network, the
-  workspace read-only and `.git` hidden, and nothing else of your computer visible. Install it
-  once: `brew install podman`, `podman machine init`, `podman machine start`. The first run builds
-  an R image, which takes a few minutes.
-- **Local** (`--env local`, and `pnpm dev`): R on your computer, as you. Not sandboxed.
-
-**Plugins…** in the menu turns engines and environments on and off, and picks the default; the
-same panel turns document formats on and off (a file whose format is off opens as a Text file),
-and, for you alone, each format's editing behaviour (markdown cues and footnote ordering, chunk
-fences). The host's plugins can be changed there only on a host you run on your own computer (the
-desktop app, `pnpm dev`, or `--allow-plugin-changes`); the choices are kept in `plugins.json` in
-the data folder, for every workspace, and win over `--engine` and `--env`. On a shared host the
-panel shows them, read-only ([decision 0017](docs/decisions/0017-plugins-panel.md)). A workspace
-can say what it needs in `.kuraa/run.json`, but cannot loosen what you allow:
+Everything that configures a host is a flag (`--engine`, `--format`, `--plugin`, the `--allow-…`
+flags); the desktop app takes `--engine` (`--engine none` for none), `--format` and `--plugin`
+too. **Plugins…** in the menu shows what is on, read-only, and lets each person turn their own
+editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
+browser. A file whose format is off opens as a Text file
+([decision 0017](docs/decisions/0017-plugins-panel.md)). A workspace can say what it needs in
+`.kuraa/run.json`, but cannot loosen what the host allows:
 
 ```json
 {
-  "environment": "podman",
   "r": { "packages": ["dplyr", "ggplot2"], "system": ["libxml2-dev"], "renv": true },
   "access": { "workspace": "read-write" }
 }
@@ -127,10 +124,10 @@ already there.
 ```sh
 pnpm dev                          # uses .dev-workspace/ (created the first time, git-ignored)
 pnpm dev --dir ~/research/notes
-pnpm dev --env podman             # run R chunks in a Podman container (default: on this computer)
 ```
 
-`--allow-write` and `--allow-network` let the workspace ask for those in `.kuraa/run.json`.
+R chunks run in Podman, as everywhere. `--allow-write` and `--allow-network` let the workspace ask
+for those in `.kuraa/run.json`.
 
 Open <http://127.0.0.1:5173>. There is nothing to configure: the dev server puts the host behind
 its own address and gives the page the token. Client changes apply in place without a reload;
@@ -145,6 +142,7 @@ URL and token in **Settings**.
 ```sh
 pnpm desktop                          # launcher: open a folder, or join a shared host
 pnpm desktop -- --open ~/research/notes
+pnpm desktop -- --open ~/research/notes --engine none --format pandoc-markdown --format text
 pnpm desktop -- --join http://192.168.1.20:4321 --token <token>
 ```
 
@@ -170,7 +168,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
 | — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
-| — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched (skipped without R) |
+| — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
 
@@ -181,7 +179,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
 | `packages/run-kit` | The contract for run plugins: engines, environments, the sandbox policy |
 | `packages/engine-r` | The R engine: runs `r` chunks through `evaluate` |
-| `packages/env-podman`, `packages/env-local` | Environments: a locked-down container; a plain process |
+| `packages/env-podman` | The sandbox every process runs in: a locked-down Podman container |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension points; `/editor`: chunk fences |

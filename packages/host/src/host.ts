@@ -10,12 +10,9 @@ import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMe
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { loadRunPlugins, type RunPlugins } from './plugins.js';
-import { cleanChoices, orderEnvironments, readChoices, resolveOn, writeChoices, type PluginChoices } from './plugin-settings.js';
+import { loadRunPlugins } from './plugins.js';
+import { podmanEnvironment } from '@kuraa/env-podman';
 import { createRequestHandler } from './http.js';
-
-/** Addresses only this computer can reach. */
-const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
 
 export interface HostTimings {
   /** Serialize this long after the last update. */
@@ -38,20 +35,18 @@ export interface HostOptions {
   /** Remote to fetch from and push to. Defaults to `origin` when it exists. */
   upstream?: string;
   identity?: { name: string; email: string };
-  /** Document types to load. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
+  /** Document types this host has. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
   types?: DocumentType[];
   /**
-   * Running code chunks: which engines and environments are on (see runner.ts).
-   * Off by default. With the `local` environment, anyone with the token can run
-   * any program as the host's user; a sandboxed one (Podman) confines it.
+   * Which of those are on, by id (--format). Default: all. A file whose type is
+   * off opens as the next type that claims it (markdown files as Text files).
+   */
+  formats?: string[];
+  /**
+   * Running code chunks: which engines are on (see runner.ts). Off by default.
+   * Code always runs in a Podman container, never on this computer itself.
    */
   run?: RunOptions;
-  /**
-   * Let the Plugins panel turn run plugins and formats on and off, keeping the
-   * choices in this file (they win over \`run\`). For a host only its owner can
-   * reach: it must listen on the loopback address.
-   */
-  pluginSettings?: string;
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   timings?: Partial<HostTimings>;
@@ -102,12 +97,10 @@ interface CacheEntry {
 }
 
 export class Host {
-  /** The document types that are on. Replaced when formats are turned on or off. */
-  registry = new TypeRegistry();
+  /** The document types that are on. */
+  readonly registry = new TypeRegistry();
   /** Every document type this host has, on or off. */
   private readonly allTypes: DocumentType[];
-  private choices: PluginChoices = {};
-  private runPlugins!: RunPlugins;
   readonly git: Git;
   readonly dir: string;
   readonly token: string;
@@ -135,78 +128,23 @@ export class Host {
       GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email,
     } : {});
     this.allTypes = options.types ?? standardTypes;
-    if (options.pluginSettings && !LOOPBACK.includes(options.host ?? '127.0.0.1')) {
-      throw new Error('Plugins can be changed from the app only on a host that listens on this computer alone (127.0.0.1). A shared host takes its plugins from its options.');
-    }
-    this.applyFormats();
+    const known = this.allTypes.map((t) => t.id);
+    for (const id of options.formats ?? []) if (!known.includes(id)) throw new Error(`Unknown format "${id}". Known: ${known.join(', ')}.`);
+    for (const t of this.allTypes) if (!options.formats || options.formats.includes(t.id)) this.registry.register(t);
   }
 
   log(msg: string): void {
     this.options.log?.(msg);
   }
 
-  // -------------------------------------------------------------------------
-  // Plugins: which run plugins and formats are on (see plugin-settings.ts)
-
-  private applyFormats(): void {
-    const registry = new TypeRegistry();
-    for (const t of this.allTypes) if (this.choices.formats?.[t.id] ?? true) registry.register(t);
-    this.registry = registry;
-  }
-
-  private async applyRun(): Promise<void> {
-    const opts = this.options.run;
-    const engines = resolveOn([...this.runPlugins.engines.keys()], opts?.engines ?? [], this.choices.engines);
-    const environments = resolveOn([...this.runPlugins.environments.keys()], opts?.environments ?? [], this.choices.environments);
-    await this.runner.turnOn(engines, orderEnvironments(environments, opts?.environments ?? [], this.choices.defaultEnvironment));
-  }
-
-  /** Every plugin, whether it is on, and whether this client may change that. */
+  /** Every plugin, and whether it is on. Set by the host's options (flags); people using the app only see them. */
   async plugins() {
     const run = await this.runner.catalog();
-    const defaultEnvironment = this.runner.turnedOn.environments[0] ?? null;
     return {
-      canChange: !!this.options.pluginSettings,
       engines: run.engines,
-      environments: run.environments.map((e) => ({ ...e, default: e.id === defaultEnvironment })),
+      environment: run.environment,
       formats: this.allTypes.map((t) => ({ id: t.id, label: t.label, description: t.description ?? '', extensions: t.extensions ?? [], on: this.registry.get(t.id) === t })),
     };
-  }
-
-  /**
-   * Turn plugins on or off (only what `change` names; the rest stays). Running
-   * sessions stop; everyone with a file open is told; a file that now opens as
-   * another type (or none) has its room written, committed and closed.
-   */
-  async setPlugins(raw: unknown): Promise<void> {
-    const file = this.options.pluginSettings;
-    if (!file) throw new HttpError(403, 'Only the person running this host can change its plugins.');
-    const change = cleanChoices(raw);
-    const unknown = (ids: string[], known: Iterable<string>, what: string) => {
-      const set = new Set(known);
-      const bad = ids.filter((id) => !set.has(id));
-      if (bad.length) throw new HttpError(400, `No ${what} called ${bad.join(', ')}.`);
-    };
-    unknown(Object.keys(change.engines ?? {}), this.runPlugins.engines.keys(), 'engine');
-    unknown([...Object.keys(change.environments ?? {}), ...(change.defaultEnvironment ? [change.defaultEnvironment] : [])], this.runPlugins.environments.keys(), 'environment');
-    unknown(Object.keys(change.formats ?? {}), this.allTypes.map((t) => t.id), 'format');
-    await this.serial(async () => {
-      this.choices = {
-        engines: { ...this.choices.engines, ...change.engines },
-        environments: { ...this.choices.environments, ...change.environments },
-        formats: { ...this.choices.formats, ...change.formats },
-        ...(change.defaultEnvironment ?? this.choices.defaultEnvironment ? { defaultEnvironment: change.defaultEnvironment ?? this.choices.defaultEnvironment } : {}),
-      };
-      await writeChoices(file, this.choices);
-      await this.applyRun();
-      this.applyFormats();
-      for (const rec of this.records.values()) this.broadcast(rec, { type: 'plugins' });
-      for (const rec of [...this.records.values()]) {
-        if (this.typeFor(rec.path)?.id !== rec.type.id) await this.dropRoom(rec.path);
-      }
-    });
-    const on = this.runner.turnedOn;
-    this.log(`plugins changed: running ${on.engines.join(', ') || 'nothing'} in ${on.environments.join(' or ') || 'nothing'}; formats ${this.registry.all().map((t) => t.id).join(', ')}`);
   }
 
   /** Run state-changing work one step at a time. */
@@ -224,11 +162,11 @@ export class Host {
     }
     this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
     const run = this.options.run;
-    this.runPlugins = await loadRunPlugins(run?.plugins);
     this.runner = new Runner({
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
-      plugins: this.runPlugins,
+      plugins: await loadRunPlugins(run?.plugins),
+      environment: podmanEnvironment,
       options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
       broadcastAll: (message) => {
@@ -239,13 +177,7 @@ export class Host {
       },
       log: (m) => this.log(m),
     });
-    if (this.options.pluginSettings) {
-      this.choices = await readChoices(this.options.pluginSettings, (m) => this.log(m));
-      this.applyFormats();
-      await this.applyRun();
-    }
-    const on = this.runner.turnedOn;
-    if (this.runner.enabled) this.log(`running code: ${on.engines.join(', ')} in ${on.environments.join(' or ')}`);
+    if (this.runner.enabled) this.log(`running code: ${this.runner.turnedOn.join(', ')}, in Podman containers`);
     await mkdir(this.cacheDir, { recursive: true });
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.

@@ -12,21 +12,14 @@ export interface RunInfo {
   /** Whether people may install packages here. */
   allowInstalls: boolean;
   /** Where this workspace's code runs, and whether that is available. */
-  environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
+  environment: { id: string; label: string; available: boolean; message: string } | null;
 }
-/** Which plugins the host has, which are on, and whether this client may change them. */
+/** Which plugins the host has and which are on: set by the host's flags, shown read-only. */
 export interface PluginsInfo {
-  canChange: boolean;
   engines: { id: string; label: string; description: string; on: boolean }[];
-  environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; default: boolean; available: boolean; message: string }[];
+  /** Where code runs: the Podman sandbox, always. */
+  environment: { id: string; label: string; description: string; available: boolean; message: string };
   formats: { id: string; label: string; description: string; extensions: string[]; on: boolean }[];
-}
-/** A change to the host's plugins: only what it names changes. */
-export interface PluginChange {
-  engines?: Record<string, boolean>;
-  environments?: Record<string, boolean>;
-  defaultEnvironment?: string;
-  formats?: Record<string, boolean>;
 }
 export interface PackageInfo { name: string; version: string; source: 'workspace' | 'environment' }
 export interface PackageResult { ok: boolean; message: string; log: string; restart: boolean }
@@ -90,7 +83,6 @@ export class HostApi {
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   plugins() { return this.json<PluginsInfo>('/api/plugins'); }
-  setPlugins(change: PluginChange) { return this.json<PluginsInfo>('/api/plugins', { method: 'PUT', body: JSON.stringify(change) }); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }

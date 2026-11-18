@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "@kuraa/engine-r": "workspace:*",
-    "@kuraa/env-local": "workspace:*",
     "@kuraa/env-podman": "workspace:*",
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",

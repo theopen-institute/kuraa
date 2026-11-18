@@ -112,10 +112,9 @@ async function runInstaller(ctx: PackageContext, request: { refs: string[]; envi
     workspace: ctx.workspace, scratch: join(ctx.dataDir, 'tmp'), files: ctx.files,
     mounts: where.mounts('read-write'),
     policy: { ...ctx.policy, workspace: 'none', network: true },
-    searchPaths: ['/Library/Frameworks/R.framework/Resources/bin', '/opt/R/current/bin', '/usr/lib/R/bin'],
     image: imageRecipe(ctx.requirements, ctx.workspace),
     command: (view) => ({
-      argv: [!ctx.environment.sandboxed ? ((ctx.options as { rscript?: string } | undefined)?.rscript ?? 'Rscript') : 'Rscript', '--no-save', '--no-restore', `${view.files}/install.R`],
+      argv: ['Rscript', '--no-save', '--no-restore', `${view.files}/install.R`],
       cwd: view.inside(where.lib),
       env: {
         KURAA_INSTALL: JSON.stringify({ lib: view.inside(where.lib), cache: view.inside(where.cache), refs: request.refs, environment: request.environment ?? [] }),

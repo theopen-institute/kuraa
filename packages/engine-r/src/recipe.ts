@@ -11,7 +11,8 @@ import { readManifest } from './packages.js';
 
 /** The starter set: R with the tidyverse (and the system libraries most packages need). */
 export const DEFAULT_IMAGE = 'docker.io/rocker/tidyverse:4.5';
-const NAME = /^[A-Za-z0-9._+-]+$/;
+// Never starting with '-', so a name cannot pass for an option to apt-get or install2.r.
+const NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
 const IMAGE = /^[A-Za-z0-9./:@_-]+$/;
 
 interface Requirements { image?: unknown; packages?: unknown; system?: unknown; renv?: unknown }

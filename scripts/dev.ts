@@ -1,4 +1,4 @@
-// pnpm dev [--dir <folder>] [--port 5173] [--env local|podman] [--allow-write] [--allow-network]
+// pnpm dev [--dir <folder>] [--port 5173] [--allow-write] [--allow-network]
 //
 // The web client against a live host, for development, in one command:
 //   - the host runs under `tsx watch`, so it restarts when host, session, kernel
@@ -11,9 +11,9 @@
 // Without --dir it uses .dev-workspace/ in this repository (git-ignored),
 // creating it with a sample file the first time.
 //
-// R chunks run on this computer (--env local, the default here: not sandboxed)
-// or in a Podman container (--env podman). --allow-write and --allow-network let
-// the workspace ask for those in .kuraa/run.json. KURAA_DEV_ENV still works.
+// R chunks run in Podman containers, as everywhere (never on this computer
+// itself). --allow-write and --allow-network let the workspace ask for those in
+// .kuraa/run.json.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -29,7 +29,6 @@ const { values } = parseArgs({
   options: {
     dir: { type: 'string' },
     port: { type: 'string', default: '5173' },
-    env: { type: 'string' },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
   },
@@ -87,10 +86,7 @@ const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
   '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1',
-  // R runs on this computer unless --env podman: see the top of this file.
-  '--engine', 'r', '--env', values.env ?? process.env.KURAA_DEV_ENV ?? 'local', '--allow-installs',
-  // You run this host, on this computer only: the Plugins panel may change what is on.
-  '--allow-plugin-changes',
+  '--engine', 'r', '--allow-installs',
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });

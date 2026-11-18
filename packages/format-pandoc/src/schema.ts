@@ -150,7 +150,10 @@ export const pandocNodes: Record<string, NodeSpec> = {
         return { src: el.getAttribute('src'), alt: el.getAttribute('alt') ?? '', title: el.getAttribute('title') };
       },
     }],
-    toDOM: (node) => ['img', { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }],
+    toDOM: (node) => {
+      const src = safeUrl(node.attrs.src, 'image');
+      return ['img', { ...(src ? { src } : {}), alt: node.attrs.alt, title: node.attrs.title }];
+    },
   },
 
   hard_break: {
@@ -180,12 +183,32 @@ function atom(className: string, attr: string): NodeSpec {
   };
 }
 
+/**
+ * A document's addresses are shown as written, but only these reach the page:
+ * web and mail addresses, and paths relative to the document. Anything else
+ * (javascript:, file:, data: for links) is drawn without an address, so a
+ * document can never run code or reach local files by being viewed or clicked.
+ */
+export function safeUrl(url: unknown, kind: 'link' | 'image'): string | null {
+  const u = String(url ?? '').trim();
+  if (!u) return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(u.replace(/[\u0000-\u0020]/g, ''))?.[1]?.toLowerCase();
+  if (!scheme) return u.startsWith('//') ? null : u; // relative (protocol-relative goes elsewhere: refuse)
+  if (scheme === 'http' || scheme === 'https') return u;
+  if (kind === 'link' && scheme === 'mailto') return u;
+  if (kind === 'image' && /^data:image\/(png|jpeg|gif|webp);/i.test(u)) return u;
+  return null;
+}
+
 export const pandocMarks: Record<string, MarkSpec> = {
   link: {
     attrs: { href: { default: '' }, title: { default: null }, auto: { default: false } },
     inclusive: false,
     parseDOM: [{ tag: 'a[href]', getAttrs: (dom) => ({ href: (dom as HTMLElement).getAttribute('href'), title: (dom as HTMLElement).getAttribute('title') }) }],
-    toDOM: (mark) => ['a', { href: mark.attrs.href, title: mark.attrs.title }, 0],
+    toDOM: (mark) => {
+      const href = safeUrl(mark.attrs.href, 'link');
+      return ['a', { ...(href ? { href } : { 'data-unsafe-href': '' }), title: mark.attrs.title }, 0];
+    },
   },
   span: {
     attrs: { attrs: { default: '' } },

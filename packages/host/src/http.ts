@@ -99,13 +99,8 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     });
   }
 
-  // Plugins: which run plugins and formats are on. Anyone may look; only the
-  // owner of a host that allows it may change them (host.setPlugins).
+  // Plugins: which engines and formats are on. Set by the host's flags; the app only shows them.
   if (route === 'GET /api/plugins') return send(res, 200, await host.plugins());
-  if (route === 'PUT /api/plugins') {
-    await host.setPlugins(await readBody(req));
-    return send(res, 200, await host.plugins());
-  }
 
   // Packages for an engine (R): declared per workspace, stored once per host.
   if (route === 'GET /api/packages') {
@@ -133,7 +128,7 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
   }
 
   if (route.startsWith('POST /api/runs')) {
-    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host. Start it with --engine and --env to turn it on.');
+    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host. Start it with --engine to turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     if (route === 'POST /api/runs') {

@@ -283,7 +283,8 @@ export function renderOutputs(outputs: ChunkOutput[]): HTMLElement[] {
     switch (o.type) {
       case 'image': {
         const img = el('img', 'out-image');
-        img.src = `data:${o.mime};base64,${o.data}`;
+        // Raster images only: an SVG from a chunk could carry script.
+        if (/^image\/(png|jpeg|gif|webp)$/.test(o.mime)) img.src = `data:${o.mime};base64,${o.data}`;
         img.width = o.width;
         img.alt = 'Plot';
         return img;

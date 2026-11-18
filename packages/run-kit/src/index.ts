@@ -1,12 +1,15 @@
 // The contract for running code, as plugins.
 //
-// The host knows nothing about any language or sandbox. It runs chunks through
-// two kinds of plugin, which it loads and the operator turns on:
+// The host knows nothing about any language. It runs chunks through engines,
+// which plugins provide and the operator turns on (flags):
 //
 //   Engine       how to run code in a language and report what it produced
 //                (engine-r: R through evaluate, as knitr does)
-//   Environment  where a process runs, and what it may touch (env-podman: a
-//                locked-down container; env-local: a plain process, no sandbox)
+//
+// Every process an engine starts, it starts through the Environment it is given,
+// which is always the host's Podman sandbox (env-podman): a locked-down
+// container. People using the app are not trusted with this computer, so code
+// they write never runs outside it. Plugins cannot add environments.
 //
 // A plugin module exports a RunPlugin: `export default definePlugin({ ... })`.
 // The host refuses a plugin whose apiVersion differs from RUN_API_VERSION.
@@ -21,7 +24,7 @@ export type { ChunkOutput };
 export const RUN_API_VERSION = 1;
 
 // ---------------------------------------------------------------------------
-// Policy: what a process may touch. Environments that sandbox enforce it.
+// Policy: what a process may touch. The sandbox enforces it.
 
 export interface Policy {
   /** How the process sees the workspace; 'none' for helpers that must not see it (package installers). */
@@ -91,8 +94,6 @@ export interface StartRequest {
    * argv[0] is a program name (or an absolute path) the environment resolves.
    */
   command(view: PathView): { argv: string[]; cwd: string; env?: Record<string, string> };
-  /** Where the program may be on a plain machine, besides PATH. */
-  searchPaths?: string[];
   /** How to build an image to run in. */
   image?: ImageRecipe;
   log(message: string): void;
@@ -118,14 +119,13 @@ export interface EnvironmentStatus {
   message: string;
 }
 
+/** The sandbox processes run in: the host's Podman environment (env-podman), and nothing else. */
 export interface Environment {
   id: string;
   /** Where code runs, as a phrase: 'in a Podman container'. */
   label: string;
-  /** A sentence for people choosing it (the Plugins panel): what it is, what it shields. */
+  /** A sentence on what it is and what it shields (the Plugins panel). */
   description?: string;
-  /** Whether it enforces the policy. A plain process on the host does not. */
-  sandboxed: boolean;
   check(options: unknown): Promise<EnvironmentStatus>;
   start(req: StartRequest, options: unknown): Promise<SandboxProcess>;
 }
@@ -187,7 +187,7 @@ export interface EngineSession {
 export interface Engine {
   id: string;
   label: string;
-  /** A sentence for people choosing it (the Plugins panel). */
+  /** A sentence on what it does (the Plugins panel). */
   description?: string;
   /** Chunk engine names it runs, as in a knitr header: ['r']. */
   handles: string[];
@@ -249,7 +249,6 @@ export interface RunPlugin {
   apiVersion: number;
   name: string;
   engines?: Engine[];
-  environments?: Environment[];
 }
 
 export function definePlugin(plugin: Omit<RunPlugin, 'apiVersion'>): RunPlugin {

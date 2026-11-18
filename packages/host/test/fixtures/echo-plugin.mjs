@@ -1,18 +1,6 @@
 // A run plugin from outside the repository's packages, as a third party would
 // write one: plain JavaScript, no imports. An "echo" engine that reports where
-// it was asked to run and under which policy, and three environments.
-const environment = (id, available = true) => ({
-  id,
-  label: `fake ${id}`,
-  sandboxed: true,
-  async check() {
-    return { available, message: available ? `${id} is here` : `${id} is switched off` };
-  },
-  async start() {
-    throw new Error('the echo engine does not start processes');
-  },
-});
-
+// it was asked to run and under which policy, without starting any process.
 export default {
   apiVersion: 1,
   name: 'echo-plugin',
@@ -33,5 +21,4 @@ export default {
       };
     },
   }],
-  environments: [environment('fake-a'), environment('fake-b'), environment('fake-down', false)],
 };

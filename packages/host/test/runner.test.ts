@@ -1,4 +1,6 @@
-// Running R chunks through a real host and a real R. Skipped where R is not installed.
+// Running R chunks through a real host, in real Podman containers. Skipped
+// unless Podman is installed and running; the first run builds the R image,
+// which takes a few minutes.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,10 +11,9 @@ import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { connectHeadless } from '@kuraa/session/testing';
 import type { ChunkOutput, RunRecord } from '@kuraa/session/model';
 import { startHost, type RunningHost } from '../src/index.js';
-import { findRscript } from '@kuraa/engine-r';
-import { findPodman } from '@kuraa/env-podman';
+import { podmanWorks } from '@kuraa/env-podman';
 
-const HAS_R = findRscript() !== null;
+const PODMAN_OK = podmanWorks();
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const DOC = 'reports/analysis.Rmd';
 
@@ -29,7 +30,7 @@ function makeRepo(): string {
   return dir;
 }
 
-describe.skipIf(!HAS_R)('running R chunks', () => {
+describe.skipIf(!PODMAN_OK)('running R chunks', () => {
   let dir: string;
   let running: RunningHost;
   let index = 0;
@@ -65,7 +66,7 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
   beforeEach(async () => {
     dir = makeRepo();
     index = 0;
-    running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['local'] }, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
+    running = await startHost({ dir, port: 0, run: { engines: ['r'] }, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
   });
 
   afterEach(async () => {
@@ -125,7 +126,7 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
     await new Promise((r) => setTimeout(r, 1000));
     await api('/api/runs/interrupt', { method: 'POST', body: JSON.stringify({ path: DOC }) });
     const interrupted = await waitFor(long.id);
-    expect(interrupted.state).toBe('interrupted');
+    expect(interrupted.state, JSON.stringify(interrupted.outputs)).toBe('interrupted');
     expect(interrupted.ms).toBeLessThan(10_000);
     const { runs } = (await (await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).json()) as { runs: RunRecord[] };
     expect(runs.find((x) => x.id === queued.id)).toBeUndefined(); // cancelled runs are not kept
@@ -148,10 +149,10 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
       await new Promise((r) => setTimeout(r, 200));
       const states = c.messages.filter((m) => m.type === 'run').map((m) => (m as { run: RunRecord }).run.state);
       expect(states).toEqual(['queued', 'running', 'done', 'queued', 'running', 'done']);
-      expect(c.messages.some((m) => m.type === 'run-session' && m.session.state === 'ready' && m.session.engine === 'r' && m.session.environment === 'local')).toBe(true);
+      expect(c.messages.some((m) => m.type === 'run-session' && m.session.state === 'ready' && m.session.engine === 'r' && m.session.environment === 'podman')).toBe(true);
 
       await running.close();
-      running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['local'] } });
+      running = await startHost({ dir, port: 0, run: { engines: ['r'] } });
       const { runs } = (await (await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).json()) as { runs: RunRecord[] };
       expect(runs.map((r) => r.id)).toEqual([second.id]); // the same label replaced the earlier run
       expect(git(dir, 'status', '--porcelain')).toBe(''); // nothing written into the workspace
@@ -170,23 +171,10 @@ describe.skipIf(!HAS_R)('running R chunks', () => {
   });
 });
 
-// The same, in a real container. Skipped unless Podman is installed and running;
-// the first run builds the R image, which takes a few minutes.
-const PODMAN_OK = (() => {
-  const podman = findPodman();
-  if (!podman) return false;
-  try {
-    execFileSync(podman, ['info'], { stdio: 'ignore', timeout: 15_000 });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-describe.skipIf(!PODMAN_OK)('running R chunks in Podman', () => {
+describe.skipIf(!PODMAN_OK)('the sandbox', () => {
   it('runs R where it cannot see your files, write the workspace, see .git, or reach the network', async () => {
     const dir = makeRepo();
-    const running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['podman'] } });
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'] } });
     try {
       const api = (path: string, init: RequestInit = {}) =>
         fetch(running.url + path, { ...init, headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' } });
@@ -219,7 +207,7 @@ describe.skipIf(!PODMAN_OK)('R packages in Podman', () => {
   it('installs through a separate container, and sessions see the library read-only', async () => {
     const dir = makeRepo();
     const dataDir = mkdtempSync(join(tmpdir(), 'kuraa-poddata-'));
-    const running = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['podman'], allowInstalls: true, dataDir } });
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], allowInstalls: true, dataDir } });
     try {
       const api = (path: string, body?: object) => fetch(running.url + path, {
         method: body ? 'POST' : 'GET',

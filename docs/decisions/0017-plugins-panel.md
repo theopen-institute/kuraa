@@ -1,33 +1,22 @@
-# 0017 · Turning plugins on and off
+# 0017 · The Plugins panel
 
-**Plugins…** in the menu lists three kinds of plugin, each with a box to turn it on or off:
+> Changed by [0018](0018-untrusted-users.md): the host's plugins are set by flags only. The panel
+> first let the owner of a host switch them; it now only shows them.
 
-- **Running code**: engines (R) and environments (Podman, Local, and any loaded with `--plugin`),
-  with the default environment among those that are on.
-- **Document formats**: Pandoc markdown, R Markdown, Text file. A file whose format is off opens
-  as the next type that claims it. The Text file type claims `.md`, `.Rmd` and `.qmd` at its low
-  priority, so they open as text with markdown highlighting while their own formats are off.
+**Plugins…** in the menu lists three kinds of plugin:
+
+- **Running code**: the engines (R, and any loaded with `--plugin`), whether each is on, and where
+  code runs: always the Podman sandbox, with whether it is available. Read-only (`--engine`).
+- **Document formats**: Pandoc markdown, R Markdown, Text file, whether each is on. Read-only
+  (`--format`). A file whose format is off opens as the next type that claims it: the Text file
+  type claims `.md`, `.Rmd` and `.qmd` at its low priority, so they open as text with markdown
+  highlighting while their own formats are off.
 - **Editing, just you**: each format's editor module (`FormatEditor`), such as markdown cues with
-  footnote ordering, or chunk fences. Kept in this browser (`localStorage`); no one else is
-  affected. Footnote ordering acts only on your own edits, so turning it off leaves others' notes
-  alone and theirs tidy yours on their next edit.
+  footnote ordering, or chunk fences. Each person turns these on and off for themselves; kept in
+  their browser (`localStorage`), affecting no one else. Footnote ordering acts only on your own
+  edits, so turning it off leaves others' notes alone, and theirs tidy yours on their next edit.
 
-**Who changes the host's plugins.** Run plugins decide what runs on the host's computer, and Local
-is not sandboxed. There is no admin role (anyone with the token edits), so the host's plugins can
-be changed only on a host its owner alone can reach: one started with `pluginSettings` (the
-desktop app, `pnpm dev`, `--allow-plugin-changes`), which the host refuses unless it listens on
-the loopback address. Elsewhere the panel shows them read-only, and `PUT /api/plugins` answers 403.
+`GET /api/plugins` describes them; nothing in the API changes them.
 
-**Where the choices live.** In `plugins.json` in the host's data folder (with the package cache):
-per computer, for every workspace, never in a workspace, so a repository cannot turn on what its
-owner turned off. They win over `--engine` and `--env`, which say what is on until a choice is
-made. The desktop app's Run Code menu is gone; the panel replaced it.
-
-**Live.** A change applies at once. Running sessions stop (the next run starts in what is now on).
-Everyone with a file open gets a `plugins` room message and reloads the workspace's description.
-A file that now opens as a different type has its room written, committed and closed first, and
-its editors reopen it as the new type.
-
-**Contracts.** `Engine`, `Environment` and `DocumentType` gained an optional `description`, and
-`FormatEditor` an optional `label` and `description`, for the panel. All optional: existing
-plugins keep working, and the run plugin API version is unchanged.
+**Contracts.** `Engine`, `Environment` and `DocumentType` have an optional `description`, and
+`FormatEditor` an optional `label` and `description`, for the panel.

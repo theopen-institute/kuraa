@@ -1,21 +1,19 @@
-// R packages per workspace, stored once per host: real installs from CRAN with
-// the local environment (Podman is covered in runner.test.ts). Skipped without R,
-// pak or the network. hellno: small, no dependencies, and not usually installed.
+// R packages per workspace, stored once per host: real installs from CRAN, in
+// Podman containers. Skipped without Podman or the network. hellno: small, no
+// dependencies, and not in the image.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findRscript } from '@kuraa/engine-r';
+import { podmanWorks } from '@kuraa/env-podman';
 import type { RunRecord } from '@kuraa/session/model';
 import { startHost, type RunningHost } from '../src/index.js';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const READY = (() => {
-  const r = findRscript();
-  if (!r) return false;
+  if (!podmanWorks()) return false;
   try {
-    execFileSync(r, ['-e', 'stopifnot(requireNamespace("pak", quietly = TRUE))'], { stdio: 'ignore' });
     execFileSync('curl', ['-sSf', '--max-time', '10', '-o', '/dev/null', 'https://cloud.r-project.org/web/packages/hellno/index.html'], { stdio: 'ignore' });
     return true;
   } catch {
@@ -41,7 +39,7 @@ describe.skipIf(!READY)('R packages', () => {
   }
 
   async function host(dir: string, allowInstalls = true): Promise<RunningHost> {
-    const h = await startHost({ dir, port: 0, run: { engines: ['r'], environments: ['local'], allowInstalls, dataDir } });
+    const h = await startHost({ dir, port: 0, run: { engines: ['r'], allowInstalls, dataDir } });
     hosts.push(h);
     return h;
   }
@@ -113,7 +111,9 @@ describe.skipIf(!READY)('R packages', () => {
     // Lose this workspace's library (as on another computer), keep the manifest.
     await h.close();
     const libs = join(dataDir, 'engines/r/libs');
-    for (const n of readdirSync(libs)) rmSync(join(libs, n), { recursive: true, force: true });
+    // Emptied, not deleted: Podman on a Mac shares folders into its VM, which can
+    // keep a folder deleted and made again moments later as missing.
+    for (const ws of readdirSync(libs)) for (const n of readdirSync(join(libs, ws))) rmSync(join(libs, ws, n), { recursive: true, force: true });
     h = await host(dir);
     expect(await run(h, 'suppressPackageStartupMessages(library(hellno)); "back"')).toBe('[1] "back"\n');
   }, 300_000);

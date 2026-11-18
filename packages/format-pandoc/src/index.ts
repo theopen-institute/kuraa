@@ -4,7 +4,7 @@ import { pandocMarks, pandocNodes } from './schema.js';
 import { createParser, type ParseHooks } from './parse.js';
 import { createSerializer, type SerializeHooks } from './serialize.js';
 
-export { pandocMarks, pandocNodes } from './schema.js';
+export { pandocMarks, pandocNodes, safeUrl } from './schema.js';
 export { parseFragment, type MdNode, type ParseContext, type ParseHooks } from './parse.js';
 export { escapeText, escapeLineStarts, prefixLines, preserve, type SerializeContext, type SerializeHooks } from './serialize.js';
 

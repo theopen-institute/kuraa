@@ -1,17 +1,16 @@
 // Running code chunks, through run plugins (see @kuraa/run-kit and plugins.ts).
 //
-// The runner knows no language or sandbox. For each document and engine it
-// opens a session in an environment, runs requests one at a time, broadcasts
+// The runner knows no language. For each document and engine it opens a
+// session in the sandbox (a Podman container), runs requests one at a time, broadcasts
 // each run's progress and outputs to everyone with the document open, and
 // caches the latest output of each chunk in .git/kuraa/outputs (never in the
 // document).
 //
-// Who decides what: the operator (host options) turns engines and environments
-// on, and sets the limits. A workspace may ask, in .kuraa/run.json, for one of
-// the allowed environments, for what its engines need (an image, packages), and
-// for more access (writing the workspace, the network); it gets more access
-// only where the operator allows it. It can never choose an environment the
-// operator did not allow, and if the chosen one is unavailable, nothing runs.
+// Who decides what: the operator (host options, from flags) turns engines on
+// and sets the limits. A workspace may ask, in .kuraa/run.json, for what its
+// engines need (an image, packages) and for more access (writing the
+// workspace, the network); it gets more access only where the operator allows
+// it. Code always runs in the sandbox; if it is unavailable, nothing runs.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -21,13 +20,11 @@ import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo } f
 import type { RunPlugins } from './plugins.js';
 
 export interface RunOptions {
-  /** Engines to turn on, by id: ['r']. None: running is off. */
+  /** Engines to turn on, by id: ['r']. None: running is off. Code runs in a Podman container. */
   engines: string[];
-  /** Environments allowed, by id; the first is the default: ['podman']. None: running is off. */
-  environments: string[];
-  /** More run plugins to load, by path or package name. */
+  /** More run plugins (engines) to load, by path or package name. */
   plugins?: string[];
-  /** Options for plugins, by engine or environment id: { r: { rscript: '…' }, podman: { podman: '…' } }. */
+  /** Options by engine id, and for the sandbox under `podman`: { podman: { podman: '/path/to/podman' } }. */
   options?: Record<string, unknown>;
   /** Let a workspace ask to write to itself (default: read-only). */
   allowWorkspaceWrite?: boolean;
@@ -55,7 +52,6 @@ export function defaultDataDir(): string {
 
 /** What a workspace asks for, in .kuraa/run.json. */
 interface WorkspaceRunConfig {
-  environment?: unknown;
   access?: { workspace?: unknown; network?: unknown };
   [engine: string]: unknown;
 }
@@ -65,8 +61,8 @@ export interface RunDescription {
   engines: { id: string; label: string; handles: string[]; packages: boolean }[];
   /** Whether people may install packages here. */
   allowInstalls: boolean;
-  /** The environment this workspace runs in, and whether it is there. */
-  environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
+  /** Where code runs (the sandbox), and whether it is there. */
+  environment: { id: string; label: string; available: boolean; message: string } | null;
 }
 
 const MAX_TEXT = 200_000;
@@ -82,13 +78,15 @@ export class Runner {
   private readonly idle = new Map<string, NodeJS.Timeout>();
   private readonly checked = new Map<string, { at: number; status: EnvironmentStatus }>();
   private closed = false;
-  /** The engines and environments that are on (the first environment is the default). */
-  private on: { engines: string[]; environments: string[] };
+  /** The engines that are on. */
+  private readonly on: string[];
 
   constructor(private readonly o: {
     root: string;
     stateDir: string;
     plugins: RunPlugins;
+    /** Where every process runs: the Podman sandbox. */
+    environment: Environment;
     options: RunOptions | undefined;
     broadcast: (path: string, message: RoomMessage) => void;
     /** To everyone with any document of the workspace open. */
@@ -98,57 +96,33 @@ export class Runner {
     log: (m: string) => void;
     idleMs?: number;
   }) {
-    this.on = this.check(o.options?.engines ?? [], o.options?.environments ?? []);
-  }
-
-  private check(engines: string[], environments: string[]): { engines: string[]; environments: string[] } {
-    const { plugins } = this.o;
-    for (const id of engines) if (!plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...plugins.engines.keys()].join(', ') || 'none'}.`);
-    for (const id of environments) if (!plugins.environments.has(id)) throw new Error(`Unknown environment "${id}". Known: ${[...plugins.environments.keys()].join(', ') || 'none'}.`);
-    return { engines: [...engines], environments: [...environments] };
+    for (const id of o.options?.engines ?? []) if (!o.plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.plugins.engines.keys()].join(', ') || 'none'}.`);
+    this.on = [...(o.options?.engines ?? [])];
   }
 
   get enabled(): boolean {
-    return this.on.engines.length > 0 && this.on.environments.length > 0;
+    return this.on.length > 0;
   }
 
-  /** What is on: engine ids, and environment ids with the default first. */
-  get turnedOn(): { engines: string[]; environments: string[] } {
-    return { engines: [...this.on.engines], environments: [...this.on.environments] };
+  /** The engines that are on, by id. */
+  get turnedOn(): string[] {
+    return [...this.on];
   }
 
-  /** Every engine and environment the loaded plugins offer, whether on or not, and whether each environment is there. */
+  /** Every engine the loaded plugins offer, whether on or not, and the sandbox and whether it is there. */
   async catalog(): Promise<{
     engines: { id: string; label: string; description: string; on: boolean }[];
-    environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
+    environment: { id: string; label: string; description: string; available: boolean; message: string };
   }> {
-    const { plugins } = this.o;
+    const env = this.o.environment;
     return {
-      engines: [...plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.engines.includes(e.id) })),
-      environments: await Promise.all([...plugins.environments.values()].map(async (e) => ({
-        id: e.id, label: e.label, description: e.description ?? '', sandboxed: e.sandboxed,
-        on: this.on.environments.includes(e.id), ...(await this.status(e)),
-      }))),
+      engines: [...this.o.plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.includes(e.id) })),
+      environment: { id: env.id, label: env.label, description: env.description ?? '', ...(await this.status(env)) },
     };
   }
 
-  /**
-   * Turn engines and environments on or off (the first environment is the
-   * default). Every session stops, so the next run starts in what is now on.
-   */
-  async turnOn(engines: string[], environments: string[]): Promise<void> {
-    const next = this.check(engines, environments);
-    const paths = new Set([...this.sessions.keys()].map((k) => k.split('\0')[0]!));
-    for (const path of this.queues.keys()) {
-      this.interrupt(path);
-      paths.add(path);
-    }
-    this.on = next;
-    await Promise.all([...paths].map((path) => this.restart(path)));
-  }
-
   private get engines(): Engine[] {
-    return this.on.engines.map((id) => this.o.plugins.engines.get(id)!);
+    return this.on.map((id) => this.o.plugins.engines.get(id)!);
   }
 
   /** The engine that runs chunks of `name` (a chunk's engine, e.g. `r`). */
@@ -166,12 +140,6 @@ export class Runner {
     }
   }
 
-  /** The environment for this workspace: the one it asks for if allowed, else the operator's default. */
-  private environmentFor(config: WorkspaceRunConfig): Environment | null {
-    const allowed = this.on.environments;
-    const asked = typeof config.environment === 'string' && allowed.includes(config.environment) ? config.environment : allowed[0];
-    return asked ? this.o.plugins.environments.get(asked)! : null;
-  }
 
   private async status(env: Environment): Promise<EnvironmentStatus> {
     const hit = this.checked.get(env.id);
@@ -183,13 +151,13 @@ export class Runner {
 
   async describe(): Promise<RunDescription> {
     if (!this.enabled) return { enabled: false, engines: [], allowInstalls: false, environment: null };
-    const env = this.environmentFor(await this.config())!;
+    const env = this.o.environment;
     const status = await this.status(env);
     return {
       enabled: true,
       engines: this.engines.map((e) => ({ id: e.id, label: e.label, handles: e.handles, packages: !!e.packages })),
       allowInstalls: !!this.o.options?.allowInstalls,
-      environment: { id: env.id, label: env.label, sandboxed: env.sandboxed, ...status },
+      environment: { id: env.id, label: env.label, ...status },
     };
   }
 
@@ -223,7 +191,7 @@ export class Runner {
   /** What a package manager works with, for this workspace, crediting `by`. */
   private async packageContext(engine: Engine, by: PresenceUser | null): Promise<PackageContext> {
     const config = await this.config();
-    const environment = this.environmentFor(config)!;
+    const environment = this.o.environment;
     const status = await this.status(environment);
     if (!status.available) throw new Error(status.message);
     return {
@@ -327,7 +295,7 @@ export class Runner {
     const existing = this.sessions.get(key);
     if (existing) return existing;
     const config = await this.config();
-    const environment = this.environmentFor(config)!;
+    const environment = this.o.environment;
     const status = await this.status(environment);
     if (!status.available) throw new Error(status.message);
     const pathHash = createHash('sha1').update(path).digest('hex').slice(0, 12);

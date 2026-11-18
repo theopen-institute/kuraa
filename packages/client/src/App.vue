@@ -208,7 +208,6 @@ function useSettings(s: Settings) {
               :format-editor="editorFor(type.id)"
               @status="(s) => (status = s)"
               @committed="historyKey++"
-              @plugins="refreshTree()"
             />
           </div>
           <div v-if="viewing" class="editor-pane past-version" data-testid="past-version">
@@ -268,7 +267,6 @@ function useSettings(s: Settings) {
       :editors="editors"
       :editors-off="editorsOff"
       @editors-off="setEditorsOff"
-      @changed="refreshTree()"
       @close="pluginsOpen = false"
     />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />

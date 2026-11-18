@@ -7,15 +7,39 @@
 //   electron .                          launcher: open a folder or join a host
 //   electron . --open <folder>          embed a host on <folder>
 //   electron . --join <url> --token <t> join a shared host; no local host
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+//
+// For folders it opens itself, as for any host, the configuration is flags:
+//   --engine <id>...   engines to turn on (default: r); --engine none for none
+//   --format <id>...   document formats to turn on (default: all)
+//   --plugin <spec>... more run plugins (engines)
+// Code always runs in a Podman container, never on this computer itself.
+//
+// The window shows only the app's own pages: it does not navigate elsewhere or
+// open other windows (web links open in the browser), and the bridge answers
+// only the app's own pages.
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { defaultDataDir, gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
+import { gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
 import type { ShellConfig } from '@kuraa/client';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
+/** The only pages the window may show. */
+const OWN_PAGES = [WEB_INDEX, LAUNCHER].map((p) => pathToFileURL(p).href);
+const isOwnPage = (url: string) => OWN_PAGES.includes(url.split(/[?#]/)[0]!);
+
+const { values: flags } = parseArgs({
+  args: process.argv.slice(app.isPackaged ? 1 : 2).filter((a) => a !== '.'),
+  options: {
+    open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
+    engine: { type: 'string', multiple: true }, format: { type: 'string', multiple: true }, plugin: { type: 'string', multiple: true },
+  },
+  strict: false,
+});
+const list = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 
 let window: BrowserWindow | null = null;
 let host: RunningHost | null = null;
@@ -23,17 +47,11 @@ let quitting = false;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
 
-// What runs, for folders this app opens itself: R, in a Podman container. The
-// Plugins panel (in the app's menu) changes that; its choices are this app
-// user's, kept with the app's data (never in a workspace), and win over these.
-// KURAA_RUN_ENV (podman, local or off) and KURAA_PLUGIN_SETTINGS are for tests.
+/** What runs, for folders this app opens itself: R unless --engine says otherwise, in Podman. */
 function runOptions(): RunOptions {
-  const forced = process.env.KURAA_RUN_ENV;
-  const env = forced === 'local' ? 'local' : 'podman';
-  return { engines: forced === 'off' ? [] : ['r'], environments: [env], allowInstalls: true };
+  const engines = (list(flags.engine) ?? ['r']).filter((e) => e !== 'none');
+  return { engines, plugins: list(flags.plugin) ?? [], allowInstalls: true };
 }
-
-const pluginSettings = () => process.env.KURAA_PLUGIN_SETTINGS ?? join(defaultDataDir(), 'plugins.json');
 
 /** Host timings may be shortened for automated tests. */
 function timings(): Partial<HostTimings> {
@@ -77,9 +95,9 @@ async function openFolder(path: string): Promise<boolean> {
   host = await startHost({
     dir,
     init: !folder.repoRoot,
-    // What runs: R in a container, unless changed in the Plugins panel.
+    // What runs and which formats are on: this app's flags.
     run: runOptions(),
-    pluginSettings: pluginSettings(),
+    formats: list(flags.format),
     host: '127.0.0.1',
     port: 0,
     timings: timings(),
@@ -139,12 +157,16 @@ function buildMenu(): void {
   ]));
 }
 
+/** Whether a bridge call comes from one of the app's own pages (not a page that got into the window somehow). */
+const fromOwnPage = (e: IpcMainEvent | IpcMainInvokeEvent) => !!e.senderFrame && isOwnPage(e.senderFrame.url);
+
 ipcMain.on('kuraa:config', (e) => {
-  e.returnValue = config;
+  e.returnValue = fromOwnPage(e) ? config : null;
 });
-ipcMain.handle('kuraa:open-folder', () => pickFolder());
-ipcMain.handle('kuraa:leave', () => leave());
-ipcMain.handle('kuraa:join', async (_e, url: string, token: string) => {
+ipcMain.handle('kuraa:open-folder', (e) => (fromOwnPage(e) ? pickFolder() : undefined));
+ipcMain.handle('kuraa:leave', (e) => (fromOwnPage(e) ? leave() : undefined));
+ipcMain.handle('kuraa:join', async (e, url: string, token: string) => {
+  if (!fromOwnPage(e)) return 'Not allowed.';
   try {
     const res = await fetch(`${url.replace(/\/$/, '')}/api/workspace`, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) return res.status === 401 ? 'The host rejected the token.' : `The host answered ${res.status}.`;
@@ -155,21 +177,38 @@ ipcMain.handle('kuraa:join', async (_e, url: string, token: string) => {
   return null;
 });
 
+// No page in this app opens windows, navigates away, or embeds web views. A
+// link to the web opens in the browser; anything else goes nowhere.
+app.on('web-contents-created', (_e, contents) => {
+  const openOutside = (url: string) => {
+    if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url);
+  };
+  contents.setWindowOpenHandler(({ url }) => {
+    openOutside(url);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (event, url) => {
+    if (isOwnPage(url)) return;
+    event.preventDefault();
+    openOutside(url);
+  });
+  contents.on('will-redirect', (event, url) => {
+    if (!isOwnPage(url)) event.preventDefault();
+  });
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+});
+
 app.whenReady().then(async () => {
   buildMenu();
   window = new BrowserWindow({
     width: 1280,
     height: 820,
     title: 'kuraa',
-    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false },
   });
   window.on('closed', () => (window = null));
 
-  const { values } = parseArgs({
-    args: process.argv.slice(app.isPackaged ? 1 : 2).filter((a) => a !== '.'),
-    options: { open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' } },
-    strict: false,
-  });
+  const values = flags;
   try {
     if (typeof values.open === 'string') {
       if (!(await openFolder(values.open))) await showLauncher();

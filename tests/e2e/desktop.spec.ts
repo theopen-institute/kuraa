@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
-import { findPodman } from '../../packages/env-podman/src/index.js';
+import { podmanWorks } from '../../packages/env-podman/src/index.js';
 
 const DESKTOP = resolve(import.meta.dirname, '../../apps/desktop');
 const MAIN = join(DESKTOP, 'build/main.cjs');
@@ -35,8 +35,6 @@ async function launch(args: string[], timings: object, extraEnv: Record<string, 
     args: [MAIN, ...args],
     // VS Code's terminal sets ELECTRON_RUN_AS_NODE, which would start Electron as plain Node.
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings),
-      // The app's plugin choices, apart from those of whoever runs the tests.
-      KURAA_PLUGIN_SETTINGS: join(mkdtempSync(join(tmpdir(), 'kuraa-plugins-')), 'plugins.json'),
       ...extraEnv },
   });
   const page = await app.firstWindow();
@@ -211,16 +209,7 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
   }
 });
 
-const PODMAN_RUNNING = (() => {
-  const podman = findPodman();
-  if (!podman) return false;
-  try {
-    execFileSync(podman, ['info'], { stdio: 'ignore', timeout: 15_000 });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+const PODMAN_RUNNING = podmanWorks();
 
 test('runs R chunks in a Podman container by default', async () => {
   test.skip(!PODMAN_RUNNING, 'Podman is not installed and running');
@@ -229,7 +218,7 @@ test('runs R chunks in a Podman container by default', async () => {
   writeFileSync(join(dir, 'analysis.Rmd'), '# Analysis\n\n```{r}\nx <- 21\nx * 2\n```\n');
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'Analysis');
-  const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 }, { KURAA_RUN_ENV: 'podman' });
+  const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
   try {
     await page.getByTestId('file:analysis.Rmd').click();
     await expect(page.getByTestId('status')).toContainText('Connected');
@@ -237,6 +226,40 @@ test('runs R chunks in a Podman container by default', async () => {
     await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
     await page.getByTestId('menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
+  } finally {
+    await app.close();
+  }
+});
+
+test('flags set what runs and which formats are on; the window shows only the app', async () => {
+  const dir = makeRepo();
+  writeFileSync(join(dir, 'analysis.Rmd'), '# Analysis\n\n```{r}\n1 + 1\n```\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'An R Markdown file');
+  const { app, page } = await launch(['--open', dir, '--engine', 'none', '--format', 'pandoc-markdown', '--format', 'text'], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
+  try {
+    // R Markdown is off: the file opens as text; nothing runs.
+    await page.getByTestId('file:analysis.Rmd').click();
+    await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
+    await page.getByTestId('menu-button').click();
+    await expect(page.getByTestId('r-state')).toHaveCount(0);
+    await page.getByTestId('menu').getByRole('button', { name: 'Plugins…' }).click();
+    const plugins = page.getByTestId('plugins');
+    await expect(plugins.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
+    await expect(plugins.getByRole('checkbox', { name: 'R', exact: true })).toBeDisabled();
+    await expect(plugins.getByRole('checkbox', { name: 'R Markdown', exact: true })).not.toBeChecked();
+    await expect(plugins.getByRole('checkbox', { name: 'Pandoc markdown', exact: true })).toBeChecked();
+    await page.keyboard.press('Escape');
+
+    // A page cannot take the window elsewhere, or open another.
+    const home = page.url();
+    await page.evaluate(() => {
+      location.href = 'file:///etc/hosts';
+    });
+    await page.waitForTimeout(500);
+    expect(page.url()).toBe(home);
+    expect(await page.evaluate(() => window.open('file:///etc/hosts') === null)).toBe(true);
+    expect(app.windows()).toHaveLength(1);
   } finally {
     await app.close();
   }

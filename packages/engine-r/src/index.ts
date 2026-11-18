@@ -1,5 +1,5 @@
 // The R engine: runs knitr's `r` chunks. One R process per document session,
-// started in the environment the host chose, talking line-delimited JSON with
+// started in the host's sandbox (a Podman container), talking line-delimited JSON with
 // the driver (./driver.ts). Outputs come back in order: text, messages,
 // warnings, errors, data frames as tables, plots as PNG.
 //
@@ -7,15 +7,14 @@
 // a session sees its workspace's library and the shared cache read-only, and
 // install.packages() in a chunk asks the host, which runs a separate installer.
 //
-// What the workspace may ask of it, in the "r" section of .kuraa/run.json (used
-// by environments that build images, such as Podman):
+// What the workspace may ask of it, in the "r" section of .kuraa/run.json (the
+// image the container is built from):
 //   { "image": "docker.io/rocker/r-ver:4.5", "packages": ["dplyr"],
 //     "system": ["libxml2-dev"], "renv": true }
-// Operator options: { "rscript": "/path/to/Rscript" } (for a plain machine).
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  definePlugin, findExecutable,
+  definePlugin,
   type ChunkOutput, type Engine, type EngineContext, type EngineSession, type RunRequest, type RunResult, type SandboxProcess,
 } from '@kuraa/run-kit';
 import { R_DRIVER, REPLY_PREFIX } from './driver.js';
@@ -24,14 +23,6 @@ import { layout, rPackages } from './packages.js';
 
 export { DEFAULT_IMAGE, imageRecipe } from './recipe.js';
 export { checkRefs, formatManifest, readManifest, MANIFEST, type Manifest } from './packages.js';
-
-/** Where R lives when it is not on PATH. */
-export const R_SEARCH_PATHS = ['/Library/Frameworks/R.framework/Resources/bin', '/opt/R/current/bin', '/usr/lib/R/bin'];
-
-/** Rscript on this computer, if any. */
-export function findRscript(explicit?: string): string | null {
-  return findExecutable(explicit ?? process.env.KURAA_RSCRIPT ?? 'Rscript', R_SEARCH_PATHS);
-}
 
 type DriverOutput = Exclude<ChunkOutput, { type: 'image' }> | { type: 'image'; file: string; width: number; height: number };
 interface Reply { type: 'result'; id: string; outputs: DriverOutput[]; interrupted?: boolean; fromEnvironment?: { name: string; version: string }[] }
@@ -65,18 +56,15 @@ class RSession implements EngineSession {
     await mkdir(join(ctx.scratch, 'plots'), { recursive: true });
     const recipe = imageRecipe(ctx.requirements, ctx.workspace);
     if (recipe.context?.['renv.lock'] === '') recipe.context['renv.lock'] = await readFile(join(ctx.workspace, 'renv.lock'), 'utf8');
-    // An explicit Rscript applies to a plain machine; inside an image, Rscript is on PATH.
-    const rscript = !ctx.environment.sandboxed ? ((ctx.options as { rscript?: string } | undefined)?.rscript ?? process.env.KURAA_RSCRIPT ?? 'Rscript') : 'Rscript';
     const where = layout(ctx);
     await Promise.all([where.lib, where.cache].map((d) => mkdir(d, { recursive: true })));
     const proc = await ctx.environment.start({
       name: 'r',
       workspace: ctx.workspace, scratch: ctx.scratch, files: ctx.files, policy: ctx.policy,
       mounts: where.mounts('read-only'),
-      searchPaths: R_SEARCH_PATHS,
       image: recipe,
       // In the workspace root, so a project's .Rprofile (renv, for instance) applies.
-      command: (view) => ({ argv: [rscript, '--no-save', '--no-restore', `${view.files}/driver.R`], cwd: view.workspace, env: { R_KURAA: '1', KURAA_R_LIB: view.inside(where.lib) } }),
+      command: (view) => ({ argv: ['Rscript', '--no-save', '--no-restore', `${view.files}/driver.R`], cwd: view.workspace, env: { R_KURAA: '1', KURAA_R_LIB: view.inside(where.lib) } }),
       log: ctx.log,
       status: ctx.status,
     }, ctx.environmentOptions);

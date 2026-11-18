@@ -1,5 +1,8 @@
 # 0013 · Running code through plugins, sandboxed by default
 
+> Changed by [0018](0018-untrusted-users.md): there is no Local environment, and environments are
+> no longer plugins. Code runs only in the Podman sandbox; engines remain plugins.
+
 The host no longer knows about R. Running code goes through two kinds of plugin, with the
 contract in `@kuraa/run-kit`:
 

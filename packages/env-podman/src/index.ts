@@ -1,4 +1,5 @@
-// The Podman environment: each session runs in a locked-down container.
+// The Podman environment: each session runs in a locked-down container. It is
+// the only place code from people using the app runs (see @kuraa/run-kit).
 //
 //   - the workspace is mounted read-only at /work (read-write only if the policy
 //     allows), with .git hidden; a scratch folder read-write at /scratch; the
@@ -13,19 +14,31 @@
 // its own Linux virtual machine, so there is that boundary too.
 //
 // Operator options: { "podman": "/path/to/podman" }.
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { definePlugin, findExecutable, mappedView, type Environment, type ImageRecipe, type Mount, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
+import { findExecutable, mappedView, type Environment, type ImageRecipe, type Mount, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
 
 const run = promisify(execFile);
 const OWN_GROUP = process.platform !== 'win32';
 export const INSIDE = { workspace: '/work', scratch: '/scratch', files: '/kuraa' };
 
 interface Options { podman?: string }
+
+/** Whether Podman is installed and answering (for tests and tools that must skip without it). Blocks up to 15 s. */
+export function podmanWorks(options?: unknown): boolean {
+  const podman = findPodman(options);
+  if (!podman) return false;
+  try {
+    execFileSync(podman, ['info'], { stdio: 'ignore', timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function findPodman(options?: unknown): string | null {
   const explicit = (options as Options | undefined)?.podman ?? process.env.KURAA_PODMAN;
@@ -46,7 +59,9 @@ export function runArgs(opts: {
 }): string[] {
   const { policy } = opts;
   return [
-    'run', '--rm', '--interactive', '--name', opts.name, '--label', 'kuraa=session',
+    // --sig-proxy=false: signals to the podman process stay there. Passed on, one
+    // SIGINT reached the container twice; interrupts go through podman kill instead.
+    'run', '--rm', '--interactive', '--sig-proxy=false', '--name', opts.name, '--label', 'kuraa=session',
     ...(policy.network ? [] : ['--network=none']),
     '--read-only', '--tmpfs=/tmp:rw,size=1g,mode=1777',
     '--cap-drop=all', '--security-opt=no-new-privileges',
@@ -103,7 +118,6 @@ export const podmanEnvironment: Environment = {
   id: 'podman',
   label: 'in a Podman container',
   description: 'A container with no network, the workspace read-only and .git hidden, and nothing else of this computer visible.',
-  sandboxed: true,
 
   async check(options) {
     const podman = findPodman(options);
@@ -138,8 +152,8 @@ export const podmanEnvironment: Environment = {
     });
     const proc: SandboxProcess = {
       stdin: child.stdin!, stdout: child.stdout!, stderr: child.stderr!, view, exited,
-      // `podman run` passes signals on to the container.
-      interrupt: () => void child.kill('SIGINT'),
+      // Exactly one SIGINT, to the process in the container.
+      interrupt: () => void run(podman, ['kill', '--signal=SIGINT', name]).catch((e: Error) => req.log(`podman kill: ${e.message}`)),
       kill: () => {
         void run(podman, ['kill', name]).catch(() => undefined);
         child.kill('SIGKILL');
@@ -149,4 +163,3 @@ export const podmanEnvironment: Environment = {
   },
 };
 
-export default definePlugin({ name: '@kuraa/env-podman', environments: [podmanEnvironment] });

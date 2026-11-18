@@ -343,12 +343,6 @@ importers:
         specifier: workspace:*
         version: link:../run-kit
 
-  packages/env-local:
-    dependencies:
-      '@kuraa/run-kit':
-        specifier: workspace:*
-        version: link:../run-kit
-
   packages/env-podman:
     dependencies:
       '@kuraa/run-kit':
@@ -485,9 +479,6 @@ importers:
       '@kuraa/engine-r':
         specifier: workspace:*
         version: link:../engine-r
-      '@kuraa/env-local':
-        specifier: workspace:*
-        version: link:../env-local
       '@kuraa/env-podman':
         specifier: workspace:*
         version: link:../env-podman

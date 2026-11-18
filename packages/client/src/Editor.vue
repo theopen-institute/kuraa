@@ -31,7 +31,7 @@ const props = defineProps<{
   /** What the type does in the editor (cues, keys, behaviour), if it has an editor module. */
   formatEditor?: FormatEditor;
 }>();
-const emit = defineEmits<{ status: [status: EditorStatus]; committed: []; plugins: [] }>();
+const emit = defineEmits<{ status: [status: EditorStatus]; committed: [] }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
 const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
@@ -129,7 +129,6 @@ function open(): () => void {
           emit('committed');
         } else if (m.type === 'outside-change') update({ notice: { kind: 'info', text: m.merged ? 'Merged a change made outside the app.' : 'Applied a change made outside the app.' } });
         else if (m.type === 'conflict') update({ notice: { kind: 'warn', text: `A conflicting outside edit was saved as ${m.savedAs}; the live version was kept.` } });
-        else if (m.type === 'plugins') emit('plugins');
         else if (m.type === 'reseeded') update({ notice: { kind: 'warn', text: 'The host reloaded this file. Reopen it to continue.' } });
       },
     });

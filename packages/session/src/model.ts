@@ -19,9 +19,7 @@ export type RoomMessage =
   | { type: 'run'; run: RunRecord }
   | { type: 'run-session'; session: RunSessionInfo }
   /** A workspace's packages changed (installed, removed, restored). */
-  | { type: 'packages'; engine: string; message: string }
-  /** The host's plugins changed (run plugins, formats): what runs, and how files open. */
-  | { type: 'plugins' };
+  | { type: 'packages'; engine: string; message: string };
 
 // Running code chunks. The host runs them; every client with the document open
 // sees the same runs and outputs. Outputs are never written into the file.

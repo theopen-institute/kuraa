@@ -7,6 +7,7 @@ import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { podmanWorks } from '@kuraa/env-podman';
+import { standardRunPlugins } from '@kuraa/run-plugins';
 import type { RunRecord } from '@kuraa/session/model';
 import { startHost, type RunningHost } from '../src/index.js';
 
@@ -39,7 +40,7 @@ describe.skipIf(!READY)('R packages', () => {
   }
 
   async function host(dir: string, allowInstalls = true): Promise<RunningHost> {
-    const h = await startHost({ dir, port: 0, run: { engines: ['r'], allowInstalls, dataDir } });
+    const h = await startHost({ dir, port: 0, run: { engines: ['r'], plugins: standardRunPlugins, allowInstalls, dataDir } });
     hosts.push(h);
     return h;
   }

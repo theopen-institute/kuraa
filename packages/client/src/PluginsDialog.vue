@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Plugins: what runs code (always in a Podman container), which document formats
-// are on, and, for you alone, each format's editing behaviour. The host's
-// plugins are set by whoever runs it, with flags; here they are only shown.
+// Plugins: the languages that run code (engines) and where it runs
+// (environments), which document formats are on, and, for you alone, each
+// format's editing behaviour. The host's plugins are set by whoever runs it,
+// with flags; here they are only shown.
 import { computed, ref, shallowRef } from 'vue';
 import type { FormatEditor } from '@kuraa/editor-kit';
 import type { HostApi, PluginsInfo } from './api.js';
@@ -17,6 +18,9 @@ const emit = defineEmits<{ close: []; editorsOff: [ids: string[]] }>();
 
 const info = shallowRef<PluginsInfo | null>(null);
 const error = ref<string | null>(null);
+const title = (label: string) => label.charAt(0).toUpperCase() + label.slice(1);
+/** An environment's name, without a '(not sandboxed)' its label may carry: that is shown apart. */
+const envName = (label: string) => title(label.replace(/\s*\(not sandboxed\)\s*$/i, ''));
 const modules = computed(() => Object.entries(props.editors).map(([id, m]) => ({ id, label: m.label ?? id, description: m.description ?? '' })));
 
 props.api.plugins().then(
@@ -46,7 +50,7 @@ onEscape(() => emit('close'));
       <template v-if="info">
         <p class="muted plugins-note">
           What runs code, and which formats are on, are set by whoever runs this host, when they start it
-          (<code>--engine</code>, <code>--format</code>).
+          (<code>--engine</code>, <code>--env</code>, <code>--format</code>, <code>--plugin</code>).
         </p>
 
         <section class="plugins-group" data-testid="plugins-run">
@@ -58,13 +62,16 @@ onEscape(() => emit('close'));
               <span class="plugin-about">{{ e.description }}</span>
             </span>
           </label>
-          <div class="plugin plugin-place" data-testid="plugins-sandbox">
+          <h4>Where code runs</h4>
+          <label v-for="e in info.environments" :key="e.id" class="plugin" :data-testid="`environment:${e.id}`">
+            <input type="checkbox" :checked="e.on" disabled :aria-label="envName(e.label)">
             <span class="plugin-text">
-              <span class="plugin-name">Runs {{ info.environment.label }}</span>
-              <span class="plugin-about">{{ info.environment.description }} Code never runs on the host's computer itself.</span>
-              <span v-if="!info.environment.available" class="plugin-about plugin-unavailable">Not available: {{ info.environment.message }}</span>
+              <span class="plugin-name">{{ envName(e.label) }}<span v-if="!e.sandboxed" class="plugin-warn"> · not sandboxed</span></span>
+              <span class="plugin-about">{{ e.description }}</span>
+              <span v-if="e.on && !e.available" class="plugin-about plugin-unavailable">Not available: {{ e.message }}</span>
             </span>
-          </div>
+          </label>
+          <p v-if="!info.environments.length" class="muted plugins-note">No environment is loaded, so no code runs here.</p>
         </section>
 
         <section class="plugins-group" data-testid="plugins-formats">

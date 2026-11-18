@@ -7,16 +7,16 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@kuraa/engine-r": "workspace:*",
-    "@kuraa/env-podman": "workspace:*",
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "@kuraa/run-kit": "workspace:*",
+    "@kuraa/run-plugins": "workspace:*",
     "@kuraa/session": "workspace:*",
     "prosemirror-model": "^1.25.13",
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@kuraa/env-podman": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",

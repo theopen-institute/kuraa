@@ -15,7 +15,7 @@ const swallow = (x: Promise<unknown>) => void x.catch(() => undefined);
     <h3>Code</h3>
     <p class="menu-facts">
       <span
-        :class="['r-state', `r-${live.session.state}`, { unavailable: live.info.environment && !live.info.environment.available }]"
+        :class="['r-state', `r-${live.session.state}`, { unsandboxed: live.info.environment && !live.info.environment.sandboxed, unavailable: live.info.environment && !live.info.environment.available }]"
         data-testid="r-state"
         :title="live.info.environment?.message ?? ''"
       >{{ live.engineLabel }} {{ SESSION[live.session.state] ?? live.session.state }}{{ live.session.state === 'starting' && live.session.message ? ` · ${live.session.message}` : '' }}{{ live.info.environment ? ` · ${live.info.environment.available ? live.info.environment.label : `${live.info.environment.label}: not available`}` : '' }}</span>

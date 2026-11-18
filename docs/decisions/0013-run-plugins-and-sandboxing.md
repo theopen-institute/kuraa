@@ -1,7 +1,8 @@
 # 0013 · Running code through plugins, sandboxed by default
 
-> Changed by [0018](0018-untrusted-users.md): there is no Local environment, and environments are
-> no longer plugins. Code runs only in the Podman sandbox; engines remain plugins.
+> Changed by [0018](0018-untrusted-users.md) and [0019](0019-engine-and-environment-plugins.md): the
+> Local environment no longer ships, the host loads no plugin itself, a workspace does not choose
+> the environment, and an unsandboxed one needs `--allow-unsandboxed`.
 
 The host no longer knows about R. Running code goes through two kinds of plugin, with the
 contract in `@kuraa/run-kit`:
@@ -26,7 +27,7 @@ environment: `--engine r --env podman` (repeatable; the first environment is the
 `RunPlugin` (`definePlugin({ name, engines, environments })`). The host refuses a plugin built for
 another `RUN_API_VERSION`, and two plugins defining the same id. Plugins run in the host process
 with the host's rights, so only the operator names them; a workspace cannot.
-`packages/host/test/fixtures/echo-plugin.mjs` is a complete example in plain JavaScript.
+`packages/host/test/fixtures/echo-engine.mjs` (an engine) and `fixtures/environments.mjs` (environments) are complete examples in plain JavaScript.
 
 **A workspace can ask; only the operator can allow.** `.kuraa/run.json` in a workspace may ask
 for one of the allowed environments (`"environment": "podman"`), say what each engine needs (for

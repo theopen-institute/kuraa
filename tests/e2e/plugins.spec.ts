@@ -1,5 +1,5 @@
-// The Plugins panel shows what the host's flags turned on (engines, formats,
-// and the sandbox code runs in) and changes none of it; each person's editing
+// The Plugins panel shows what the host's flags turned on (engines, where code
+// runs, formats) and changes none of it; each person's editing
 // behaviour is theirs to turn on and off. Documents cannot put script in the page.
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
+import { standardRunPlugins } from '../../packages/run-plugins/src/index.js';
 import { E2E } from './env.js';
 
 const RMD = '# Chunks\n\n```{r}\n1 + 1\n```\n';
@@ -26,7 +27,7 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
   return startHost({
     dir,
     formats,
-    run: { engines: [], dataDir: mkdtempSync(join(tmpdir(), 'kuraa-e2e-plugins-data-')) },
+    run: { engines: [], plugins: standardRunPlugins, dataDir: mkdtempSync(join(tmpdir(), 'kuraa-e2e-plugins-data-')) },
     staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
     timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   });
@@ -55,8 +56,11 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(box(page, 'R Markdown')).not.toBeChecked();
     await expect(box(page, 'Pandoc markdown')).toBeChecked();
     for (const name of ['R', 'R Markdown', 'Pandoc markdown', 'Text file']) await expect(box(page, name)).toBeDisabled();
-    await expect(page.getByTestId('plugins-sandbox')).toContainText('Runs in a Podman container');
-    await expect(page.getByTestId('plugins-sandbox')).toContainText('never runs on the host');
+    // Where code runs: the environments loaded (here only Podman), none in use while no engine is on.
+    await expect(page.getByTestId('environment:podman')).toContainText('In a Podman container');
+    await expect(page.getByTestId('environment:podman')).not.toContainText('not sandboxed');
+    await expect(box(page, 'In a Podman container')).not.toBeChecked();
+    await expect(box(page, 'In a Podman container')).toBeDisabled();
   } finally {
     await host.close();
   }
@@ -118,6 +122,7 @@ test('on the shared host too, only your editing behaviour can change', async ({ 
   await openPlugins(page);
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
+  await expect(box(page, 'In a Podman container')).toBeChecked();
   await expect(box(page, 'R Markdown')).toBeDisabled();
   await expect(box(page, 'Markdown editing')).toBeEnabled();
 });

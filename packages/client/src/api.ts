@@ -12,13 +12,13 @@ export interface RunInfo {
   /** Whether people may install packages here. */
   allowInstalls: boolean;
   /** Where this workspace's code runs, and whether that is available. */
-  environment: { id: string; label: string; available: boolean; message: string } | null;
+  environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
 /** Which plugins the host has and which are on: set by the host's flags, shown read-only. */
 export interface PluginsInfo {
   engines: { id: string; label: string; description: string; on: boolean }[];
-  /** Where code runs: the Podman sandbox, always. */
-  environment: { id: string; label: string; description: string; available: boolean; message: string };
+  /** Places code can run; the one in use is on. */
+  environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
   formats: { id: string; label: string; description: string; extensions: string[]; on: boolean }[];
 }
 export interface PackageInfo { name: string; version: string; source: 'workspace' | 'environment' }

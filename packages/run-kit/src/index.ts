@@ -1,18 +1,27 @@
 // The contract for running code, as plugins.
 //
-// The host knows nothing about any language. It runs chunks through engines,
-// which plugins provide and the operator turns on (flags):
+// The host knows no language and no place to run code. Both come from plugins,
+// which the operator loads and turns on with flags:
 //
-//   Engine       how to run code in a language and report what it produced
+//   Engine       a language: how to run its code and report what it produced
 //                (engine-r: R through evaluate, as knitr does)
+//   Environment  a place processes run, and what they may touch there
+//                (env-podman: a locked-down container; others could run them
+//                on this computer, or on a remote server)
 //
-// Every process an engine starts, it starts through the Environment it is given,
-// which is always the host's Podman sandbox (env-podman): a locked-down
-// container. People using the app are not trusted with this computer, so code
-// they write never runs outside it. Plugins cannot add environments.
+// The two never know each other's implementation. They meet only through this
+// contract: an engine asks the environment it is given to start a process
+// (StartRequest: a command, the folders it needs, a Policy, and optionally how
+// to provision a container), and gets back a running process (SandboxProcess:
+// its streams, how to interrupt or end it, and how its paths look from inside).
 //
-// A plugin module exports a RunPlugin: `export default definePlugin({ ... })`.
-// The host refuses a plugin whose apiVersion differs from RUN_API_VERSION.
+// People using the app are trusted with document content only, so the policy
+// matters: an environment says whether it enforces it (`sandboxed`), and a host
+// uses one that does not only if its operator says so (--allow-unsandboxed).
+//
+// A plugin module exports a RunPlugin, with engines, environments or both:
+// `export default definePlugin({ name, engines, environments })`. The host
+// refuses a plugin whose apiVersion differs from RUN_API_VERSION.
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
@@ -24,7 +33,7 @@ export type { ChunkOutput };
 export const RUN_API_VERSION = 1;
 
 // ---------------------------------------------------------------------------
-// Policy: what a process may touch. The sandbox enforces it.
+// Policy: what a process may touch. Sandboxed environments enforce it.
 
 export interface Policy {
   /** How the process sees the workspace; 'none' for helpers that must not see it (package installers). */
@@ -52,7 +61,12 @@ export const DEFAULT_POLICY: Policy = { workspace: 'read-only', network: false, 
 /**
  * The three folders a process gets, as it sees them, and how to translate. On
  * the host they are the workspace, a scratch folder (writable: plots, temporary
- * files), and the engine's files (read-only: a driver script).
+ * files), and the engine's files (read-only: a driver script). An environment
+ * makes them, and any further mounts, visible to the process at the paths it
+ * reports, with the access asked for. One that runs processes elsewhere (a
+ * remote server) copies or syncs them; what the process writes to scratch must
+ * be back on the host by the time the process reports it (the engine reads
+ * plots from there).
  */
 export interface PathView {
   workspace: string;
@@ -71,7 +85,11 @@ export interface Mount {
   access: 'read-only' | 'read-write';
 }
 
-/** How to build an image the engine runs in, for environments that use images. */
+/**
+ * How to provision a container with what an engine's command needs (R and its
+ * packages, say). Environments that run containers build it; others ignore it
+ * and must already have the program.
+ */
 export interface ImageRecipe {
   /** A Containerfile. */
   containerfile: string;
@@ -91,10 +109,10 @@ export interface StartRequest {
   policy: Policy;
   /**
    * The command, built once the environment's view of the paths is known.
-   * argv[0] is a program name (or an absolute path) the environment resolves.
+   * argv[0] is a program name the environment resolves (on its PATH).
    */
   command(view: PathView): { argv: string[]; cwd: string; env?: Record<string, string> };
-  /** How to build an image to run in. */
+  /** How to provision a container for the command, for environments that use containers. */
   image?: ImageRecipe;
   log(message: string): void;
   /** Progress the user should see, e.g. while an image builds. */
@@ -119,14 +137,21 @@ export interface EnvironmentStatus {
   message: string;
 }
 
-/** The sandbox processes run in: the host's Podman environment (env-podman), and nothing else. */
+/** A place processes run. Engines start every process through one; see the top of this file. */
 export interface Environment {
   id: string;
   /** Where code runs, as a phrase: 'in a Podman container'. */
   label: string;
   /** A sentence on what it is and what it shields (the Plugins panel). */
   description?: string;
+  /**
+   * Whether it enforces the Policy, keeping code away from the computer the
+   * host runs on. A host uses one that does not only with --allow-unsandboxed.
+   */
+  sandboxed: boolean;
+  /** Whether it can run processes now, and what to tell people (why not, or what it is). */
   check(options: unknown): Promise<EnvironmentStatus>;
+  /** Start a process. `options` are the operator's, for this environment. */
   start(req: StartRequest, options: unknown): Promise<SandboxProcess>;
 }
 
@@ -134,6 +159,7 @@ export interface Environment {
 // Engines
 
 export interface EngineContext {
+  /** Where its processes run: start every one through this. */
   environment: Environment;
   /** The engine's own folder on the host, shared by every workspace (a package cache, say). */
   dataDir: string;
@@ -217,6 +243,7 @@ export interface PackageResult {
 }
 
 export interface PackageContext {
+  /** Where its processes run: start every one through this. */
   environment: Environment;
   environmentOptions: unknown;
   workspace: string;
@@ -248,7 +275,10 @@ export interface PackageManager {
 export interface RunPlugin {
   apiVersion: number;
   name: string;
+  /** Languages. */
   engines?: Engine[];
+  /** Places to run processes. */
+  environments?: Environment[];
 }
 
 export function definePlugin(plugin: Omit<RunPlugin, 'apiVersion'>): RunPlugin {

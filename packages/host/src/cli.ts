@@ -1,12 +1,17 @@
 // kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
 //   formats:      [--format pandoc-markdown --format text ...]   (default: all)
-//   running code: --engine r [--plugin <path or package>]...      (in Podman containers, always)
+//   running code: --engine r [--env podman] [--plugin <path or package>]...
 //                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
-//                 [--memory 4g] [--cpus 2] [--podman path]
+//                 [--memory 4g] [--cpus 2] [--podman path] [--allow-unsandboxed]
+//
+// The run plugins that ship (@kuraa/run-plugins: R, and Podman containers) are
+// always loaded; --plugin adds more. --env picks the environment code runs in;
+// with only one loaded, that one. One that is not sandboxed needs --allow-unsandboxed.
 //
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
 import { parseArgs } from 'node:util';
+import { standardRunPlugins } from '@kuraa/run-plugins';
 import { startHost } from './index.js';
 
 const { values } = parseArgs({
@@ -15,7 +20,9 @@ const { values } = parseArgs({
     init: { type: 'boolean', default: false },
     format: { type: 'string', multiple: true },
     engine: { type: 'string', multiple: true },
+    env: { type: 'string' },
     plugin: { type: 'string', multiple: true },
+    'allow-unsandboxed': { type: 'boolean', default: false },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
     'allow-installs': { type: 'boolean', default: false },
@@ -40,7 +47,9 @@ const running = await startHost({
   // Nothing runs unless an engine is on.
   run: {
     engines: values.engine ?? [],
-    plugins: values.plugin ?? [],
+    environment: values.env,
+    plugins: [...standardRunPlugins, ...(values.plugin ?? [])],
+    allowUnsandboxed: values['allow-unsandboxed'],
     allowWorkspaceWrite: values['allow-write'],
     allowNetwork: values['allow-network'],
     allowInstalls: values['allow-installs'],

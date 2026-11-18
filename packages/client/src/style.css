@@ -355,7 +355,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .plugin-name { font-weight: 500; }
 .plugin-about { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .plugin-unavailable { color: var(--warn); }
-.plugin-place { grid-template-columns: minmax(0, 1fr); padding-left: 23px; cursor: default; }
+.r-state.unsandboxed::after { content: ' · not sandboxed'; color: var(--warn); }
+.plugin-warn { font-weight: 400; color: var(--warn); }
 .plugins-note code { font-size: 12px; }
 .plugins-note { margin: 0; font-size: 12.5px; }
 .plugins-error { margin: 0; color: var(--warn); font-size: 13px; }

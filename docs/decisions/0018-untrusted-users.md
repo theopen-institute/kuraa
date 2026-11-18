@@ -1,8 +1,12 @@
 # 0018 · People using the app are not trusted; code runs only in Podman
 
+> Changed by [0019](0019-engine-and-environment-plugins.md): environments are plugins again, like
+> engines; Podman is one, and none that runs code on the computer itself ships. An unsandboxed
+> environment is used only with `--allow-unsandboxed`.
+
 **Who is trusted with what.** Whoever runs a host is its administrator, and configures it only
-with flags (`--engine`, `--format`, `--plugin`, `--allow-write`, `--allow-network`,
-`--allow-installs`, `--podman`, …; the desktop app takes `--engine`, `--format` and `--plugin`).
+with flags (`--engine`, `--env`, `--format`, `--plugin`, `--allow-write`, `--allow-network`,
+`--allow-installs`, `--allow-unsandboxed`, `--podman`, …; the desktop app takes the run and format flags too).
 People using the app, including the person running the desktop app, are trusted with the content
 of documents and nothing more: nothing they write, run or open may execute on the host's computer
 or in the app, and nothing in the app changes how the host is configured. Proper accounts and roles
@@ -12,11 +16,9 @@ in-app switches of [0017](0017-plugins-panel.md), which now only shows what is o
 **Code runs only in Podman.**
 
 - The Local environment (`@kuraa/env-local`, R on the computer itself) is gone, with
-  `--env`, `--rscript` and engine-r's search for R on the computer.
-- Environments are no longer plugins. The runner has one, the Podman sandbox
-  (`@kuraa/env-podman`), given to it by the host. `RunPlugin` has no `environments`, and a plugin
-  that brings any is refused when the host starts. Engines remain plugins; everything an engine
-  starts, it starts through the sandbox.
+  `--rscript` and engine-r's search for R on the computer.
+- Environments were briefly not plugins (only Podman, built in); [0019](0019-engine-and-environment-plugins.md)
+  made them plugins again, with sandboxing declared by each and gated by `--allow-unsandboxed`.
 - A workspace can no longer choose an environment (`"environment"` in `.kuraa/run.json` is
   ignored). It can still ask for an image, packages and system libraries (names are checked and
   may not start with `-`), and for write access or the network, which it gets only where the
@@ -29,7 +31,7 @@ in-app switches of [0017](0017-plugins-panel.md), which now only shows what is o
 Plugin code itself (engines loaded with `--plugin`) runs in the host process: it is installed by
 the administrator, like the host, and is trusted as the host is.
 
-**Interrupts.** Signals sent to `podman run` reached the container twice (one SIGINT stopped two
+**Interrupts (Podman).** Signals sent to `podman run` reached the container twice (one SIGINT stopped two
 runs, or R itself), so Podman now runs with `--sig-proxy=false` and interrupts go through
 `podman kill --signal=SIGINT`, which delivers exactly one.
 

@@ -5,8 +5,8 @@
 
 **Plugins…** in the menu lists three kinds of plugin:
 
-- **Running code**: the engines (R, and any loaded with `--plugin`), whether each is on, and where
-  code runs: always the Podman sandbox, with whether it is available. Read-only (`--engine`).
+- **Running code**: the engines (R, and any loaded with `--plugin`) and the environments, whether
+  each is on, whether an environment is sandboxed and available. Read-only (`--engine`, `--env`).
 - **Document formats**: Pandoc markdown, R Markdown, Text file, whether each is on. Read-only
   (`--format`). A file whose format is off opens as the next type that claims it: the Text file
   type claims `.md`, `.Rmd` and `.qmd` at its low priority, so they open as text with markdown

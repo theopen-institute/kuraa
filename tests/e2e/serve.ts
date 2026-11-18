@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost } from '../../packages/host/src/index.js';
+import { standardRunPlugins } from '../../packages/run-plugins/src/index.js';
 import { E2E, NOTES } from './env.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: E2E.dir, encoding: 'utf8' });
@@ -24,7 +25,7 @@ const running = await startHost({
   port: E2E.port,
   host: '127.0.0.1',
   token: E2E.token,
-  run: { engines: ['r'], allowInstalls: true, dataDir: join(E2E.dir, '..', 'kuraa-e2e-rdata') },
+  run: { engines: ['r'], plugins: standardRunPlugins, allowInstalls: true, dataDir: join(E2E.dir, '..', 'kuraa-e2e-rdata') },
   staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
   timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   log: (m) => console.log(`[host] ${m}`),

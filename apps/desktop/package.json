@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@kuraa/client": "workspace:*",
-    "@kuraa/host": "workspace:*"
+    "@kuraa/host": "workspace:*",
+    "@kuraa/run-plugins": "workspace:*"
   },
   "devDependencies": {
     "electron": "45.3.2"

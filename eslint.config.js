@@ -63,9 +63,12 @@ export default tseslint.config(
   },
   {
     // Run plugins and their contract: host side (Node), never the client or editor.
+    // Engines (languages) and environments (places to run) are separate plugins
+    // that meet only through @kuraa/run-kit: neither imports the other.
     files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**'],
     rules: merge(
       restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'vue', '@codemirror/*', 'prosemirror-*'], 'Run plugins depend on @kuraa/run-kit only.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/run-plugins'], 'Engines and environments meet only through @kuraa/run-kit.'),
       noYjs,
     ),
   },
@@ -74,7 +77,18 @@ export default tseslint.config(
     rules: merge(restrict(['@kuraa/*', 'vue', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },
   {
+    // The host core knows no language and no place to run code: run plugins are
+    // passed in by whoever starts it (the command line here, the desktop app, tests).
     files: ['packages/host/src/**'],
+    ignores: ['packages/host/src/cli.ts'],
+    rules: merge(
+      restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/run-plugins'], 'The host imports no run plugin; the program that starts it passes them.'),
+      noYjs,
+    ),
+  },
+  {
+    files: ['packages/host/src/cli.ts'],
     rules: merge(restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'), noYjs),
   },
   {

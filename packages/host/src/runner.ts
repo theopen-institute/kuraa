@@ -1,30 +1,40 @@
 // Running code chunks, through run plugins (see @kuraa/run-kit and plugins.ts).
 //
-// The runner knows no language. For each document and engine it opens a
-// session in the sandbox (a Podman container), runs requests one at a time, broadcasts
+// The runner knows no language and no place to run code: engines and
+// environments come from plugins (see @kuraa/run-kit and plugins.ts). For each
+// document and engine it opens a session in the environment, runs requests one
+// at a time, broadcasts
 // each run's progress and outputs to everyone with the document open, and
 // caches the latest output of each chunk in .git/kuraa/outputs (never in the
 // document).
 //
-// Who decides what: the operator (host options, from flags) turns engines on
-// and sets the limits. A workspace may ask, in .kuraa/run.json, for what its
-// engines need (an image, packages) and for more access (writing the
-// workspace, the network); it gets more access only where the operator allows
-// it. Code always runs in the sandbox; if it is unavailable, nothing runs.
+// Who decides what: the operator (host options, from flags) loads plugins,
+// turns engines on, chooses the environment and sets the limits; an environment
+// that is not sandboxed only if they say so. A workspace may ask, in
+// .kuraa/run.json, for what its engines need (an image, packages) and for more
+// access (writing the workspace, the network); it gets more access only where
+// the operator allows it. If the environment is unavailable, nothing runs.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy } from '@kuraa/run-kit';
+import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunPlugin } from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/server';
 import type { RunPlugins } from './plugins.js';
 
 export interface RunOptions {
-  /** Engines to turn on, by id: ['r']. None: running is off. Code runs in a Podman container. */
+  /** Engines to turn on, by id: ['r']. None: running is off. */
   engines: string[];
-  /** More run plugins (engines) to load, by path or package name. */
-  plugins?: string[];
-  /** Options by engine id, and for the sandbox under `podman`: { podman: { podman: '/path/to/podman' } }. */
+  /** Where code runs, by environment id: 'podman'. Default: the only environment loaded. */
+  environment?: string;
+  /**
+   * Run plugins: engines and environments, as modules or by path or package
+   * name. The host loads none of its own (@kuraa/run-plugins has those that ship).
+   */
+  plugins?: (RunPlugin | string)[];
+  /** Use an environment that is not sandboxed: code then runs with whatever rights it has there. */
+  allowUnsandboxed?: boolean;
+  /** Options by engine or environment id: { podman: { podman: '/path/to/podman' } }. */
   options?: Record<string, unknown>;
   /** Let a workspace ask to write to itself (default: read-only). */
   allowWorkspaceWrite?: boolean;
@@ -61,8 +71,8 @@ export interface RunDescription {
   engines: { id: string; label: string; handles: string[]; packages: boolean }[];
   /** Whether people may install packages here. */
   allowInstalls: boolean;
-  /** Where code runs (the sandbox), and whether it is there. */
-  environment: { id: string; label: string; available: boolean; message: string } | null;
+  /** Where code runs, and whether it is there. */
+  environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
 
 const MAX_TEXT = 200_000;
@@ -85,8 +95,6 @@ export class Runner {
     root: string;
     stateDir: string;
     plugins: RunPlugins;
-    /** Where every process runs: the Podman sandbox. */
-    environment: Environment;
     options: RunOptions | undefined;
     broadcast: (path: string, message: RoomMessage) => void;
     /** To everyone with any document of the workspace open. */
@@ -98,10 +106,35 @@ export class Runner {
   }) {
     for (const id of o.options?.engines ?? []) if (!o.plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.plugins.engines.keys()].join(', ') || 'none'}.`);
     this.on = [...(o.options?.engines ?? [])];
+    this.env = this.chooseEnvironment();
+  }
+
+  /** Where code runs: the one the operator named, else the only one loaded. */
+  private readonly env: Environment | null;
+
+  private chooseEnvironment(): Environment | null {
+    const { plugins, options } = this.o;
+    const all = [...plugins.environments.values()];
+    if (options?.environment) {
+      const env = plugins.environments.get(options.environment);
+      if (!env) throw new Error(`Unknown environment "${options.environment}". Known: ${all.map((e) => e.id).join(', ') || 'none'}.`);
+      return this.checkSandbox(env);
+    }
+    if (!this.on.length) return all.length === 1 ? all[0]! : null;
+    if (all.length === 0) throw new Error('Engines are on, but no environment to run code in is loaded. Load one with --plugin.');
+    if (all.length > 1) throw new Error(`Several environments are loaded (${all.map((e) => e.id).join(', ')}); choose one with --env.`);
+    return this.checkSandbox(all[0]!);
+  }
+
+  private checkSandbox(env: Environment): Environment {
+    if (!env.sandboxed && this.on.length && !this.o.options?.allowUnsandboxed) {
+      throw new Error(`The environment "${env.id}" is not sandboxed: code would run ${env.label} with whatever rights it has there. Use it only with --allow-unsandboxed.`);
+    }
+    return env;
   }
 
   get enabled(): boolean {
-    return this.on.length > 0;
+    return this.on.length > 0 && this.env !== null;
   }
 
   /** The engines that are on, by id. */
@@ -109,15 +142,18 @@ export class Runner {
     return [...this.on];
   }
 
-  /** Every engine the loaded plugins offer, whether on or not, and the sandbox and whether it is there. */
+  /** Every engine and environment the loaded plugins offer, which are on, and whether each environment is there. */
   async catalog(): Promise<{
     engines: { id: string; label: string; description: string; on: boolean }[];
-    environment: { id: string; label: string; description: string; available: boolean; message: string };
+    environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
   }> {
-    const env = this.o.environment;
+    const { plugins } = this.o;
     return {
-      engines: [...this.o.plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.includes(e.id) })),
-      environment: { id: env.id, label: env.label, description: env.description ?? '', ...(await this.status(env)) },
+      engines: [...plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.includes(e.id) })),
+      environments: await Promise.all([...plugins.environments.values()].map(async (e) => ({
+        id: e.id, label: e.label, description: e.description ?? '', sandboxed: e.sandboxed,
+        on: this.enabled && e === this.env, ...(await this.status(e)),
+      }))),
     };
   }
 
@@ -151,13 +187,13 @@ export class Runner {
 
   async describe(): Promise<RunDescription> {
     if (!this.enabled) return { enabled: false, engines: [], allowInstalls: false, environment: null };
-    const env = this.o.environment;
+    const env = this.env!;
     const status = await this.status(env);
     return {
       enabled: true,
       engines: this.engines.map((e) => ({ id: e.id, label: e.label, handles: e.handles, packages: !!e.packages })),
       allowInstalls: !!this.o.options?.allowInstalls,
-      environment: { id: env.id, label: env.label, ...status },
+      environment: { id: env.id, label: env.label, sandboxed: env.sandboxed, ...status },
     };
   }
 
@@ -191,7 +227,7 @@ export class Runner {
   /** What a package manager works with, for this workspace, crediting `by`. */
   private async packageContext(engine: Engine, by: PresenceUser | null): Promise<PackageContext> {
     const config = await this.config();
-    const environment = this.o.environment;
+    const environment = this.env!;
     const status = await this.status(environment);
     if (!status.available) throw new Error(status.message);
     return {
@@ -295,7 +331,7 @@ export class Runner {
     const existing = this.sessions.get(key);
     if (existing) return existing;
     const config = await this.config();
-    const environment = this.o.environment;
+    const environment = this.env!;
     const status = await this.status(environment);
     if (!status.available) throw new Error(status.message);
     const pathHash = createHash('sha1').update(path).digest('hex').slice(0, 12);

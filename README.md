@@ -43,7 +43,9 @@ in, and a `git clone` command. Useful options:
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
-| `--engine` | off | Turn on running code: `--engine r`. Code runs in Podman containers, always. See below |
+| `--engine` | off | Turn on running code: `--engine r`. See below |
+| `--env` | the only one loaded | Where code runs, by environment: `--env podman` |
+| `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` |
 | `--plugin` | none | Load a run plugin (engine or environment) by path or package name |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
@@ -75,17 +77,22 @@ open: text, messages, warnings, errors, data frames as tables, and plots at the 
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
 runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also says where code runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
 
-**People using the app are not trusted with the computer the host runs on**; only the content of
-their documents is theirs ([decision 0018](docs/decisions/0018-untrusted-users.md)). Code runs
-through **engine** plugins (R), and only ever in a **Podman container**: no network, the
-workspace read-only and `.git` hidden, nothing else of the computer visible. There is no way to run
-code on the computer itself, and a plugin cannot add one. Install Podman once: `brew install
-podman`, `podman machine init`, `podman machine start`. The first run builds an R image, which
-takes a few minutes. Package installs run in containers too.
+Code runs through two kinds of plugin, which meet only through the contract in `@kuraa/run-kit`
+([decision 0019](docs/decisions/0019-engine-and-environment-plugins.md)): **engines** are
+languages (R), and **environments** are where their processes run. The host itself knows neither;
+the ones that ship are R and **Podman**: a container with no network, the workspace read-only and
+`.git` hidden, nothing else of the computer visible. Install Podman once: `brew install podman`,
+`podman machine init`, `podman machine start`. The first run builds an R image, which takes a few
+minutes. Package installs run in containers too.
 
-Everything that configures a host is a flag (`--engine`, `--format`, `--plugin`, the `--allow-…`
-flags); the desktop app takes `--engine` (`--engine none` for none), `--format` and `--plugin`
-too. **Plugins…** in the menu shows what is on, read-only, and lets each person turn their own
+**People using the app are not trusted with the computer the host runs on**; only the content of
+their documents is theirs ([decision 0018](docs/decisions/0018-untrusted-users.md)). No environment
+that runs code on the computer itself ships. One can be written, but a host uses an environment
+that is not sandboxed only when started with `--allow-unsandboxed`.
+
+Everything that configures a host is a flag (`--engine`, `--env`, `--format`, `--plugin`, the
+`--allow-…` flags); the desktop app takes `--engine` (`--engine none` for none), `--env`,
+`--format`, `--plugin` and `--allow-unsandboxed` too. **Plugins…** in the menu shows what is on, read-only, and lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
 browser. A file whose format is off opens as a Text file
 ([decision 0017](docs/decisions/0017-plugins-panel.md)). A workspace can say what it needs in
@@ -108,7 +115,8 @@ running without it. Each workspace records its packages in `.kuraa/r-packages.js
 so collaborators and other machines get the same ones; each package version is stored once per
 computer. A shared host allows installs only with `--allow-installs`
 ([decision 0014](docs/decisions/0014-packages.md)). A run plugin is a module exporting `definePlugin({ name, engines,
-environments })` from `@kuraa/run-kit`; [an example](packages/host/test/fixtures/echo-plugin.mjs).
+environments })` from `@kuraa/run-kit`: examples of [an engine](packages/host/test/fixtures/echo-engine.mjs)
+and [environments](packages/host/test/fixtures/environments.mjs), loaded with `--plugin <path>`.
 
 The repository is also served over git's HTTP protocol at `/git`, with the token as the password:
 
@@ -177,9 +185,10 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
-| `packages/run-kit` | The contract for run plugins: engines, environments, the sandbox policy |
-| `packages/engine-r` | The R engine: runs `r` chunks through `evaluate` |
-| `packages/env-podman` | The sandbox every process runs in: a locked-down Podman container |
+| `packages/run-kit` | The contract between run plugins: engines (languages) and environments (where processes run), the policy |
+| `packages/engine-r` | Engine plugin: R, running `r` chunks through `evaluate` |
+| `packages/env-podman` | Environment plugin: a locked-down Podman container |
+| `packages/run-plugins` | The run plugins that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension points; `/editor`: chunk fences |

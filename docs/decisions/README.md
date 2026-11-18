@@ -16,9 +16,10 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0010](0010-text-format.md) | One Text file type for source and data files: a ProseMirror node per line, highlighted by file name |
 | [0011](0011-running-chunks.md) | Running R chunks: one R session per document on the host, shared outputs, never in the file |
 | [0012](0012-format-editor-modules.md) | Each format brings its editor behaviour in an editor module; the client keeps only what is generic |
-| [0013](0013-run-plugins-and-sandboxing.md) | Running code through engine plugins, in the Podman sandbox (environments: see 0018) |
+| [0013](0013-run-plugins-and-sandboxing.md) | Running code through engine and environment plugins (see 0018, 0019) |
 | [0014](0014-packages.md) | Packages: declared per workspace in a committed manifest, stored once per host, installed apart from the data |
 | [0015](0015-editable-source.md) | The Source view is editable, with character-level merging against the rich view |
 | [0016](0016-vue-client.md) | The client's components are Vue; editor objects are never made reactive; plugins stay framework-free |
 | [0017](0017-plugins-panel.md) | Plugins… shows the host's engines and formats, and turns your own editing behaviour on and off |
 | [0018](0018-untrusted-users.md) | People using the app are not trusted: code runs only in Podman, nothing in a document runs in the app, configuration is flags |
+| [0019](0019-engine-and-environment-plugins.md) | Engines and environments are separate plugins meeting through run-kit; the host imports none; unsandboxed needs a flag |

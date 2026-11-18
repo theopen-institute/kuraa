@@ -11,7 +11,6 @@ import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
 import { loadRunPlugins } from './plugins.js';
-import { podmanEnvironment } from '@kuraa/env-podman';
 import { createRequestHandler } from './http.js';
 
 export interface HostTimings {
@@ -43,8 +42,8 @@ export interface HostOptions {
    */
   formats?: string[];
   /**
-   * Running code chunks: which engines are on (see runner.ts). Off by default.
-   * Code always runs in a Podman container, never on this computer itself.
+   * Running code chunks: the run plugins (engines and environments), which
+   * engines are on, and where code runs (see runner.ts). Off by default.
    */
   run?: RunOptions;
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
@@ -142,7 +141,7 @@ export class Host {
     const run = await this.runner.catalog();
     return {
       engines: run.engines,
-      environment: run.environment,
+      environments: run.environments,
       formats: this.allTypes.map((t) => ({ id: t.id, label: t.label, description: t.description ?? '', extensions: t.extensions ?? [], on: this.registry.get(t.id) === t })),
     };
   }
@@ -166,7 +165,6 @@ export class Host {
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
       plugins: await loadRunPlugins(run?.plugins),
-      environment: podmanEnvironment,
       options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
       broadcastAll: (message) => {
@@ -177,7 +175,10 @@ export class Host {
       },
       log: (m) => this.log(m),
     });
-    if (this.runner.enabled) this.log(`running code: ${this.runner.turnedOn.join(', ')}, in Podman containers`);
+    if (this.runner.enabled) {
+      const env = (await this.runner.describe()).environment!;
+      this.log(`running code: ${this.runner.turnedOn.join(', ')}, ${env.label}${env.sandboxed ? '' : ' (NOT SANDBOXED)'}`);
+    }
     await mkdir(this.cacheDir, { recursive: true });
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.

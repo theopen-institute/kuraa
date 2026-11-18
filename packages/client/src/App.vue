@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
-import { HostApi, type CommitInfo, type TreeFile, type WorkspaceInfo } from './api.js';
+import { HostApi, HubApi, type CommitInfo, type HubWorkspace, type TreeFile, type WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -21,6 +21,9 @@ import ComponentsDialog from './ComponentsDialog.vue';
 import ReadOnlyCode from './ReadOnlyCode.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 import SettingsDialog from './SettingsDialog.vue';
+import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
+import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
+import { askConfirm } from './ask.js';
 
 const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}) });
 
@@ -36,14 +39,87 @@ const registry = computed(() => {
 
 const settings = shallowRef<Settings>(loadSettings(props.overrides, props.defaults));
 const editingSettings = ref(!isComplete(settings.value));
-const api = computed(() => markRaw(new HostApi(settings.value.hostUrl, settings.value.token)));
+
+// A hub (a server holding many workspaces) or a host of one. On a hub, the
+// workspace open is one of its workspaces, at <hub>/w/<id>.
+const hubApi = computed(() => markRaw(new HubApi(settings.value.hostUrl, settings.value.token)));
+/** The hub's workspaces; null for a host of one workspace, or before the address has been asked. */
+const hub = shallowRef<HubWorkspace[] | null>(null);
+const hubKnown = ref(false);
+const chosenKey = () => `kuraa:workspace:${settings.value.hostUrl}`;
+const chosen = ref<string | null>(null);
+const addingWorkspace = ref(false);
+
+async function loadHub(prefer?: string | null) {
+  try {
+    const list = await hubApi.value.workspaces();
+    hub.value = list;
+    if (list) {
+      let stored: string | null = null;
+      try { stored = localStorage.getItem(chosenKey()); } catch { /* storage unavailable */ }
+      const ok = (id: string | null | undefined) => !!id && list.some((w) => w.id === id && !w.error);
+      chosen.value = [prefer, chosen.value, props.shell.workspace, stored, list.find((w) => !w.error)?.id].find(ok) ?? null;
+    }
+    error.value = null;
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    hubKnown.value = true;
+  }
+}
+watch([hubApi, editingSettings], () => {
+  if (!editingSettings.value) void loadHub();
+}, { immediate: true });
+watch(chosen, (id) => {
+  try { if (id) localStorage.setItem(chosenKey(), id); } catch { /* storage unavailable */ }
+});
+/** The address answers, and (on a hub) a workspace is open. */
+const ready = computed(() => hubKnown.value && (!hub.value || !!chosen.value));
+const api = computed(() => markRaw(hub.value && chosen.value ? hubApi.value.workspaceApi(chosen.value) : new HostApi(settings.value.hostUrl, settings.value.token)));
+
+function switchWorkspace(id: string) {
+  if (id === chosen.value) return;
+  const w = hub.value?.find((x) => x.id === id);
+  if (w?.error) {
+    error.value = `${w.name} cannot be opened: ${w.error}`;
+    return;
+  }
+  select(null);
+  workspace.value = null;
+  files.value = [];
+  chosen.value = id;
+}
+
+async function workspaceAdded(w: HubWorkspace) {
+  addingWorkspace.value = false;
+  select(null);
+  workspace.value = null;
+  files.value = [];
+  await loadHub(w.id);
+  notice.value = { kind: 'info', text: w.peers ? `Joined “${w.name}”.` : `Made “${w.name}”.` };
+}
+
+async function removeWorkspace(id: string) {
+  const w = hub.value?.find((x) => x.id === id);
+  if (!w || !(await askConfirm(`Remove “${w.name}” from this list? Its folder stays as it is (${w.path}).`, 'Remove', true))) return;
+  try {
+    await hubApi.value.remove(id);
+    if (chosen.value === id) {
+      select(null);
+      chosen.value = null;
+      workspace.value = null;
+      files.value = [];
+    }
+    await loadHub();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
 
 const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
 const error = ref<string | null>(null);
-const path = ref<string | null>((() => {
-  try { return sessionStorage.getItem(OPEN_KEY); } catch { return null; }
-})());
+const path = ref<string | null>(null);
 const status = shallowRef<EditorStatus | null>(null);
 const historyKey = ref(0);
 const viewing = shallowRef<{ commit: CommitInfo; text: string } | null>(null);
@@ -124,14 +200,19 @@ async function refreshTree(selectPath?: string | null) {
   }
 }
 
-watch([api, editingSettings], () => {
-  if (!editingSettings.value) void refreshTree();
+watch([api, editingSettings, ready], () => {
+  if (!editingSettings.value && ready.value) void refreshTree();
 }, { immediate: true });
 
+// The open file, per workspace, for this tab: a reload opens it again.
+const openKey = () => `${OPEN_KEY}:${api.value.baseUrl}`;
+watch(api, () => {
+  try { path.value = sessionStorage.getItem(openKey()); } catch { path.value = null; }
+}, { immediate: true });
 watch(path, (p) => {
   try {
-    if (p) sessionStorage.setItem(OPEN_KEY, p);
-    else sessionStorage.removeItem(OPEN_KEY);
+    if (p) sessionStorage.setItem(openKey(), p);
+    else sessionStorage.removeItem(openKey());
   } catch { /* storage unavailable */ }
 });
 
@@ -207,6 +288,7 @@ function useSettings(s: Settings) {
 
     <div :class="['panes', { 'history-open': historyOpen }]">
       <FileTree
+        v-if="ready"
         :api="api"
         :files="shownFiles"
         :selected="path"
@@ -218,13 +300,52 @@ function useSettings(s: Settings) {
         @changed="refreshTree"
         @error="(m) => (error = m)"
       >
+        <template v-if="hub" #title>
+          <WorkspaceSwitcher
+            :workspaces="hub"
+            :current="chosen"
+            :name="workspace?.name ?? hub.find((w) => w.id === chosen)?.name ?? 'Workspace'"
+            :can-open-folder="!!shell.openFolder"
+            @switch="switchWorkspace"
+            @add="addingWorkspace = true"
+            @open-folder="shell.openFolder?.()"
+            @remove="removeWorkspace"
+          />
+        </template>
         <template #footer>
           <MenuButton :status="status" :has-document="!!path && !!type" @open="menuOpen = true" />
         </template>
       </FileTree>
+      <nav v-else class="pane pane-left" aria-label="Workspaces">
+        <div class="pane-header">
+          <WorkspaceSwitcher
+            v-if="hub"
+            :workspaces="hub"
+            :current="null"
+            name="Workspaces"
+            :can-open-folder="!!shell.openFolder"
+            @switch="switchWorkspace"
+            @add="addingWorkspace = true"
+            @open-folder="shell.openFolder?.()"
+            @remove="removeWorkspace"
+          />
+        </div>
+        <div class="tree" />
+        <div class="pane-footer"><MenuButton :status="status" :has-document="false" @open="menuOpen = true" /></div>
+      </nav>
 
       <main class="pane pane-centre">
-        <div v-if="!path" class="empty">Choose a file on the left, or create one.</div>
+        <div v-if="hub && !chosen && hubKnown" class="empty">
+          <div class="no-workspace" data-testid="no-workspace">
+            <h2>{{ hub.length ? 'Choose a workspace' : 'No workspaces yet' }}</h2>
+            <p>A workspace is a folder of documents, kept with git. Make a new one, or join one someone shared with you with their invitation or link.</p>
+            <div class="actions">
+              <button type="button" class="primary" data-testid="add-workspace-button" @click="addingWorkspace = true">Add a workspace…</button>
+              <button v-if="shell.openFolder" type="button" @click="shell.openFolder()">Open a folder…</button>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="!path && ready" class="empty">Choose a file on the left, or create one.</div>
         <div v-if="path && !type && file" class="empty">No document type for {{ path }}.</div>
         <div v-if="versionMismatch" class="banner warn">
           This client has {{ type!.label }} version {{ type!.version }}; the host has {{ hostType!.version }}. Update one of them before editing.
@@ -305,6 +426,7 @@ function useSettings(s: Settings) {
       @accepted="refreshTree(); historyKey++"
       @close="menuOpen = false"
     />
+    <AddWorkspaceDialog v-if="addingWorkspace" :hub="hubApi" @added="workspaceAdded" @cancel="addingWorkspace = false" />
     <ComponentsDialog
       v-if="componentsOpen"
       :api="api"

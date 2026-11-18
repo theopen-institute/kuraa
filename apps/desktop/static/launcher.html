@@ -23,17 +23,19 @@
     input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
     button { font: inherit; border-radius: 6px; padding: 6px 12px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--bg); justify-self: start; }
     .error { color: var(--warn); min-height: 1.5em; }
+    button.secondary { background: none; color: var(--accent); }
   </style>
 </head>
 <body>
   <main>
     <h1>kuraa</h1>
-    <p class="lead">Edit a folder of Pandoc markdown and R Markdown files, alone or live with others.</p>
+    <p class="lead">Edit folders of Pandoc markdown and R Markdown files, alone or live with others.</p>
     <div class="cards">
       <section>
-        <h2>Open a folder</h2>
-        <p>Work on a folder on this computer. The app runs its own host, writes plain files and commits them with git. Other tools can use the folder at the same time.</p>
-        <button id="open" type="button">Open folder…</button>
+        <h2>Your workspaces</h2>
+        <p>Folders on this computer, kept with git: new ones, folders you open, and workspaces others shared with you. The app writes plain files and commits them; other tools can use the folders at the same time.</p>
+        <button id="home" type="button">Your workspaces</button>
+        <button id="open" type="button" class="secondary">Open folder…</button>
       </section>
       <form id="join">
         <section>
@@ -48,6 +50,7 @@
     </div>
   </main>
   <script>
+    document.getElementById('home').addEventListener('click', () => window.kuraa.home());
     document.getElementById('open').addEventListener('click', () => window.kuraa.openFolder());
     document.getElementById('join').addEventListener('submit', async (e) => {
       e.preventDefault();

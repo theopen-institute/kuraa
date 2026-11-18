@@ -17,6 +17,8 @@ export interface Shell {
   openFolder?(): void;
   /** Leave this workspace and go back to the shell's start screen (native shells). */
   leave?(): void;
+  /** On a hub, the workspace to open first (the shell opened or added it). */
+  workspace?: string;
 }
 
 export const webShell: Shell = { managesHost: false };
@@ -29,6 +31,8 @@ export interface ShellConfig {
   name: string;
   email: string;
   managesHost: boolean;
+  /** On a hub, the workspace to open first. */
+  workspace?: string;
 }
 
 /**
@@ -42,4 +46,6 @@ export interface ShellBridge {
   /** Resolves to an error message, or null once the client is loading. */
   join(url: string, token: string): Promise<string | null>;
   leave(): Promise<void>;
+  /** Back to this app's own workspaces (from the launcher). */
+  home(): Promise<void>;
 }

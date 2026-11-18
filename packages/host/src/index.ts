@@ -6,6 +6,7 @@ export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './wo
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
 export type { JoinOptions } from './peers/join.js';
+export { Hub, startHub, slugOf, type HubOptions, type HubWorkspace, type RunningHub } from './hub.js';
 export type { PeerOptions, PeersStatus, DeviceInfo, Proposal } from './peers/peers.js';
 
 /** Join a workspace from an invitation (loads the peer layer, and Hyperswarm with it, only when called). */

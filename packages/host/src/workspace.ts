@@ -36,7 +36,9 @@ export async function initWorkspace(dir: string): Promise<void> {
   const name = who.name || 'Kuraa host';
   const email = who.email || 'host@kuraa.invalid';
   const git = new Git(dir, { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email });
-  await git.run(['init', '-q']);
+  // The branch git is set to start with, else main (not git's own old default).
+  const branch = (await git.run(['config', '--get', 'init.defaultBranch'], { allowFail: true })).stdout.trim() || 'main';
+  await git.run(['init', '-q', `--initial-branch=${branch}`]);
   await git.run(['add', '-A']);
   await git.run(['commit', '-q', '--allow-empty', '-m', 'Initialise workspace']);
 }

@@ -62,13 +62,13 @@ export class ApiError extends Error {
 }
 
 export class HostApi {
-  constructor(readonly baseUrl: string, private readonly token: string) {}
+  constructor(readonly baseUrl: string, protected readonly token: string) {}
 
   get collabUrl(): string {
     return this.baseUrl.replace(/\/$/, '').replace(/^http/, 'ws') + '/collab';
   }
 
-  private async req(path: string, init: RequestInit = {}): Promise<Response> {
+  protected async req(path: string, init: RequestInit = {}): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(this.baseUrl.replace(/\/$/, '') + path, {
@@ -89,7 +89,7 @@ export class HostApi {
     return res;
   }
 
-  private async json<T>(path: string, init?: RequestInit): Promise<T> {
+  protected async json<T>(path: string, init?: RequestInit): Promise<T> {
     return (await (await this.req(path, init)).json()) as T;
   }
 
@@ -117,4 +117,49 @@ export class HostApi {
   installPackages(engine: string, refs: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/install', { method: 'POST', body: JSON.stringify({ engine, refs, by }) }); }
   removePackages(engine: string, names: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/remove', { method: 'POST', body: JSON.stringify({ engine, names, by }) }); }
   clearRuns(path: string, chunk?: ChunkRef) { return this.json('/api/runs/clear', { method: 'POST', body: JSON.stringify({ path, chunk }) }); }
+}
+
+/** A workspace of a hub (a server holding many; see the host's hub.ts). */
+export interface HubWorkspace {
+  id: string;
+  name: string;
+  /** Its folder, on the hub's computer. */
+  path: string;
+  /** It syncs with other devices. */
+  peers: boolean;
+  /** Why it is not open, if it is not. */
+  error?: string;
+}
+
+/** A hub's own API: its workspaces, and adding them. Each workspace is a host at `<hub>/w/<id>`. */
+export class HubApi extends HostApi {
+  /** The hub's workspaces; null if the address is a host of one workspace, not a hub. */
+  async workspaces(): Promise<HubWorkspace[] | null> {
+    try {
+      return (await this.json<{ workspaces: HubWorkspace[] }>('/hub/api/workspaces')).workspaces;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /** A new workspace: a folder made a git repository. */
+  async create(name: string): Promise<HubWorkspace> {
+    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name }) })).workspace;
+  }
+
+  /** A workspace joined from an invitation or subscription link. */
+  async join(invitation: string, name: string): Promise<HubWorkspace> {
+    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name }) })).workspace;
+  }
+
+  /** Take a workspace off the list (its folder stays). */
+  remove(id: string) {
+    return this.json(`/hub/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** The API of one of the hub's workspaces. */
+  workspaceApi(id: string): HostApi {
+    return new HostApi(`${this.baseUrl.replace(/\/$/, '')}/w/${encodeURIComponent(id)}`, this.token);
+  }
 }

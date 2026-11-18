@@ -30,9 +30,11 @@ function makeRepo(): string {
 }
 
 async function launch(args: string[], timings: object, extraEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
+  // Each launch keeps its workspaces (and their list) in a folder of its own, never in Documents.
+  const workspaces = mkdtempSync(join(tmpdir(), 'kuraa-desktop-workspaces-'));
   const app = await electron.launch({
     executablePath: ELECTRON,
-    args: [MAIN, ...args],
+    args: [MAIN, '--workspaces', workspaces, ...args],
     // VS Code's terminal sets ELECTRON_RUN_AS_NODE, which would start Electron as plain Node.
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings),
       ...extraEnv },
@@ -165,7 +167,7 @@ test('joins a shared host without starting one', async () => {
   expect(existsSync(join(dir, '.git'))).toBe(true);
 });
 
-test('the launcher opens a folder that is not yet a repository, and joins a host', async () => {
+test('opens a folder that is not yet a repository, and from the launcher joins a host', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
   writeFileSync(join(dir, 'notes.md'), NOTES);
   const shared = makeRepo();
@@ -178,8 +180,11 @@ test('the launcher opens a folder that is not yet a repository, and joins a host
       dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox;
     }, dir);
 
-    await page.getByRole('button', { name: 'Open folder…' }).click();
+    // It starts with its workspaces: none yet.
+    await expect(page.getByTestId('no-workspace')).toContainText('No workspaces yet');
+    await page.getByRole('button', { name: 'Open a folder…' }).click();
     await openNotes(page);
+    await expect(page.getByTestId('workspace-name')).toHaveText(basename(dir));
     expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
     await typeAtEnd(page, 'Light rain', ' Opened from the launcher.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Opened from the launcher.');

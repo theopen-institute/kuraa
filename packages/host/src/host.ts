@@ -30,6 +30,8 @@ export interface HostTimings {
 
 export interface HostOptions {
   dir: string;
+  /** What the workspace is called to people (default: its folder's name). */
+  label?: string;
   token: string;
   host?: string;
   port?: number;

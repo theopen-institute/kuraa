@@ -1,12 +1,15 @@
-// The desktop shell. It either embeds a host on a local folder (loopback, free
-// port, random token) or joins a shared host, and loads the web client build.
-// It does no file or git work itself: the host does that, through the helpers
-// @kuraa/host exports. The connection reaches the page through the preload
-// bridge (kuraa:config), not the URL, so reloading the window keeps it.
+// The desktop shell. It embeds a hub (loopback, free port, random token): your
+// workspaces, added from the app as new folders, folders you open, or joined
+// from invitations and links (see @kuraa/host's hub.ts). Or it joins a shared
+// host or hub, running none of its own. It loads the web client build, and does
+// no file or git work itself: the hub does that, through the helpers @kuraa/host
+// exports. The connection reaches the page through the preload bridge
+// (kuraa:config), not the URL, so reloading the window keeps it.
 //
-//   electron .                          launcher: open a folder or join a host
-//   electron . --open <folder>          embed a host on <folder>
-//   electron . --join <url> --token <t> join a shared host; no local host
+//   electron .                          your workspaces
+//   electron . --open <folder>          your workspaces, with <folder> added and open
+//   electron . --join <url> --token <t> join a shared host or hub; none of its own
+//   --workspaces <folder>               where new workspaces go (default: Documents/kuraa)
 //
 // For folders it opens itself, as for any host, the configuration is flags:
 //   --engine <id>...     engines to turn on (default: r); --engine none for none
@@ -25,7 +28,7 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
+import { gitIdentity, inspectFolder, startHub, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 
@@ -41,13 +44,14 @@ const { values: flags } = parseArgs({
     open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
     engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true },
     component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' }, peer: { type: 'boolean' },
+    workspaces: { type: 'string' },
   },
   strict: false,
 });
 const list = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 
 let window: BrowserWindow | null = null;
-let host: RunningHost | null = null;
+let hub: RunningHub | null = null;
 let quitting = false;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
@@ -73,9 +77,9 @@ function timings(): Partial<HostTimings> {
   }
 }
 
-async function stopHost(): Promise<void> {
-  const h = host;
-  host = null;
+async function stopHub(): Promise<void> {
+  const h = hub;
+  hub = null;
   if (h) await h.close(); // flushes and commits open rooms
 }
 
@@ -85,7 +89,36 @@ function loadClient(next: ShellConfig): Promise<void> {
   return window!.loadFile(WEB_INDEX);
 }
 
-/** Open a local folder with an embedded host. Returns false if the user declined. */
+/** This app's hub, started if it is not running. */
+async function ensureHub(): Promise<RunningHub> {
+  if (hub) return hub;
+  const custom = typeof flags.workspaces === 'string';
+  hub = await startHub({
+    root: custom ? (flags.workspaces as string) : join(app.getPath('documents'), 'kuraa'),
+    // With the default folder, the list lives with the app's own data, not in Documents.
+    registry: custom ? undefined : join(app.getPath('userData'), 'workspaces.json'),
+    host: '127.0.0.1',
+    port: 0,
+    // What runs and which formats are on: this app's flags.
+    hosts: { run: runOptions(), formats: list(flags.format), timings: timings() },
+    peers: { everywhere: flags.peer === true },
+    log: (m) => console.log(`[hub] ${m}`),
+  });
+  console.log(`[desktop] hub ${hub.url} on ${hub.hub.root}`);
+  return hub;
+}
+
+/**
+ * Your workspaces: the hub, in the client, with `workspace` open if given. The
+ * name and email suggested are git's, for `folder` (a folder just opened) or in general.
+ */
+async function showWorkspaces(workspace?: string, folder = app.getPath('home')): Promise<void> {
+  const h = await ensureHub();
+  const who = await gitIdentity(folder);
+  await loadClient({ hostUrl: h.url, token: h.token, ...who, managesHost: true, workspace });
+}
+
+/** Add a local folder to the workspaces, and open it. Returns false if the user declined. */
 async function openFolder(path: string): Promise<boolean> {
   if (!existsSync(path)) throw new Error(`No such folder: ${path}`);
   const folder = await inspectFolder(path);
@@ -100,37 +133,22 @@ async function openFolder(path: string): Promise<boolean> {
     });
     if (response !== 0) return false;
   }
-  const dir = folder.repoRoot ?? folder.dir;
-
-  await stopHost();
-  host = await startHost({
-    dir,
-    init: !folder.repoRoot,
-    // What runs and which formats are on: this app's flags.
-    run: runOptions(),
-    formats: list(flags.format),
-    peers: flags.peer === true,
-    host: '127.0.0.1',
-    port: 0,
-    timings: timings(),
-    log: (m) => console.log(`[host] ${m}`),
-  });
-  console.log(`[desktop] embedded host ${host.url} on ${dir}`);
-  const who = await gitIdentity(dir);
-  await loadClient({ hostUrl: host.url, token: host.token, ...who, managesHost: true });
+  const h = await ensureHub();
+  const w = await h.hub.addFolder(folder.repoRoot ?? folder.dir, !folder.repoRoot);
+  await showWorkspaces(w.id, w.path);
   return true;
 }
 
-/** Join a shared host. No local host runs. */
+/** Join a shared host or hub. None of this app's own runs. */
 async function joinHost(url: string, token: string): Promise<void> {
-  await stopHost();
+  await stopHub();
   const who = await gitIdentity(app.getPath('home'));
   await loadClient({ hostUrl: url.replace(/\/$/, ''), token, ...who, managesHost: false });
 }
 
-/** Back to the launcher, stopping any embedded host (which flushes and commits). */
+/** Back to the launcher, stopping this app's hub (which flushes and commits). */
 async function leave(): Promise<void> {
-  await stopHost();
+  await stopHub();
   await showLauncher();
 }
 
@@ -157,6 +175,7 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
+        { label: 'Your Workspaces', click: () => void showWorkspaces() },
         { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => void pickFolder() },
         { label: 'Join Shared Host…', click: () => void leave() },
         { type: 'separator' },
@@ -177,6 +196,7 @@ ipcMain.on('kuraa:config', (e) => {
 });
 ipcMain.handle('kuraa:open-folder', (e) => (fromOwnPage(e) ? pickFolder() : undefined));
 ipcMain.handle('kuraa:leave', (e) => (fromOwnPage(e) ? leave() : undefined));
+ipcMain.handle('kuraa:home', (e) => (fromOwnPage(e) ? showWorkspaces() : undefined));
 ipcMain.handle('kuraa:join', async (e, url: string, token: string) => {
   if (!fromOwnPage(e)) return 'Not allowed.';
   try {
@@ -227,7 +247,7 @@ app.whenReady().then(async () => {
     } else if (typeof values.join === 'string') {
       await joinHost(values.join, typeof values.token === 'string' ? values.token : '');
     } else {
-      await showLauncher();
+      await showWorkspaces();
     }
   } catch (e) {
     dialog.showErrorBox('kuraa', (e as Error).message);
@@ -237,10 +257,10 @@ app.whenReady().then(async () => {
 
 // Flush and commit before quitting.
 app.on('before-quit', (event) => {
-  if (quitting || !host) return;
+  if (quitting || !hub) return;
   event.preventDefault();
   quitting = true;
-  void stopHost().finally(() => app.quit());
+  void stopHub().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => app.quit());

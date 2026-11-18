@@ -240,7 +240,7 @@ provide(TREE, {
 <template>
   <nav class="pane pane-left" aria-label="Files">
     <div :class="['pane-header', { 'drop-target': over === '' }]" @dragover="dragOver($event, '')" @drop="drop($event, '')">
-      <span class="workspace-name" :title="workspaceName" data-testid="workspace-name">{{ workspaceName }}</span>
+      <slot name="title"><span class="workspace-name" :title="workspaceName" data-testid="workspace-name">{{ workspaceName }}</span></slot>
       <span class="pane-header-actions">
         <button type="button" title="New file" aria-label="New file" @click="create()">＋</button>
         <button type="button" title="New folder" aria-label="New folder" @click="newFolder()">⊞</button>

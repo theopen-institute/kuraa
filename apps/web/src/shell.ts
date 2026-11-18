@@ -4,8 +4,8 @@
 //   desktop app   the preload script exposes window.kuraa (a ShellBridge)
 //   pnpm dev      Vite was started with the dev host's token; the host is
 //                 behind Vite's proxy at this page's own origin
-//   web           a host serves this page; a link may carry ?token=… (and
-//                 ?host=…), which is remembered for this tab so reloads work
+//   web           a host or hub serves this page; a link may carry ?token=… (and
+//                 ?host=…, and on a hub ?w=<workspace>), remembered for this tab so reloads work
 import { webShell, type Settings, type Shell, type ShellBridge } from '@kuraa/client';
 
 export interface ResolvedShell {
@@ -25,6 +25,7 @@ export function resolveShell(): ResolvedShell {
     return {
       shell: {
         managesHost: config?.managesHost ?? false,
+        workspace: config?.workspace,
         openFolder: () => void bridge.openFolder(),
         leave: () => void bridge.leave(),
       },
@@ -52,6 +53,8 @@ export function resolveShell(): ResolvedShell {
   };
   const fromLink = { hostUrl: take('host'), token: take('token') };
   const defaults = { name: take('name'), email: take('email') };
+  // On a hub, ?w=<id> opens that workspace.
+  const workspace = take('w');
   if (url.href !== location.href) history.replaceState(null, '', url);
 
   // Remembered for this tab, so a reload keeps the connection and the suggested name.
@@ -65,5 +68,5 @@ export function resolveShell(): ResolvedShell {
   } catch {
     tab = { overrides: fromLink, defaults };
   }
-  return { shell: webShell, ...tab };
+  return { shell: workspace ? { ...webShell, workspace } : webShell, ...tab };
 }

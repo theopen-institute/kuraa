@@ -32,3 +32,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0026](0026-commit-messages-and-history.md) | Automatic commits name the document, the headings that changed and who edited, with an autosave trailer; history folds them into editing sessions |
 | [0027](0027-room-seeds.md) | A room starts from the git blob of its file, seeded by a fixed client id, so rooms on different devices combine without duplicate text |
 | [0028](0028-peers.md) | Devices of one workspace sync directly (Hyperswarm): pairing by invitation or subscription link, git between them, pull only, with the same merges everywhere; rooms join across devices; an upstream by convention, with gated branches and proposals |
+| [0029](0029-hub.md) | A hub serves many workspaces at one address (each a host, at /w/<id>); the app adds them as new folders or from invitations and links, inside the folder the operator named |

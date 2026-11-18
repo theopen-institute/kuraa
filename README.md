@@ -42,6 +42,7 @@ in, and a `git clone` command. Useful options:
 | `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect |
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--upstream` | `origin` if it exists | The remote that **Sync** fetches from, merges and pushes to |
+| `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below |
 | `--peer` | off | Sync with this workspace's other devices, directly. See below |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
@@ -82,6 +83,21 @@ others editing the rich view: [decision 0015](docs/decisions/0015-editable-sourc
 **Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.
+
+## Many workspaces: a hub
+
+A hub serves many workspaces at one address and token, and lets people add them from the app
+([decision 0029](docs/decisions/0029-hub.md)):
+
+```sh
+pnpm host --workspaces ~/research --static apps/web/dist
+```
+
+In the app, the workspace's name at the top of the sidebar switches between them and adds new
+ones: a new folder (made a git repository, inside `~/research`), or a workspace someone shared,
+joined with their invitation or subscription link. The desktop app works this way by itself:
+new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
+any folder on the computer.
 
 ## On several devices
 
@@ -193,18 +209,20 @@ URL and token in **Settings**.
 ## Run the desktop app
 
 ```sh
-pnpm desktop                          # launcher: open a folder, or join a shared host
+pnpm desktop                          # your workspaces (new ones in Documents/kuraa)
+pnpm desktop -- --workspaces ~/research   # new workspaces in another folder
 pnpm desktop -- --open ~/research/notes
 pnpm desktop -- --open ~/research/notes --engine none --format pandoc-markdown --format text
 pnpm desktop -- --join http://192.168.1.20:4321 --token <token>
 ```
 
-Opening a folder starts a host inside the app, on the loopback address with a random token, and
-commits under the folder's git identity. If the folder is not a git repository, the app asks
+The app runs a hub inside it, on the loopback address with a random token: your workspaces,
+added from the app (see above), each committing under its folder's git identity. **Open a
+folder…** (or `--open`) adds a folder and opens it. If the folder is not a git repository, the app asks
 before initialising one. The folder stays usable by other programs while it is open; their
 changes appear in the editor. Quitting writes and commits any pending edits.
 
-Joining a shared host starts no local host.
+Joining a shared host or hub runs none of the app's own; the launcher leads back to your workspaces.
 
 ## Checks
 
@@ -240,7 +258,7 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | `packages/format-text` | The Text file type for scripts, data and settings files, one node per line, highlighted by file name |
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
-| `packages/host` | Relay, bridge between rooms and files, committer, git peer, merges (`merging.ts`), devices (`peers/`), HTTP API, CLI, run component registry |
+| `packages/host` | Relay, bridge between rooms and files, committer, git peer, merges (`merging.ts`), devices (`peers/`), hub of many workspaces (`hub.ts`), HTTP API, CLI, run component registry |
 | `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |

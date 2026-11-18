@@ -29,7 +29,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   }
 }
 
-function tokenOf(req: IncomingMessage): string | null {
+export function tokenOf(req: IncomingMessage): string | null {
   const auth = req.headers.authorization ?? '';
   if (auth.startsWith('Bearer ')) return auth.slice(7);
   if (auth.startsWith('Basic ')) {
@@ -92,7 +92,7 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
 
   if (route === 'GET /api/workspace') {
     return send(res, 200, {
-      name: host.workspace,
+      name: host.options.label ?? host.workspace,
       branch: await host.git.branch(),
       head: await host.git.head(),
       types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
@@ -406,7 +406,11 @@ async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse,
 }
 
 function serveStatic(host: Host, path: string, res: ServerResponse): boolean {
-  const root = host.options.staticDir;
+  return serveStaticFrom(host.options.staticDir, path, res);
+}
+
+/** A file of the built web client (index.html for any path that is not one). */
+export function serveStaticFrom(root: string | undefined, path: string, res: ServerResponse): boolean {
   if (!root) {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('kuraa host. Open the web client and point it at this URL.');

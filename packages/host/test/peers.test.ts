@@ -288,3 +288,67 @@ describe('a shared room and a third device', () => {
     expect(file(dirA).match(/many/g)).toHaveLength(1);
   });
 });
+
+describe('subscription links', () => {
+  async function joinBy(link: string, name: string, timeoutMs = 20_000): Promise<string> {
+    const parent = mkdtempSync(join(tmpdir(), `kuraa-peer-${name}-`));
+    dirs.push(parent);
+    const dir = join(parent, 'notes');
+    await joinWorkspace({ dir, invitation: link, name, bootstrap: testnet.bootstrap as never, timeoutMs });
+    git(dir, 'config', 'user.name', name);
+    git(dir, 'config', 'user.email', `${name}@example.org`);
+    return dir;
+  }
+
+  it('let several people join as full devices, through any device, with the one that made it away', async () => {
+    const dirA = repo();
+    const a = await start(dirA);
+    const link = await a.host.peers!.subscriptionLink(24);
+    // Used once while Ada's device is there…
+    const dirB = await joinBy(link, 'bee');
+    expect(file(dirB)).toBe(NOTES);
+    const b = await start(dirB);
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.name === 'bee' && d.online), 15_000, 'bee paired');
+    // …and again with it gone: Bo's device lets the next one in.
+    await a.close();
+    hosts.splice(hosts.indexOf(a), 1);
+    const dirC = await joinBy(link, 'cee');
+    expect(file(dirC)).toBe(NOTES);
+    const c = await start(dirC);
+    // A full device: its work reaches the others, and theirs reaches it.
+    await api(c, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-cee.md', content: '# Cee\n' }) });
+    await until(() => { try { return readFileSync(join(dirB, 'from-cee.md'), 'utf8') === '# Cee\n'; } catch { return false; } }, 15_000, 'cee’s work on bee');
+    // Ada's device, back, takes cee in too (cee shows its link; bee vouches for it).
+    const a2 = await start(dirA);
+    await until(() => git(dirA, 'remote').split('\n').includes('cee'), 20_000, 'Ada’s device pairs with cee');
+    await until(() => { try { return readFileSync(join(dirA, 'from-cee.md'), 'utf8') === '# Cee\n'; } catch { return false; } }, 20_000, 'cee’s work on Ada’s device');
+    void b;
+    void a2;
+  });
+
+  it('stop working once revoked (on every device) or expired, and with an upstream only work if it made them', async () => {
+    const dirA = repo();
+    const a = await start(dirA);
+    const link = await a.host.peers!.subscriptionLink(24);
+    const dirB = await joinBy(link, 'bee');
+    const b = await start(dirB);
+    await until(async () => (await b.host.peers!.status()).devices.some((d) => d.online), 15_000, 'bee paired');
+    // Revoked on Ada's device: Bo's device learns it, and no one gets in by it, there or here.
+    const { id } = (await import('../src/peers/identity.js')).decodeLink(link);
+    await a.host.peers!.node.identity.revokeLink(id);
+    await a.host.peers!.node.membersChanged();
+    await until(() => { try { return git(dirB, 'config', '--get-all', 'kuraa.revokedlinks') === id; } catch { return false; } }, 15_000, 'Bo’s device learns of the revocation');
+    await expect(joinBy(link, 'late', 4000)).rejects.toThrow('Could not reach a device of the workspace that takes this link');
+    // Expired: refused before looking.
+    const expired = await a.host.peers!.subscriptionLink(-1);
+    await expect(joinBy(expired, 'later', 4000)).rejects.toThrow('This subscription link has expired');
+    // With Ada's device as the upstream, a link Bo's device made lets no one in.
+    git(dirA, 'config', 'kuraa.upstream', 'self');
+    await a.host.peers!.node.membersChanged();
+    await until(() => git(dirB, 'config', '--default', '', 'kuraa.upstream') !== '', 15_000, 'Bo’s device learns the upstream');
+    const fromBo = await b.host.peers!.subscriptionLink(24);
+    await expect(joinBy(fromBo, 'someone', 4000)).rejects.toThrow('Could not reach');
+    const fromAda = await a.host.peers!.subscriptionLink(24);
+    expect(file(await joinBy(fromAda, 'welcome'))).toBe(NOTES);
+  });
+});

@@ -41,12 +41,25 @@ find each other), punches through home routers, and encrypts every connection wi
 other end proves the key it claims. One connection per device is split into channels (protomux):
 control messages, rooms, and git streams.
 
-- **Pairing** is the operator's, from the command line: `kuraa-host invite` prints a one-time
-  invitation (good for 24 hours; only a hash of it is kept); on the other device, `kuraa-host join
-  <invitation> --dir <new folder>` finds the inviting device, presents it, learns the members and
-  the upstream, fetches, and checks out the branch. The app only shows devices.
+- **Pairing** is the operator's, from the command line; the app only shows devices. Two ways:
+  - **An invitation** (`kuraa-host invite`): good once, for 24 hours, with the device that made
+    it (only a hash of it is kept there), which must be running when the other joins.
+  - **A subscription link** (`kuraa-host link [--hours 168 | --forever]`): good for anyone, any
+    number of times, until it expires or is revoked. The device that made it signs it (its id,
+    expiry and the workspace, with its key), so any member can check it and let someone in; the
+    device that made it need not be there. With an upstream device, only links it made count.
+    `kuraa-host links` lists a device's links; `kuraa-host revoke-link <id>` revokes one, and the
+    revocation spreads like a removal (`kuraa.revokedlinks`). Devices that joined by it stay. A
+    link carries the workspace's secret, as an invitation does: anyone who has it can find the
+    workspace's devices, though only a good link or invitation lets them in.
+
+  Either way, on the other device `kuraa-host join <invitation or link> --dir <new folder>` finds
+  a device that lets it in, learns the members and the upstream from it, fetches, and checks out
+  the branch. A device that joined by a link keeps it (`.git/kuraa/joined-link`) and shows it to
+  devices it meets that do not know it yet, so they pair with it too.
 - **Who is let in:** a paired device that has not been removed, or a device presenting an
-  invitation. Anyone else is turned away after its hello; removed devices before it.
+  invitation this device made or a good subscription link. Anyone else is turned away after its
+  hello; removed devices before it.
 - **Membership spreads:** a device a member vouches for (in its hello) is paired by the others,
   and so is a removal; with an upstream device, only its word counts. Devices announce changes to
   the members as they happen, and dial newly paired devices directly.
@@ -108,4 +121,7 @@ started from (0027). Devices tell each other which rooms they have open.
   others. They see that a device looks for a topic (a hash), not what the workspace holds.
 - Run outputs stay on each device. Branch deletions are not passed on.
 - Membership without an upstream is a convention every device follows: a removal reaches a device
-  only through devices that know of it.
+  only through devices that know of it, and so does a revoked link.
+- A subscription link has no limit on how many times it is used: the devices that check it do not
+  count uses together. Expiry and revocation are what limit it.
+- Every device that joins is a full device: there are no read-only roles yet.

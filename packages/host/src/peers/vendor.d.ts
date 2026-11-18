@@ -51,6 +51,8 @@ declare module 'hypercore-crypto' {
     keyPair(seed?: Buffer): { publicKey: Buffer; secretKey: Buffer };
     hash(data: Buffer | Buffer[]): Buffer;
     randomBytes(n: number): Buffer;
+    sign(message: Buffer, secretKey: Buffer): Buffer;
+    verify(message: Buffer, signature: Buffer, publicKey: Buffer): boolean;
   };
   export default crypto;
 }

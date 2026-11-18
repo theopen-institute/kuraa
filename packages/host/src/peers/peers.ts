@@ -115,6 +115,7 @@ export class Peers {
 
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const remote = link.remote!;
     const running = this.fetching.get(remote);
     if (running) {
@@ -199,6 +200,11 @@ export class Peers {
     const oid = await this.host.git.out(['rev-parse', '--verify', ref]);
     const link = [...this.node.links.values()].find((l) => l.remote === device) ?? null;
     await this.bringBranch(branch, ref, oid, link);
+  }
+
+  /** Make a subscription link: anyone with it may join, until it expires or is revoked (CLI: kuraa-host link). */
+  subscriptionLink(hours: number | null = 168): Promise<string> {
+    return this.node.identity.createLink(hours);
   }
 
   /** Make an invitation for another device to join (CLI: kuraa-host invite). */

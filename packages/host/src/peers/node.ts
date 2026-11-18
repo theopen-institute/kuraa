@@ -3,7 +3,9 @@
 // sharing who the members are, and letting paired devices fetch from it.
 //
 // Who is let in: a paired device that has not been removed, and a device not
-// yet paired that presents an invitation this one made.
+// yet paired that presents an invitation this one made, or a subscription link
+// a member made (any member checks it; with an upstream device, only its links
+// count).
 // Membership spreads: a device paired with one member is accepted by the others
 // once that member vouches for it, unless the workspace has an upstream device,
 // whose word alone counts (see docs/decisions/0028-peers.md).
@@ -12,7 +14,7 @@ import type { Duplex } from 'node:stream';
 import Hyperswarm, { type SwarmConnection } from 'hyperswarm';
 import type { Git } from '../git.js';
 import { GitBridge } from './bridge.js';
-import { Identity, topicFor, type DeviceKey, type Member, type WorkspaceIdentity } from './identity.js';
+import { Identity, checkLink, decodeLink, topicFor, type DeviceKey, type Member, type WorkspaceIdentity } from './identity.js';
 import { PeerLink, type ControlMessage } from './link.js';
 
 export interface NodeOptions {
@@ -28,8 +30,10 @@ export interface NodeOptions {
   /** The branch a joining device should start on. */
   branch(): Promise<string>;
   log(m: string): void;
-  /** Joining: the invitation to present to the inviting device. */
-  invite?: { key: string; token: string };
+  /** Joining: the invitation to present to the inviting device, or the subscription link to present to any. */
+  ticket?: { kind: 'invite'; key: string; token: string } | { kind: 'link'; link: string };
+  /** Joining: accept devices of the workspace not yet paired (any of them may let this one in). */
+  joining?: boolean;
 }
 
 /** A DHT node, from `host:port` or as given. */
@@ -132,6 +136,7 @@ export class PeerNode {
 
   private async helloFor(link: PeerLink): Promise<ControlMessage> {
     const members = await this.identity.members();
+    const shown = await this.linkToShow();
     return {
       type: 'hello',
       workspace: this.ws.id,
@@ -140,8 +145,28 @@ export class PeerNode {
       members: members.map((m) => ({ key: m.key, name: m.name })),
       removed: [...this.removedKeys],
       upstream: await this.upstreamKey(),
-      ...(this.o.invite && this.o.invite.key === link.key ? { invite: this.o.invite.token } : {}),
+      revokedLinks: await this.identity.revokedLinks(),
+      ...(this.o.ticket?.kind === 'invite' && this.o.ticket.key === link.key ? { invite: this.o.ticket.token } : {}),
+      // A device that came in by a link shows it to devices that may not know it yet.
+      ...(shown ? { link: shown } : {}),
     };
+  }
+
+  private async linkToShow(): Promise<string | null> {
+    return this.o.ticket?.kind === 'link' ? this.o.ticket.link : this.identity.joinedLink();
+  }
+
+  /** Why a subscription link does not let a device in here, or null if it does. */
+  private async refuseLink(code: string): Promise<string | null> {
+    let l;
+    try {
+      l = decodeLink(code);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    const upstream = await this.upstreamKey();
+    const issuers = upstream ? [upstream] : [this.myKey, ...(await this.identity.members()).map((m) => m.key)];
+    return checkLink(l, { workspace: this.ws.id, issuers, revoked: await this.identity.revokedLinks() });
   }
 
   /** The upstream device's key, if the upstream is a device. */
@@ -180,13 +205,25 @@ export class PeerNode {
     const related = (h.forkedFrom ?? '').startsWith(`${this.ws.id}@`) || (this.ws.forkedFrom ?? '').startsWith(`${h.workspace}@`);
     if (!same && !related) return bye('another workspace');
     let member: Member | undefined = (await this.identity.members()).find((x) => x.key === link.key);
+    if (!member && same && this.o.joining) {
+      // Joining: any device of the workspace may be the one that lets this one in.
+      const name = await this.identity.addMember(link.key, h.name);
+      if (name) member = { key: link.key, name };
+    }
     if (!member) {
-      if (!same || typeof h.invite !== 'string' || !(await this.identity.redeem(h.invite))) return bye('not paired with this device');
+      if (!same) return bye('not paired with this device');
+      let how: string;
+      if (typeof h.invite === 'string' && (await this.identity.redeem(h.invite))) how = 'by invitation';
+      else if (typeof h.link === 'string') {
+        const why = await this.refuseLink(h.link);
+        if (why) return bye(`not paired with this device, and ${why}`);
+        how = `by subscription link ${decodeLink(h.link).id}`;
+      } else return bye('not paired with this device');
       const name = await this.identity.addMember(link.key, h.name);
       if (!name) return bye('this device was removed from the workspace');
       member = { key: link.key, name };
       await this.refresh();
-      this.o.log(`peers: paired with ${name} (${link.key.slice(0, 8)}…), by invitation`);
+      this.o.log(`peers: paired with ${name} (${link.key.slice(0, 8)}…), ${how}`);
       const members = (await this.identity.members()).filter((x) => x.key !== link.key);
       link.send({ type: 'welcome', name: this.name, members: members.map((x) => ({ key: x.key, name: x.name })), upstream: await this.upstreamKey(), branch: await this.o.branch() });
       void this.membersChanged(link);
@@ -212,6 +249,13 @@ export class PeerNode {
       if (this.removedKeys.has(key)) continue;
       await this.identity.removeMember(key);
       this.links.get(key)?.close();
+      changed = true;
+    }
+    const revoked = await this.identity.revokedLinks();
+    for (const id of h.revokedLinks ?? []) {
+      if (revoked.includes(id) || !/^[0-9a-f]{16}$/.test(id)) continue;
+      await this.identity.revokeLink(id);
+      this.o.log(`peers: ${link.remote} says subscription link ${id} is revoked`);
       changed = true;
     }
     const known = new Set((await this.identity.members()).map((m) => m.key));
@@ -272,11 +316,12 @@ export class PeerNode {
   }
 
   private async fetchNow(remote: string): Promise<boolean> {
+    if (this.closing) return false;
     const r = await this.o.git.run([
       '-c', 'core.hooksPath=/dev/null', '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
       'fetch', '--prune', '--no-write-fetch-head', remote,
     ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: `${this.bridge.binDir}:${process.env.PATH ?? ''}` } });
-    if (r.code !== 0) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
+    if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;
   }
 

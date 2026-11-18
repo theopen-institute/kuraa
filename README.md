@@ -94,11 +94,17 @@ sides changed differently stays in the document with both versions, to choose be
 
 ```sh
 # On the first device (its host running with --peer):
-pnpm host invite --dir ~/research/notes          # prints a one-time invitation
-# On the other device:
-pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
+pnpm host invite --dir ~/research/notes          # a one-time invitation, for one device
+pnpm host link --dir ~/research/notes            # or a subscription link, for anyone, for a week
+# On another device:
+pnpm host join kuraa-invite:… --dir ~/notes      # or kuraa-link:…; fetches the workspace
 pnpm host --dir ~/notes --peer --static apps/web/dist
 ```
+
+A subscription link lets anyone who has it join as a full device, as often as they like, until it
+expires (`--hours`, or `--forever`) or is revoked (`pnpm host revoke-link <id>`; `pnpm host links`
+lists them). Any device of the workspace that is running can let them in. Share it only with
+people who may join: it carries the workspace's secret.
 
 Paired devices are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device
 has. `pnpm host devices` lists them; `remove-device`, `name` and `fork` manage them.

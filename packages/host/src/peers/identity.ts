@@ -8,6 +8,9 @@
 //   `git fetch laptop` works and their branches are `laptop/main`.
 // - Devices removed from the workspace: `kuraa.removed`, never accepted again.
 // - Invitations not yet used: .git/kuraa/invites.json.
+// - Subscription links this device made: .git/kuraa/links.json; revoked ones,
+//   `kuraa.revokedlinks` (shared with the other devices, as removals are). The
+//   link this device joined by: .git/kuraa/joined-link.
 import { createHash, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -49,7 +52,16 @@ export function remoteName(name: string): string {
 }
 
 export class Identity {
+  /** Changes to the members, one at a time (a device may be paired by two routes at once). */
+  private changing: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly git: Git, private readonly stateDir: string) {}
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.changing.then(fn, fn);
+    this.changing = run.catch(() => undefined);
+    return run;
+  }
 
   private async get(key: string): Promise<string | null> {
     const r = await this.git.run(['config', '--get', key], { allowFail: true });
@@ -145,7 +157,11 @@ export class Identity {
   }
 
   /** Pair with a device: add it as a remote (under a free name), unless it was removed. Returns its remote name. */
-  async addMember(key: string, name: string): Promise<string | null> {
+  addMember(key: string, name: string): Promise<string | null> {
+    return this.serial(() => this.addMemberNow(key, name));
+  }
+
+  private async addMemberNow(key: string, name: string): Promise<string | null> {
     if (!hex.test(key) || key.length !== 64) throw new Error('Not a device key');
     if ((await this.removed()).includes(key)) return null;
     const members = await this.members();
@@ -160,7 +176,11 @@ export class Identity {
   }
 
   /** Remove a device from the workspace: forget it, and never accept it again. */
-  async removeMember(key: string): Promise<void> {
+  removeMember(key: string): Promise<void> {
+    return this.serial(() => this.removeMemberNow(key));
+  }
+
+  private async removeMemberNow(key: string): Promise<void> {
     const m = (await this.members()).find((x) => x.key === key);
     if (m) await this.git.run(['remote', 'remove', m.name]);
     if (!(await this.removed()).includes(key)) await this.git.run(['config', '--add', 'kuraa.removed', key]);
@@ -215,6 +235,67 @@ export class Identity {
     return token;
   }
 
+  // Subscription links ------------------------------------------------------
+
+  private get linksFile(): string {
+    return join(this.stateDir, 'links.json');
+  }
+
+  /** The links this device made. */
+  async links(): Promise<IssuedLink[]> {
+    try {
+      return JSON.parse(await readFile(this.linksFile, 'utf8')) as IssuedLink[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Make a subscription link: anyone with it can join the workspace as a full
+   * device, any number of times, until it expires (`hours`; null: never) or is
+   * revoked. Signed with this device's key, so any member can check it.
+   */
+  async createLink(hours: number | null): Promise<string> {
+    const ws = await this.workspace();
+    if (!ws) throw new Error('This repository is not a workspace shared between devices');
+    const key = await this.deviceKey();
+    const id = randomBytes(8).toString('hex');
+    const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
+    const issuer = key.publicKey.toString('hex');
+    const signature = crypto.sign(linkMessage(ws.id, id, expires, issuer), key.secretKey).toString('hex');
+    const list = await this.links();
+    list.push({ id, expires, created: Date.now() });
+    await mkdir(this.stateDir, { recursive: true });
+    await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
+    return encodeLink({ workspace: ws, issuer: { key: issuer, name: await this.deviceName() }, id, expires, signature });
+  }
+
+  /** Revoke a link: no device lets anyone join by it any more (those who did stay). */
+  revokeLink(id: string): Promise<void> {
+    if (!/^[0-9a-f]{16}$/.test(id)) return Promise.reject(new Error('Not a link id'));
+    return this.serial(async () => {
+      if (!(await this.revokedLinks()).includes(id)) await this.git.run(['config', '--add', 'kuraa.revokedlinks', id]);
+    });
+  }
+
+  async revokedLinks(): Promise<string[]> {
+    return this.getAll('kuraa.revokedlinks');
+  }
+
+  /** The link this device joined by, shown to devices it meets that do not know it yet. */
+  async joinedLink(): Promise<string | null> {
+    try {
+      return (await readFile(join(this.stateDir, 'joined-link'), 'utf8')).trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async setJoinedLink(link: string): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    await writeFile(join(this.stateDir, 'joined-link'), link, { mode: 0o600 });
+  }
+
   /** Use up an invitation; whether it was good. */
   async redeem(token: string): Promise<boolean> {
     const hash = createHash('sha256').update(token).digest('hex');
@@ -224,6 +305,55 @@ export class Identity {
     await writeFile(this.invitesFile, JSON.stringify(left), { mode: 0o600 });
     return true;
   }
+}
+
+/** A subscription link as the device that made it keeps it. */
+export interface IssuedLink {
+  id: string;
+  /** When it stops working (ms since 1970); 0: never. */
+  expires: number;
+  created: number;
+}
+
+/** What a subscription link carries: the workspace, the device that made it, and its signature. */
+export interface SubscriptionLink {
+  workspace: WorkspaceIdentity;
+  issuer: Member;
+  id: string;
+  expires: number;
+  /** The issuer's signature over the workspace id, link id, expiry and issuer key, hex. */
+  signature: string;
+}
+
+const linkMessage = (workspace: string, id: string, expires: number, issuer: string) => Buffer.from(`kuraa-link\0${workspace}\0${id}\0${expires}\0${issuer}`);
+
+export function encodeLink(l: SubscriptionLink): string {
+  const payload = [l.workspace.id, l.workspace.secret, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.signature].join('|');
+  return `kuraa-link:${Buffer.from(payload, 'utf8').toString('base64url')}`;
+}
+
+export function decodeLink(code: string): SubscriptionLink {
+  const m = /^kuraa-link:([A-Za-z0-9_-]+)$/.exec(code.trim());
+  if (!m) throw new Error('Not a subscription link (it starts with kuraa-link:)');
+  const [id, secret, forkedFrom, key, name, linkId, expires, signature] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
+  if (!id || !secret || !key || !name || !linkId || !signature || !hex.test(id) || !hex.test(secret) || !hex.test(key) || !/^[0-9a-f]{16}$/.test(linkId) || !/^\d+$/.test(expires ?? '') || !hex.test(signature)) {
+    throw new Error('This subscription link is damaged');
+  }
+  return { workspace: { id, secret, forkedFrom: forkedFrom || null }, issuer: { key, name }, id: linkId, expires: Number(expires), signature };
+}
+
+/**
+ * Why a link does not let a device join this workspace, or null if it does:
+ * it is for this workspace, made by a device this one accepts links from, signed
+ * by it, not expired and not revoked.
+ */
+export function checkLink(l: SubscriptionLink, o: { workspace: string; issuers: string[]; revoked: string[]; now?: number }): string | null {
+  if (l.workspace.id !== o.workspace) return 'the link is for another workspace';
+  if (!o.issuers.includes(l.issuer.key)) return 'the link was made by a device this one does not take links from';
+  if (!crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.issuer.key), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'))) return 'the link is not signed by the device it names';
+  if (l.expires !== 0 && l.expires < (o.now ?? Date.now())) return 'the link has expired';
+  if (o.revoked.includes(l.id)) return 'the link was revoked';
+  return null;
 }
 
 /** What an invitation carries: the workspace, who invited, and the one-time token. */

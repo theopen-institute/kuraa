@@ -25,7 +25,7 @@ let peer;
 try {
   peer = JSON.parse(readFileSync(join(gitDir, 'kuraa', 'peer.json'), 'utf8'));
 } catch {
-  process.stderr.write('kuraa: the kuraa host is not running for this repository\n');
+  process.stderr.write('kuraa: the kuraa host is not running for this repository (no ' + join(gitDir, 'kuraa', 'peer.json') + ')\n');
   process.exit(1);
 }
 let buf = Buffer.alloc(0);

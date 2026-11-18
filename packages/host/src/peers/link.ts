@@ -26,6 +26,10 @@ export type ControlMessage =
       upstream: string | null;
       /** A one-time invitation, from a device joining. */
       invite?: string;
+      /** A subscription link, from a device that joined (or is joining) by one. */
+      link?: string;
+      /** Subscription links revoked. */
+      revokedLinks?: string[];
     }
   /** The answer to a joining device: what it needs to set itself up. */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; upstream: string | null; branch: string }

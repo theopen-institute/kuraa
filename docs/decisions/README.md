@@ -26,3 +26,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0020](0020-components.md) | What extends the app (formats, engines, environments) is called a component, in the interface and the code |
 | [0021](0021-document-header.md) | A document's YAML header is edited in a Header dialog (right-click the file), not in the page |
 | [0022](0022-titles-and-filenames.md) | Documents are known by their title; filenames are made from it, safe for every file system and git |
+| [0023](0023-file-icons.md) | Each document type defines its files' small icon; the client draws them all alike |

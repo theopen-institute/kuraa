@@ -1,5 +1,5 @@
 import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model';
-import type { DocumentType, NodeViewHint } from '@kuraa/kernel';
+import type { DocumentType, FileIcon, NodeViewHint } from '@kuraa/kernel';
 import { pandocMarks, pandocNodes } from './schema.js';
 import { createParser, type ParseHooks } from './parse.js';
 import { createSerializer, type SerializeHooks } from './serialize.js';
@@ -28,7 +28,14 @@ export interface PandocExtension {
   parse?: ParseHooks;
   serialize?: SerializeHooks;
   nodeViews?: Record<string, NodeViewHint>;
+  /** Its files' icon; a document page if not given. */
+  icon?: FileIcon;
 }
+
+/** A page with a folded corner and lines of text. */
+export const DOCUMENT_ICON: FileIcon = {
+  paths: ['M4 1.5h5.5l3 3v10H4z', 'M9.5 1.5v3h3', 'M6 7.5h4.5', 'M6 9.5h4.5', 'M6 11.5h3'],
+};
 
 export const PANDOC_VERSION = 2;
 
@@ -62,6 +69,7 @@ export function createPandocType(ext?: PandocExtension): DocumentType {
     parse,
     serialize,
     title: pandocTitle,
+    icon: () => ext?.icon ?? DOCUMENT_ICON,
     editor: { nodeViews: { ...pandocNodeViews, ...(ext?.nodeViews ?? {}) } },
   };
 }

@@ -86,8 +86,19 @@ export interface DocumentType {
    * source files) are known by their filename.
    */
   title?: DocumentTitle;
+  /** The small icon a file of this type is shown with (in the sidebar); none: a plain mark. */
+  icon?(path: string): FileIcon | undefined;
   /** Client only. */
   editor?: EditorContribution;
+}
+
+/**
+ * A file's icon: strokes in a 16×16 box, as SVG path data, one string per
+ * stroke. The client draws every icon alike (thin lines in the text's colour,
+ * no fill), so icons stay quiet and consistent whatever format defines them.
+ */
+export interface FileIcon {
+  paths: string[];
 }
 
 export interface DocumentTitle {

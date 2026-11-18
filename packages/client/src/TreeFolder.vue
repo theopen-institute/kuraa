@@ -4,6 +4,7 @@
 import { computed, inject } from 'vue';
 import type { TreeFile } from './api.js';
 import { shownName, TREE, type Folder } from './tree.js';
+import FileIcon from './FileIcon.vue';
 
 const props = defineProps<{ folder: Folder; depth: number }>();
 const t = inject(TREE)!;
@@ -64,7 +65,7 @@ const tip = (f: TreeFile) => {
       :data-testid="`file:${f.path}`"
       @click="t.select(f.path)"
     >
-      <span class="tree-icon">{{ f.type ? '◇' : '·' }}</span><span class="tree-name">{{ shownName(f) }}</span>
+      <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>
     </button>
     <span class="tree-actions">
       <button type="button" title="Rename" @click="t.rename(f.path)">✎</button>

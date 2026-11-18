@@ -20,6 +20,8 @@ export const rmarkdown: DocumentType = createPandocType({
   priority: 10,
   extensions: ['.Rmd'],
   match: (path) => /\.rmd$/i.test(path),
+  // A page with a line of text and a code chunk.
+  icon: { paths: ['M4 1.5h5.5l3 3v10H4z', 'M9.5 1.5v3h3', 'M6 7h4.5', 'M7.25 9.25 6 10.5l1.25 1.25', 'M9.25 9.25l1.25 1.25-1.25 1.25'] },
 
   nodes: {
     code_chunk: {

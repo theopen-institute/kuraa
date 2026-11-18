@@ -1,6 +1,6 @@
 // The sidebar's tree: files grouped into folders, and what each row can do.
 import type { InjectionKey, Ref } from 'vue';
-import type { TypeRegistry } from '@kuraa/kernel';
+import type { FileIcon, TypeRegistry } from '@kuraa/kernel';
 import type { TreeFile } from './api.js';
 
 export interface FileTypeChoice {
@@ -78,6 +78,8 @@ export interface TreeContext {
   newFolder(inside?: string): void;
   rename(path: string): void;
   remove(path: string): void;
+  /** A file's icon, as its type defines it. */
+  iconFor(file: TreeFile): FileIcon | undefined;
   /** The right-click menu for a file, a folder, or the top level (''). */
   contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top'): void;
   dragStart(e: DragEvent, path: string): void;

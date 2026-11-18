@@ -228,6 +228,7 @@ provide(TREE, {
   newFolder: (inside) => void newFolder(inside),
   rename: (path) => void rename(path),
   remove: (path) => void remove(path),
+  iconFor: (f) => (f.type ? props.registry.get(f.type)?.icon?.(f.path) : undefined),
   contextMenu,
   dragStart,
   dragEnd,

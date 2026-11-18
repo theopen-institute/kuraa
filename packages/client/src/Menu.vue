@@ -35,6 +35,7 @@ const emit = defineEmits<{
   sync: [];
   saveSettings: [settings: Settings];
   packages: [runner: ChunkRunner, engine: string];
+  plugins: [];
   close: [];
 }>();
 
@@ -95,6 +96,14 @@ const runner = computed(() => props.status?.runner ?? null);
           <button type="button" :disabled="syncing || !workspace" title="Commit, fetch, merge and push against the upstream remote" @click="emit('sync'); emit('close')">
             {{ syncing ? 'Syncing…' : 'Sync' }}
           </button>
+        </div>
+      </section>
+
+      <section class="menu-section">
+        <h3>Plugins</h3>
+        <p class="menu-facts">What runs code and where, the document formats, and your editing behaviour.</p>
+        <div class="menu-actions">
+          <button type="button" @click="emit('plugins'); emit('close')">Plugins…</button>
         </div>
       </section>
 

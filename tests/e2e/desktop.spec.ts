@@ -34,7 +34,10 @@ async function launch(args: string[], timings: object, extraEnv: Record<string, 
     executablePath: ELECTRON,
     args: [MAIN, ...args],
     // VS Code's terminal sets ELECTRON_RUN_AS_NODE, which would start Electron as plain Node.
-    env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings), ...extraEnv },
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings),
+      // The app's plugin choices, apart from those of whoever runs the tests.
+      KURAA_PLUGIN_SETTINGS: join(mkdtempSync(join(tmpdir(), 'kuraa-plugins-')), 'plugins.json'),
+      ...extraEnv },
   });
   const page = await app.firstWindow();
   page.on('pageerror', (e) => console.error(`[desktop] page error: ${e.message}`));

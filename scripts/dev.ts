@@ -89,6 +89,8 @@ const host = run('host', bin('tsx'), [
   '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1',
   // R runs on this computer unless --env podman: see the top of this file.
   '--engine', 'r', '--env', values.env ?? process.env.KURAA_DEV_ENV ?? 'local', '--allow-installs',
+  // You run this host, on this computer only: the Plugins panel may change what is on.
+  '--allow-plugin-changes',
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });

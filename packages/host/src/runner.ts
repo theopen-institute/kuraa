@@ -82,6 +82,8 @@ export class Runner {
   private readonly idle = new Map<string, NodeJS.Timeout>();
   private readonly checked = new Map<string, { at: number; status: EnvironmentStatus }>();
   private closed = false;
+  /** The engines and environments that are on (the first environment is the default). */
+  private on: { engines: string[]; environments: string[] };
 
   constructor(private readonly o: {
     root: string;
@@ -96,17 +98,57 @@ export class Runner {
     log: (m: string) => void;
     idleMs?: number;
   }) {
-    const opts = o.options;
-    for (const id of opts?.engines ?? []) if (!o.plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.plugins.engines.keys()].join(', ') || 'none'}.`);
-    for (const id of opts?.environments ?? []) if (!o.plugins.environments.has(id)) throw new Error(`Unknown environment "${id}". Known: ${[...o.plugins.environments.keys()].join(', ') || 'none'}.`);
+    this.on = this.check(o.options?.engines ?? [], o.options?.environments ?? []);
+  }
+
+  private check(engines: string[], environments: string[]): { engines: string[]; environments: string[] } {
+    const { plugins } = this.o;
+    for (const id of engines) if (!plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...plugins.engines.keys()].join(', ') || 'none'}.`);
+    for (const id of environments) if (!plugins.environments.has(id)) throw new Error(`Unknown environment "${id}". Known: ${[...plugins.environments.keys()].join(', ') || 'none'}.`);
+    return { engines: [...engines], environments: [...environments] };
   }
 
   get enabled(): boolean {
-    return !!this.o.options?.engines.length && !!this.o.options.environments.length;
+    return this.on.engines.length > 0 && this.on.environments.length > 0;
+  }
+
+  /** What is on: engine ids, and environment ids with the default first. */
+  get turnedOn(): { engines: string[]; environments: string[] } {
+    return { engines: [...this.on.engines], environments: [...this.on.environments] };
+  }
+
+  /** Every engine and environment the loaded plugins offer, whether on or not, and whether each environment is there. */
+  async catalog(): Promise<{
+    engines: { id: string; label: string; description: string; on: boolean }[];
+    environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
+  }> {
+    const { plugins } = this.o;
+    return {
+      engines: [...plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.engines.includes(e.id) })),
+      environments: await Promise.all([...plugins.environments.values()].map(async (e) => ({
+        id: e.id, label: e.label, description: e.description ?? '', sandboxed: e.sandboxed,
+        on: this.on.environments.includes(e.id), ...(await this.status(e)),
+      }))),
+    };
+  }
+
+  /**
+   * Turn engines and environments on or off (the first environment is the
+   * default). Every session stops, so the next run starts in what is now on.
+   */
+  async turnOn(engines: string[], environments: string[]): Promise<void> {
+    const next = this.check(engines, environments);
+    const paths = new Set([...this.sessions.keys()].map((k) => k.split('\0')[0]!));
+    for (const path of this.queues.keys()) {
+      this.interrupt(path);
+      paths.add(path);
+    }
+    this.on = next;
+    await Promise.all([...paths].map((path) => this.restart(path)));
   }
 
   private get engines(): Engine[] {
-    return (this.o.options?.engines ?? []).map((id) => this.o.plugins.engines.get(id)!);
+    return this.on.engines.map((id) => this.o.plugins.engines.get(id)!);
   }
 
   /** The engine that runs chunks of `name` (a chunk's engine, e.g. `r`). */
@@ -126,7 +168,7 @@ export class Runner {
 
   /** The environment for this workspace: the one it asks for if allowed, else the operator's default. */
   private environmentFor(config: WorkspaceRunConfig): Environment | null {
-    const allowed = this.o.options?.environments ?? [];
+    const allowed = this.on.environments;
     const asked = typeof config.environment === 'string' && allowed.includes(config.environment) ? config.environment : allowed[0];
     return asked ? this.o.plugins.environments.get(asked)! : null;
   }

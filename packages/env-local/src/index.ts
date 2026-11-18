@@ -11,6 +11,7 @@ const OWN_GROUP = process.platform !== 'win32';
 export const localEnvironment: Environment = {
   id: 'local',
   label: 'on this computer (not sandboxed)',
+  description: 'R on this computer, as you: code can read and change anything you can. Only for code you trust.',
   sandboxed: false,
 
   async check() {

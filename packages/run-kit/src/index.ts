@@ -122,6 +122,8 @@ export interface Environment {
   id: string;
   /** Where code runs, as a phrase: 'in a Podman container'. */
   label: string;
+  /** A sentence for people choosing it (the Plugins panel): what it is, what it shields. */
+  description?: string;
   /** Whether it enforces the policy. A plain process on the host does not. */
   sandboxed: boolean;
   check(options: unknown): Promise<EnvironmentStatus>;
@@ -185,6 +187,8 @@ export interface EngineSession {
 export interface Engine {
   id: string;
   label: string;
+  /** A sentence for people choosing it (the Plugins panel). */
+  description?: string;
   /** Chunk engine names it runs, as in a knitr header: ['r']. */
   handles: string[];
   open(ctx: EngineContext): EngineSession;

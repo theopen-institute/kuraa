@@ -193,4 +193,8 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
   };
 }
 
-export const pandocEditor: FormatEditor = createPandocEditor();
+export const pandocEditor: FormatEditor = {
+  ...createPandocEditor(),
+  label: 'Markdown editing',
+  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), and footnotes kept numbered and in order.',
+};

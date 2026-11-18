@@ -8,10 +8,10 @@
 //   electron . --open <folder>          embed a host on <folder>
 //   electron . --join <url> --token <t> join a shared host; no local host
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
+import { defaultDataDir, gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
 import type { ShellConfig } from '@kuraa/client';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
@@ -22,41 +22,18 @@ let host: RunningHost | null = null;
 let quitting = false;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
-/** The folder open in this window, if any (to reopen it when the run setting changes). */
-let openFolderPath: string | null = null;
 
-// Where code chunks run, for folders this app opens itself. A choice of this
-// app's user, kept in its own settings, never taken from a workspace.
-type RunChoice = 'podman' | 'local' | 'off';
-const RUN_CHOICES: { id: RunChoice; label: string }[] = [
-  { id: 'podman', label: 'In a Podman Container (Sandboxed)' },
-  { id: 'local', label: 'On This Computer (Not Sandboxed)' },
-  { id: 'off', label: 'Off' },
-];
-const prefsFile = () => join(app.getPath('userData'), 'settings.json');
-
-function runChoice(): RunChoice {
+// What runs, for folders this app opens itself: R, in a Podman container. The
+// Plugins panel (in the app's menu) changes that; its choices are this app
+// user's, kept with the app's data (never in a workspace), and win over these.
+// KURAA_RUN_ENV (podman, local or off) and KURAA_PLUGIN_SETTINGS are for tests.
+function runOptions(): RunOptions {
   const forced = process.env.KURAA_RUN_ENV;
-  if (forced === 'podman' || forced === 'local' || forced === 'off') return forced;
-  try {
-    const choice = (JSON.parse(readFileSync(prefsFile(), 'utf8')) as { run?: string }).run;
-    if (choice === 'podman' || choice === 'local' || choice === 'off') return choice;
-  } catch { /* first run, or unreadable: the default */ }
-  return 'podman';
+  const env = forced === 'local' ? 'local' : 'podman';
+  return { engines: forced === 'off' ? [] : ['r'], environments: [env], allowInstalls: true };
 }
 
-function setRunChoice(choice: RunChoice): void {
-  let prefs: Record<string, unknown> = {};
-  try {
-    prefs = JSON.parse(readFileSync(prefsFile(), 'utf8')) as Record<string, unknown>;
-  } catch { /* start afresh */ }
-  writeFileSync(prefsFile(), JSON.stringify({ ...prefs, run: choice }, null, 2));
-}
-
-function runOptions(): RunOptions | undefined {
-  const choice = runChoice();
-  return choice === 'off' ? undefined : { engines: ['r'], environments: [choice], allowInstalls: true };
-}
+const pluginSettings = () => process.env.KURAA_PLUGIN_SETTINGS ?? join(defaultDataDir(), 'plugins.json');
 
 /** Host timings may be shortened for automated tests. */
 function timings(): Partial<HostTimings> {
@@ -100,14 +77,14 @@ async function openFolder(path: string): Promise<boolean> {
   host = await startHost({
     dir,
     init: !folder.repoRoot,
-    // Where chunks run is this app's setting (Run Code menu): a container by default.
+    // What runs: R in a container, unless changed in the Plugins panel.
     run: runOptions(),
+    pluginSettings: pluginSettings(),
     host: '127.0.0.1',
     port: 0,
     timings: timings(),
     log: (m) => console.log(`[host] ${m}`),
   });
-  openFolderPath = dir;
   console.log(`[desktop] embedded host ${host.url} on ${dir}`);
   const who = await gitIdentity(dir);
   await loadClient({ hostUrl: host.url, token: host.token, ...who, managesHost: true });
@@ -123,7 +100,6 @@ async function joinHost(url: string, token: string): Promise<void> {
 
 /** Back to the launcher, stopping any embedded host (which flushes and commits). */
 async function leave(): Promise<void> {
-  openFolderPath = null;
   await stopHost();
   await showLauncher();
 }
@@ -144,19 +120,6 @@ function showLauncher(): Promise<void> {
   return window!.loadFile(LAUNCHER);
 }
 
-/** The Run Code menu changed: remember it, and reopen the folder so the host uses it. */
-async function chooseRun(choice: RunChoice): Promise<void> {
-  setRunChoice(choice);
-  buildMenu();
-  if (host && openFolderPath) {
-    try {
-      await openFolder(openFolderPath);
-    } catch (e) {
-      dialog.showErrorBox('Could not reopen the folder', (e as Error).message);
-    }
-  }
-}
-
 function buildMenu(): void {
   const isMac = process.platform === 'darwin';
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -171,15 +134,6 @@ function buildMenu(): void {
       ],
     },
     { role: 'editMenu' },
-    {
-      label: 'Run Code',
-      submenu: RUN_CHOICES.map((c) => ({
-        label: c.label,
-        type: 'radio' as const,
-        checked: runChoice() === c.id,
-        click: () => void chooseRun(c.id),
-      })),
-    },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
   ]));

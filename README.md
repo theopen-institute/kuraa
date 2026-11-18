@@ -48,6 +48,7 @@ in, and a `git clone` command. Useful options:
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
 | `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
 | `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
+| `--allow-plugin-changes` | off | Let the **Plugins** panel turn plugins on and off (desktop and `pnpm dev`: on). Only with `--host 127.0.0.1` |
 
 Everyone who has the URL and token can edit. Each person sets a display name, an email (for
 co-author credit) and a cursor colour under **Settings** in the client.
@@ -62,7 +63,7 @@ workspace name to move it to the top level; each move is committed. Everything e
 ⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
 **Save version**, when it was last written and committed; the code session; the workspace's branch,
-**Sync** and who is here; and your settings. The bottom of the sidebar shows whether you are
+**Sync** and who is here; **Plugins…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.
 
@@ -83,7 +84,13 @@ what it may touch ([decision 0013](docs/decisions/0013-run-plugins-and-sandboxin
   an R image, which takes a few minutes.
 - **Local** (`--env local`, and `pnpm dev`): R on your computer, as you. Not sandboxed.
 
-The desktop app's **Run Code** menu switches between the two, or turns running off. A workspace
+**Plugins…** in the menu turns engines and environments on and off, and picks the default; the
+same panel turns document formats on and off (a file whose format is off opens as a Text file),
+and, for you alone, each format's editing behaviour (markdown cues and footnote ordering, chunk
+fences). The host's plugins can be changed there only on a host you run on your own computer (the
+desktop app, `pnpm dev`, or `--allow-plugin-changes`); the choices are kept in `plugins.json` in
+the data folder, for every workspace, and win over `--engine` and `--env`. On a shared host the
+panel shows them, read-only ([decision 0017](docs/decisions/0017-plugins-panel.md)). A workspace
 can say what it needs in `.kuraa/run.json`, but cannot loosen what you allow:
 
 ```json

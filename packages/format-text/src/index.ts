@@ -91,6 +91,7 @@ export interface TextTypeOptions {
   /** Part of the room key, so stable. */
   id: string;
   label: string;
+  description?: string;
   files: FileRule[];
   /** Extensions offered for new files, the usual one first. */
   newFileExtensions?: string[];
@@ -114,6 +115,7 @@ export function createTextType(opts: TextTypeOptions): DocumentType {
     id: opts.id,
     version: opts.version ?? 1,
     label: opts.label,
+    ...(opts.description ? { description: opts.description } : {}),
     priority: opts.priority ?? 0,
     extensions: opts.newFileExtensions ?? [],
     match: (path, head) => ruleFor(opts.files, path, head) !== undefined,
@@ -136,6 +138,8 @@ export const textFiles: FileRule[] = [
   { language: 'julia', extensions: ['.jl'], shebang: /\bjulia\b/ },
   { language: 'shell', extensions: ['.sh', '.bash', '.zsh'], names: ['.bashrc', '.bash_profile', '.zshrc', '.profile'], shebang: /\b(ba|z|da|k)?sh\b/ },
   { language: 'yaml', extensions: ['.yml', '.yaml', '.cff'] },
+  // Markdown documents have their own types, which win; these apply when they are turned off.
+  { language: 'markdown', extensions: ['.md', '.markdown', '.Rmd', '.qmd'] },
   { language: 'json', extensions: ['.json', '.jsonc', '.geojson', '.code-workspace'] },
   { language: 'toml', extensions: ['.toml'] },
   { language: 'properties', extensions: ['.ini', '.cfg', '.conf', '.properties', '.env'], names: ['.Renviron', '.editorconfig', '.npmrc', 'DESCRIPTION'] },
@@ -167,6 +171,7 @@ export const textFiles: FileRule[] = [
 export const textFile = createTextType({
   id: 'text',
   label: 'Text file',
+  description: 'Scripts, data and settings files (.R, .py, .csv, .yml, .bib, .tex, …), highlighted by name',
   files: textFiles,
   newFileExtensions: ['.txt'],
   priority: -10,

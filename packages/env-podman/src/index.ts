@@ -102,6 +102,7 @@ async function ensureImage(podman: string, recipe: ImageRecipe, req: StartReques
 export const podmanEnvironment: Environment = {
   id: 'podman',
   label: 'in a Podman container',
+  description: 'A container with no network, the workspace read-only and .git hidden, and nothing else of this computer visible.',
   sandboxed: true,
 
   async check(options) {

@@ -2,8 +2,11 @@
 //   running code: --engine r --env podman [--env local] [--plugin <path or package>]...
 //                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
 //                 [--memory 4g] [--cpus 2] [--rscript path] [--podman path]
+//   plugins:      [--allow-plugin-changes]  the Plugins panel may turn plugins on and off
+//                 (loopback hosts only; the choices are kept in <data-dir>/plugins.json)
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { startHost } from './index.js';
+import { defaultDataDir, startHost } from './index.js';
 
 const { values } = parseArgs({
   options: {
@@ -15,6 +18,7 @@ const { values } = parseArgs({
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
     'allow-installs': { type: 'boolean', default: false },
+    'allow-plugin-changes': { type: 'boolean', default: false },
     'data-dir': { type: 'string' },
     memory: { type: 'string' },
     cpus: { type: 'string' },
@@ -33,20 +37,20 @@ const { values } = parseArgs({
 const running = await startHost({
   dir: values.dir!,
   init: values.init,
-  run: values.engine?.length || values.env?.length
-    ? {
-        engines: values.engine ?? [],
-        environments: values.env ?? [],
-        plugins: values.plugin ?? [],
-        allowWorkspaceWrite: values['allow-write'],
-        allowNetwork: values['allow-network'],
-        allowInstalls: values['allow-installs'],
-        dataDir: values['data-dir'],
-        memory: values.memory,
-        cpus: values.cpus ? Number(values.cpus) : undefined,
-        options: { r: { rscript: values.rscript }, podman: { podman: values.podman } },
-      }
-    : undefined,
+  // Nothing runs unless an engine and an environment are on (here, or in the Plugins panel).
+  run: {
+    engines: values.engine ?? [],
+    environments: values.env ?? [],
+    plugins: values.plugin ?? [],
+    allowWorkspaceWrite: values['allow-write'],
+    allowNetwork: values['allow-network'],
+    allowInstalls: values['allow-installs'],
+    dataDir: values['data-dir'],
+    memory: values.memory,
+    cpus: values.cpus ? Number(values.cpus) : undefined,
+    options: { r: { rscript: values.rscript }, podman: { podman: values.podman } },
+  },
+  pluginSettings: values['allow-plugin-changes'] ? join(values['data-dir'] ?? defaultDataDir(), 'plugins.json') : undefined,
   port: Number(values.port),
   host: values.host!,
   token: values.token ?? process.env.KURAA_TOKEN,

@@ -37,6 +37,10 @@ export interface EditorContext {
 }
 
 export interface FormatEditor {
+  /** What it is called where people turn it on or off (the Plugins panel): 'Markdown editing'. */
+  label?: string;
+  /** A sentence on what it does. */
+  description?: string;
   /**
    * ProseMirror plugins for documents of this type: input rules, key bindings,
    * behaviour. They come before the client's generic ones (undo/redo and

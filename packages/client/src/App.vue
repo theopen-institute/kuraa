@@ -7,6 +7,7 @@ import { HostApi, type CommitInfo, type TreeFile, type WorkspaceInfo } from './a
 import type { ChunkRunner } from './runs.js';
 import { askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
+import { loadEditorsOff, saveEditorsOff } from './editor-choices.js';
 import { webShell } from './shell.js';
 import type { AppProps, EditorStatus, Notice } from './types.js';
 import Editor from './Editor.vue';
@@ -16,6 +17,7 @@ import Menu from './Menu.vue';
 import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
+import PluginsDialog from './PluginsDialog.vue';
 import ReadOnlyCode from './ReadOnlyCode.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 import SettingsDialog from './SettingsDialog.vue';
@@ -52,6 +54,15 @@ const showSource = ref(false);
 const notice = shallowRef<Notice | null>(null);
 const menuOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
+const pluginsOpen = ref(false);
+
+// Each format's editor module, unless this person turned it off (Plugins).
+const editorsOff = ref(loadEditorsOff());
+const editorFor = (typeId: string) => (editorsOff.value.includes(typeId) ? undefined : props.editors[typeId]);
+function setEditorsOff(ids: string[]) {
+  editorsOff.value = ids;
+  saveEditorsOff(ids);
+}
 
 // ⌘, (Ctrl+,) opens and closes the menu.
 const onKey = (e: KeyboardEvent) => {
@@ -103,6 +114,14 @@ const file = computed(() => files.value.find((f) => f.path === path.value) ?? nu
 const type = computed(() => (file.value?.type ? registry.value.get(file.value.type) : undefined));
 const hostType = computed(() => workspace.value?.types.find((t) => t.id === file.value?.type));
 const versionMismatch = computed(() => !!type.value && !!hostType.value && hostType.value.version !== type.value.version);
+// The types the host has on: offered for new files. (Files report their own type.)
+const hostRegistry = computed(() => {
+  const on = workspace.value?.types.map((t) => t.id);
+  if (!on) return registry.value;
+  const r = new TypeRegistry();
+  for (const t of registry.value.all()) if (on.includes(t.id)) r.register(t);
+  return markRaw(r);
+});
 const shownNotice = computed(() => notice.value ?? status.value?.notice ?? null);
 
 async function view(commit: CommitInfo | null) {
@@ -159,7 +178,7 @@ function useSettings(s: Settings) {
         :api="api"
         :files="files"
         :selected="path"
-        :registry="registry"
+        :registry="hostRegistry"
         :workspace-name="workspace?.name ?? 'Files'"
         @select="select"
         @changed="refreshTree"
@@ -179,16 +198,17 @@ function useSettings(s: Settings) {
         <div v-if="path && type && !versionMismatch && !editingSettings" class="centre-stack">
           <div :style="{ display: viewing ? 'none' : 'contents' }">
             <Editor
-              :key="`${api.baseUrl}|${path}`"
+              :key="`${api.baseUrl}|${path}|${type.id}`"
               :api="api"
               :settings="settings"
               :path="path"
               :type="type"
               :show-source="showSource"
               :run="workspace?.run ?? null"
-              :format-editor="editors[type.id]"
+              :format-editor="editorFor(type.id)"
               @status="(s) => (status = s)"
               @committed="historyKey++"
+              @plugins="refreshTree()"
             />
           </div>
           <div v-if="viewing" class="editor-pane past-version" data-testid="past-version">
@@ -202,7 +222,7 @@ function useSettings(s: Settings) {
             </div>
             <div class="editor-scroll">
               <ReadOnlyCode v-if="viewSource && !type.editor?.layout" :text="viewing.text" />
-              <ReadOnlyDoc v-else :text="viewing.text" :type="type" :path="viewing.commit.path || path" :format-editor="editors[type.id]" />
+              <ReadOnlyDoc v-else :text="viewing.text" :type="type" :path="viewing.commit.path || path" :format-editor="editorFor(type.id)" />
             </div>
           </div>
         </div>
@@ -239,7 +259,17 @@ function useSettings(s: Settings) {
       @sync="sync"
       @save-settings="useSettings"
       @packages="(runner, engine) => (packages = { runner, engine })"
+      @plugins="pluginsOpen = true"
       @close="menuOpen = false"
+    />
+    <PluginsDialog
+      v-if="pluginsOpen"
+      :api="api"
+      :editors="editors"
+      :editors-off="editorsOff"
+      @editors-off="setEditorsOff"
+      @changed="refreshTree()"
+      @close="pluginsOpen = false"
     />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />
 

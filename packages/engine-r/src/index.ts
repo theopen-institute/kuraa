@@ -194,6 +194,7 @@ class RSession implements EngineSession {
 export const rEngine: Engine = {
   id: 'r',
   label: 'R',
+  description: 'Runs r chunks in R Markdown documents, one R session per document, through knitr\'s evaluate.',
   handles: ['r'],
   open: (ctx) => new RSession(ctx),
   packages: rPackages,

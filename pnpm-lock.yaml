@@ -229,9 +229,9 @@ importers:
       '@kuraa/host':
         specifier: workspace:*
         version: link:../../packages/host
-      '@kuraa/run-plugins':
+      '@kuraa/run-components':
         specifier: workspace:*
-        version: link:../../packages/run-plugins
+        version: link:../../packages/run-components
     devDependencies:
       electron:
         specifier: 45.3.2
@@ -485,12 +485,12 @@ importers:
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@kuraa/run-components':
+        specifier: workspace:*
+        version: link:../run-components
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit
-      '@kuraa/run-plugins':
-        specifier: workspace:*
-        version: link:../run-plugins
       '@kuraa/session':
         specifier: workspace:*
         version: link:../session
@@ -526,13 +526,7 @@ importers:
         specifier: ^1.25.13
         version: 1.25.13
 
-  packages/run-kit:
-    dependencies:
-      '@kuraa/session':
-        specifier: workspace:*
-        version: link:../session
-
-  packages/run-plugins:
+  packages/run-components:
     dependencies:
       '@kuraa/engine-r':
         specifier: workspace:*
@@ -543,6 +537,12 @@ importers:
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit
+
+  packages/run-kit:
+    dependencies:
+      '@kuraa/session':
+        specifier: workspace:*
+        version: link:../session
 
   packages/session:
     dependencies:

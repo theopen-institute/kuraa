@@ -1,4 +1,4 @@
-// The Podman environment plugin: each process runs in a locked-down container.
+// The Podman environment component: each process runs in a locked-down container.
 //
 //   - the workspace is mounted read-only at /work (read-write only if the policy
 //     allows), with .git hidden; a scratch folder read-write at /scratch; the
@@ -19,7 +19,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { definePlugin, findExecutable, mappedView, type Environment, type ImageRecipe, type Mount, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
+import { defineRunComponent, findExecutable, mappedView, type Environment, type ImageRecipe, type Mount, type Policy, type SandboxProcess, type StartRequest } from '@kuraa/run-kit';
 
 const run = promisify(execFile);
 const OWN_GROUP = process.platform !== 'win32';
@@ -163,4 +163,4 @@ export const podmanEnvironment: Environment = {
   },
 };
 
-export default definePlugin({ name: '@kuraa/env-podman', environments: [podmanEnvironment] });
+export default defineRunComponent({ name: '@kuraa/env-podman', environments: [podmanEnvironment] });

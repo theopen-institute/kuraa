@@ -243,12 +243,12 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await page.getByTestId('menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveCount(0);
-    await page.getByTestId('menu').getByRole('button', { name: 'Plugins…' }).click();
-    const plugins = page.getByTestId('plugins');
-    await expect(plugins.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
-    await expect(plugins.getByRole('checkbox', { name: 'R', exact: true })).toBeDisabled();
-    await expect(plugins.getByRole('checkbox', { name: 'R Markdown', exact: true })).not.toBeChecked();
-    await expect(plugins.getByRole('checkbox', { name: 'Pandoc markdown', exact: true })).toBeChecked();
+    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
+    const components = page.getByTestId('components');
+    await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
+    await expect(components.getByRole('checkbox', { name: 'R', exact: true })).toBeDisabled();
+    await expect(components.getByRole('checkbox', { name: 'R Markdown', exact: true })).not.toBeChecked();
+    await expect(components.getByRole('checkbox', { name: 'Pandoc markdown', exact: true })).toBeChecked();
     await page.keyboard.press('Escape');
 
     // A page cannot take the window elsewhere, or open another.

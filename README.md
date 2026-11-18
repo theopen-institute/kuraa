@@ -47,7 +47,7 @@ in, and a `git clone` command. Useful options:
 | `--env` | the only one loaded | Where code runs, by environment: `--env podman` |
 | `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` |
-| `--plugin` | none | Load a run plugin (engine or environment) by path or package name |
+| `--component` | none | Load a run component (engine or environment) by path or package name |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
 | `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
 | `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
@@ -65,7 +65,7 @@ workspace name to move it to the top level; each move is committed. Everything e
 ⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
 **Save version**, when it was last written and committed; the code session; the workspace's branch,
-**Sync** and who is here; **Plugins…**; and your settings. The bottom of the sidebar shows whether you are
+**Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.
 
@@ -77,8 +77,8 @@ open: text, messages, warnings, errors, data frames as tables, and plots at the 
 `fig.width` and `fig.height`. Each document has its own R session, so objects carry over between
 runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also says where code runs. Outputs are kept in `.git/kuraa/`, never in the `.Rmd`.
 
-Code runs through two kinds of plugin, which meet only through the contract in `@kuraa/run-kit`
-([decision 0019](docs/decisions/0019-engine-and-environment-plugins.md)): **engines** are
+Code runs through two kinds of component, which meet only through the contract in `@kuraa/run-kit`
+([decision 0019](docs/decisions/0019-engine-and-environment-components.md)): **engines** are
 languages (R), and **environments** are where their processes run. The host itself knows neither;
 the ones that ship are R and **Podman**: a container with no network, the workspace read-only and
 `.git` hidden, nothing else of the computer visible. Install Podman once: `brew install podman`,
@@ -90,12 +90,12 @@ their documents is theirs ([decision 0018](docs/decisions/0018-untrusted-users.m
 that runs code on the computer itself ships. One can be written, but a host uses an environment
 that is not sandboxed only when started with `--allow-unsandboxed`.
 
-Everything that configures a host is a flag (`--engine`, `--env`, `--format`, `--plugin`, the
+Everything that configures a host is a flag (`--engine`, `--env`, `--format`, `--component`, the
 `--allow-…` flags); the desktop app takes `--engine` (`--engine none` for none), `--env`,
-`--format`, `--plugin` and `--allow-unsandboxed` too. **Plugins…** in the menu shows what is on, read-only, and lets each person turn their own
+`--format`, `--component` and `--allow-unsandboxed` too. **Components…** in the menu shows what is on, read-only, and lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
 browser. A file whose format is off opens as a Text file
-([decision 0017](docs/decisions/0017-plugins-panel.md)). A workspace can say what it needs in
+([decision 0017](docs/decisions/0017-components-panel.md)). A workspace can say what it needs in
 `.kuraa/run.json`, but cannot loosen what the host allows:
 
 ```json
@@ -114,9 +114,9 @@ a chunk, or **Packages…** in the menu (CRAN names, `name@version`, `bioc::name
 running without it. Each workspace records its packages in `.kuraa/r-packages.json` (committed),
 so collaborators and other machines get the same ones; each package version is stored once per
 computer. A shared host allows installs only with `--allow-installs`
-([decision 0014](docs/decisions/0014-packages.md)). A run plugin is a module exporting `definePlugin({ name, engines,
+([decision 0014](docs/decisions/0014-packages.md)). A run component is a module exporting `defineRunComponent({ name, engines,
 environments })` from `@kuraa/run-kit`: examples of [an engine](packages/host/test/fixtures/echo-engine.mjs)
-and [environments](packages/host/test/fixtures/environments.mjs), loaded with `--plugin <path>`.
+and [environments](packages/host/test/fixtures/environments.mjs), loaded with `--component <path>`.
 
 The repository is also served over git's HTTP protocol at `/git`, with the token as the password:
 
@@ -185,17 +185,17 @@ pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromi
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type, command and hook registries. No DOM, no Node, no formats |
-| `packages/run-kit` | The contract between run plugins: engines (languages) and environments (where processes run), the policy |
-| `packages/engine-r` | Engine plugin: R, running `r` chunks through `evaluate` |
-| `packages/env-podman` | Environment plugin: a locked-down Podman container |
-| `packages/run-plugins` | The run plugins that ship, for the programs that start a host; the host imports none |
+| `packages/run-kit` | The contract between run components: engines (languages) and environments (where processes run), the policy |
+| `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate` |
+| `packages/env-podman` | Environment component: a locked-down Podman container |
+| `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |
 | `packages/format-rmarkdown` | R Markdown, built only on format-pandoc's extension points; `/editor`: chunk fences |
 | `packages/format-text` | The Text file type for scripts, data and settings files, one node per line, highlighted by file name |
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
-| `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI, run plugin registry |
+| `packages/host` | Relay, bridge between rooms and files, committer, git peer, HTTP API, CLI, run component registry |
 | `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |

@@ -1,17 +1,17 @@
 // kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
 //   formats:      [--format pandoc-markdown --format text ...]   (default: all)
-//   running code: --engine r [--env podman] [--plugin <path or package>]...
+//   running code: --engine r [--env podman] [--component <path or package>]...
 //                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
 //                 [--memory 4g] [--cpus 2] [--podman path] [--allow-unsandboxed]
 //
-// The run plugins that ship (@kuraa/run-plugins: R, and Podman containers) are
-// always loaded; --plugin adds more. --env picks the environment code runs in;
+// The run components that ship (@kuraa/run-components: R, and Podman containers) are
+// always loaded; --component adds more. --env picks the environment code runs in;
 // with only one loaded, that one. One that is not sandboxed needs --allow-unsandboxed.
 //
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
 import { parseArgs } from 'node:util';
-import { standardRunPlugins } from '@kuraa/run-plugins';
+import { standardRunComponents } from '@kuraa/run-components';
 import { startHost } from './index.js';
 
 const { values } = parseArgs({
@@ -21,7 +21,7 @@ const { values } = parseArgs({
     format: { type: 'string', multiple: true },
     engine: { type: 'string', multiple: true },
     env: { type: 'string' },
-    plugin: { type: 'string', multiple: true },
+    component: { type: 'string', multiple: true },
     'allow-unsandboxed': { type: 'boolean', default: false },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
@@ -48,7 +48,7 @@ const running = await startHost({
   run: {
     engines: values.engine ?? [],
     environment: values.env,
-    plugins: [...standardRunPlugins, ...(values.plugin ?? [])],
+    components: [...standardRunComponents, ...(values.component ?? [])],
     allowUnsandboxed: values['allow-unsandboxed'],
     allowWorkspaceWrite: values['allow-write'],
     allowNetwork: values['allow-network'],

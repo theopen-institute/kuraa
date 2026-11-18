@@ -17,7 +17,7 @@ import Menu from './Menu.vue';
 import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
-import PluginsDialog from './PluginsDialog.vue';
+import ComponentsDialog from './ComponentsDialog.vue';
 import ReadOnlyCode from './ReadOnlyCode.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 import SettingsDialog from './SettingsDialog.vue';
@@ -54,9 +54,9 @@ const showSource = ref(false);
 const notice = shallowRef<Notice | null>(null);
 const menuOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
-const pluginsOpen = ref(false);
+const componentsOpen = ref(false);
 
-// Each format's editor module, unless this person turned it off (Plugins).
+// Each format's editor module, unless this person turned it off (Components).
 const editorsOff = ref(loadEditorsOff());
 const editorFor = (typeId: string) => (editorsOff.value.includes(typeId) ? undefined : props.editors[typeId]);
 function setEditorsOff(ids: string[]) {
@@ -258,16 +258,16 @@ function useSettings(s: Settings) {
       @sync="sync"
       @save-settings="useSettings"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @plugins="pluginsOpen = true"
+      @components="componentsOpen = true"
       @close="menuOpen = false"
     />
-    <PluginsDialog
-      v-if="pluginsOpen"
+    <ComponentsDialog
+      v-if="componentsOpen"
       :api="api"
       :editors="editors"
       :editors-off="editorsOff"
       @editors-off="setEditorsOff"
-      @close="pluginsOpen = false"
+      @close="componentsOpen = false"
     />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />
 

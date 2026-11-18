@@ -1,6 +1,6 @@
-# 0019 · Engines and environments are separate plugins
+# 0019 · Engines and environments are separate components
 
-Running code takes two kinds of plugin, which never know each other's implementation and meet
+Running code takes two kinds of component, which never know each other's implementation and meet
 only through the contract in `@kuraa/run-kit`:
 
 | Kind | Answers | Ships |
@@ -17,9 +17,9 @@ answers with a `SandboxProcess`: stdin, stdout and stderr, `interrupt()`, `kill(
 the `PathView`. An environment that runs processes elsewhere (a remote server) makes the folders
 visible there and brings scratch back. Neither package may import the other (a lint rule).
 
-**The host knows neither.** The host core imports no run plugin (a lint rule): the program that
+**The host knows neither.** The host core imports no run component (a lint rule): the program that
 starts it passes them, as modules or by path or package name. The command line, the desktop app
-and `pnpm dev` pass `@kuraa/run-plugins` (R and Podman) plus any `--plugin`. Tests pass their own.
+and `pnpm dev` pass `@kuraa/run-components` (R and Podman) plus any `--component`. Tests pass their own.
 
 **Choosing.** `--engine` turns engines on; `--env` chooses the environment, by default the only one
 loaded (with several, the host asks for `--env`; with none and engines on, it refuses to start).
@@ -29,7 +29,7 @@ A workspace does not choose.
 (`sandboxed`); the host refuses to start with one that does not unless the operator passes
 `--allow-unsandboxed`. Per [0018](0018-untrusted-users.md), people using the app are trusted with
 document content only, so no environment that runs code on the host's computer ships. One can be
-written (a local environment, say) and loaded with `--plugin`; the panel and the menu mark it
+written (a local environment, say) and loaded with `--component`; the panel and the menu mark it
 "not sandboxed".
 
 This restores what [0013](0013-run-plugins-and-sandboxing.md) began, without its Local environment,

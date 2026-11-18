@@ -37,7 +37,7 @@ export interface EditorContext {
 }
 
 export interface FormatEditor {
-  /** What it is called where people turn it on or off (the Plugins panel): 'Markdown editing'. */
+  /** What it is called where people turn it on or off (the Components panel): 'Markdown editing'. */
   label?: string;
   /** A sentence on what it does. */
   description?: string;

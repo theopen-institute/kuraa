@@ -1,6 +1,6 @@
 # 0013 · Running code through plugins, sandboxed by default
 
-> Changed by [0018](0018-untrusted-users.md) and [0019](0019-engine-and-environment-plugins.md): the
+> Changed by [0018](0018-untrusted-users.md) and [0019](0019-engine-and-environment-components.md): the
 > Local environment no longer ships, the host loads no plugin itself, a workspace does not choose
 > the environment, and an unsandboxed one needs `--allow-unsandboxed`.
 

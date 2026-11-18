@@ -10,7 +10,7 @@
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "@kuraa/run-kit": "workspace:*",
-    "@kuraa/run-plugins": "workspace:*",
+    "@kuraa/run-components": "workspace:*",
     "@kuraa/session": "workspace:*",
     "prosemirror-model": "^1.25.13",
     "ws": "^8.23.0"

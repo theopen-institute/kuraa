@@ -14,7 +14,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  definePlugin,
+  defineRunComponent,
   type ChunkOutput, type Engine, type EngineContext, type EngineSession, type RunRequest, type RunResult, type SandboxProcess,
 } from '@kuraa/run-kit';
 import { R_DRIVER, REPLY_PREFIX } from './driver.js';
@@ -188,4 +188,4 @@ export const rEngine: Engine = {
   packages: rPackages,
 };
 
-export default definePlugin({ name: '@kuraa/engine-r', engines: [rEngine] });
+export default defineRunComponent({ name: '@kuraa/engine-r', engines: [rEngine] });

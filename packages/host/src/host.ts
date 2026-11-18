@@ -10,7 +10,7 @@ import { Relay, decodeDoc, encodeDoc, patchState, type PresenceUser, type RoomMe
 import { Git } from './git.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { loadRunPlugins } from './plugins.js';
+import { loadRunComponents } from './components.js';
 import { createRequestHandler } from './http.js';
 
 export interface HostTimings {
@@ -42,7 +42,7 @@ export interface HostOptions {
    */
   formats?: string[];
   /**
-   * Running code chunks: the run plugins (engines and environments), which
+   * Running code chunks: the run components (engines and environments), which
    * engines are on, and where code runs (see runner.ts). Off by default.
    */
   run?: RunOptions;
@@ -136,8 +136,8 @@ export class Host {
     this.options.log?.(msg);
   }
 
-  /** Every plugin, and whether it is on. Set by the host's options (flags); people using the app only see them. */
-  async plugins() {
+  /** Every component, and whether it is on. Set by the host's options (flags); people using the app only see them. */
+  async components() {
     const run = await this.runner.catalog();
     return {
       engines: run.engines,
@@ -164,7 +164,7 @@ export class Host {
     this.runner = new Runner({
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
-      plugins: await loadRunPlugins(run?.plugins),
+      components: await loadRunComponents(run?.components),
       options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
       broadcastAll: (message) => {

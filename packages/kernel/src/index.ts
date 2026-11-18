@@ -65,7 +65,7 @@ export interface DocumentType {
   /** Bump on any schema change; part of the room key. */
   version: number;
   label: string;
-  /** What files it opens, in a phrase for people turning it on or off (the Plugins panel). */
+  /** What files it opens, in a phrase for people turning it on or off (the Components panel). */
   description?: string;
   /** Higher wins when several types match the same file. */
   priority?: number;

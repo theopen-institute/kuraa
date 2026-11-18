@@ -14,8 +14,8 @@ export interface RunInfo {
   /** Where this workspace's code runs, and whether that is available. */
   environment: { id: string; label: string; sandboxed: boolean; available: boolean; message: string } | null;
 }
-/** Which plugins the host has and which are on: set by the host's flags, shown read-only. */
-export interface PluginsInfo {
+/** Which components the host has and which are on: set by the host's flags, shown read-only. */
+export interface ComponentsInfo {
   engines: { id: string; label: string; description: string; on: boolean }[];
   /** Places code can run; the one in use is on. */
   environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
@@ -82,7 +82,7 @@ export class HostApi {
   version(path: string | null, message: string) { return this.json<{ commit: string | null }>('/api/versions', { method: 'POST', body: JSON.stringify({ path, message }) }); }
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
-  plugins() { return this.json<PluginsInfo>('/api/plugins'); }
+  components() { return this.json<ComponentsInfo>('/api/components'); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }

@@ -1,14 +1,14 @@
-// Running code chunks, through run plugins (see @kuraa/run-kit and plugins.ts).
+// Running code chunks, through run components (see @kuraa/run-kit and components.ts).
 //
 // The runner knows no language and no place to run code: engines and
-// environments come from plugins (see @kuraa/run-kit and plugins.ts). For each
+// environments come from components (see @kuraa/run-kit and components.ts). For each
 // document and engine it opens a session in the environment, runs requests one
 // at a time, broadcasts
 // each run's progress and outputs to everyone with the document open, and
 // caches the latest output of each chunk in .git/kuraa/outputs (never in the
 // document).
 //
-// Who decides what: the operator (host options, from flags) loads plugins,
+// Who decides what: the operator (host options, from flags) loads components,
 // turns engines on, chooses the environment and sets the limits; an environment
 // that is not sandboxed only if they say so. A workspace may ask, in
 // .kuraa/run.json, for what its engines need (an image, packages) and for more
@@ -18,9 +18,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunPlugin } from '@kuraa/run-kit';
+import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunComponent } from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/server';
-import type { RunPlugins } from './plugins.js';
+import type { RunComponents } from './components.js';
 
 export interface RunOptions {
   /** Engines to turn on, by id: ['r']. None: running is off. */
@@ -28,10 +28,10 @@ export interface RunOptions {
   /** Where code runs, by environment id: 'podman'. Default: the only environment loaded. */
   environment?: string;
   /**
-   * Run plugins: engines and environments, as modules or by path or package
-   * name. The host loads none of its own (@kuraa/run-plugins has those that ship).
+   * Run components: engines and environments, as modules or by path or package
+   * name. The host loads none of its own (@kuraa/run-components has those that ship).
    */
-  plugins?: (RunPlugin | string)[];
+  components?: (RunComponent | string)[];
   /** Use an environment that is not sandboxed: code then runs with whatever rights it has there. */
   allowUnsandboxed?: boolean;
   /** Options by engine or environment id: { podman: { podman: '/path/to/podman' } }. */
@@ -94,7 +94,7 @@ export class Runner {
   constructor(private readonly o: {
     root: string;
     stateDir: string;
-    plugins: RunPlugins;
+    components: RunComponents;
     options: RunOptions | undefined;
     broadcast: (path: string, message: RoomMessage) => void;
     /** To everyone with any document of the workspace open. */
@@ -104,7 +104,7 @@ export class Runner {
     log: (m: string) => void;
     idleMs?: number;
   }) {
-    for (const id of o.options?.engines ?? []) if (!o.plugins.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.plugins.engines.keys()].join(', ') || 'none'}.`);
+    for (const id of o.options?.engines ?? []) if (!o.components.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.components.engines.keys()].join(', ') || 'none'}.`);
     this.on = [...(o.options?.engines ?? [])];
     this.env = this.chooseEnvironment();
   }
@@ -113,15 +113,15 @@ export class Runner {
   private readonly env: Environment | null;
 
   private chooseEnvironment(): Environment | null {
-    const { plugins, options } = this.o;
-    const all = [...plugins.environments.values()];
+    const { components, options } = this.o;
+    const all = [...components.environments.values()];
     if (options?.environment) {
-      const env = plugins.environments.get(options.environment);
+      const env = components.environments.get(options.environment);
       if (!env) throw new Error(`Unknown environment "${options.environment}". Known: ${all.map((e) => e.id).join(', ') || 'none'}.`);
       return this.checkSandbox(env);
     }
     if (!this.on.length) return all.length === 1 ? all[0]! : null;
-    if (all.length === 0) throw new Error('Engines are on, but no environment to run code in is loaded. Load one with --plugin.');
+    if (all.length === 0) throw new Error('Engines are on, but no environment to run code in is loaded. Load one with --component.');
     if (all.length > 1) throw new Error(`Several environments are loaded (${all.map((e) => e.id).join(', ')}); choose one with --env.`);
     return this.checkSandbox(all[0]!);
   }
@@ -142,15 +142,15 @@ export class Runner {
     return [...this.on];
   }
 
-  /** Every engine and environment the loaded plugins offer, which are on, and whether each environment is there. */
+  /** Every engine and environment the loaded components offer, which are on, and whether each environment is there. */
   async catalog(): Promise<{
     engines: { id: string; label: string; description: string; on: boolean }[];
     environments: { id: string; label: string; description: string; sandboxed: boolean; on: boolean; available: boolean; message: string }[];
   }> {
-    const { plugins } = this.o;
+    const { components } = this.o;
     return {
-      engines: [...plugins.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.includes(e.id) })),
-      environments: await Promise.all([...plugins.environments.values()].map(async (e) => ({
+      engines: [...components.engines.values()].map((e) => ({ id: e.id, label: e.label, description: e.description ?? '', on: this.on.includes(e.id) })),
+      environments: await Promise.all([...components.environments.values()].map(async (e) => ({
         id: e.id, label: e.label, description: e.description ?? '', sandboxed: e.sandboxed,
         on: this.enabled && e === this.env, ...(await this.status(e)),
       }))),
@@ -158,7 +158,7 @@ export class Runner {
   }
 
   private get engines(): Engine[] {
-    return this.on.map((id) => this.o.plugins.engines.get(id)!);
+    return this.on.map((id) => this.o.components.engines.get(id)!);
   }
 
   /** The engine that runs chunks of `name` (a chunk's engine, e.g. `r`). */

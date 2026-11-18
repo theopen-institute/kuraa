@@ -20,6 +20,7 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0014](0014-packages.md) | Packages: declared per workspace in a committed manifest, stored once per host, installed apart from the data |
 | [0015](0015-editable-source.md) | The Source view is editable, with character-level merging against the rich view |
 | [0016](0016-vue-client.md) | The client's components are Vue; editor objects are never made reactive; plugins stay framework-free |
-| [0017](0017-plugins-panel.md) | Plugins… shows the host's engines and formats, and turns your own editing behaviour on and off |
+| [0017](0017-components-panel.md) | Components… shows the host's engines, environments and formats, and turns your own editing behaviour on and off |
 | [0018](0018-untrusted-users.md) | People using the app are not trusted: code runs only in Podman, nothing in a document runs in the app, configuration is flags |
-| [0019](0019-engine-and-environment-plugins.md) | Engines and environments are separate plugins meeting through run-kit; the host imports none; unsandboxed needs a flag |
+| [0019](0019-engine-and-environment-components.md) | Engines and environments are separate components meeting through run-kit; the host imports none; unsandboxed needs a flag |
+| [0020](0020-components.md) | What extends the app (formats, engines, environments) is called a component, in the interface and the code |

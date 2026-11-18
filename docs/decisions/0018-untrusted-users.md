@@ -1,6 +1,6 @@
 # 0018 · People using the app are not trusted; code runs only in Podman
 
-> Changed by [0019](0019-engine-and-environment-plugins.md): environments are plugins again, like
+> Changed by [0019](0019-engine-and-environment-components.md): environments are plugins again, like
 > engines; Podman is one, and none that runs code on the computer itself ships. An unsandboxed
 > environment is used only with `--allow-unsandboxed`.
 
@@ -11,13 +11,13 @@ People using the app, including the person running the desktop app, are trusted 
 of documents and nothing more: nothing they write, run or open may execute on the host's computer
 or in the app, and nothing in the app changes how the host is configured. Proper accounts and roles
 may come later; until then, anything an administrator decides is a flag. This replaces the
-in-app switches of [0017](0017-plugins-panel.md), which now only shows what is on.
+in-app switches of [0017](0017-components-panel.md), which now only shows what is on.
 
 **Code runs only in Podman.**
 
 - The Local environment (`@kuraa/env-local`, R on the computer itself) is gone, with
   `--rscript` and engine-r's search for R on the computer.
-- Environments were briefly not plugins (only Podman, built in); [0019](0019-engine-and-environment-plugins.md)
+- Environments were briefly not plugins (only Podman, built in); [0019](0019-engine-and-environment-components.md)
   made them plugins again, with sandboxing declared by each and gated by `--allow-unsandboxed`.
 - A workspace can no longer choose an environment (`"environment"` in `.kuraa/run.json` is
   ignored). It can still ask for an image, packages and system libraries (names are checked and

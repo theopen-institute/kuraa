@@ -1,4 +1,4 @@
-// An engine plugin from outside the repository's packages, as a third party
+// An engine component from outside the repository's packages, as a third party
 // would write one: plain JavaScript, no imports. The "echo" language runs
 // `echo <code>` through whatever environment it is given, knowing nothing of it:
 // the two meet only through the run-kit contract.

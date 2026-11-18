@@ -1,4 +1,4 @@
-// An environment plugin from outside the repository's packages: three places
+// An environment component from outside the repository's packages: three places
 // to "run" processes, which run nothing but report what they were asked, as
 // the process's output. One is sandboxed, one is not, one is unavailable.
 import { PassThrough, Readable } from 'node:stream';

@@ -1,4 +1,4 @@
-// The Plugins panel shows what the host's flags turned on (engines, where code
+// The Components panel shows what the host's flags turned on (engines, where code
 // runs, formats) and changes none of it; each person's editing
 // behaviour is theirs to turn on and off. Documents cannot put script in the page.
 import { expect, test, type Page } from '@playwright/test';
@@ -8,14 +8,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
-import { standardRunPlugins } from '../../packages/run-plugins/src/index.js';
+import { standardRunComponents } from '../../packages/run-components/src/index.js';
 import { E2E } from './env.js';
 
 const RMD = '# Chunks\n\n```{r}\n1 + 1\n```\n';
 
 /** A host of the test's own, started with flags of its own. */
 async function ownHost(formats?: string[]): Promise<RunningHost> {
-  const dir = mkdtempSync(join(tmpdir(), 'kuraa-e2e-plugins-'));
+  const dir = mkdtempSync(join(tmpdir(), 'kuraa-e2e-components-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir });
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'Owner');
@@ -27,19 +27,19 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
   return startHost({
     dir,
     formats,
-    run: { engines: [], plugins: standardRunPlugins, dataDir: mkdtempSync(join(tmpdir(), 'kuraa-e2e-plugins-data-')) },
+    run: { engines: [], components: standardRunComponents, dataDir: mkdtempSync(join(tmpdir(), 'kuraa-e2e-components-data-')) },
     staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
     timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   });
 }
 
-async function openPlugins(page: Page): Promise<void> {
+async function openComponents(page: Page): Promise<void> {
   await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu').getByRole('button', { name: 'Plugins…' }).click();
-  await expect(page.getByTestId('plugins')).toBeVisible();
+  await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
+  await expect(page.getByTestId('components')).toBeVisible();
 }
 
-const box = (page: Page, name: string) => page.getByTestId('plugins').getByRole('checkbox', { name, exact: true });
+const box = (page: Page, name: string) => page.getByTestId('components').getByRole('checkbox', { name, exact: true });
 
 test('the host’s flags decide; the panel only shows them', async ({ page }) => {
   const host = await ownHost(['pandoc-markdown', 'text']);
@@ -50,8 +50,8 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await expect(page.getByTestId('editor')).toContainText('```{r}');
 
-    await openPlugins(page);
-    await expect(page.getByTestId('plugins')).toContainText('--format');
+    await openComponents(page);
+    await expect(page.getByTestId('components')).toContainText('--format');
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R Markdown')).not.toBeChecked();
     await expect(box(page, 'Pandoc markdown')).toBeChecked();
@@ -89,7 +89,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     const editor = page.getByTestId('editor');
     await expect(editor).toContainText('Plain text here.');
 
-    await openPlugins(page);
+    await openComponents(page);
     await box(page, 'Markdown editing').uncheck();
     await page.keyboard.press('Escape');
     await editor.locator('p', { hasText: 'Plain text here.' }).click();
@@ -102,7 +102,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     // Kept in this browser; turned back on, typing formats again.
     await page.reload();
     await page.getByTestId('file:notes.md').click();
-    await openPlugins(page);
+    await openComponents(page);
     await expect(box(page, 'Markdown editing')).not.toBeChecked();
     await box(page, 'Markdown editing').check();
     await page.keyboard.press('Escape');
@@ -119,7 +119,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
 test('on the shared host too, only your editing behaviour can change', async ({ page }) => {
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
-  await openPlugins(page);
+  await openComponents(page);
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();

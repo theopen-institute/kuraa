@@ -1,6 +1,6 @@
-// The contract for running code, as plugins.
+// The contract for running code, as components.
 //
-// The host knows no language and no place to run code. Both come from plugins,
+// The host knows no language and no place to run code. Both come from components,
 // which the operator loads and turns on with flags:
 //
 //   Engine       a language: how to run its code and report what it produced
@@ -19,9 +19,9 @@
 // matters: an environment says whether it enforces it (`sandboxed`), and a host
 // uses one that does not only if its operator says so (--allow-unsandboxed).
 //
-// A plugin module exports a RunPlugin, with engines, environments or both:
-// `export default definePlugin({ name, engines, environments })`. The host
-// refuses a plugin whose apiVersion differs from RUN_API_VERSION.
+// A component module exports a RunComponent, with engines, environments or both:
+// `export default defineRunComponent({ name, engines, environments })`. The host
+// refuses a component whose apiVersion differs from RUN_API_VERSION.
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
@@ -142,7 +142,7 @@ export interface Environment {
   id: string;
   /** Where code runs, as a phrase: 'in a Podman container'. */
   label: string;
-  /** A sentence on what it is and what it shields (the Plugins panel). */
+  /** A sentence on what it is and what it shields (the Components panel). */
   description?: string;
   /**
    * Whether it enforces the Policy, keeping code away from the computer the
@@ -213,7 +213,7 @@ export interface EngineSession {
 export interface Engine {
   id: string;
   label: string;
-  /** A sentence on what it does (the Plugins panel). */
+  /** A sentence on what it does (the Components panel). */
   description?: string;
   /** Chunk engine names it runs, as in a knitr header: ['r']. */
   handles: string[];
@@ -270,9 +270,9 @@ export interface PackageManager {
 }
 
 // ---------------------------------------------------------------------------
-// Plugins
+// Components
 
-export interface RunPlugin {
+export interface RunComponent {
   apiVersion: number;
   name: string;
   /** Languages. */
@@ -281,12 +281,12 @@ export interface RunPlugin {
   environments?: Environment[];
 }
 
-export function definePlugin(plugin: Omit<RunPlugin, 'apiVersion'>): RunPlugin {
-  return { apiVersion: RUN_API_VERSION, ...plugin };
+export function defineRunComponent(component: Omit<RunComponent, 'apiVersion'>): RunComponent {
+  return { apiVersion: RUN_API_VERSION, ...component };
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for plugins
+// Helpers for components
 
 /** A program on PATH or in one of `dirs` (apps started from the macOS Dock get a short PATH). */
 export function findExecutable(name: string, dirs: string[] = []): string | null {

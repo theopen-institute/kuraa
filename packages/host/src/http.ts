@@ -99,8 +99,8 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     });
   }
 
-  // Plugins: which engines and formats are on. Set by the host's flags; the app only shows them.
-  if (route === 'GET /api/plugins') return send(res, 200, await host.plugins());
+  // Components: which engines and formats are on. Set by the host's flags; the app only shows them.
+  if (route === 'GET /api/components') return send(res, 200, await host.components());
 
   // Packages for an engine (R): declared per workspace, stored once per host.
   if (route === 'GET /api/packages') {

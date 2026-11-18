@@ -12,7 +12,7 @@ import { connectHeadless } from '@kuraa/session/testing';
 import type { ChunkOutput, RunRecord } from '@kuraa/session/model';
 import { startHost, type RunningHost } from '../src/index.js';
 import { podmanWorks } from '@kuraa/env-podman';
-import { standardRunPlugins } from '@kuraa/run-plugins';
+import { standardRunComponents } from '@kuraa/run-components';
 
 const PODMAN_OK = podmanWorks();
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -67,7 +67,7 @@ describe.skipIf(!PODMAN_OK)('running R chunks', () => {
   beforeEach(async () => {
     dir = makeRepo();
     index = 0;
-    running = await startHost({ dir, port: 0, run: { engines: ['r'], plugins: standardRunPlugins }, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
+    running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents }, timings: { flushMs: 150, idleCommitMs: 600, maxCommitMs: 5000, dropMs: 400 } });
   });
 
   afterEach(async () => {
@@ -153,7 +153,7 @@ describe.skipIf(!PODMAN_OK)('running R chunks', () => {
       expect(c.messages.some((m) => m.type === 'run-session' && m.session.state === 'ready' && m.session.engine === 'r' && m.session.environment === 'podman')).toBe(true);
 
       await running.close();
-      running = await startHost({ dir, port: 0, run: { engines: ['r'], plugins: standardRunPlugins } });
+      running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents } });
       const { runs } = (await (await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).json()) as { runs: RunRecord[] };
       expect(runs.map((r) => r.id)).toEqual([second.id]); // the same label replaced the earlier run
       expect(git(dir, 'status', '--porcelain')).toBe(''); // nothing written into the workspace
@@ -175,7 +175,7 @@ describe.skipIf(!PODMAN_OK)('running R chunks', () => {
 describe.skipIf(!PODMAN_OK)('the sandbox', () => {
   it('runs R where it cannot see your files, write the workspace, see .git, or reach the network', async () => {
     const dir = makeRepo();
-    const running = await startHost({ dir, port: 0, run: { engines: ['r'], plugins: standardRunPlugins } });
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents } });
     try {
       const api = (path: string, init: RequestInit = {}) =>
         fetch(running.url + path, { ...init, headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' } });
@@ -208,7 +208,7 @@ describe.skipIf(!PODMAN_OK)('R packages in Podman', () => {
   it('installs through a separate container, and sessions see the library read-only', async () => {
     const dir = makeRepo();
     const dataDir = mkdtempSync(join(tmpdir(), 'kuraa-poddata-'));
-    const running = await startHost({ dir, port: 0, run: { engines: ['r'], plugins: standardRunPlugins, allowInstalls: true, dataDir } });
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents, allowInstalls: true, dataDir } });
     try {
       const api = (path: string, body?: object) => fetch(running.url + path, {
         method: body ? 'POST' : 'GET',

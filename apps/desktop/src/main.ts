@@ -12,9 +12,9 @@
 //   --engine <id>...     engines to turn on (default: r); --engine none for none
 //   --env <id>           where code runs (default: the only environment loaded)
 //   --format <id>...     document formats to turn on (default: all)
-//   --plugin <spec>...   more run plugins (engines, environments)
+//   --component <spec>...   more run components (engines, environments)
 //   --allow-unsandboxed  allow an environment that is not sandboxed
-// The plugins that ship (@kuraa/run-plugins: R, Podman containers) are loaded.
+// The components that ship (@kuraa/run-components: R, Podman containers) are loaded.
 //
 // The window shows only the app's own pages: it does not navigate elsewhere or
 // open other windows (web links open in the browser), and the bridge answers
@@ -25,7 +25,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { gitIdentity, inspectFolder, startHost, type HostTimings, type RunOptions, type RunningHost } from '@kuraa/host';
-import { standardRunPlugins } from '@kuraa/run-plugins';
+import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
@@ -39,7 +39,7 @@ const { values: flags } = parseArgs({
   options: {
     open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
     engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true },
-    plugin: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' },
+    component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' },
   },
   strict: false,
 });
@@ -57,7 +57,7 @@ function runOptions(): RunOptions {
   return {
     engines,
     environment: typeof flags.env === 'string' ? flags.env : undefined,
-    plugins: [...standardRunPlugins, ...(list(flags.plugin) ?? [])],
+    components: [...standardRunComponents, ...(list(flags.component) ?? [])],
     allowUnsandboxed: flags['allow-unsandboxed'] === true,
     allowInstalls: true,
   };

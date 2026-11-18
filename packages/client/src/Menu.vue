@@ -35,7 +35,7 @@ const emit = defineEmits<{
   sync: [];
   saveSettings: [settings: Settings];
   packages: [runner: ChunkRunner, engine: string];
-  plugins: [];
+  components: [];
   close: [];
 }>();
 
@@ -100,10 +100,10 @@ const runner = computed(() => props.status?.runner ?? null);
       </section>
 
       <section class="menu-section">
-        <h3>Plugins</h3>
+        <h3>Components</h3>
         <p class="menu-facts">What runs code and where, the document formats, and your editing behaviour.</p>
         <div class="menu-actions">
-          <button type="button" @click="emit('plugins'); emit('close')">Plugins…</button>
+          <button type="button" @click="emit('components'); emit('close')">Components…</button>
         </div>
       </section>
 

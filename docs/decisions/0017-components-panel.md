@@ -1,11 +1,11 @@
-# 0017 · The Plugins panel
+# 0017 · The Components panel
 
-> Changed by [0018](0018-untrusted-users.md): the host's plugins are set by flags only. The panel
+> Changed by [0018](0018-untrusted-users.md): the host's components are set by flags only. The panel
 > first let the owner of a host switch them; it now only shows them.
 
-**Plugins…** in the menu lists three kinds of plugin:
+**Components…** in the menu lists three kinds of component:
 
-- **Running code**: the engines (R, and any loaded with `--plugin`) and the environments, whether
+- **Running code**: the engines (R, and any loaded with `--component`) and the environments, whether
   each is on, whether an environment is sandboxed and available. Read-only (`--engine`, `--env`).
 - **Document formats**: Pandoc markdown, R Markdown, Text file, whether each is on. Read-only
   (`--format`). A file whose format is off opens as the next type that claims it: the Text file
@@ -16,7 +16,7 @@
   their browser (`localStorage`), affecting no one else. Footnote ordering acts only on your own
   edits, so turning it off leaves others' notes alone, and theirs tidy yours on their next edit.
 
-`GET /api/plugins` describes them; nothing in the API changes them.
+`GET /api/components` describes them; nothing in the API changes them.
 
 **Contracts.** `Engine`, `Environment` and `DocumentType` have an optional `description`, and
 `FormatEditor` an optional `label` and `description`, for the panel.

@@ -10,7 +10,7 @@
 export type MergeChunk<T> = { ok: T[] } | { conflict: { base: T[]; a: T[]; b: T[] } };
 
 /** For each item of `base`, the index of the item it is matched with in `other` (a longest common subsequence), or -1. */
-function matches<T>(base: readonly T[], other: readonly T[], eq: (x: T, y: T) => boolean): number[] {
+export function matches<T>(base: readonly T[], other: readonly T[], eq: (x: T, y: T) => boolean): number[] {
   const out = new Array<number>(base.length).fill(-1);
   // Equal ends need no table.
   let pre = 0;

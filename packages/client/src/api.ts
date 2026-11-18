@@ -40,6 +40,8 @@ export interface CommitInfo {
   hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[];
   /** The file's path in this commit; differs from the current path before a rename. */
   path: string;
+  /** A save the host made on its own, a merge it made, or any other commit (a named version, one made outside). */
+  kind: 'autosave' | 'merge' | 'commit';
 }
 
 export class ApiError extends Error {

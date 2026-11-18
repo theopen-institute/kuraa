@@ -29,3 +29,4 @@ One short note per deviation from, or interpretation of, the prototype build spe
 | [0023](0023-file-icons.md) | Each document type defines its files' small icon; the client draws them all alike |
 | [0024](0024-out-of-date-outputs.md) | Every run records what its session had run before it, so outputs computed from code that has since changed are flagged, and Rebuild above runs only what is behind |
 | [0025](0025-merging.md) | Merges read documents (blocks, then words), never stop, and keep a conflict in the document as a block with both versions; the same merge commit on every device |
+| [0026](0026-commit-messages-and-history.md) | Automatic commits name the document, the headings that changed and who edited, with an autosave trailer; history folds them into editing sessions |

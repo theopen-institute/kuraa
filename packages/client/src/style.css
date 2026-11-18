@@ -475,3 +475,9 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .tree-conflict { margin-left: 4px; color: var(--warn); font-size: 11px; }
 .conflict-version-body > :first-child { margin-top: 6px; }
 .conflict-version-body > :last-child { margin-bottom: 6px; }
+/* History: editing sessions fold their saves; saves inside are quieter; versions stand out. */
+.history-session > button .history-subject { font-weight: 500; }
+.history-caret { display: inline-block; width: 1em; color: var(--muted); }
+.history-saves { list-style: none; margin: 0 0 4px 14px; padding: 0; border-left: 1px solid var(--border); }
+.history-saves .history-subject { font-weight: 400; font-size: 13px; }
+.history-merge .history-subject { font-weight: 500; color: var(--muted); }

@@ -4,6 +4,7 @@ import { existsSync, statSync, createReadStream } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { Host } from './host.js';
+import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './host.js';
 
 const MIME: Record<string, string> = {
@@ -299,7 +300,9 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       const [hash, author, email, date, subject, body = ''] = header.split('\x1f');
       const coAuthors = [...body.matchAll(/^Co-authored-by:\s*(.+?)\s*<([^>]*)>\s*$/gim)].map((m) => ({ name: m[1], email: m[2] }));
       const pathThen = names.split('\n').map((n) => n.trim()).filter(Boolean).pop() ?? path;
-      return { hash, author, email, date, subject, coAuthors, path: pathThen };
+      // Saves the host made on its own, merges it made, or commits made otherwise (named versions, outside).
+      const kind = email === MERGE_AUTHOR.email ? 'merge' : /^Kuraa-Kind:\s*autosave\s*$/im.test(body) ? 'autosave' : 'commit';
+      return { hash, author, email, date, subject, coAuthors, path: pathThen, kind };
     });
     return send(res, 200, { commits });
   }

@@ -3,7 +3,7 @@
 import type { Node, Schema } from 'prosemirror-model';
 import type { MergeResult, MergeSide } from './merge.js';
 
-export { countMarkers, diff3, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
+export { countMarkers, diff3, matches, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
 
 export interface ParsedDocument {
   text: string;

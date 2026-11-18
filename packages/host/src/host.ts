@@ -13,6 +13,7 @@ import { Runner, type RunOptions } from './runner.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler } from './http.js';
 import { conflictsIn, mergeCommits, type MergeOutcome } from './merging.js';
+import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 
 export interface HostTimings {
   /** Serialize this long after the last update. */
@@ -468,27 +469,33 @@ export class Host {
       t[k] = undefined;
     }
     rec.editingSince = null;
-    const committed = await this.commitPaths([rec.path], message ?? `Update ${rec.path}`, [...rec.contributors.values()]);
+    // A named version says what it is; otherwise say what changed, and mark it as a save the host made.
+    let text = message;
+    if (text === undefined) {
+      const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
+      text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, [...rec.contributors.values()].map((u) => u.name));
+    }
+    const committed = await this.commitPaths([rec.path], text, [...rec.contributors.values()], message === undefined ? [AUTOSAVE_TRAILER] : []);
     rec.uncommitted = false;
     if (!committed) return null;
     rec.contributors.clear();
     rec.baseCommit = committed;
     rec.lastCommit = committed;
     rec.lastCommitAt = new Date().toISOString();
-    this.broadcast(rec, { type: 'committed', at: rec.lastCommitAt, commit: committed, message: message ?? `Update ${rec.path}` });
+    this.broadcast(rec, { type: 'committed', at: rec.lastCommitAt, commit: committed, message: text });
     await this.saveCache(rec);
     return committed;
   }
 
   /** Stage and commit the given paths. Returns the commit, or null if nothing changed. */
-  async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = []): Promise<string | null> {
+  async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = [], extra: string[] = []): Promise<string | null> {
     await this.git.run(['add', '-A', '--', ...paths]);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
     if (diff.code === 0) return null;
     const trailers = coAuthors
       .filter((u) => u.email)
       .map((u) => `Co-authored-by: ${u.name.replace(/[<>\n]/g, '')} <${u.email.replace(/[<>\n\s]/g, '')}>`);
-    const unique = [...new Set(trailers)];
+    const unique = [...new Set([...trailers, ...extra])];
     const full = unique.length ? `${message}\n\n${unique.join('\n')}` : message;
     await this.git.run(['commit', '-q', '-F', '-', '--', ...paths], { input: full });
     const head = await this.git.head();

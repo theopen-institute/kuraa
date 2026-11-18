@@ -1,7 +1,10 @@
 <script setup lang="ts">
 // The history sidebar: the open file's commits; one can be viewed, read only.
-import { ref, shallowRef, watch } from 'vue';
+// The host's own saves are grouped into editing sessions, opened to see each
+// save; named versions and merges stand on their own.
+import { computed, ref, shallowRef, watch } from 'vue';
 import type { CommitInfo, HostApi } from './api.js';
+import { groupHistory, partsOf, peopleOf } from './history.js';
 import { when } from './labels.js';
 
 const props = defineProps<{ api: HostApi; path: string | null; refreshKey: number; viewing: string | null }>();
@@ -31,7 +34,20 @@ watch([() => props.api, () => props.path, () => props.refreshKey], ([api, path],
   );
 }, { immediate: true });
 
-const people = (c: CommitInfo) => [c.author, ...c.coAuthors.map((a) => a.name)].filter((n, j, all) => all.indexOf(n) === j).join(', ');
+const people = (c: CommitInfo) => peopleOf([c]);
+const entries = computed(() => groupHistory(commits.value));
+const open = ref(new Set<string>());
+function toggle(id: string) {
+  const next = new Set(open.value);
+  if (!next.delete(id)) next.add(id);
+  open.value = next;
+}
+const latest = computed(() => commits.value[0]?.hash);
+const summary = (cs: CommitInfo[]) => {
+  const parts = partsOf(cs);
+  const shown = parts.length > 3 ? `${parts.slice(0, 3).join(', ')} and ${parts.length - 3} more` : parts.join(', ');
+  return `${cs.length} saves${shown ? `: ${shown}` : ''}`;
+};
 </script>
 
 <template>
@@ -40,13 +56,30 @@ const people = (c: CommitInfo) => [c.author, ...c.coAuthors.map((a) => a.name)].
     <p v-if="!path" class="muted pad">Open a file to see its history.</p>
     <p v-if="error" class="banner warn">{{ error }}</p>
     <ol class="history" data-testid="history">
-      <li v-for="(c, i) in commits" :key="c.hash" :class="{ selected: viewing === c.hash }">
-        <button type="button" @click="emit('view', viewing === c.hash ? null : c)">
-          <span class="history-subject">{{ c.subject }}</span>
-          <span class="history-meta"><code>{{ c.hash.slice(0, 7) }}</code> · {{ when(c.date) }}{{ i === 0 ? ' · latest' : '' }}</span>
-          <span class="history-people">{{ people(c) }}</span>
-        </button>
-      </li>
+      <template v-for="e in entries" :key="e.kind === 'session' ? e.id : e.commit.hash">
+        <li v-if="e.kind === 'commit'" :class="['history-' + e.commit.kind, { selected: viewing === e.commit.hash }]">
+          <button type="button" @click="emit('view', viewing === e.commit.hash ? null : e.commit)">
+            <span class="history-subject">{{ e.commit.subject }}</span>
+            <span class="history-meta"><code>{{ e.commit.hash.slice(0, 7) }}</code> · {{ when(e.commit.date) }}{{ e.commit.hash === latest ? ' · latest' : '' }}</span>
+            <span class="history-people">{{ people(e.commit) }}</span>
+          </button>
+        </li>
+        <li v-else class="history-session" data-testid="history-session">
+          <button type="button" :aria-expanded="open.has(e.id)" @click="toggle(e.id)">
+            <span class="history-subject"><span class="history-caret" aria-hidden="true">{{ open.has(e.id) ? '▾' : '▸' }}</span> {{ summary(e.commits) }}</span>
+            <span class="history-meta">{{ when(e.commits[e.commits.length - 1]!.date) }} – {{ when(e.commits[0]!.date) }}{{ e.commits[0]!.hash === latest ? ' · latest' : '' }}</span>
+            <span class="history-people">{{ peopleOf(e.commits) }}</span>
+          </button>
+          <ol v-if="open.has(e.id)" class="history-saves">
+            <li v-for="c in e.commits" :key="c.hash" :class="{ selected: viewing === c.hash }">
+              <button type="button" @click="emit('view', viewing === c.hash ? null : c)">
+                <span class="history-subject">{{ c.subject }}</span>
+                <span class="history-meta"><code>{{ c.hash.slice(0, 7) }}</code> · {{ when(c.date) }}</span>
+              </button>
+            </li>
+          </ol>
+        </li>
+      </template>
     </ol>
   </aside>
 </template>

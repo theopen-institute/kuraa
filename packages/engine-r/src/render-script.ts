@@ -61,6 +61,8 @@ local({
   if (requireNamespace("tinytex", quietly = TRUE)) {
     try(utils::assignInNamespace("tlmgr_writable", function() FALSE, "tinytex"), silent = TRUE)
   }
+  # Its log is kept when LaTeX fails (in scratch, emptied after every render): see latex_errors().
+  options(tinytex.clean = FALSE)
 
   have <- function(program) nzchar(Sys.which(program))
   # A program that is there but cannot start (a TeX built for another C library, say).
@@ -142,6 +144,13 @@ local({
     } else if (pdf_engine != "typst") {
       output_format <- or(chosen, "pdf_document")
       output_options$latex_engine <- pdf_engine
+      # LaTeX writes beside where it runs, and rmarkdown runs it from the
+      # document's folder, which is read-only: run it beside the .tex, in scratch.
+      try(utils::assignInNamespace("latexmk", function(file, engine, biblatex = FALSE) {
+        owd <- setwd(dirname(file))
+        on.exit(setwd(owd), add = TRUE)
+        tinytex::latexmk(basename(file), engine, if (biblatex) "biber" else "bibtex")
+      }, "rmarkdown"), silent = TRUE)
     } else {
       output_format <- rmarkdown::output_format(
         knitr = rmarkdown::knitr_options(opts_chunk = list(dev = "png", dpi = 192, fig.width = or(opts$fig_width, 6.5), fig.height = or(opts$fig_height, 4.5))),
@@ -186,10 +195,22 @@ local({
     }
   }
 
+  # LaTeX's own errors, from its logs, for people (behind Details) and for the
+  # host, which reads them for packages that were missing.
+  latex_errors <- function() {
+    logs <- list.files(c(out_dir, tmp_dir), pattern = "[.]log$", full.names = TRUE)
+    for (f in logs) {
+      lines <- tryCatch(readLines(f, warn = FALSE), error = function(e) character())
+      at <- grep("^!", lines)
+      if (length(at)) cat("\nLaTeX (", basename(f), "):\n", paste(unique(unlist(lapply(head(at, 20), function(i) lines[i:min(length(lines), i + 2)]))), collapse = "\n"), "\n", sep = "")
+    }
+  }
+
   ok <- tryCatch({
     main()
     TRUE
   }, error = function(e) {
+    latex_errors()
     reply(FALSE, conditionMessage(e))
     FALSE
   })

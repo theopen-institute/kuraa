@@ -24,11 +24,13 @@ import { dirname, join, resolve } from 'node:path';
 import {
   DEFAULT_POLICY, parseSize,
   type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
-  type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RunComponent,
+  type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RenderTools, type RunComponent,
+  type Tool, type ToolUse,
 } from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
 import type { RunComponents } from './components.js';
 import { renameOver } from './files.js';
+import { ToolStore, type ToolEnv, type ToolInfo, type ToolResult } from './tools.js';
 
 export interface RunOptions {
   /** Engines to turn on, by id: ['r']. None: running is off. */
@@ -55,7 +57,8 @@ export interface RunOptions {
   disk?: string;
   /**
    * Let people install packages (install.packages() in a chunk, the Packages
-   * panel). Installs run apart from the workspace, with the network.
+   * panel) and download tools and add to them (TeX and its packages, decision
+   * 0045). Installs run apart from the workspace, with the network.
    */
   allowInstalls?: boolean;
   /** Where engines keep what is shared by every workspace (a package cache). Default: the user's app data folder. */
@@ -172,7 +175,13 @@ export class Runner {
     if (o.options?.disk !== undefined && parseSize(o.options.disk) === null) throw new Error(`--disk takes a size such as 2g, not "${o.options.disk}".`);
     this.dataDir = o.options?.dataDir ?? defaultDataDir();
     this.workspaceKey = createHash('sha1').update(resolve(o.root)).digest('hex').slice(0, 16);
+    this.tools = ToolStore.at(this.dataDir);
+    this.unsubscribeTools = this.tools.subscribe(() => o.broadcastAll({ type: 'tools', at: new Date().toISOString() }));
   }
+
+  /** Tools, kept once per computer in the data folder (tools.ts). */
+  private readonly tools: ToolStore;
+  private readonly unsubscribeTools: () => void;
 
   /** Where engines keep what every workspace shares. */
   private readonly dataDir: string;
@@ -326,7 +335,7 @@ export class Runner {
    * network, whatever the workspace asks for. Throws, saying why, if the
    * environment is not there.
    */
-  async renderContext(engine: Engine, scratch: string, signal: AbortSignal, status: (m: string) => void): Promise<RenderContext> {
+  async renderContext(engine: Engine, scratch: string, signal: AbortSignal, status: (m: string) => void, tools?: RenderTools): Promise<RenderContext> {
     await this.available();
     const ctx = this.context(engine, await this.config());
     return {
@@ -337,7 +346,180 @@ export class Runner {
       signal,
       log: (m) => this.o.log(`${engine.id} render: ${m}`),
       status,
+      ...(tools ? { tools } : {}),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Tools (decision 0045; tools.ts keeps them)
+
+  /** Whether people here may download tools and add to them (and install packages). */
+  get allowInstalls(): boolean {
+    return !!this.o.options?.allowInstalls;
+  }
+
+  tool(id: string): Tool | undefined {
+    return this.o.components.tools.get(id);
+  }
+
+  /** Where installers run, and the environment's architecture. Throws, saying why, if code cannot run here. */
+  private async toolEnv(): Promise<ToolEnv> {
+    if (!this.enabled) throw new Error('Running code is turned off on this server, and tools are used only where code runs.');
+    const environment = await this.available();
+    const { arch } = await this.status(environment);
+    return {
+      environment,
+      options: this.o.options?.options?.[environment.id],
+      policy: this.policy({}),
+      arch: arch ?? null,
+      log: (m) => this.o.log(`tools: ${m}`),
+    };
+  }
+
+  /** Every tool the components offer, and how each stands on this computer. */
+  async listTools(): Promise<{ allowInstalls: boolean; arch: string | null; tools: ToolInfo[] }> {
+    const arch = this.enabled ? ((await this.status(this.env!)).arch ?? null) : null;
+    const tools = await Promise.all([...this.o.components.tools.values()].map((t) => this.tools.info(t, arch)));
+    return { allowInstalls: this.allowInstalls && this.enabled, arch, tools };
+  }
+
+  /** Start downloading a tool (or join its download). Resolves once it has started; `done` when it has finished. */
+  async downloadTool(id: string): Promise<{ ok: boolean; message: string; done: Promise<ToolResult> }> {
+    const tool = this.toolOrThrow(id);
+    if (!this.allowInstalls) return refused('Downloading tools is turned off on this server; whoever runs it can turn it on.');
+    const env = await this.toolEnv();
+    const why = this.tools.cannotInstall(tool, env.arch);
+    if (why) return refused(why);
+    const done = this.tools.install(tool, env);
+    void done.then((r) => this.o.log(`tools: ${r.message}${r.ok ? '' : `\n${r.log}`}`), (e: Error) => this.o.log(`tools: ${tool.id}: ${e.message}`));
+    return { ok: true, message: `Downloading ${tool.label}…`, done };
+  }
+
+  async removeTool(id: string): Promise<{ ok: boolean; message: string; done: Promise<ToolResult> }> {
+    const tool = this.toolOrThrow(id);
+    if (!this.allowInstalls) return refused('Removing tools is turned off on this server; whoever runs it can turn it on.');
+    const done = this.tools.remove(tool);
+    void done.catch((e: Error) => this.o.log(`tools: could not remove ${tool.id}: ${e.message}`));
+    return { ok: true, message: `Removing ${tool.label}…`, done };
+  }
+
+  /** Add parts to a tool (LaTeX packages), and record them in the workspace, crediting `by`. */
+  async addToolParts(id: string, names: string[], by: PresenceUser | null, status?: (m: string) => void): Promise<ToolResult & { added: string[] }> {
+    const tool = this.toolOrThrow(id);
+    if (!tool.parts) return { ok: false, message: `${tool.label} has no parts to add.`, log: '', added: [] };
+    if (!this.allowInstalls) return { ok: false, message: `Adding ${tool.parts.label} is turned off on this server; whoever runs it can turn it on.`, log: '', added: [] };
+    const result = await this.tools.addParts(tool, names, await this.toolEnv(), status);
+    if (result.added.length) await this.recordParts(tool, result.added, by).catch((e: Error) => this.o.log(`could not record ${tool.parts!.label}: ${e.message}`));
+    return result;
+  }
+
+  private toolOrThrow(id: string): Tool {
+    const tool = this.tool(id);
+    if (!tool) throw new Error(`This server has no tool called "${id}".`);
+    return tool;
+  }
+
+  /** The parts of a tool the workspace records (its documents needed them), checked as the tool would. */
+  private async recordedParts(tool: Tool): Promise<string[]> {
+    if (!tool.parts) return [];
+    try {
+      const parsed = JSON.parse(await readFile(join(this.o.root, tool.parts.record), 'utf8')) as { packages?: unknown };
+      return Array.isArray(parsed.packages) ? parsed.packages.filter((p): p is string => typeof p === 'string' && tool.parts!.valid(p)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Add parts to the workspace's record (`{ "packages": [...] }`, sorted), and commit it. */
+  private async recordParts(tool: Tool, names: string[], by: PresenceUser | null): Promise<void> {
+    const parts = tool.parts!;
+    const now = await this.recordedParts(tool);
+    const fresh = names.filter((n) => !now.includes(n));
+    if (!fresh.length) return;
+    const file = join(this.o.root, parts.record);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `${JSON.stringify({ packages: [...new Set([...now, ...fresh])].sort() }, null, 2)}\n`);
+    await this.o.commit([parts.record], `${parts.label}: add ${fresh.join(', ')}`, by);
+  }
+
+  /**
+   * The tools one render may use (RenderContext.tools), for whoever asked for it:
+   * what it used is released when the render has finished, and `repair` adds
+   * the parts a failed render's log says were missing.
+   */
+  renderTools(by: PresenceUser | null, status: (m: string) => void): RenderTools & {
+    repair(log: string): Promise<{ ok: boolean; message: string; added: string[] } | null>;
+    release(): void;
+  } {
+    const used = new Map<string, Tool>();
+    const releases: (() => void)[] = [];
+    const tried = new Set<string>();
+    const have = new Map<string, string[]>();
+    return {
+      use: async (id: string): Promise<ToolUse> => {
+        const tool = this.tool(id);
+        if (!tool) return { ok: false, reason: 'This server does not offer it.', canDownload: false };
+        let env: ToolEnv;
+        try {
+          env = await this.toolEnv();
+        } catch (e) {
+          return { ok: false, reason: (e as Error).message, canDownload: false };
+        }
+        const unsupported = this.tools.cannotInstall(tool, env.arch);
+        if (unsupported) return { ok: false, reason: unsupported, canDownload: false };
+        // What the workspace's documents needed before (on another computer, say): added first, where allowed.
+        const record = env.arch ? await this.tools.record(tool, env.arch) : null;
+        if (record && tool.parts && this.allowInstalls) {
+          const missing = (await this.recordedParts(tool)).filter((p) => !record.parts.includes(p));
+          if (missing.length) {
+            status(`Adding the ${tool.parts.label} this workspace uses: ${missing.join(', ')}…`);
+            const added = await this.tools.addParts(tool, missing, env, status).catch((e: Error) => ({ ok: false, message: e.message, log: '', added: [] }));
+            if (!added.ok) this.o.log(`tools: ${added.message}\n${added.log}`);
+          }
+        }
+        const held = await this.tools.acquire(tool, env.arch);
+        if (!held) {
+          const busy = this.tools.busy(tool);
+          const reason = busy === 'downloading' ? `${tool.label} is being downloaded.`
+            : busy === 'removing' ? `${tool.label} is being removed from this computer.`
+              : this.allowInstalls ? `${tool.label} is not on this computer yet.`
+                : `${tool.label} is not on this computer, and downloading it is turned off on this server.`;
+          return { ok: false, reason, canDownload: this.allowInstalls && busy !== 'removing' };
+        }
+        releases.push(held.release);
+        used.set(tool.id, tool);
+        have.set(tool.id, held.record.parts);
+        const arch = held.record.arch;
+        return { ok: true, mounts: [{ host: held.files, inside: tool.inside, access: 'read-only' }], path: tool.path(arch), env: tool.env?.(arch) ?? {} };
+      },
+      repair: async (log: string) => {
+        for (const tool of used.values()) {
+          const parts = tool.parts;
+          if (!parts) continue;
+          const names = parts.missing(log).filter((n) => parts.valid(n) && !tried.has(n) && !have.get(tool.id)?.includes(n));
+          if (!names.length) continue;
+          if (!this.allowInstalls) {
+            return { ok: false, message: `It needs ${parts.label} this computer does not have: ${names.join(', ')}. Adding them is turned off on this server; whoever runs it can turn it on.`, added: [] };
+          }
+          for (const n of names) tried.add(n);
+          status(`Adding ${parts.label}: ${names.join(', ')}…`);
+          const result = await this.addToolParts(tool.id, names, by, status).catch((e: Error) => ({ ok: false, message: e.message, log: '', added: [] as string[] }));
+          if (!result.added.length) return { ok: false, message: result.message, added: [] };
+          have.set(tool.id, [...(have.get(tool.id) ?? []), ...result.added]);
+          return { ok: true, message: result.message, added: result.added };
+        }
+        return null;
+      },
+      release: () => {
+        for (const r of releases.splice(0)) r();
+      },
+    };
+  }
+
+  /** What to offer people for a tool a render needs: its name and size, if they may download it here. */
+  toolOffer(id: string): { tool: string; label: string; downloadBytes: number } | null {
+    const tool = this.tool(id);
+    return tool && this.allowInstalls ? { tool: tool.id, label: tool.label, downloadBytes: tool.downloadBytes } : null;
   }
 
   /** What a package manager works with, for this workspace, crediting `by`. */
@@ -650,6 +832,7 @@ export class Runner {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.unsubscribeTools();
     for (const t of this.idle.values()) clearTimeout(t);
     this.idle.clear();
     for (const path of new Set([...this.queues.keys(), ...this.active.keys()])) this.interrupt(path);
@@ -657,6 +840,10 @@ export class Runner {
     this.sessions.clear();
     await Promise.all(sessions.map((s) => this.stopSession(s)));
   }
+}
+
+function refused(message: string): { ok: false; message: string; done: Promise<ToolResult> } {
+  return { ok: false, message, done: Promise.resolve({ ok: false, message, log: '' }) };
 }
 
 /** Merge adjacent text, and cap its size and the number of outputs. */

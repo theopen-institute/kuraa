@@ -28,7 +28,9 @@ export type RoomMessage =
   | { type: 'run'; run: RunRecord }
   | { type: 'run-session'; session: RunSessionInfo }
   /** A workspace's packages changed (installed, removed, restored). */
-  | { type: 'packages'; engine: string; message: string };
+  | { type: 'packages'; engine: string; message: string }
+  /** A tool (TeX, say) is being downloaded, changed or removed: ask the host how tools stand (GET /api/tools). */
+  | { type: 'tools'; at: string };
 
 // Running code chunks. The host runs them; every client with the document open
 // sees the same runs and outputs. Outputs are never written into the file.

@@ -94,7 +94,7 @@ function str(v: unknown, name: string): string {
 }
 
 /** Who asked, as the client says: a name, an email (for credit) and a colour. Null without a name, unless `anonymous` stands in. */
-function personOf(v: unknown, anonymous?: string): PresenceUser | null {
+export function personOf(v: unknown, anonymous?: string): PresenceUser | null {
   const by = (v && typeof v === 'object' ? v : {}) as { name?: unknown; email?: unknown; color?: unknown };
   const name = typeof by.name === 'string' ? by.name : anonymous;
   if (name === undefined) return null;

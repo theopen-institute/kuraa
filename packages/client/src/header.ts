@@ -8,6 +8,7 @@ import { Document, isMap, isScalar, parseDocument, stringify } from 'yaml';
 import { DELIBERATE_EDIT, type HeaderField, type HeaderSpec } from '@kuraa/editor-kit';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
+import { S } from './strings.js';
 
 export type Kind = HeaderField['kind'];
 export type Value = string | string[] | boolean | number | null;
@@ -64,7 +65,7 @@ const firstLine = (message: string) => message.split('\n')[0]!.trim();
 function parse(text: string): { doc: Document } | { error: string } {
   const doc = parseDocument(text);
   if (doc.errors.length) return { error: firstLine(doc.errors[0]!.message) };
-  if (doc.contents !== null && !isMap(doc.contents)) return { error: 'The header is not a list of fields (name: value), so it can only be edited as YAML.' };
+  if (doc.contents !== null && !isMap(doc.contents)) return { error: S.header.notFields };
   return { doc };
 }
 

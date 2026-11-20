@@ -2,9 +2,11 @@
 // Adding a workspace to a hub: a new one (a folder of its own, made a git
 // repository), or one someone shared, joined with the invite link they gave
 // (kuraa-invite:…).
-import { computed, ref } from 'vue';
+import { computed, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HubApi, HubWorkspace } from './api.js';
-import { onEscape, vFocus } from './vue.js';
+import { S } from './strings.js';
+import { useDialog, vFocus } from './vue.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ hub: HubApi }>();
 const emit = defineEmits<{ added: [workspace: HubWorkspace]; cancel: [] }>();
@@ -13,22 +15,23 @@ const mode = ref<'new' | 'join'>('new');
 const name = ref('');
 const invitation = ref('');
 const busy = ref(false);
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
 
 const isLink = computed(() => invitation.value.trim().startsWith('kuraa-invite:'));
 
-onEscape(() => {
+const root = useTemplateRef<HTMLElement>('root');
+useDialog(root, () => {
   if (!busy.value) emit('cancel');
 });
 
 async function submit() {
   error.value = null;
   if (mode.value === 'new' && !name.value.trim()) {
-    error.value = 'Give the workspace a name.';
+    error.value = S.addWorkspace.needsName;
     return;
   }
   if (mode.value === 'join' && !isLink.value) {
-    error.value = 'Paste the invite link someone gave you (it starts with kuraa-invite:).';
+    error.value = S.addWorkspace.needsLink;
     return;
   }
   busy.value = true;
@@ -36,7 +39,7 @@ async function submit() {
     const w = mode.value === 'new' ? await props.hub.create(name.value) : await props.hub.join(invitation.value.trim(), name.value);
     emit('added', w);
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   } finally {
     busy.value = false;
   }
@@ -45,18 +48,18 @@ async function submit() {
 
 <template>
   <div class="modal-backdrop" @mousedown.self="!busy && emit('cancel')">
-    <form class="modal naming add-workspace" role="dialog" aria-modal="true" aria-label="Add a workspace" data-testid="add-workspace" @submit.prevent="submit">
-      <h2>Add a workspace</h2>
-      <div class="segmented" aria-label="How">
-        <button type="button" :class="{ active: mode === 'new' }" :aria-pressed="mode === 'new'" data-testid="add-workspace-new" :disabled="busy" @click="mode = 'new'; error = null">A new folder</button>
-        <button type="button" :class="{ active: mode === 'join' }" :aria-pressed="mode === 'join'" data-testid="add-workspace-join" :disabled="busy" @click="mode = 'join'; error = null">Join from an invite link</button>
+    <form ref="root" class="modal naming add-workspace" role="dialog" aria-modal="true" aria-labelledby="add-workspace-title" data-testid="add-workspace" @submit.prevent="submit">
+      <h2 id="add-workspace-title">{{ S.addWorkspace.title }}</h2>
+      <div class="segmented" role="group" :aria-label="S.addWorkspace.how">
+        <button type="button" :class="{ active: mode === 'new' }" :aria-pressed="mode === 'new'" data-testid="add-workspace-new" :disabled="busy" @click="mode = 'new'; error = null">{{ S.addWorkspace.newFolder }}</button>
+        <button type="button" :class="{ active: mode === 'join' }" :aria-pressed="mode === 'join'" data-testid="add-workspace-join" :disabled="busy" @click="mode = 'join'; error = null">{{ S.addWorkspace.join }}</button>
       </div>
       <p class="naming-hint">
-        <template v-if="mode === 'new'">A folder of its own, kept with git. Files you make in it are committed as you work.</template>
-        <template v-else>Paste the invite link someone gave you. Your copy syncs with everyone else’s: what you do reaches them, and what they do reaches you.</template>
+        <template v-if="mode === 'new'">{{ S.addWorkspace.newAbout }}</template>
+        <template v-else>{{ S.addWorkspace.joinAbout }}</template>
       </p>
       <label v-if="mode === 'join'" class="field">
-        <span>Invite link</span>
+        <span>{{ S.addWorkspace.link }}</span>
         <textarea
           v-model="invitation"
           v-focus
@@ -70,23 +73,23 @@ async function submit() {
         />
       </label>
       <label class="field">
-        <span>Name</span>
+        <span>{{ S.addWorkspace.name }}</span>
         <input
           v-model="name"
           v-focus="mode === 'new'"
           name="name"
-          :placeholder="mode === 'new' ? 'Field notes' : 'What to call it here'"
+          :placeholder="mode === 'new' ? S.addWorkspace.namePlaceholder : S.addWorkspace.joinNamePlaceholder"
           data-testid="add-workspace-name"
           :disabled="busy"
           @input="error = null"
         >
       </label>
-      <p v-if="busy && mode === 'join'" class="naming-hint" role="status">Looking for a device of the workspace to let this one in…</p>
-      <p v-if="error" class="naming-error" role="alert">{{ error }}</p>
+      <p v-if="busy && mode === 'join'" class="naming-hint" role="status">{{ S.addWorkspace.looking }}</p>
+      <ErrorBanner v-if="error" :error="error" inline class="naming-error" />
       <div class="modal-actions">
-        <button type="button" :disabled="busy" @click="emit('cancel')">Cancel</button>
+        <button type="button" :disabled="busy" @click="emit('cancel')">{{ S.common.cancel }}</button>
         <button type="submit" class="primary" data-testid="add-workspace-submit" :disabled="busy">
-          {{ busy ? (mode === 'new' ? 'Creating…' : 'Joining…') : mode === 'new' ? 'Create' : 'Join' }}
+          {{ busy ? (mode === 'new' ? S.addWorkspace.creating : S.addWorkspace.joining) : mode === 'new' ? S.addWorkspace.create : S.addWorkspace.joinButton }}
         </button>
       </div>
     </form>

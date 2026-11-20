@@ -5,6 +5,7 @@
 import { ref } from 'vue';
 import type { HubWorkspace } from './api.js';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
+import { S } from './strings.js';
 
 const props = defineProps<{
   workspaces: HubWorkspace[];
@@ -28,14 +29,14 @@ function open(e: MouseEvent) {
   const label = (w: HubWorkspace) => (w.id === props.current ? props.name : w.name);
   const items: ContextItem[] = [
     ...props.workspaces.map((w) => ({
-      label: `${w.id === props.current ? '✓ ' : ''}${label(w)}${w.error ? (props.canAdd ? ' (cannot open: remove…)' : ' (cannot open)') : w.peers ? ' · synced' : ''}`,
+      label: `${w.id === props.current ? '✓ ' : ''}${label(w)}${w.error ? (props.canAdd ? S.workspaceSwitcher.cannotOpenRemove : S.workspaceSwitcher.cannotOpen) : w.peers ? S.workspaceSwitcher.synced : ''}`,
       run: () => emit('switch', w.id),
       testid: `workspace:${w.id}`,
     })),
-    ...(current && !current.error && props.canInvite ? [{ label: `Invite people to “${label(current)}”…`, run: () => emit('invite'), testid: 'workspace-invite' }] : []),
-    ...(props.canAdd ? [{ label: 'Add a workspace…', run: () => emit('add'), testid: 'workspace-add' }] : []),
-    ...(props.canAdd && props.canOpenFolder ? [{ label: 'Open a folder…', run: () => emit('openFolder'), testid: 'workspace-open-folder' }] : []),
-    ...(current && props.canAdd ? [{ label: `Remove “${label(current)}” from this list…`, run: () => emit('remove', current.id), danger: true, testid: 'workspace-remove' }] : []),
+    ...(current && !current.error && props.canInvite ? [{ label: S.workspaceSwitcher.invite(label(current)), run: () => emit('invite'), testid: 'workspace-invite' }] : []),
+    ...(props.canAdd ? [{ label: S.workspaceSwitcher.add, run: () => emit('add'), testid: 'workspace-add' }] : []),
+    ...(props.canAdd && props.canOpenFolder ? [{ label: S.workspaceSwitcher.openFolder, run: () => emit('openFolder'), testid: 'workspace-open-folder' }] : []),
+    ...(current && props.canAdd ? [{ label: S.workspaceSwitcher.remove(label(current)), run: () => emit('remove', current.id), danger: true, testid: 'workspace-remove' }] : []),
   ];
   menu.value = { x: box.left, y: box.bottom + 4, items };
 }

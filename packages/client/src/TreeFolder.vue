@@ -1,32 +1,44 @@
 <script setup lang="ts">
 // One folder's contents in the sidebar: its folders (each drawn by this same
 // component), then its files: documents by title, other files by filename.
+// Each row is a tree item (FileTree.vue has the keys); one of them is in the
+// Tab order at a time, and the arrows move between them.
 import { computed, inject } from 'vue';
 import type { TreeFile } from './api.js';
-import { shownName, TREE, type Folder } from './tree.js';
+import { foldersOf, shownName, TREE, type Folder } from './tree.js';
+import { S } from './strings.js';
 import FileIcon from './FileIcon.vue';
 
 const props = defineProps<{ folder: Folder; depth: number }>();
 const t = inject(TREE)!;
-const { selected, collapsed, dragging, over } = t;
+const { selected, collapsed, dragging, over, tabStop } = t;
 
-const folders = computed(() => [...props.folder.folders.values()].sort((a, b) => a.name.localeCompare(b.name)));
+const folders = computed(() => foldersOf(props.folder));
 const indent = computed(() => ({ paddingLeft: `${8 + props.depth * 14}px` }));
 /** A document still without a title shows its filename, dimmed. */
 const untitled = (f: TreeFile) => f.title === null;
 const tip = (f: TreeFile) => {
   if (f.cannotOpen) return `${f.path}: ${f.cannotOpen}`;
-  if (!f.type) return `${f.path}: no document type opens this file`;
-  if (untitled(f)) return `${f.path}: no title yet (Rename… or Header… gives it one)`;
+  if (!f.type) return S.tree.noType(f.path);
+  if (untitled(f)) return S.tree.untitled(f.path);
   return f.title ? `${f.title}\n${f.path}` : f.path;
 };
+/** What a file row is called to a screen reader: its name, and its conflicts if it has any. */
+const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.conflicts(f.conflicts)}` : shownName(f));
 </script>
 
 <template>
   <li
     v-for="f in folders"
     :key="`d:${f.path}`"
+    role="treeitem"
+    :aria-expanded="!collapsed.has(f.path)"
+    :aria-level="depth + 1"
+    :aria-label="f.name"
+    :tabindex="tabStop === f.path ? 0 : -1"
+    :data-path="f.path"
     :class="['tree-dir', { 'drop-target': over === f.path, dragging: dragging === f.path }]"
+    @focus.self="t.focused(f.path)"
     @dragover="t.dragOver($event, f.path)"
     @drop="t.drop($event, f.path)"
   >
@@ -37,47 +49,48 @@ const tip = (f: TreeFile) => {
       @dragstart="t.dragStart($event, f.path)"
       @dragend="t.dragEnd()"
       @contextmenu="t.contextMenu($event, f.path, 'folder')"
+      @click="t.toggle(f.path)"
     >
-      <button type="button" class="tree-row tree-folder" :style="indent" @click="t.toggle(f.path)">
-        <span class="tree-icon">{{ collapsed.has(f.path) ? '▸' : '▾' }}</span>{{ f.name }}
-      </button>
+      <span class="tree-row tree-folder" :style="indent">
+        <span class="tree-icon" aria-hidden="true">{{ collapsed.has(f.path) ? '▸' : '▾' }}</span>{{ f.name }}
+      </span>
       <span class="tree-actions">
-        <button type="button" :title="`New file in ${f.name}`" :aria-label="`New file in ${f.name}`" @click="t.create(f.path)">＋</button>
-        <button type="button" :title="`New folder in ${f.name}`" :aria-label="`New folder in ${f.name}`" @click="t.newFolder(f.path)">⊞</button>
+        <button type="button" tabindex="-1" :title="S.tree.newFileIn(f.name)" :aria-label="S.tree.newFileIn(f.name)" @click.stop="t.create(f.path)">＋</button>
+        <button type="button" tabindex="-1" :title="S.tree.newFolderIn(f.name)" :aria-label="S.tree.newFolderIn(f.name)" @click.stop="t.newFolder(f.path)">⊞</button>
       </span>
     </div>
-    <ul v-if="!collapsed.has(f.path)"><TreeFolder :folder="f" :depth="depth + 1" /></ul>
+    <ul v-if="!collapsed.has(f.path)" role="group"><TreeFolder :folder="f" :depth="depth + 1" /></ul>
   </li>
   <li
     v-for="f in folder.files"
     :key="f.path"
+    role="treeitem"
+    :aria-level="depth + 1"
+    :aria-label="fileLabel(f)"
+    :aria-current="selected === f.path ? 'page' : undefined"
+    :tabindex="tabStop === f.path ? 0 : -1"
+    :data-path="f.path"
     :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path, 'has-conflicts': !!f.conflicts }]"
     draggable="true"
+    @focus.self="t.focused(f.path)"
     @dragstart="t.dragStart($event, f.path)"
     @dragend="t.dragEnd()"
     @contextmenu="t.contextMenu($event, f.path, 'file')"
+    @click="f.type && t.select(f.path)"
   >
-    <button
-      type="button"
-      class="tree-row"
-      :style="indent"
-      :disabled="!f.type"
-      :title="tip(f)"
-      :data-testid="`file:${f.path}`"
-      @click="t.select(f.path)"
-    >
+    <div class="tree-row" :style="indent" :title="tip(f)" :data-testid="`file:${f.path}`">
       <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>
       <span
         v-if="f.conflicts"
         class="tree-conflict"
         :data-testid="`conflicts:${f.path}`"
-        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between. Click to go to the first`"
+        :title="S.tree.conflictsTitle(f.conflicts)"
         @click.stop="t.showConflicts(f.path)"
-      >{{ f.conflicts }} conflict{{ f.conflicts === 1 ? '' : 's' }}</span>
-    </button>
+      >{{ S.tree.conflicts(f.conflicts) }}</span>
+    </div>
     <span class="tree-actions">
-      <button type="button" title="Rename" @click="t.rename(f.path)">✎</button>
-      <button type="button" title="Delete" @click="t.remove(f.path)">✕</button>
+      <button type="button" tabindex="-1" :title="S.common.rename" :aria-label="S.common.rename" @click.stop="t.rename(f.path)">✎</button>
+      <button type="button" tabindex="-1" :title="S.common.delete" :aria-label="S.common.delete" @click.stop="t.remove(f.path)">✕</button>
     </span>
   </li>
 </template>

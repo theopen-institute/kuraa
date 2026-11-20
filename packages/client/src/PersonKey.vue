@@ -8,6 +8,7 @@
 import { onMounted, ref, shallowRef } from 'vue';
 import type { PersonInfo, PersonShell } from './shell.js';
 import { ensureIdentity } from './hostPerson.js';
+import { S } from './strings.js';
 
 const props = defineProps<{ person: PersonShell; displayName: string }>();
 
@@ -33,17 +34,15 @@ async function done(error: string | null, what: string) {
 }
 
 async function importIdentity() {
-  if (line.value.trim()) await done(await props.person.import(line.value.trim()), `Your identity is here now. ${props.person.afterChange}`);
+  if (line.value.trim()) await done(await props.person.import(line.value.trim()), S.person.imported(props.person.afterChange));
 }
 
 async function copy() {
-  message.value = (await props.person.copy())
-    ? { ok: true, text: 'Copied. Paste it under Advanced on your other computer. Anyone with it can vouch for keys as you: send it privately.' }
-    : { ok: false, text: 'Nothing to copy.' };
+  message.value = (await props.person.copy()) ? { ok: true, text: S.person.copied } : { ok: false, text: S.person.nothing };
 }
 
 async function revoke(key: string) {
-  await done(await props.person.revoke(key), `${key.slice(0, 8)}… is no longer yours: what it signs stops counting as yours on each device as your workspaces tell it, as they next save (work a device already has stays yours).`);
+  await done(await props.person.revoke(key), S.person.revoked(`${key.slice(0, 8)}…`));
 }
 
 const short = (k: string) => `${k.slice(0, 8)}…`;
@@ -52,30 +51,30 @@ const short = (k: string) => `${k.slice(0, 8)}…`;
 <template>
   <div v-if="me" class="person-key" data-testid="person-key">
     <p class="menu-facts" data-testid="you-here">
-      <template v-if="me.identity">You on this computer: <strong>{{ me.identity.name }}</strong>. What you save here is marked as yours.</template>
-      <template v-else>Set your name above, and what you save here is marked as yours.</template>
+      <template v-if="me.identity">{{ S.person.here }}<strong>{{ me.identity.name }}</strong>{{ S.person.marked }}</template>
+      <template v-else>{{ S.person.setName }}</template>
     </p>
     <details class="person-advanced" data-testid="person-advanced">
-      <summary>Advanced</summary>
-      <p class="menu-facts">This computer's signing key, for you: <code :title="me.signing" data-testid="signing-key">{{ short(me.signing) }}</code>. It was made here, never leaves, and signs what you save here.</p>
+      <summary>{{ S.person.advanced }}</summary>
+      <p class="menu-facts">{{ S.person.signing }}<code :title="me.signing" data-testid="signing-key">{{ short(me.signing) }}</code>{{ S.person.signingAbout }}</p>
       <template v-if="me.identity">
         <p class="menu-facts" data-testid="identity">
-          Your identity <code :title="me.identity.key">{{ short(me.identity.key) }}</code> vouches for your signing keys, so your work counts as yours from each of your computers.
+          {{ S.person.identity }}<code :title="me.identity.key">{{ short(me.identity.key) }}</code>{{ S.person.identityAbout }}
         </p>
         <ul v-if="me.keys.length > 1" class="person-keys">
           <li v-for="k in me.keys" :key="k.key" :data-testid="`key:${k.key.slice(0, 8)}`">
             <code :title="k.key">{{ short(k.key) }}</code>
-            <span v-if="k.thisComputer" class="muted">this computer</span>
-            <button v-else type="button" @click="revoke(k.key)">Revoke</button>
+            <span v-if="k.thisComputer" class="muted">{{ S.person.thisComputer }}</span>
+            <button v-else type="button" @click="revoke(k.key)">{{ S.person.revoke }}</button>
           </li>
         </ul>
-        <p class="menu-facts">To use another computer as you, copy your identity here and import it there. Keep a copy somewhere safe: a lost one cannot be recovered.</p>
-        <div class="menu-actions"><button type="button" data-testid="person-copy" @click="copy">Copy identity</button></div>
+        <p class="menu-facts">{{ S.person.toUseAnother }}</p>
+        <div class="menu-actions"><button type="button" data-testid="person-copy" @click="copy">{{ S.person.copy }}</button></div>
       </template>
-      <p class="menu-facts">On a second computer: paste the identity copied on your first, so both count as you. It replaces the one made here.</p>
+      <p class="menu-facts">{{ S.person.second }}</p>
       <form class="person-row" @submit.prevent="importIdentity">
-        <input v-model="line" placeholder="kuraa-id:… (Copy identity on your other computer)" spellcheck="false" aria-label="Your identity, from another computer" data-testid="person-line">
-        <button type="submit" data-testid="person-import">Import</button>
+        <input v-model="line" :placeholder="S.person.linePlaceholder" spellcheck="false" :aria-label="S.person.lineLabel" data-testid="person-line">
+        <button type="submit" data-testid="person-import">{{ S.person.import }}</button>
       </form>
     </details>
     <p v-if="message" :class="['menu-facts', message.ok ? '' : 'person-error']" data-testid="person-status" role="status">{{ message.text }}</p>

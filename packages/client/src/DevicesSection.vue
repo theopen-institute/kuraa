@@ -6,12 +6,14 @@
 import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
+import { S } from './strings.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ api: HostApi }>();
 const emit = defineEmits<{ invite: [] }>();
 const info = shallowRef<PeersInfo | null>(null);
 const busy = ref(false);
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
 
 async function load() {
   try {
@@ -29,7 +31,7 @@ onBeforeUnmount(() => clearInterval(timer));
 
 type Device = Extract<PeersInfo, { enabled: true }>['devices'][number];
 /** A device as people know it: whose it is, and which computer. */
-const label = (d: { name: string; person: string | null }) => (d.person ? `${d.person} on ${d.name}` : d.name);
+const label = (d: { name: string; person: string | null }) => (d.person ? S.devices.on(d.person, d.name) : d.name);
 
 async function act(fn: () => Promise<unknown>) {
   busy.value = true;
@@ -38,23 +40,19 @@ async function act(fn: () => Promise<unknown>) {
     await fn();
     await load();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   } finally {
     busy.value = false;
   }
 }
 
 async function remove(d: Device) {
-  const ok = await askConfirm(
-    `Remove ${label(d)} from this workspace? This is permanent: it will no longer sync with anyone here, and cannot join again with an old link. Whoever uses it keeps their copy of everything up to now.`,
-    'Remove',
-    true,
-  );
+  const ok = await askConfirm(S.devices.removeAsk(label(d)), S.common.remove, true);
   if (ok) await act(() => props.api.removeDevice(d.key));
 }
 
 async function rename(current: string) {
-  const name = (await askText('What should this computer be called here?', current, 'Rename'))?.trim();
+  const name = (await askText(S.devices.renameAsk, current, S.common.rename))?.trim();
   if (name && name !== current) await act(() => props.api.renameDevice(name));
 }
 
@@ -63,31 +61,31 @@ const online = (i: Extract<PeersInfo, { enabled: true }>) => i.devices.filter((d
 
 <template>
   <section v-if="info && !info.enabled && info.canInvite" class="menu-section" data-testid="devices">
-    <h3>Devices</h3>
-    <p class="menu-facts">This workspace is on this computer only. Invite people to work on it with you, from their own computers.</p>
-    <div class="menu-actions"><button type="button" data-testid="invite-button" @click="emit('invite')">Invite people…</button></div>
+    <h3>{{ S.devices.title }}</h3>
+    <p class="menu-facts">{{ S.devices.alone }}</p>
+    <div class="menu-actions"><button type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button></div>
   </section>
   <section v-if="info?.enabled" class="menu-section" data-testid="devices">
-    <h3>Devices</h3>
+    <h3>{{ S.devices.title }}</h3>
     <p class="menu-facts" data-testid="this-device">
-      You are on {{ info.device.name }}.
-      <template v-if="info.devices.length">{{ online(info) }} of {{ info.devices.length }} other device{{ info.devices.length === 1 ? '' : 's' }} online.</template>
-      <template v-else>No one else has joined yet.</template>
+      {{ S.devices.youAreOn(info.device.name) }}
+      <template v-if="info.devices.length">{{ S.devices.online(online(info), info.devices.length) }}</template>
+      <template v-else>{{ S.devices.nobody }}</template>
     </p>
     <ul v-if="info.devices.length" class="menu-devices">
       <li v-for="d in info.devices" :key="d.key" :data-testid="`device:${d.name}`">
         <span :class="['device-dot', { online: d.online }]" aria-hidden="true" />
         <span class="device-who">{{ label(d) }}</span>
-        <span v-if="d.related" class="device-tag" title="A separate copy made from this workspace: its work does not come in on its own.">separate copy</span>
-        <span v-if="d.otherVersion" class="device-tag" title="It runs another version of kuraa, which merges differently. Work done apart still comes together: one of the two makes the merges, and the other takes them.">other version</span>
-        <span class="device-state">{{ d.online ? 'online' : 'offline' }}</span>
-        <button v-if="info.canInvite" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">Remove…</button>
+        <span v-if="d.related" class="device-tag" :title="S.devices.separateTitle">{{ S.devices.separate }}</span>
+        <span v-if="d.otherVersion" class="device-tag" :title="S.devices.otherVersionTitle">{{ S.devices.otherVersion }}</span>
+        <span class="device-state">{{ d.online ? S.devices.isOnline : S.devices.isOffline }}</span>
+        <button v-if="info.canInvite" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
       </li>
     </ul>
     <div v-if="info.canInvite" class="menu-actions">
-      <button type="button" data-testid="invite-button" @click="emit('invite')">Invite people…</button>
-      <button type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">Rename this computer…</button>
+      <button type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button>
+      <button type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">{{ S.devices.rename }}</button>
     </div>
-    <p v-if="error" class="banner warn">{{ error }}</p>
+    <ErrorBanner v-if="error" :error="error" inline />
   </section>
 </template>

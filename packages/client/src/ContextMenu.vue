@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// A menu at the pointer, for right-clicks: closed by choosing, clicking
-// elsewhere, Escape, or scrolling. Arrow keys move between its items.
+// A menu at the pointer, for right-clicks (or by a row, from the keyboard):
+// closed by choosing, clicking elsewhere, Escape, or scrolling. Arrow keys,
+// Home and End move between its items. Choosing, or Escape, gives focus back to
+// what had it (the row it was opened on), before what was chosen runs.
 import { onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue';
 
 export interface ContextItem {
@@ -15,8 +17,14 @@ const emit = defineEmits<{ close: [] }>();
 
 const menu = useTemplateRef<HTMLDivElement>('menu');
 const pos = ref({ left: `${props.x}px`, top: `${props.y}px` });
+/** What had focus when it opened: it gets it back. */
+const opener = document.activeElement as HTMLElement | null;
+const giveBack = () => {
+  if (opener?.isConnected) opener.focus();
+};
 
 function choose(item: ContextItem) {
+  giveBack();
   emit('close');
   item.run();
 }
@@ -27,12 +35,20 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
+    giveBack();
     emit('close');
   } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     const step = e.key === 'ArrowDown' ? 1 : -1;
     buttons[(at + step + buttons.length) % buttons.length]?.focus();
-  } else if (e.key === 'Tab') emit('close');
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    buttons[e.key === 'Home' ? 0 : buttons.length - 1]?.focus();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    giveBack();
+    emit('close');
+  }
 }
 
 const outside = (e: Event) => {
@@ -70,6 +86,7 @@ onBeforeUnmount(() => {
       :key="item.label"
       type="button"
       role="menuitem"
+      tabindex="-1"
       :class="{ danger: item.danger }"
       :data-testid="item.testid"
       @click="choose(item)"

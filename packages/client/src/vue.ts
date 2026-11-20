@@ -1,5 +1,6 @@
 // Small Vue helpers for the client's components.
-import { onScopeDispose, shallowRef, triggerRef, watch, type Directive, type ShallowRef } from 'vue';
+import { onBeforeUnmount, onMounted, shallowRef, triggerRef, watch, type Directive, type Ref, type ShallowRef } from 'vue';
+import { trapFocus } from './focus.js';
 
 /**
  * An object that changes outside Vue and says so through subscribe (the chunk
@@ -22,11 +23,32 @@ export const vFocus: Directive<HTMLElement, boolean | undefined> = {
   },
 };
 
-/** Close on Escape while mounted. */
-export function onEscape(fn: () => void): void {
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') fn();
-  };
-  window.addEventListener('keydown', onKey);
-  onScopeDispose(() => window.removeEventListener('keydown', onKey));
+/**
+ * Make the element in `root` a modal dialog while it is mounted (focus.ts): Tab
+ * stays inside it, Escape calls `onEscape`, focus moves into it, and goes back
+ * where it was when it closes. The element itself carries role="dialog" (or
+ * "alertdialog"), aria-modal and a label.
+ */
+export function useDialog(root: Readonly<Ref<HTMLElement | null>>, onEscape?: () => void): void {
+  let release: (() => void) | null = null;
+  // Where focus was before the dialog's fields (v-focus) took it.
+  const previous = document.activeElement as HTMLElement | null;
+  onMounted(() => {
+    if (root.value) release = trapFocus(root.value, { onEscape, previous });
+  });
+  onBeforeUnmount(() => {
+    release?.();
+    release = null;
+  });
+}
+
+/**
+ * For a panel beside the document (Search, Preview): not modal, but when it
+ * closes with focus inside it, focus goes back where it was before it opened.
+ */
+export function useReturnFocus(root: Readonly<Ref<HTMLElement | null>>): void {
+  const previous = document.activeElement as HTMLElement | null;
+  onBeforeUnmount(() => {
+    if (root.value?.contains(document.activeElement) && previous?.isConnected) previous.focus();
+  });
 }

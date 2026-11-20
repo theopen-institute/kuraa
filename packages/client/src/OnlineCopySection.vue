@@ -9,6 +9,8 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, OnlineCopyInfo } from './api.js';
 import { time } from './labels.js';
+import { S } from './strings.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ api: HostApi }>();
 const copies = shallowRef<OnlineCopyInfo[]>([]);
@@ -16,7 +18,7 @@ const canManage = ref(false);
 const known = ref(false);
 const target = ref('');
 const busy = ref(false);
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
 
 async function load() {
   try {
@@ -39,7 +41,7 @@ async function act(fn: () => Promise<OnlineCopyInfo[]>) {
   try {
     copies.value = await fn();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   } finally {
     busy.value = false;
   }
@@ -51,29 +53,29 @@ async function add() {
   if (!error.value) target.value = '';
 }
 
-const state = (c: OnlineCopyInfo) => (c.busy ? 'syncing…' : c.error ? 'not up to date' : c.lastSync ? `up to date ${time(c.lastSync)}` : 'not yet');
+const state = (c: OnlineCopyInfo) => (c.busy ? S.online.syncing : c.error ? S.online.behind : c.lastSync ? S.online.upToDate(time(c.lastSync)) : S.online.notYet);
 </script>
 
 <template>
   <section v-if="known && (copies.length || canManage)" class="menu-section" data-testid="online-copy">
-    <h3>Online copy</h3>
-    <p class="menu-facts">A copy of this workspace on GitHub, GitLab or any git server. Each save goes there, and Sync brings in what others put there, so you meet even when your computers cannot reach each other.</p>
+    <h3>{{ S.online.title }}</h3>
+    <p class="menu-facts">{{ S.online.about }}</p>
     <ul v-if="copies.length" class="menu-devices">
-      <li v-for="c in copies" :key="c.name" :data-testid="`online:${c.name}`" :title="c.error ?? ''">
+      <li v-for="c in copies" :key="c.name" :data-testid="`online:${c.name}`">
         <span :class="['device-dot', { online: !c.error && !!c.lastSync }]" aria-hidden="true" />
         <code class="device-who">{{ c.url }}</code>
         <span class="device-state">{{ state(c) }}</span>
-        <button v-if="canManage" type="button" :disabled="busy" @click="act(() => api.removeOnline(c.name))">Remove</button>
+        <button v-if="canManage" type="button" :disabled="busy" @click="act(() => api.removeOnline(c.name))">{{ S.common.remove }}</button>
       </li>
     </ul>
-    <p v-for="c in copies.filter((x) => x.error)" :key="`e-${c.name}`" class="menu-facts person-error">{{ c.error }}</p>
+    <ErrorBanner v-for="c in copies.filter((x) => x.error)" :key="`e-${c.name}`" :error="c.error" inline />
     <template v-if="canManage && !copies.length">
       <form class="person-row" @submit.prevent="add">
-        <input v-model="target" placeholder="git@github.com:you/notes.git" spellcheck="false" aria-label="The address of a git repository for the online copy" data-testid="online-target">
-        <button type="submit" :disabled="busy" data-testid="online-add">Add</button>
+        <input v-model="target" placeholder="git@github.com:you/notes.git" spellcheck="false" :aria-label="S.online.address" data-testid="online-target">
+        <button type="submit" :disabled="busy" data-testid="online-add">{{ S.online.add }}</button>
       </form>
-      <p class="menu-facts">Make an empty repository on GitHub or GitLab first, and paste its address. Your own git sign-in is used (an SSH key, or a credential helper for https).</p>
+      <p class="menu-facts">{{ S.online.how }}</p>
     </template>
-    <p v-if="error" class="banner warn">{{ error }}</p>
+    <ErrorBanner v-if="error" :error="error" inline />
   </section>
 </template>

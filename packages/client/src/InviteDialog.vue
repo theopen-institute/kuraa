@@ -5,32 +5,35 @@
 // read and change everything, and may invite and remove others; the dialog
 // says so. Making one turns syncing on, if it was not. The links made here are
 // listed, to revoke.
-import { computed, onMounted, ref, shallowRef } from 'vue';
+import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HostApi, InviteLinkInfo } from './api.js';
-import { onEscape } from './vue.js';
+import { S } from './strings.js';
+import { useDialog } from './vue.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ api: HostApi; workspace: string; syncing: boolean }>();
 const emit = defineEmits<{ close: [] }>();
-onEscape(() => emit('close'));
+const root = useTemplateRef<HTMLElement>('root');
+useDialog(root, () => emit('close'));
 
 const forWhom = ref<'one' | 'anyone'>('one');
 const EXPIRY = [
-  { label: 'a day', hours: 24 },
-  { label: 'a week', hours: 24 * 7 },
-  { label: 'never', hours: null },
+  { label: S.invite.inA(S.invite.day), hours: 24 },
+  { label: S.invite.inA(S.invite.week), hours: 24 * 7 },
+  { label: S.invite.never, hours: null },
 ] as const;
 const expiry = ref(1);
 const made = shallowRef<{ code: string; once: boolean; expires: number } | null>(null);
 const links = shallowRef<InviteLinkInfo[]>([]);
 const busy = ref(false);
 const copied = ref(false);
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
 
 async function loadLinks() {
   try {
     links.value = (await props.api.peerLinks()).slice().reverse();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   }
 }
 onMounted(loadLinks);
@@ -44,7 +47,7 @@ async function create() {
     made.value = { code: r.link, once: r.once, expires: r.expires };
     await loadLinks();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   } finally {
     busy.value = false;
   }
@@ -67,71 +70,69 @@ async function revoke(id: string) {
     await props.api.revokeLink(id);
     await loadLinks();
   } catch (e) {
-    error.value = (e as Error).message;
+    error.value = e;
   }
 }
 
 const when = (ms: number) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-const until = computed(() => (made.value ? (made.value.expires ? `until ${when(made.value.expires)}` : 'with no expiry') : ''));
-const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? 'used' : l.state === 'revoked' ? 'revoked' : l.state === 'expired' ? 'expired' : l.expires ? `until ${when(l.expires)}` : 'no expiry');
+const until = computed(() => (made.value ? (made.value.expires ? S.invite.until(when(made.value.expires)) : S.invite.noExpiry) : ''));
+const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.state === 'revoked' ? S.invite.revoked : l.state === 'expired' ? S.invite.expired : l.expires ? S.invite.until(when(l.expires)) : S.invite.noExpiryShort);
 </script>
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('close')">
-    <div class="modal naming invite" role="dialog" aria-modal="true" aria-label="Invite people" data-testid="invite">
-      <h2>Invite people to {{ workspace }}</h2>
+    <div ref="root" class="modal naming invite" role="dialog" aria-modal="true" aria-labelledby="invite-title" data-testid="invite">
+      <h2 id="invite-title">{{ S.invite.title(workspace) }}</h2>
       <p class="naming-hint">
-        Whoever joins gets a copy of this workspace that syncs with yours, and the same say as you: they can read and change everything,
-        invite others, and remove anyone. Share a link only with people you trust with that.
-        <template v-if="!syncing && !made"> Making one turns on syncing for this workspace.</template>
+        {{ S.invite.about }}<template v-if="!syncing && !made">{{ S.invite.turnsOn }}</template>
       </p>
 
       <template v-if="!made">
-        <div class="segmented" aria-label="Who it is for">
-          <button type="button" :class="{ active: forWhom === 'one' }" :aria-pressed="forWhom === 'one'" data-testid="invite-once" @click="forWhom = 'one'">One person</button>
-          <button type="button" :class="{ active: forWhom === 'anyone' }" :aria-pressed="forWhom === 'anyone'" data-testid="invite-anyone" @click="forWhom = 'anyone'">Anyone with the link</button>
+        <div class="segmented" role="group" :aria-label="S.invite.forWhom">
+          <button type="button" :class="{ active: forWhom === 'one' }" :aria-pressed="forWhom === 'one'" data-testid="invite-once" @click="forWhom = 'one'">{{ S.invite.one }}</button>
+          <button type="button" :class="{ active: forWhom === 'anyone' }" :aria-pressed="forWhom === 'anyone'" data-testid="invite-anyone" @click="forWhom = 'anyone'">{{ S.invite.anyone }}</button>
         </div>
         <label class="field">
-          <span>Expires</span>
+          <span>{{ S.invite.expires }}</span>
           <select v-model="expiry" data-testid="invite-expiry">
-            <option v-for="(e, i) in EXPIRY" :key="e.label" :value="i">{{ e.label === 'never' ? 'never' : `in ${e.label}` }}</option>
+            <option v-for="(e, i) in EXPIRY" :key="e.label" :value="i">{{ e.label }}</option>
           </select>
         </label>
         <p class="naming-hint">
-          <template v-if="forWhom === 'one'">The first person to use it joins; after that it lets no one else in.</template>
-          <template v-else>Anyone with the link can join, as often as it is used, until it expires or you revoke it.</template>
-          Any of the workspace’s devices that is running can let them in.
+          <template v-if="forWhom === 'one'">{{ S.invite.oneAbout }}</template>
+          <template v-else>{{ S.invite.anyoneAbout }}</template>
+          {{ S.invite.anyDevice }}
         </p>
       </template>
 
       <template v-else>
         <label class="field">
-          <span>{{ made.once ? `The link, for one person, ${until}` : `The link, for anyone with it, ${until}` }}</span>
+          <span>{{ S.invite.linkFor(made.once, until) }}</span>
           <textarea :value="made.code" readonly rows="4" spellcheck="false" data-testid="invite-code" @focus="($event.target as HTMLTextAreaElement).select()" />
         </label>
-        <p class="naming-hint">They add it in kuraa: <strong>Add a workspace…</strong>, then <strong>Join from an invite link</strong>.</p>
+        <p class="naming-hint">{{ S.invite.howToUse }}</p>
       </template>
 
       <section v-if="links.length" class="invite-links" data-testid="invite-links">
-        <h3>Links made here</h3>
+        <h3>{{ S.invite.made }}</h3>
         <ul>
           <li v-for="l in links" :key="l.id" :data-testid="`link:${l.id}`">
-            <span>{{ l.once ? 'For one person' : 'For anyone' }}, made {{ when(l.created) }}, <span :class="l.state">{{ stateOf(l) }}</span></span>
-            <button v-if="l.state === 'active'" type="button" class="danger" :data-testid="`revoke:${l.id}`" @click="revoke(l.id)">Revoke</button>
+            <span>{{ S.invite.linkRow(l.once, when(l.created)) }}<span :class="l.state">{{ stateOf(l) }}</span></span>
+            <button v-if="l.state === 'active'" type="button" class="danger" :data-testid="`revoke:${l.id}`" @click="revoke(l.id)">{{ S.invite.revoke }}</button>
           </li>
         </ul>
       </section>
 
-      <p v-if="error" class="naming-error" role="alert">{{ error }}</p>
+      <ErrorBanner v-if="error" :error="error" inline class="naming-error" />
       <div class="modal-actions">
         <template v-if="!made">
-          <button type="button" @click="emit('close')">Cancel</button>
-          <button type="button" class="primary" data-testid="invite-create" :disabled="busy" @click="create">{{ busy ? 'Making…' : 'Make the link' }}</button>
+          <button type="button" @click="emit('close')">{{ S.common.cancel }}</button>
+          <button type="button" class="primary" data-testid="invite-create" :disabled="busy" @click="create">{{ busy ? S.invite.making : S.invite.make }}</button>
         </template>
         <template v-else>
-          <button type="button" @click="made = null">Make another</button>
-          <button type="button" data-testid="invite-copy" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
-          <button type="button" class="primary" @click="emit('close')">Done</button>
+          <button type="button" @click="made = null">{{ S.invite.another }}</button>
+          <button type="button" data-testid="invite-copy" @click="copy">{{ copied ? S.common.copied : S.common.copy }}</button>
+          <button type="button" class="primary" @click="emit('close')">{{ S.common.done }}</button>
         </template>
       </div>
     </div>

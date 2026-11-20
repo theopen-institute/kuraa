@@ -6,12 +6,13 @@
 // Saving from Fields writes only the fields changed here, onto the header as it
 // is by then, so someone else's changes to other fields survive. Saving YAML
 // writes the whole header.
-import { computed, nextTick, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { HeaderField, HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
 import { emptyRequired, entryFor, headerText, mergeHeader, readEntries, today, withRequired, writeHeader, yamlError, type Entry } from './header.js';
 import { askConfirm } from './ask.js';
-import { onEscape, vFocus } from './vue.js';
+import { S } from './strings.js';
+import { useDialog, vFocus } from './vue.js';
 import HeaderList from './HeaderList.vue';
 
 const props = defineProps<{
@@ -47,7 +48,7 @@ if ('error' in first) {
 } else entries.value = withRequired(first.entries, props.spec);
 
 const required = (key: string) => !!props.spec.required?.includes(key);
-const needs = (keys: string[]) => (keys.length ? `A document needs a ${keys.map((k) => props.spec.fields.find((f) => f.key === k)?.label.toLowerCase() ?? k).join(' and a ')}.` : null);
+const needs = (keys: string[]) => (keys.length ? S.header.needs(keys.map((k) => props.spec.fields.find((f) => f.key === k)?.label.toLowerCase() ?? k)) : null);
 const yamlProblem = computed(() => {
   if (mode.value !== 'yaml') return null;
   const bad = yamlError(yaml.value);
@@ -139,7 +140,7 @@ const canSave = computed(() => (mode.value === 'yaml' ? !yamlProblem.value : !en
 
 /** Write the whole header, asking first if that would undo someone else's change. */
 async function replace(text: string | null) {
-  if (live() !== opened && !(await askConfirm('Someone changed the header while you were editing it. Save yours over theirs?', 'Save mine'))) return;
+  if (live() !== opened && !(await askConfirm(S.header.overwriteAsk, S.header.saveMine))) return;
   finish(text);
 }
 
@@ -167,7 +168,8 @@ function cancel() {
   props.view.focus();
 }
 
-onEscape(() => {
+const root = useTemplateRef<HTMLElement>('root');
+useDialog(root, () => {
   if (adding.value) adding.value = false;
   else cancel();
 });
@@ -185,29 +187,29 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
 
 <template>
   <div class="modal-backdrop" @mousedown.self="cancel">
-    <form class="modal header-dialog" role="dialog" aria-label="Header" data-testid="header" @submit.prevent="save">
+    <form ref="root" class="modal header-dialog" role="dialog" aria-modal="true" aria-labelledby="header-title" data-testid="header" @submit.prevent="save">
       <div class="header-top">
         <div class="header-heading">
-          <h2>{{ adding ? 'Add a field' : 'Header' }}</h2>
-          <p class="muted">{{ name }} · what Pandoc reads from the top of the file</p>
+          <h2 id="header-title">{{ adding ? S.header.add : S.header.title }}</h2>
+          <p class="muted">{{ S.header.about(name) }}</p>
         </div>
-        <div v-if="!adding" class="segmented" role="tablist" aria-label="Edit as">
-          <button type="button" role="tab" :aria-selected="mode === 'fields'" :class="{ active: mode === 'fields' }" :disabled="!!yamlError(yaml)" data-testid="header-fields-tab" @click="toFields">Fields</button>
-          <button type="button" role="tab" :aria-selected="mode === 'yaml'" :class="{ active: mode === 'yaml' }" data-testid="header-yaml-tab" @click="toYaml">YAML</button>
+        <div v-if="!adding" class="segmented" role="tablist" :aria-label="S.header.editAs">
+          <button type="button" role="tab" :aria-selected="mode === 'fields'" :class="{ active: mode === 'fields' }" :disabled="!!yamlError(yaml)" data-testid="header-fields-tab" @click="toFields">{{ S.header.fields }}</button>
+          <button type="button" role="tab" :aria-selected="mode === 'yaml'" :class="{ active: mode === 'yaml' }" data-testid="header-yaml-tab" @click="toYaml">{{ S.header.yaml }}</button>
         </div>
       </div>
 
       <p v-if="changedMeanwhile" class="header-note" data-testid="header-changed">
-        Someone changed the header while this was open. Saving changes only the fields you changed.
+        {{ S.header.changedMeanwhile }}
       </p>
       <p v-if="problem" class="header-error" role="alert">{{ problem }}</p>
 
       <!-- Adding a field: Pandoc's, by group, or one of your own. -->
       <div v-if="adding" class="header-body header-picker" data-testid="header-picker">
-        <input v-model="search" v-focus class="header-search" type="search" placeholder="Search fields, or type a name of your own" aria-label="Search fields" @keydown.enter.prevent="addFirst">
+        <input v-model="search" v-focus class="header-search" type="search" :placeholder="S.header.search" :aria-label="S.header.searchLabel" @keydown.enter.prevent="addFirst">
         <button v-if="custom" type="button" class="header-option" data-testid="header-custom" @click="add(custom)">
-          <span class="header-option-name">Add “{{ custom }}”</span>
-          <span class="header-option-about">A field of your own. Pandoc passes it to templates and filters.</span>
+          <span class="header-option-name">{{ S.header.addCustom(custom) }}</span>
+          <span class="header-option-about">{{ S.header.customAbout }}</span>
         </button>
         <section v-for="g in groups" :key="g.group" class="header-group">
           <h3>{{ g.group }}</h3>
@@ -216,14 +218,14 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
             <span v-if="f.description" class="header-option-about">{{ f.description }}</span>
           </button>
         </section>
-        <p v-if="!groups.length && !custom" class="muted">No field matches. A name of your own starts with a letter.</p>
+        <p v-if="!groups.length && !custom" class="muted">{{ S.header.noMatch }}</p>
       </div>
 
       <!-- The fields. -->
       <div v-else-if="mode === 'fields'" class="header-body">
         <div v-if="!entries.length" class="header-empty">
-          <p>This document has no header yet.</p>
-          <p class="muted">A header holds the title, authors and date, a bibliography, and settings for the PDF or web page Pandoc makes.</p>
+          <p>{{ S.header.empty }}</p>
+          <p class="muted">{{ S.header.emptyAbout }}</p>
         </div>
         <div v-for="(e, i) in entries" :key="e.key" class="header-row" :data-testid="`header-field:${e.key}`">
           <label class="header-label" :for="fieldId(e.key)">
@@ -239,12 +241,12 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
             </template>
             <textarea v-else-if="e.kind === 'paragraph'" :id="fieldId(e.key)" :value="asString(e)" rows="3" @input="setString(e, $event)" />
             <div v-else-if="e.kind === 'date'" class="header-inline">
-              <input :id="fieldId(e.key)" :value="asString(e)" placeholder="2026-01-31, or January 2026" @input="setString(e, $event)">
-              <button type="button" @click="e.value = today()">Today</button>
+              <input :id="fieldId(e.key)" :value="asString(e)" :placeholder="S.header.datePlaceholder" @input="setString(e, $event)">
+              <button type="button" @click="e.value = today()">{{ S.header.today }}</button>
             </div>
             <label v-else-if="e.kind === 'boolean'" class="header-switch">
               <input :id="fieldId(e.key)" type="checkbox" :checked="e.value === true" @change="e.value = ($event.target as HTMLInputElement).checked">
-              <span>{{ e.value ? 'Yes' : 'No' }}</span>
+              <span>{{ e.value ? S.header.yes : S.header.no }}</span>
             </label>
             <input v-else-if="e.kind === 'number'" :id="fieldId(e.key)" type="number" step="any" :value="e.value ?? ''" class="header-number" @input="setNumber(e, $event)">
             <HeaderList v-else-if="e.kind === 'list'" :model-value="(e.value as string[])" @update:model-value="(v) => (e.value = v)" :id-base="fieldId(e.key)" :choices="e.field?.choices" :label="label(e)" />
@@ -260,12 +262,12 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
             </template>
             <p v-if="e.error" class="header-error">{{ e.error }}</p>
             <p v-else-if="missing.includes(e.key)" class="header-error" data-testid="header-required">{{ needs([e.key]) }}</p>
-            <p v-else-if="e.kind === 'yaml' && e.field && e.field.kind !== 'yaml'" class="header-help">Edited as YAML: it holds more than {{ e.field.kind === 'list' ? 'lines of text' : 'one value' }}.</p>
+            <p v-else-if="e.kind === 'yaml' && e.field && e.field.kind !== 'yaml'" class="header-help">{{ S.header.asYaml(e.field.kind === 'list') }}</p>
             <p v-else-if="e.field?.description" class="header-help">{{ e.field.description }}</p>
-            <p v-else-if="!e.field" class="header-help">A field of your own.</p>
+            <p v-else-if="!e.field" class="header-help">{{ S.header.own }}</p>
           </div>
           <span v-if="required(e.key)" class="header-remove-placeholder" />
-          <button v-else type="button" class="header-remove" :title="`Remove ${label(e)}`" :aria-label="`Remove ${label(e)}`" @click="remove(i)">✕</button>
+          <button v-else type="button" class="header-remove" :title="S.header.removeField(label(e))" :aria-label="S.header.removeField(label(e))" @click="remove(i)">✕</button>
         </div>
       </div>
 
@@ -276,7 +278,7 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
           v-focus
           class="header-yaml header-yaml-all"
           spellcheck="false"
-          aria-label="Header as YAML"
+          :aria-label="S.header.yamlLabel"
           data-testid="header-yaml"
           placeholder="title: My document&#10;author:&#10;  - Jane Doe"
           @input="yamlEdited = true; problem = null"
@@ -286,13 +288,13 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
 
       <div class="modal-actions header-actions">
         <template v-if="adding">
-          <button type="button" @click="adding = false; search = ''">Back</button>
+          <button type="button" @click="adding = false; search = ''">{{ S.common.back }}</button>
         </template>
         <template v-else>
-          <button v-if="mode === 'fields'" type="button" class="header-add" data-testid="header-add" @click="adding = true">＋ Add field</button>
+          <button v-if="mode === 'fields'" type="button" class="header-add" data-testid="header-add" @click="adding = true">{{ S.header.addField }}</button>
           <span class="toolbar-spacer" />
-          <button type="button" @click="cancel">Cancel</button>
-          <button type="submit" class="primary" :disabled="!canSave" data-testid="header-save">Save</button>
+          <button type="button" @click="cancel">{{ S.common.cancel }}</button>
+          <button type="submit" class="primary" :disabled="!canSave" data-testid="header-save">{{ S.common.save }}</button>
         </template>
       </div>
     </form>

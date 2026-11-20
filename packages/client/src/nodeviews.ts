@@ -11,6 +11,8 @@ import { chunkOf, describeRun, engineOf, renderOutputs, type Chunk, type ChunkRu
 import { chunkName, describeBehind } from './upstream.js';
 import { askText } from './ask.js';
 import { defaultBlock } from './blocks.js';
+import { APP_KEYS } from './keys.js';
+import { S } from './strings.js';
 
 /** What node views can use besides the document: the chunk runner, when the host runs code. */
 export interface NodeViewContext {
@@ -48,7 +50,7 @@ class CodeView implements NodeView {
       this.input.className = 'code-node-attr';
       this.input.spellcheck = false;
       this.input.value = String(node.attrs[editableAttr] ?? '');
-      this.input.placeholder = hint.languageAttr ? 'language' : '';
+      this.input.placeholder = hint.languageAttr ? S.code.language : '';
       this.input.addEventListener('change', () => this.setAttr(editableAttr, this.input!.value));
       header.append(this.input);
       if (h?.suffix) header.append(Object.assign(document.createElement('span'), { className: 'code-node-affix', textContent: h.suffix }));
@@ -110,7 +112,7 @@ class CodeView implements NodeView {
 
   private runChunk(): boolean {
     const c = this.chunk();
-    if (!c || !this.runner?.canRun(c.engine)) return false;
+    if (!c || !this.runner?.canRun(c.engine) || this.runner.unavailable) return false;
     this.report(this.runner.run(c));
     return true;
   }
@@ -118,7 +120,7 @@ class CodeView implements NodeView {
   /** ⌘↩: run the selection, or the current line and move to the next one. */
   private runLine(): boolean {
     const c = this.chunk();
-    if (!c || !this.runner?.canRun(c.engine)) return false;
+    if (!c || !this.runner?.canRun(c.engine) || this.runner.unavailable) return false;
     const { state } = this.cm;
     const { main } = state.selection;
     if (!main.empty) {
@@ -163,17 +165,24 @@ class CodeView implements NodeView {
       const status = Object.assign(document.createElement('span'), { className: 'chunk-status' });
       const tick = () => {
         const secs = Math.round((Date.now() - Date.parse(pending.queuedAt)) / 1000);
-        status.textContent = pending.state === 'queued' ? 'Queued…' : `Running… ${secs > 0 ? `${secs} s` : ''}`;
+        status.textContent = pending.state === 'queued' ? S.code.queued : S.code.running(secs);
       };
       tick();
       if (pending.state === 'running') this.ticker = setInterval(tick, 1000);
-      this.actions.replaceChildren(status, this.button('Stop', 'Interrupt R, and drop queued runs', () => this.report(runner.interrupt()), 'stop'));
+      this.actions.replaceChildren(status, this.button(S.code.stop, S.code.stopTitle, () => this.report(runner.interrupt()), 'stop'));
+    } else if (runner.unavailable) {
+      // Where code runs is not there (Podman missing, say): Run is offered, but not to press, with why beside it.
+      const run = this.button(S.code.run, runner.unavailable, () => undefined, 'run');
+      run.disabled = true;
+      const why = Object.assign(document.createElement('span'), { className: 'chunk-unavailable', textContent: runner.unavailable, title: runner.unavailable });
+      why.dataset.testid = 'chunk-unavailable';
+      this.actions.replaceChildren(why, run);
     } else {
       // Offered only when the session does not have the chunks above as they now read.
       const rebuild = runner.rebuild(pos);
       this.actions.replaceChildren(
-        ...(rebuild ? [this.button(rebuild.fresh ? 'Run above' : 'Rebuild above', rebuildTitle(rebuild), () => this.report(runner.rebuildAbove(pos)), 'rebuild')] : []),
-        this.button('▶ Run', 'Run this chunk (⇧⌘↩). ⌘↩ runs the current line or selection.', () => this.runChunk(), 'run'),
+        ...(rebuild ? [this.button(rebuild.fresh ? S.code.runAbove : S.code.rebuildAbove, rebuildTitle(rebuild), () => this.report(runner.rebuildAbove(pos)), 'rebuild')] : []),
+        this.button(S.code.run, S.code.runTitle, () => this.runChunk(), 'run'),
       );
     }
 
@@ -188,15 +197,15 @@ class CodeView implements NodeView {
     const meta = document.createElement('div');
     meta.className = 'chunk-meta';
     meta.append(Object.assign(document.createElement('span'), { textContent: describeRun(last) }));
-    if (stale) meta.append(Object.assign(document.createElement('span'), { className: 'chunk-stale', textContent: 'code changed since', title: 'The chunk has been edited since this output was produced' }));
+    if (stale) meta.append(Object.assign(document.createElement('span'), { className: 'chunk-stale', textContent: S.code.codeChanged, title: S.code.codeChangedTitle }));
     else if (upstream) {
       meta.append(Object.assign(document.createElement('span'), {
         className: 'chunk-stale upstream',
         textContent: describeBehind(upstream),
-        title: `This output was produced before ${chunkName(upstream.chunk)} ${upstream.why === 'not-run' ? 'had run' : upstream.why === 'changed' ? 'was last edited' : 'had run in full'}, so it may not match the code above. Run the chunks above and this one again to bring it up to date.`,
+        title: S.code.upstreamTitle(chunkName(upstream.chunk), upstream.why),
       }));
     }
-    meta.append(this.button('×', 'Clear this output', () => this.report(runner.clear(pos)), 'clear'));
+    meta.append(this.button('×', S.code.clear, () => this.report(runner.clear(pos)), 'clear'));
     if (this.shownRun === last.id && this.output.firstChild) {
       this.output.firstChild.replaceWith(meta);
       return;
@@ -205,7 +214,7 @@ class CodeView implements NodeView {
     const body = document.createElement('div');
     body.className = 'chunk-outputs';
     const rendered = renderOutputs(last.outputs);
-    body.append(...(rendered.length ? rendered : [Object.assign(document.createElement('div'), { className: 'out-none', textContent: 'No output.' })]));
+    body.append(...(rendered.length ? rendered : [Object.assign(document.createElement('div'), { className: 'out-none', textContent: S.code.noOutput })]));
     this.output.replaceChildren(meta, body);
   }
 
@@ -243,8 +252,8 @@ class CodeView implements NodeView {
       { key: 'ArrowDown', run: () => this.escape('line', 1) },
       { key: 'ArrowRight', run: () => this.escape('char', 1) },
       // In a runnable chunk ⌘↩ runs the line (as in RStudio); elsewhere it leaves the block.
-      { key: 'Mod-Enter', run: () => (this.runnable() ? this.runLine() : this.exitBelow()) },
-      { key: 'Mod-Shift-Enter', run: () => this.runChunk() },
+      { key: APP_KEYS.runLine, run: () => (this.runnable() ? this.runLine() : this.exitBelow()) },
+      { key: APP_KEYS.runChunk, run: () => this.runChunk() },
       {
         // The markdown cue: a closing fence on the last line, then Enter, ends the block.
         key: 'Enter',
@@ -352,11 +361,11 @@ class AtomView implements NodeView {
     this.dom = document.createElement('span');
     this.dom.className = `atom ${hint.className ?? ''}`;
     this.render();
-    this.dom.title = 'Double-click to edit';
+    this.dom.title = S.code.doubleClick;
     this.dom.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (!this.view.editable) return;
-      void askText(`Edit ${this.node.type.name.replace(/_/g, ' ')}`, String(this.node.attrs[this.hint.attr] ?? ''), 'Save').then((value) => {
+      void askText(S.code.editAtom(this.node.type.name.replace(/_/g, ' ')), String(this.node.attrs[this.hint.attr] ?? ''), S.common.save).then((value) => {
         const pos = this.getPos();
         if (value === null || pos === undefined || this.view.isDestroyed) return;
         this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, [this.hint.attr]: value }));
@@ -387,11 +396,5 @@ export function buildNodeViews(hints: Record<string, NodeViewHint>, ctx: NodeVie
 /** What Rebuild above does, and why it is offered. */
 function rebuildTitle(r: Rebuild): string {
   const n = r.chunks.length;
-  const chunks = n === 1 ? 'the chunk above' : `the ${n} chunks above`;
-  if (r.fresh) return `Nothing has run in this session yet: run ${chunks}, so this chunk has what they define.`;
-  const name = chunkName(r.chunk);
-  const why = r.why === 'not-run' ? `${name} has not run in this session`
-    : r.why === 'changed' ? `${name} has changed since it ran in this session`
-    : `${name} did not run in full`;
-  return `${why[0]!.toUpperCase()}${why.slice(1)}: run ${n === 1 ? 'it' : `it and the ${n - 1} below it`} again, so this chunk sees the code above as it now reads.`;
+  return r.fresh ? S.code.rebuildFresh(n) : S.code.rebuildWhy(chunkName(r.chunk), r.why, n);
 }

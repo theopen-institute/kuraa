@@ -5,6 +5,8 @@ import { computed, onMounted, ref, useTemplateRef } from 'vue';
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { currentHeading, outlineOf } from './outline.js';
+import { keyLabel } from './keys.js';
+import { S } from './strings.js';
 
 const props = defineProps<{
   view: EditorView;
@@ -55,12 +57,12 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <nav class="outline-panel" aria-label="Outline" data-testid="outline" @keydown="onKey">
+  <nav class="outline-panel" :aria-label="S.outline.title" data-testid="outline" @keydown="onKey">
     <div class="outline-head">
-      <span>Outline</span>
-      <button type="button" title="Close (Esc)" aria-label="Close the outline" data-testid="outline-close" @click="emit('close'); view.focus()">✕</button>
+      <span>{{ S.outline.title }}</span>
+      <button type="button" :title="`${S.outline.close} (${keyLabel('Escape')})`" :aria-label="S.outline.close" data-testid="outline-close" @click="emit('close'); view.focus()">✕</button>
     </div>
-    <p v-if="!entries.length" class="outline-empty">No headings yet. Start a line with # and a space for one.</p>
+    <p v-if="!entries.length" class="outline-empty">{{ S.outline.empty }}</p>
     <ul v-else ref="list">
       <li v-for="(e, i) in entries" :key="`${i}:${e.pos}`">
         <button
@@ -69,7 +71,7 @@ function onKey(e: KeyboardEvent) {
           :style="{ paddingLeft: `${8 + (e.level - minLevel) * 14}px` }"
           :data-testid="`outline:${e.text}`"
           @click="go(i)"
-        >{{ e.text || 'Untitled heading' }}</button>
+         :aria-current="i === here ? 'location' : undefined">{{ e.text || S.outline.untitled }}</button>
       </li>
     </ul>
   </nav>

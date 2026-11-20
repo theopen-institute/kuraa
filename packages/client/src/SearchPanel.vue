@@ -2,10 +2,12 @@
 // Search across the workspace (⇧⌘F): every text file, and open documents as
 // they are being edited. Results are grouped by file, documents by their title;
 // choosing one opens the file at the match.
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { HostApi, SearchMatch, SearchResult } from './api.js';
 import type { MatchTarget } from './docActions.js';
-import { vFocus } from './vue.js';
+import { S } from './strings.js';
+import { useReturnFocus, vFocus } from './vue.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ api: HostApi; /** Goes up each time search is asked for again (⇧⌘F): the field takes focus. */ focusKey: number }>();
 const emit = defineEmits<{ open: [path: string, target: MatchTarget]; close: [] }>();
@@ -14,7 +16,9 @@ const query = ref('');
 const caseSensitive = ref(false);
 const result = shallowRef<SearchResult | null>(null);
 const searched = ref('');
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
+const root = useTemplateRef<HTMLElement>('root');
+useReturnFocus(root);
 const searching = ref(false);
 const field = ref<HTMLInputElement | null>(null);
 let asked = 0;
@@ -37,7 +41,7 @@ async function search() {
     searched.value = q;
     error.value = null;
   } catch (e) {
-    if (n === asked) error.value = (e as Error).message;
+    if (n === asked) error.value = e;
   } finally {
     if (n === asked) searching.value = false;
   }
@@ -62,11 +66,11 @@ const open = (path: string, m: SearchMatch) => emit('open', path, { line: m.line
 </script>
 
 <template>
-  <aside class="pane pane-right side-panel search-panel" aria-label="Search" data-testid="search-panel">
+  <aside ref="root" class="pane pane-right side-panel search-panel" :aria-label="S.search.title" data-testid="search-panel" @keydown.esc="emit('close')">
     <div class="pane-header">
-      <span>Search</span>
+      <span>{{ S.search.title }}</span>
       <div class="pane-header-actions">
-        <button type="button" title="Close search" aria-label="Close search" @click="emit('close')">×</button>
+        <button type="button" :title="S.search.close" :aria-label="S.search.close" @click="emit('close')">×</button>
       </div>
     </div>
     <form class="search-form" @submit.prevent="search">
@@ -75,20 +79,19 @@ const open = (path: string, m: SearchMatch) => emit('open', path, { line: m.line
         v-model="query"
         v-focus
         type="search"
-        placeholder="Search every file"
-        aria-label="Search every file"
+        :placeholder="S.search.field"
+        :aria-label="S.search.field"
         spellcheck="false"
         data-testid="search-input"
-        @keydown.esc="emit('close')"
       >
-      <label class="search-case"><input v-model="caseSensitive" type="checkbox" data-testid="search-case"> Match case</label>
+      <label class="search-case"><input v-model="caseSensitive" type="checkbox" data-testid="search-case"> {{ S.search.matchCase }}</label>
     </form>
-    <p v-if="error" class="banner warn">{{ error }}</p>
+    <ErrorBanner v-if="error" :error="error" />
     <p v-if="result && searched" class="muted pad search-summary" data-testid="search-summary">
-      <template v-if="!result.files.length">Nothing found for “{{ searched }}”.</template>
-      <template v-else>{{ count }} match{{ count === 1 ? '' : 'es' }} in {{ result.files.length }} file{{ result.files.length === 1 ? '' : 's' }}{{ result.truncated ? ' (only the first are shown)' : '' }}.</template>
+      <template v-if="!result.files.length">{{ S.search.nothing(searched) }}</template>
+      <template v-else>{{ S.search.summary(count, result.files.length, result.truncated) }}</template>
     </p>
-    <p v-else-if="searching" class="muted pad">Searching…</p>
+    <p v-else-if="searching" class="muted pad">{{ S.search.searching }}</p>
     <ol v-if="result" class="search-results" data-testid="search-results">
       <li v-for="f in result.files" :key="f.path" class="search-file" :data-testid="`search-file:${f.path}`">
         <div class="search-file-name" :title="f.path">

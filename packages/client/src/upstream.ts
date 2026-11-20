@@ -9,6 +9,7 @@
 // chunk by its label; an unlabelled one by its position or its code. A chunk's
 // latest step is the one that counts: it is what the session holds of it.
 import type { RunStep } from '@kuraa/session/model';
+import { S } from './strings.js';
 
 /** What is needed of a chunk here. */
 export interface ChunkKey {
@@ -74,17 +75,17 @@ export function behind<C extends ChunkKey>(above: readonly C[], steps: readonly 
 }
 
 /** How a chunk is named to people: by its label, or its place. */
-export const chunkName = (c: ChunkKey) => (c.label !== null ? `chunk “${c.label}”` : `chunk ${c.index + 1}`);
+export const chunkName = (c: ChunkKey) => (c.label !== null ? S.code.chunkLabel(c.label) : S.code.chunkIndex(c.index + 1));
 
 /** Why an output may be out of date, in a few words: "chunk 2 changed since". */
 export function describeBehind(b: Behind): string {
   const name = chunkName(b.chunk);
   switch (b.why) {
     case 'changed':
-      return `${name} changed since`;
+      return S.code.behindChanged(name);
     case 'not-run':
-      return `ran without ${name}`;
+      return S.code.behindNotRun(name);
     case 'incomplete':
-      return `${name} had not run in full`;
+      return S.code.behindIncomplete(name);
   }
 }

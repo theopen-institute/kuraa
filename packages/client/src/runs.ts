@@ -10,6 +10,7 @@ import type { ChunkOutput, ChunkRef, RoomMessage, RunRecord, RunSessionInfo, Run
 import type { Node as PMNode } from 'prosemirror-model';
 import type { HostApi, RunInfo } from './api.js';
 import { behind, type Behind } from './upstream.js';
+import { S } from './strings.js';
 
 export interface Chunk {
   pos: number;
@@ -108,8 +109,19 @@ export class ChunkRunner {
     this.session = { path, engine: null, environment: null, state: 'none', message: null, id: null, steps: [] };
   }
 
+  /** Whether chunks of `engine` are run here at all (an engine handles them), available now or not. */
   canRun(engine: string): boolean {
     return this.engineId(engine) !== undefined;
+  }
+
+  /**
+   * Why code cannot run now, though an engine would run it: where it runs is
+   * not available (Podman missing or stopped), in the environment's own words.
+   * Null if it can.
+   */
+  get unavailable(): string | null {
+    const env = this.info.environment;
+    return env && !env.available ? env.message || S.code.cannotRun : null;
   }
 
   /** The id of the engine that runs chunks of `engine` (a chunk's engine, e.g. `r`). */
@@ -264,6 +276,7 @@ export class ChunkRunner {
   }
 
   async runAll(): Promise<void> {
+    if (this.unavailable) return;
     for (const c of this.chunks) if (this.canRun(c.engine)) await this.run(c);
   }
 
@@ -340,8 +353,7 @@ function renderTable(o: Extract<ChunkOutput, { type: 'table' }>): HTMLElement {
   }
   table.append(body);
   wrap.append(table);
-  const fmt = (n: number) => n.toLocaleString();
-  wrap.append(el('div', 'out-table-foot', `${rows < o.nrow ? `${fmt(rows)} of ` : ''}${fmt(o.nrow)} row${o.nrow === 1 ? '' : 's'} · ${fmt(o.ncol)} column${o.ncol === 1 ? '' : 's'}`));
+  wrap.append(el('div', 'out-table-foot', S.code.rows(rows, o.nrow, o.ncol)));
   return wrap;
 }
 
@@ -353,7 +365,7 @@ export function renderOutputs(outputs: ChunkOutput[]): HTMLElement[] {
         // Raster images only: an SVG from a chunk could carry script.
         if (/^image\/(png|jpeg|gif|webp)$/.test(o.mime)) img.src = `data:${o.mime};base64,${o.data}`;
         img.width = o.width;
-        img.alt = 'Plot';
+        img.alt = S.code.plot;
         return img;
       }
       case 'table':
@@ -367,5 +379,5 @@ export function renderOutputs(outputs: ChunkOutput[]): HTMLElement[] {
 export function describeRun(r: RunRecord): string {
   const at = new Date(r.finishedAt ?? r.queuedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const took = r.ms === null ? '' : r.ms < 1000 ? ` · ${r.ms} ms` : ` · ${(r.ms / 1000).toFixed(1)} s`;
-  return `${r.chunk.partial ? 'Ran part · ' : ''}${r.by.name} · ${at}${took}`;
+  return `${r.chunk.partial ? S.code.ranPart : ''}${r.by.name} · ${at}${took}`;
 }

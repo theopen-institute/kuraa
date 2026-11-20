@@ -2,19 +2,27 @@
 // A past version of the open file, from its history: read only, rendered by its
 // type or (for a document) shown as its source; compared with the document as
 // it is now; or restored, as an edit to the live document (everyone with it open
-// sees it, it can be undone, and it is saved like any edit).
-import { computed, ref } from 'vue';
+// sees it, it can be undone, and it is saved like any edit). The copy of an
+// outside edit the host kept beside the file (decision 0037) is shown the same
+// way, to read, compare with now, or take.
+import { computed, onMounted, ref } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import type { FormatEditor } from '@kuraa/editor-kit';
 import type { CommitInfo } from './api.js';
 import { blocksFrom, compareTexts, type Comparison } from './compare.js';
 import { peopleOf } from './history.js';
+import { S } from './strings.js';
 import ReadOnlyCode from './ReadOnlyCode.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 
 const props = defineProps<{
-  commit: CommitInfo;
-  /** The file's text in that commit. */
+  /** The version from the history; null for an outside edit's copy. */
+  commit: CommitInfo | null;
+  /** The path of the outside edit's copy shown, if that is what this is. */
+  outside?: string;
+  /** Open comparing with now (Compare on an outside edit's note). */
+  startComparing?: boolean;
+  /** The file's text in that version. */
   text: string;
   type: DocumentType;
   /** The file's path in that commit. */
@@ -36,7 +44,7 @@ function compare() {
   }
   const now = props.now?.() ?? null;
   if (now === null) {
-    compareError.value = 'The document is not open, so there is nothing to compare with.';
+    compareError.value = S.past.notOpen;
     return;
   }
   comparison.value = compareTexts(props.text, now, blocksFrom((t) => props.type.parse(t)));
@@ -44,42 +52,47 @@ function compare() {
   mode.value = 'compare';
 }
 
-const date = computed(() => new Date(props.commit.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
-const people = computed(() => peopleOf([props.commit]));
+const date = computed(() => (props.commit ? S.versions.date(props.commit.date) : null));
+const people = computed(() => (props.commit ? peopleOf([props.commit]) : ''));
+const outsideName = computed(() => props.outside?.slice(props.outside.lastIndexOf('/') + 1) ?? '');
+onMounted(() => {
+  if (props.startComparing) compare();
+});
 </script>
 
 <template>
   <div class="editor-pane past-version" data-testid="past-version">
     <div class="toolbar">
       <span class="past-label">
-        <strong data-testid="past-date">{{ date }}</strong> · {{ people }}
-        <span class="muted">{{ mode === 'compare' ? '· compared with now' : '· read only' }}</span>
+        <template v-if="commit"><strong data-testid="past-date">{{ date }}</strong> · {{ people }}</template>
+        <strong v-else data-testid="past-outside">{{ S.outside.title(outsideName) }}</strong>
+        <span class="muted"> {{ mode === 'compare' ? S.past.comparedWithNow : S.past.readOnly }}</span>
       </span>
-      <details class="past-details">
-        <summary>Details</summary>
+      <details v-if="commit" class="past-details">
+        <summary>{{ S.common.details }}</summary>
         <div class="past-details-body">
           <div>{{ commit.subject }}</div>
-          <div class="muted">Version <code data-testid="past-hash">{{ commit.hash }}</code><template v-if="commit.path !== path"> · then {{ commit.path }}</template></div>
+          <div class="muted">{{ S.past.version('') }}<code data-testid="past-hash">{{ commit.hash }}</code><template v-if="commit.path !== path">{{ S.past.then(commit.path) }}</template></div>
         </div>
       </details>
       <div class="toolbar-spacer" />
-      <button v-if="!type.editor?.layout && mode !== 'compare'" type="button" :class="{ active: mode === 'source' }" @click="mode = mode === 'source' ? 'read' : 'source'">{{ mode === 'source' ? 'Rendered' : 'Source' }}</button>
-      <button type="button" :class="{ active: mode === 'compare' }" :aria-pressed="mode === 'compare'" data-testid="compare-now" @click="compare">{{ mode === 'compare' ? 'Show this version' : 'Compare with now' }}</button>
-      <button type="button" data-testid="restore-version" title="Make the document read as this version again" @click="emit('restore')">Restore this version…</button>
-      <button type="button" class="primary" @click="emit('back')">Back to live</button>
+      <button v-if="!type.editor?.layout && mode !== 'compare'" type="button" :class="{ active: mode === 'source' }" @click="mode = mode === 'source' ? 'read' : 'source'">{{ mode === 'source' ? S.past.rendered : S.past.source }}</button>
+      <button type="button" :class="{ active: mode === 'compare' }" :aria-pressed="mode === 'compare'" data-testid="compare-now" @click="compare">{{ mode === 'compare' ? S.past.showVersion : S.past.compare }}</button>
+      <button type="button" data-testid="restore-version" :title="S.past.restoreTitle" @click="emit('restore')">{{ commit ? S.past.restore : `${S.versions.useOutside}…` }}</button>
+      <button type="button" class="primary" @click="emit('back')">{{ S.past.back }}</button>
     </div>
     <p v-if="compareError" class="banner warn">{{ compareError }}</p>
     <div class="editor-scroll">
       <div v-if="mode === 'compare' && comparison" class="compare" data-testid="compare">
         <p class="compare-summary muted">
-          <template v-if="!comparison.changes">This version reads the same as the document now.</template>
+          <template v-if="!comparison.changes">{{ S.past.same }}</template>
           <template v-else>
-            {{ comparison.changes }} part{{ comparison.changes === 1 ? '' : 's' }} differ.
-            <span class="compare-key"><del>Only in this version</del> <ins>Only now</ins></span>
+            {{ S.past.differ(comparison.changes) }}
+            <span class="compare-key"><del>{{ S.past.onlyThen }}</del> <ins>{{ S.past.onlyNow }}</ins></span>
           </template>
         </p>
         <template v-for="(b, i) in comparison.blocks" :key="i">
-          <p v-if="b.kind === 'folded'" class="compare-folded">{{ b.count }} unchanged part{{ b.count === 1 ? '' : 's' }}</p>
+          <p v-if="b.kind === 'folded'" class="compare-folded">{{ S.past.folded(b.count) }}</p>
           <div v-else-if="b.kind === 'changed'" class="compare-block compare-changed" data-testid="compare-changed"><template v-for="(w, j) in b.words" :key="j"><del v-if="w.kind === 'removed'">{{ w.text }}</del><ins v-else-if="w.kind === 'added'">{{ w.text }}</ins><span v-else>{{ w.text }}</span></template></div>
           <div v-else :class="['compare-block', `compare-${b.kind}`]" :data-testid="`compare-${b.kind}`">{{ b.text }}</div>
         </template>

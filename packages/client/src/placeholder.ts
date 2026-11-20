@@ -1,0 +1,59 @@
+// What an empty document says: how to start (type # for a heading, @ to cite…)
+// and where the rest is (⌘/). Shown in the first empty paragraph, or below the
+// header when there is nothing else, and gone at the first character typed.
+// Only this view draws it; nothing is added to the document until someone types.
+import type { Node as PMNode } from 'prosemirror-model';
+import { Plugin, TextSelection } from 'prosemirror-state';
+import { Decoration, DecorationSet } from 'prosemirror-view';
+import { defaultBlock } from './blocks.js';
+
+/**
+ * Where the placeholder goes in `doc`: the position of its one empty text block,
+ * or -1 for after the header (a document with nothing else), or null if the
+ * document is not empty. `header` is the name of the node holding the header,
+ * which does not count.
+ */
+export function emptyAt(doc: PMNode, header?: string): number | null {
+  let at: number | null = -1;
+  let blocks = 0;
+  doc.forEach((node, offset) => {
+    if (at === null || (header && node.type.name === header)) return;
+    blocks++;
+    if (blocks > 1 || !node.isTextblock || node.content.size > 0 || node.type.spec.code) at = null;
+    else at = offset;
+  });
+  return at;
+}
+
+export function placeholderPlugin(text: string, header?: string): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const at = emptyAt(state.doc, header);
+        if (at === null) return null;
+        if (at >= 0) {
+          const node = state.doc.nodeAt(at)!;
+          return DecorationSet.create(state.doc, [Decoration.node(at, at + node.nodeSize, { class: 'empty-placeholder', 'data-placeholder': text })]);
+        }
+        // Only the header: a line below it to click, which makes the paragraph to type in.
+        const widget = Decoration.widget(state.doc.content.size, (view) => {
+          const el = document.createElement('p');
+          el.className = 'empty-placeholder empty-placeholder-widget';
+          el.dataset.placeholder = text;
+          el.contentEditable = 'false';
+          el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const block = defaultBlock(view.state.schema);
+            if (!block) return;
+            const end = view.state.doc.content.size;
+            const tr = view.state.tr.insert(end, block.create());
+            view.focus();
+            view.dispatch(tr.setSelection(TextSelection.create(tr.doc, end + 1)));
+          });
+          return el;
+        }, { side: 1, key: 'empty-placeholder', ignoreSelection: true });
+        return DecorationSet.create(state.doc, [widget]);
+      },
+    },
+  });
+}

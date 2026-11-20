@@ -5,7 +5,8 @@
   --panel: #f3f1ed;
   --surface: #ffffff;
   --text: #1d1c1a;
-  --muted: #6b675f;
+  /* Muted text is at least 4.5:1 on every background it sits on, the selected row's included (0044). */
+  --muted: #635f58;
   --border: #e2ded6;
   --accent: #2f6f5e;
   --accent-soft: #e3efe9;
@@ -14,14 +15,14 @@
   --code-bg: #f1eee8;
   --selected: #e9e5dd;
   /* Syntax tokens (tok-* classes from languages.ts) */
-  --tok-comment: #8a8478;
+  --tok-comment: #69645a;
   --tok-keyword: #8b3a8f;
   --tok-string: #2f7a3a;
-  --tok-number: #b4581b;
+  --tok-number: #a14d14;
   --tok-atom: #1f6fb2;
   --tok-function: #2457a6;
   --tok-definition: #6d4bb3;
-  --tok-builtin: #0f7b8a;
+  --tok-builtin: #0b6e7b;
   --tok-property: #8a5a00;
   --tok-type: #a63f1f;
   --tok-operator: #6b675f;
@@ -40,7 +41,7 @@
     --panel: #1e1e1c;
     --surface: #222220;
     --text: #e8e6e1;
-    --muted: #9b978e;
+    --muted: #a5a198;
     --border: #34332f;
     --accent: #7cc4ad;
     --accent-soft: #23362f;
@@ -48,7 +49,7 @@
     --warn-soft: #3b2418;
     --code-bg: #2a2926;
     --selected: #2e2d29;
-    --tok-comment: #8f8a7f;
+    --tok-comment: #a39e93;
     --tok-keyword: #d9a3e0;
     --tok-string: #9fd49a;
     --tok-number: #f0b37e;
@@ -87,6 +88,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }
 .banner.info { background: var(--accent-soft); }
 .banner button { margin-left: 8px; }
+.banner.warn button { color: var(--warn); border-color: currentColor; }
+.banner-details { padding: 4px 12px 8px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.error-details { display: inline-block; margin-left: 8px; font-size: 12px; }
+.error-details summary { cursor: pointer; }
+.error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12em; overflow: auto; margin: 4px 0 0; font-size: 11.5px; color: var(--text); }
+.error-line { color: var(--warn); font-size: 13px; overflow-wrap: anywhere; }
+.error-line .error-details { display: block; margin: 2px 0 0; }
+kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); color: var(--text); white-space: nowrap; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .panes { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
 .panes.history-open { grid-template-columns: 240px minmax(0, 1fr) 280px; }
@@ -95,7 +105,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .pane { min-height: 0; overflow: auto; }
 .pane-left, .pane-right { background: var(--panel); }
 .pane-left { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
-.pane-left .tree { flex: 1; overflow: auto; min-height: 0; }
+.pane-left .tree-scroll { flex: 1; overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+/* The space below the files: right-click for a new file or folder at the top level. */
+.tree-space { flex: 1 0 48px; }
 .pane-right { border-left: 1px solid var(--border); }
 .pane-header {
   display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
@@ -115,17 +127,20 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .tree li { position: relative; }
 .tree-row {
   display: flex; width: 100%; gap: 6px; text-align: left; border: 0; border-radius: 0;
-  padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
+.tree [role='treeitem'] { outline: none; }
+.tree [role='treeitem']:focus-visible > .tree-row, .tree [role='treeitem']:focus-visible > .tree-dir-row { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-file > .tree-row:hover, .tree-dir-row:hover { background: color-mix(in srgb, var(--selected) 60%, transparent); }
 .tree-icon { width: 12px; color: var(--muted); flex: none; }
-/* File icons: small, thin and quiet; a little stronger on the open file. */
+/* File icons: small, thin and quiet, in the muted colour (3:1 and more, as icons need); the open file's in the text's. */
 .file-icon {
   width: 14px; height: 14px; flex: none; align-self: center; margin-left: -1px;
   fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round;
-  color: var(--muted); opacity: 0.7;
+  color: var(--muted);
 }
 .file-icon-dot { fill: currentColor; stroke: none; }
-.tree-file.selected .file-icon { opacity: 1; }
+.tree-file.selected .file-icon { color: var(--text); }
 .tree-folder { color: var(--muted); }
 .tree-file.selected > .tree-row { background: var(--selected); font-weight: 600; }
 .tree-file.untyped > .tree-row { color: var(--muted); }
@@ -137,10 +152,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* Dragging to move: the folder it would land in, and the thing being moved. */
 .tree-dir.drop-target > .tree-dir-row { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 .tree-dir.drop-target > ul { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
-.tree.drop-target, .pane-header.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
+.tree-scroll.drop-target, .pane-header.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
 .tree .dragging { opacity: 0.45; }
 .tree [draggable='true'] { cursor: grab; }
-.tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions { display: flex; }
+/* A row's buttons show on hover, and while it has the keyboard's focus (not every folder around it). */
+.tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions,
+.tree-file:focus-within > .tree-actions, .tree-dir:focus > .tree-dir-row > .tree-actions, .tree-actions:focus-within { display: flex; }
 
 .pane-centre { display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
 .centre-stack, .editor-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -280,7 +297,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .lines-doc .line { position: relative; counter-increment: line; padding: 0 24px 0 4.75em; min-height: 1.6em; overflow-wrap: anywhere; }
 .lines-doc .line::before {
   content: counter(line); position: absolute; left: 0; width: 3.4em; text-align: right;
-  color: var(--muted); opacity: 0.55; user-select: none; pointer-events: none;
+  color: var(--muted); opacity: 0.9; user-select: none; pointer-events: none;
 }
 
 /* Running chunks: controls in the chunk header, the latest output below the code. */
@@ -320,7 +337,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
    note definitions sit in a block with their label in the margin. */
 .footnote-ref { vertical-align: super; font-size: 0.66em; line-height: 0; padding: 0.05em 0.3em; cursor: pointer; }
 .inline-note { font: 0.78em var(--font); color: var(--muted); background: var(--selected); vertical-align: 0.15em; cursor: pointer; white-space: nowrap; }
-.inline-note::before { content: 'note · '; opacity: 0.7; }
+.inline-note::before { content: 'note · '; }
 .prose aside.note { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 0 10px; font-size: 0.86em; margin: 0 0 0.5em; }
 .prose > :not(aside.note) + aside.note { border-top: 1px solid var(--border); padding-top: 0.9em; margin-top: 1.8em; }
 .note-label {
@@ -619,3 +636,37 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .compare ins, .compare-key ins { background: color-mix(in srgb, var(--tok-inserted) 22%, transparent); text-decoration: none; border-radius: 2px; }
 .compare del, .compare-key del { background: color-mix(in srgb, var(--tok-deleted) 18%, transparent); border-radius: 2px; }
 .compare-folded { font-family: var(--font); font-size: 12px; color: var(--muted); text-align: center; margin: 0 0 8px; }
+
+/* An empty document: how to start (placeholder.ts). */
+.prose .empty-placeholder::before {
+  content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
+}
+.prose .empty-placeholder-widget { margin: 0; cursor: text; }
+
+/* The Markdown and shortcuts sheet. */
+.modal.help-sheet { width: min(760px, 94vw); max-height: 88vh; overflow: auto; }
+.help-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px 24px; }
+.help-group h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.help-group table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.help-group th { text-align: left; font-weight: 400; padding: 3px 10px 3px 0; white-space: nowrap; vertical-align: top; width: 1%; }
+.help-group td { padding: 3px 0; vertical-align: top; }
+.help-type { background: var(--code-bg); border-radius: 4px; padding: 0 4px; white-space: pre; }
+.help-keys { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.no-workspace kbd { margin-left: 4px; }
+
+/* The first run's welcome. */
+.welcome-question { margin: 0; font-size: 15px; }
+.modal.settings-dialog > p.muted { margin: 0; font-size: 13px; }
+
+/* Notes with something to do (an outside edit to open or compare). */
+.notice-text { flex: 1; }
+.notice-actions { display: flex; gap: 6px; flex: none; }
+.notice-actions button { font-size: 12px; }
+
+/* Details for experts (commit ids, branches) in the menu. */
+.menu-details { font-size: 12px; color: var(--muted); }
+.menu-details summary { cursor: pointer; width: fit-content; }
+
+/* Code that cannot run here now: why, beside a Run that cannot be pressed. */
+.chunk-unavailable { color: var(--warn); font: 11.5px var(--font); padding: 0 6px; max-width: 32em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-unavailable { color: var(--warn); }

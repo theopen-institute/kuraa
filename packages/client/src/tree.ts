@@ -65,10 +65,83 @@ export function fileTypeChoices(registry: TypeRegistry): FileTypeChoice[] {
   return choices.sort((a, b) => rank(a) - rank(b) || (a.id === 'pandoc-markdown' ? -1 : b.id === 'pandoc-markdown' ? 1 : a.label.localeCompare(b.label)));
 }
 
+/** A folder's folders in the order the sidebar shows them. */
+export const foldersOf = (dir: Folder): Folder[] => [...dir.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+/** A row of the tree as the keyboard moves through it: a folder or a file, at its depth (1 at the top). */
+export interface TreeItem {
+  path: string;
+  folder: boolean;
+  level: number;
+  /** A folder showing what is in it. */
+  expanded: boolean;
+}
+
+/** The rows the sidebar shows, top to bottom: each folder's folders, then its files; nothing inside a closed folder. */
+export function visibleItems(root: Folder, collapsed: ReadonlySet<string>, level = 1): TreeItem[] {
+  const out: TreeItem[] = [];
+  for (const f of foldersOf(root)) {
+    const expanded = !collapsed.has(f.path);
+    out.push({ path: f.path, folder: true, level, expanded });
+    if (expanded) out.push(...visibleItems(f, collapsed, level + 1));
+  }
+  for (const f of root.files) out.push({ path: f.path, folder: false, level, expanded: false });
+  return out;
+}
+
+/** What a key does on a row of the tree. */
+export type TreeAction =
+  | { kind: 'focus'; path: string }
+  | { kind: 'expand' | 'collapse' | 'open' | 'rename' | 'delete' | 'menu'; path: string };
+
+/**
+ * The tree's keys, as a tree view has them: ↑ ↓ Home End move; → opens a
+ * folder, or goes into an open one; ← closes it, or goes up to the folder
+ * around; Enter (or Space) opens a file or opens and closes a folder; F2
+ * renames; Delete deletes; Shift+F10 (or the menu key) shows its menu. Null if
+ * the key does nothing here.
+ */
+export function treeKey(items: readonly TreeItem[], current: string, key: string, shift = false): TreeAction | null {
+  const i = items.findIndex((x) => x.path === current);
+  const item = items[i];
+  if (!item) return items[0] ? { kind: 'focus', path: items[0].path } : null;
+  const focus = (j: number) => {
+    const to = items[Math.max(0, Math.min(items.length - 1, j))]!;
+    return to.path === current ? null : { kind: 'focus' as const, path: to.path };
+  };
+  switch (key) {
+    case 'ArrowDown': return focus(i + 1);
+    case 'ArrowUp': return focus(i - 1);
+    case 'Home': return focus(0);
+    case 'End': return focus(items.length - 1);
+    case 'ArrowRight':
+      if (!item.folder) return null;
+      if (!item.expanded) return { kind: 'expand', path: item.path };
+      return items[i + 1]?.level === item.level + 1 ? focus(i + 1) : null;
+    case 'ArrowLeft': {
+      if (item.folder && item.expanded) return { kind: 'collapse', path: item.path };
+      for (let j = i - 1; j >= 0; j--) if (items[j]!.level < item.level) return focus(j);
+      return null;
+    }
+    case 'Enter':
+    case ' ':
+      return item.folder ? { kind: item.expanded ? 'collapse' : 'expand', path: item.path } : { kind: 'open', path: item.path };
+    case 'F2': return { kind: 'rename', path: item.path };
+    case 'Delete': return { kind: 'delete', path: item.path };
+    case 'F10': return shift ? { kind: 'menu', path: item.path } : null;
+    case 'ContextMenu': return { kind: 'menu', path: item.path };
+    default: return null;
+  }
+}
+
 /** What the tree's rows share: the state and actions of the whole tree. */
 export interface TreeContext {
   selected: Ref<string | null>;
   collapsed: Ref<Set<string>>;
+  /** The row Tab lands on (the others are reached with the arrows). */
+  tabStop: Ref<string | null>;
+  /** A row took focus: Tab comes back to it. */
+  focused(path: string): void;
   /** What is being dragged, and the folder it would land in ('' for the top level). */
   dragging: Ref<string | null>;
   over: Ref<string | null>;

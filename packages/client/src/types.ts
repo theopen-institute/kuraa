@@ -23,6 +23,14 @@ export interface AppProps {
 export interface Notice {
   kind: 'info' | 'warn';
   text: string;
+  /** What can be done about it, as buttons in the note (an outside edit to open or compare). */
+  actions?: { label: string; run: () => void; testid?: string }[];
+}
+
+/** Saving, as the host last said (decision 0037): null while all is well. */
+export interface SaveTrouble {
+  state: 'paused' | 'failing';
+  message: string;
 }
 
 export interface EditorStatus {
@@ -34,6 +42,8 @@ export interface EditorStatus {
   lastCommitAt: string | null;
   lastCommit: string | null;
   notice: Notice | null;
+  /** Saving is paused or failing, and why; null while it works. */
+  saving: SaveTrouble | null;
   /** Runs this document's code chunks, when the host allows it and the document has any. */
   runner: ChunkRunner | null;
 }

@@ -3,6 +3,7 @@
 // shared server: its key is its operator's).
 import { ApiError, type HostApi } from './api.js';
 import type { PersonShell } from './shell.js';
+import { S } from './strings.js';
 
 export async function hostPerson(api: HostApi): Promise<PersonShell | null> {
   try {
@@ -20,7 +21,7 @@ export async function hostPerson(api: HostApi): Promise<PersonShell | null> {
     }
   };
   return {
-    afterChange: 'What you save from now on is marked as yours.',
+    afterChange: S.person.afterChangeHost,
     get: () => api.person(),
     create: (name) => attempt(() => api.createPerson(name)),
     import: (line) => attempt(() => api.importPerson(line)),

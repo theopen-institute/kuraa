@@ -4,6 +4,8 @@
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue';
 import type { EditorView } from 'prosemirror-view';
 import { findState, replaceAll, replaceOne, setQuery, step } from './find.js';
+import { keyLabel } from './keys.js';
+import { S } from './strings.js';
 
 const props = defineProps<{
   view: EditorView;
@@ -72,35 +74,35 @@ function all() {
 </script>
 
 <template>
-  <div class="find-bar" role="search" data-testid="find-bar" @keydown="onKey" @mousedown="keepFocus">
+  <div class="find-bar" role="search" :aria-label="S.find.find" data-testid="find-bar" @keydown="onKey" @mousedown="keepFocus">
     <div class="find-row">
       <input
         ref="input"
         v-model="query"
         data-role="find"
         data-testid="find-input"
-        placeholder="Find"
-        aria-label="Find"
+        :placeholder="S.find.find"
+        :aria-label="S.find.find"
         spellcheck="false"
       >
-      <span class="find-count" data-testid="find-count">{{ query ? (counts.total ? `${counts.current || '–'} of ${counts.total}` : 'None') : '' }}</span>
+      <span class="find-count" data-testid="find-count">{{ query ? (counts.total ? S.find.of(counts.current || '–', counts.total) : S.find.none) : '' }}</span>
       <button
         type="button"
         :class="['find-case', { active: caseSensitive }]"
         :aria-pressed="caseSensitive"
-        title="Match case"
+        :title="S.find.matchCase"
         data-testid="find-case"
         @click="caseSensitive = !caseSensitive"
       >Aa</button>
-      <button type="button" title="Previous (⇧↩)" aria-label="Previous match" data-testid="find-previous" :disabled="!counts.total" @click="step(view, -1)">↑</button>
-      <button type="button" title="Next (↩)" aria-label="Next match" data-testid="find-next" :disabled="!counts.total" @click="step(view, 1)">↓</button>
-      <button v-if="editable" type="button" :class="{ active: replacing }" title="Replace" data-testid="find-toggle-replace" @click="replacing = !replacing">Replace</button>
-      <button type="button" title="Close (Esc)" aria-label="Close" data-testid="find-close" @click="close">✕</button>
+      <button type="button" :title="`${S.find.previous} (${keyLabel('Shift-Enter')})`" :aria-label="S.find.previous" data-testid="find-previous" :disabled="!counts.total" @click="step(view, -1)">↑</button>
+      <button type="button" :title="`${S.find.next} (${keyLabel('Enter')})`" :aria-label="S.find.next" data-testid="find-next" :disabled="!counts.total" @click="step(view, 1)">↓</button>
+      <button v-if="editable" type="button" :class="{ active: replacing }" :aria-pressed="replacing" data-testid="find-toggle-replace" @click="replacing = !replacing">{{ S.find.replace }}</button>
+      <button type="button" :title="`${S.find.close} (${keyLabel('Escape')})`" :aria-label="S.find.close" data-testid="find-close" @click="close">✕</button>
     </div>
     <div v-if="replacing && editable" class="find-row">
-      <input v-model="replacement" data-role="replace" data-testid="replace-input" placeholder="Replace with" aria-label="Replace with" spellcheck="false">
-      <button type="button" data-testid="replace-one" :disabled="!counts.total" @click="replaceOne(view, replacement)">Replace</button>
-      <button type="button" data-testid="replace-all" :disabled="!counts.total" @click="all">Replace all</button>
+      <input v-model="replacement" data-role="replace" data-testid="replace-input" :placeholder="S.find.replaceWith" :aria-label="S.find.replaceWith" spellcheck="false">
+      <button type="button" data-testid="replace-one" :disabled="!counts.total" @click="replaceOne(view, replacement)">{{ S.find.replace }}</button>
+      <button type="button" data-testid="replace-all" :disabled="!counts.total" @click="all">{{ S.find.replaceAll }}</button>
     </div>
   </div>
 </template>

@@ -2,10 +2,11 @@
 // A new file. A document (Markdown, R Markdown) is asked for its title, and
 // its filename is made from that (./filenames.ts); a text or source file is
 // asked for its filename, whose extension and type follow each other.
-import { computed, ref, watch } from 'vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 import type { FileTypeChoice } from './tree.js';
 import { pathForTitle } from './filenames.js';
-import { onEscape, vFocus } from './vue.js';
+import { S } from './strings.js';
+import { useDialog, vFocus } from './vue.js';
 
 const props = defineProps<{
   /** Where it goes: '' or 'notes/'. */
@@ -66,7 +67,7 @@ function submit() {
   if (t.titled) {
     const clean = title.value.replace(/\s+/g, ' ').trim();
     if (!clean) {
-      error.value = 'A document needs a title.';
+      error.value = S.newFile.needsTitle;
       return;
     }
     emit('create', { path: path.value, type: t.id, title: clean });
@@ -74,26 +75,27 @@ function submit() {
   }
   let p = name.value.trim();
   if (!p || p.endsWith('/')) {
-    error.value = 'A file needs a name.';
+    error.value = S.newFile.needsName;
     return;
   }
   if (!extensionOf(p) && !props.typeOf(p)) p += t.extension;
   if (props.paths.includes(p)) {
-    error.value = `${p} already exists.`;
+    error.value = S.newFile.exists(p);
     return;
   }
   emit('create', { path: p, type: t.id, title: null });
 }
 
-onEscape(() => emit('cancel'));
+const root = useTemplateRef<HTMLElement>('root');
+useDialog(root, () => emit('cancel'));
 </script>
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('cancel')">
-    <form class="modal naming" role="dialog" aria-modal="true" aria-label="New file" data-testid="new-file" @submit.prevent="submit">
-      <h2>New file</h2>
+    <form ref="root" class="modal naming" role="dialog" aria-modal="true" aria-labelledby="new-file-title" data-testid="new-file" @submit.prevent="submit">
+      <h2 id="new-file-title">{{ S.newFile.title }}</h2>
       <label class="field">
-        <span>File type</span>
+        <span>{{ S.newFile.type }}</span>
         <select v-model="typeId" name="type">
           <optgroup v-for="[group, list] in groups" :key="group" :label="group">
             <option v-for="t in list" :key="t.id" :value="t.id">{{ t.label }} ({{ t.extension }})</option>
@@ -103,23 +105,23 @@ onEscape(() => emit('cancel'));
 
       <template v-if="type?.titled">
         <label class="field">
-          <span>Title</span>
-          <input v-model="title" v-focus name="title" placeholder="Field notes from the harbour" @input="error = null">
+          <span>{{ S.newFile.titleLabel }}</span>
+          <input v-model="title" v-focus name="title" :placeholder="S.newFile.titlePlaceholder" @input="error = null">
         </label>
         <p class="naming-filename" data-testid="new-file-path">
-          <span>Saved as</span>
+          <span>{{ S.newFile.savedAs }}</span>
           <span class="naming-path">{{ path }}</span>
         </p>
       </template>
       <label v-else class="field">
-        <span>Name</span>
+        <span>{{ S.newFile.name }}</span>
         <input ref="nameInput" v-model="name" v-focus name="path" spellcheck="false" @input="onName(); error = null">
       </label>
 
       <p v-if="error" class="naming-error" role="alert">{{ error }}</p>
       <div class="modal-actions">
-        <button type="button" @click="emit('cancel')">Cancel</button>
-        <button type="submit" class="primary">Create</button>
+        <button type="button" @click="emit('cancel')">{{ S.common.cancel }}</button>
+        <button type="submit" class="primary">{{ S.common.create }}</button>
       </div>
     </form>
   </div>

@@ -2,9 +2,10 @@
 // Renaming a document: its title, and its filename. While the filename is
 // the one its title makes, it follows the title as it is typed; once changed
 // by hand it stays as typed, and "Match the title" makes it follow again.
-import { computed, ref } from 'vue';
+import { computed, ref, useTemplateRef } from 'vue';
 import { pathForTitle } from './filenames.js';
-import { onEscape, vFocus } from './vue.js';
+import { S } from './strings.js';
+import { useDialog, vFocus } from './vue.js';
 
 const props = defineProps<{
   path: string;
@@ -44,35 +45,36 @@ function match() {
 function submit() {
   const t = title.value.replace(/\s+/g, ' ').trim();
   if (!t) {
-    error.value = 'A document needs a title.';
+    error.value = S.rename.needsTitle;
     return;
   }
   const n = shownName.value.trim();
   if (!n || n.includes('/')) {
-    error.value = n ? 'A filename cannot contain “/”. Drag the file to move it to another folder.' : 'The file needs a name.';
+    error.value = n ? S.rename.noSlash : S.rename.needsName;
     return;
   }
   const to = folder + n;
   if (to !== props.path && props.paths.some((p) => p.toLowerCase() === to.toLowerCase() && p !== props.path)) {
-    error.value = `${to} already exists.`;
+    error.value = S.rename.exists(to);
     return;
   }
   emit('rename', { to, title: t });
 }
 
-onEscape(() => emit('cancel'));
+const root = useTemplateRef<HTMLElement>('root');
+useDialog(root, () => emit('cancel'));
 </script>
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('cancel')">
-    <form class="modal naming" role="dialog" aria-modal="true" aria-label="Rename" data-testid="rename" @submit.prevent="submit">
-      <h2>Rename</h2>
+    <form ref="root" class="modal naming" role="dialog" aria-modal="true" aria-labelledby="rename-title" data-testid="rename" @submit.prevent="submit">
+      <h2 id="rename-title">{{ S.rename.title }}</h2>
       <label class="field">
-        <span>Title</span>
+        <span>{{ S.rename.titleLabel }}</span>
         <input v-model="title" v-focus name="title" @input="onTitle">
       </label>
       <label class="naming-filename">
-        <span>Filename</span>
+        <span>{{ S.rename.filename }}</span>
         <span class="naming-filename-row">
           <span v-if="folder" class="naming-folder" :title="folder">{{ folder }}</span>
           <input :value="shownName" name="filename" spellcheck="false" @input="onName">
@@ -80,14 +82,14 @@ onEscape(() => emit('cancel'));
       </label>
       <p v-if="!follows" class="naming-filename">
         <span>
-          The filename stays as it is when the title changes.
-          <button type="button" class="naming-link" data-testid="rename-match" @click="match">Match the title</button>
+          {{ S.rename.stays }}
+          <button type="button" class="naming-link" data-testid="rename-match" @click="match">{{ S.rename.match }}</button>
         </span>
       </p>
       <p v-if="error" class="naming-error" role="alert">{{ error }}</p>
       <div class="modal-actions">
-        <button type="button" @click="emit('cancel')">Cancel</button>
-        <button type="submit" class="primary">Rename</button>
+        <button type="button" @click="emit('cancel')">{{ S.common.cancel }}</button>
+        <button type="submit" class="primary">{{ S.common.rename }}</button>
       </div>
     </form>
   </div>

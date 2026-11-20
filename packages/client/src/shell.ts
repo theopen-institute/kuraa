@@ -20,6 +20,15 @@ export interface Shell {
   /** On a hub, the workspace to open first (the shell opened or added it). */
   workspace?: string;
   /**
+   * Connect again with the address and access code the shell has now (a shell
+   * that runs the host knows them): after the host turned the access code down.
+   */
+  reconnect?(): void;
+  /** The shell's own preferences (the desktop app's window). */
+  preferences?(): void;
+  /** Be told when the shell's own menu asks for the Markdown and shortcuts sheet (the desktop app's Help menu). */
+  onHelp?(show: () => void): void;
+  /**
    * The person's key of the computer the shell runs its host on (the desktop app,
    * on its own workspaces): whose its commits are, so rules can name people
    * (0034). In a browser, the host offers it where its operator allows
@@ -78,8 +87,12 @@ export interface ShellBridge {
   /** Resolves to an error message, or null once the client is loading. */
   join(url: string, token: string): Promise<string | null>;
   leave(): Promise<void>;
-  /** Back to this app's own workspaces (from the launcher). */
+  /** Back to this app's own workspaces (from the launcher); also how the client reconnects. */
   home(): Promise<void>;
+  /** The app's Preferences window. */
+  preferences?(): Promise<void>;
+  /** Called when the app's Help menu asks for the Markdown and shortcuts sheet. */
+  onHelp?(show: () => void): void;
   /** You on this computer (PersonShell): only where the shell runs the host. */
   person?(): Promise<PersonInfo>;
   createPerson?(name: string): Promise<string | null>;

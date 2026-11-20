@@ -23,8 +23,13 @@ import HeaderDialog from './HeaderDialog.vue';
 import FindBar from './FindBar.vue';
 import OutlinePanel from './OutlinePanel.vue';
 import { findPlugin } from './find.js';
+import { dialogOpen } from './focus.js';
 import type { FormatCommands } from '@kuraa/editor-kit';
 import { workspaceFiles } from './workspaceFiles.js';
+import { placeholderPlugin } from './placeholder.js';
+import { APP_KEYS, keyLabel, keyMatches } from './keys.js';
+import { S } from './strings.js';
+import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{
   api: HostApi;
@@ -54,13 +59,15 @@ const emit = defineEmits<{
   filesChanged: [];
   /** It went to the first conflict, as asked. */
   jumped: [];
+  /** Someone changed the file outside the app as it was edited here: their version is kept beside it, at this path. */
+  outsideConflict: [savedAs: string];
 }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
 const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 // ProseMirror's view: held as is, never made reactive.
 const view = shallowRef<EditorView | null>(null);
-const error = ref<string | null>(null);
+const error = shallowRef<unknown>(null);
 const loading = ref(true);
 /** Goes up with every change to the document while the Header dialog is open. */
 const docVersion = ref(0);
@@ -71,13 +78,15 @@ let source: SourceEditor | null = null;
 let commands: FormatCommands = {};
 let connection: RoomConnection | null = null;
 
-const fresh = (): EditorStatus => ({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
+const fresh = (): EditorStatus => ({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, saving: null, runner: null });
 let status = fresh();
 const update = (patch: Partial<EditorStatus>) => {
   status = { ...status, ...patch };
   emit('status', status);
 };
 
+/** What the file is called, in messages: its name. */
+const name = computed(() => props.path.slice(props.path.lastIndexOf('/') + 1));
 const user = computed(() => ({ name: props.settings.name, email: props.settings.email, color: props.settings.color }));
 // Reconnect only when what the host runs changes, not on every workspace refresh.
 const runKey = computed(() => (props.run?.enabled ? JSON.stringify(props.run) : ''));
@@ -194,19 +203,21 @@ function open(): () => void {
         else if (m.type === 'committed') {
           update({ lastCommitAt: m.at, lastCommit: m.commit });
           emit('committed');
-        } else if (m.type === 'outside-change') update({ notice: { kind: 'info', text: m.merged ? 'Merged a change made outside the app.' : 'Applied a change made outside the app.' } });
-        else if (m.type === 'conflict') update({ notice: { kind: 'warn', text: `A conflicting outside edit was saved as ${m.savedAs}; the live version was kept.` } });
+        } else if (m.type === 'outside-change') update({ notice: { kind: 'info', text: m.merged ? S.editor.outsideMerged : S.editor.outsideApplied } });
+        else if (m.type === 'conflict') emit('outsideConflict', m.savedAs);
         else if (m.type === 'reseeded') {
           // The room was replaced (joined with another device's): move to the new one.
-          update({ notice: { kind: 'info', text: m.why ?? 'Joined the people editing this on another device.' } });
+          update({ notice: { kind: 'info', text: m.why ?? S.editor.joinedOther } });
           setTimeout(() => {
             // Not if the editor was closed or moved on meanwhile: that would open a room nobody closes.
             if (!cancelled) reopen();
           }, 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
         else if (m.type === 'save-status') {
+          // Paused or failing stays in a banner until it is over (App.vue); then a note says so.
           savePaused = m.state === 'paused' ? m.message : null;
-          update({ notice: { kind: m.state === 'ok' ? 'info' : 'warn', text: m.message } });
+          const was = status.saving;
+          update(m.state === 'ok' ? { saving: null, ...(was ? { notice: { kind: 'info', text: m.message } } : {}) } : { saving: { state: m.state, message: m.message } });
         }
       },
     });
@@ -227,7 +238,7 @@ function open(): () => void {
     commands = formatEditor?.commands?.(ctx) ?? {};
     const plugins = layout?.kind === 'lines'
       ? linesPlugins(type.schema, layout, path, history)
-      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap)];
+      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap), placeholderPlugin(S.help.placeholder(keyLabel(APP_KEYS.help)), formatEditor?.header?.node)];
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins, findPlugin()] });
     pmView = new EditorView(mount.value!, {
       state,
@@ -257,15 +268,15 @@ function open(): () => void {
     if (runner) {
       runner.setChunks(collectChunks(pmView.state.doc, hints));
       update({ runner });
-      runner.load().catch((e: Error) => report({ notice: { kind: 'warn', text: `Could not load chunk outputs: ${e.message}` } }));
+      runner.load().catch(() => report({ notice: { kind: 'warn', text: S.editor.outputsFailed } }));
     }
     view.value = markRaw(pmView);
     loading.value = false;
     reportTitle(pmView.state.doc, true);
     reportConflicts(pmView.state.doc, true);
-  })().catch((err: Error) => {
+  })().catch((err: unknown) => {
     if (!cancelled) {
-      error.value = err.message;
+      error.value = err;
       loading.value = false;
     }
   });
@@ -329,6 +340,8 @@ const documentActions = {
   /** Why saving is paused, if it is: a past version is not restored meanwhile. */
   savePaused: (): string | null => savePaused,
   text: (): string | null => (view.value && !view.value.isDestroyed ? props.type.serialize(view.value.state.doc) : null),
+  /** Connect again now (Try again, while offline). */
+  reconnect: () => connection?.reconnect(),
 };
 
 watch(user, (u) => connection?.setUser(u));
@@ -357,9 +370,9 @@ function command(name: keyof FormatCommands): boolean {
   return c(v.state, v.dispatch, v);
 }
 const onWritingKey = (e: KeyboardEvent) => {
-  if (!(e.metaKey || e.ctrlKey) || e.defaultPrevented) return;
-  if (e.code === 'KeyF' && !e.altKey && !e.shiftKey && openFind()) e.preventDefault();
-  else if (e.code === 'KeyO' && e.altKey && !e.shiftKey) {
+  if (!(e.metaKey || e.ctrlKey) || e.defaultPrevented || dialogOpen()) return;
+  if (keyMatches(e, APP_KEYS.find) && openFind()) e.preventDefault();
+  else if (keyMatches(e, APP_KEYS.outline)) {
     e.preventDefault();
     toggleOutline();
   }
@@ -406,8 +419,8 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
 
 <template>
   <div class="editor-pane">
-    <div v-if="error" class="banner warn">Could not open {{ path }}: {{ error }}</div>
-    <div v-if="loading && !error" class="loading">Opening {{ path }}…</div>
+    <ErrorBanner v-if="error" :error="error" :lead="S.editor.couldNotOpen(name)" />
+    <div v-if="loading && !error" class="loading">{{ S.editor.opening(name) }}</div>
     <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
     <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
     <div v-show="!showSource" class="editor-scroll" @mousedown="onBlankMouseDown">

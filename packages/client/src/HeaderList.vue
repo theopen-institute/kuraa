@@ -2,6 +2,7 @@
 // A header field holding several lines of text (authors, bibliography files):
 // one box per item. Enter starts the next item; Backspace in an empty one removes it.
 import { nextTick } from 'vue';
+import { S } from './strings.js';
 
 const props = defineProps<{ modelValue: string[]; idBase: string; label: string; choices?: string[] }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string[]] }>();
@@ -54,15 +55,15 @@ function onKey(e: KeyboardEvent, i: number) {
         :ref="setInput(i)"
         :value="item"
         :list="choices ? `${idBase}-choices` : undefined"
-        :aria-label="`${label} ${i + 1}`"
+        :aria-label="S.header.item(label, i + 1)"
         @input="set(i, ($event.target as HTMLInputElement).value)"
         @keydown="onKey($event, i)"
       >
-      <button type="button" class="header-list-remove" :title="`Remove this one`" :aria-label="`Remove ${label} ${i + 1}`" @click="remove(i)">−</button>
+      <button type="button" class="header-list-remove" :title="S.header.removeOne" :aria-label="S.header.removeItem(label, i + 1)" @click="remove(i)">−</button>
     </div>
     <datalist v-if="choices" :id="`${idBase}-choices`">
       <option v-for="c in choices" :key="c" :value="c" />
     </datalist>
-    <button type="button" class="header-list-add" @click="insert(modelValue.length)">＋ Another</button>
+    <button type="button" class="header-list-add" @click="insert(modelValue.length)">{{ S.header.another }}</button>
   </div>
 </template>

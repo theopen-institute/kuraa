@@ -3,13 +3,15 @@
 // in the corner. Information fades; warnings stay until dismissed.
 import { ref, watch } from 'vue';
 import type { Notice } from './types.js';
+import { S } from './strings.js';
 
 const props = defineProps<{ notice: Notice | null }>();
 const emit = defineEmits<{ dismiss: [] }>();
 const hidden = ref<string | null>(null);
 
 watch(() => props.notice, (notice, _prev, onCleanup) => {
-  if (!notice || notice.kind === 'warn') return;
+  // Warnings, and notes with something to do, stay until dismissed.
+  if (!notice || notice.kind === 'warn' || notice.actions?.length) return;
   const t = setTimeout(() => {
     hidden.value = notice.text;
   }, 6000);
@@ -29,7 +31,10 @@ function dismiss() {
     :role="notice.kind === 'warn' ? 'alert' : 'status'"
     data-testid="notice"
   >
-    <span>{{ notice.text }}</span>
-    <button type="button" aria-label="Dismiss" @click="dismiss">×</button>
+    <span class="notice-text">{{ notice.text }}</span>
+    <span v-if="notice.actions?.length" class="notice-actions">
+      <button v-for="a in notice.actions" :key="a.label" type="button" :data-testid="a.testid" @click="a.run()">{{ a.label }}</button>
+    </span>
+    <button type="button" class="notice-dismiss" :aria-label="S.common.dismiss" @click="dismiss">×</button>
   </div>
 </template>

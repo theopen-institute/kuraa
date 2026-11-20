@@ -11,7 +11,8 @@
 // request; with the person's own git credentials (SSH keys, a credential helper),
 // never asking for any.
 import { devNull } from 'node:os';
-import type { Git } from './git.js';
+import { NON_INTERACTIVE, type Git } from './git.js';
+import { serialQueue } from './serial.js';
 
 export interface BackupStatus {
   /** The git remote it is pushed to. */
@@ -42,6 +43,8 @@ export class Backups {
   private readonly status = new Map<string, { lastPush: string | null; error: string | null; pushing: boolean }>();
   private timer: NodeJS.Timeout | undefined;
   private closed = false;
+  /** One push at a time to each backup. */
+  private readonly pushing = new Map<string, ReturnType<typeof serialQueue>>();
 
   constructor(private readonly git: Git, private readonly o: { delayMs: number; log: (m: string) => void; serial: <T>(fn: () => Promise<T>) => Promise<T> }) {}
 
@@ -115,15 +118,25 @@ export class Backups {
    * forced), with the person's own credentials, and no prompting for any.
    */
   async push(name: string): Promise<void> {
+    let queue = this.pushing.get(name);
+    if (!queue) this.pushing.set(name, (queue = serialQueue()));
+    return queue(() => this.pushOnce(name));
+  }
+
+  private async pushOnce(name: string): Promise<void> {
     const s = this.status.get(name) ?? { lastPush: null, error: null, pushing: false };
     this.status.set(name, s);
     s.pushing = true;
     try {
-      // In turn with commits and merges, so the branches do not move underneath.
-      const r = await this.o.serial(() => this.git.run(
-        ['-c', `core.hooksPath=${devNull}`, 'push', '--porcelain', name, 'refs/heads/*:refs/heads/*'],
-        { allowFail: true, timeoutMs: 10 * 60_000, env: { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes' } },
-      ));
+      // Which commits the branches are at, read in turn with commits and merges so none is half made;
+      // the push itself, over the network, waits for nothing and holds up no saving.
+      const refs = await this.o.serial(() => this.git.out(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/']));
+      const specs = refs.split('\n').filter(Boolean).map((l) => l.replace(' ', ':'));
+      if (!specs.length) return;
+      const r = await this.git.run(
+        ['-c', `core.hooksPath=${devNull}`, 'push', '--porcelain', name, ...specs],
+        { allowFail: true, timeoutMs: 10 * 60_000, env: NON_INTERACTIVE },
+      );
       const rejected = r.stdout.split('\n').filter((l) => l.startsWith('!'));
       if (r.code === 0 && !rejected.length) {
         s.lastPush = new Date().toISOString();

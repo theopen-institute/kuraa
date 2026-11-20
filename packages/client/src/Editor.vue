@@ -194,12 +194,13 @@ function open(): () => void {
         else if (m.type === 'conflict') update({ notice: { kind: 'warn', text: `A conflicting outside edit was saved as ${m.savedAs}; the live version was kept.` } });
         else if (m.type === 'reseeded') {
           // The room was replaced (joined with another device's): move to the new one.
-          update({ notice: { kind: 'info', text: 'Joined the people editing this on another device.' } });
+          update({ notice: { kind: 'info', text: m.why ?? 'Joined the people editing this on another device.' } });
           setTimeout(() => {
             // Not if the editor was closed or moved on meanwhile: that would open a room nobody closes.
             if (!cancelled) reopen();
           }, 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
+        else if (m.type === 'save-status') update({ notice: { kind: m.state === 'ok' ? 'info' : 'warn', text: m.message } });
       },
     });
     connection = conn;

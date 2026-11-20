@@ -151,7 +151,7 @@ export class Peers {
     const chosen = await this.node.identity.syncRemote();
     const remote = await this.host.syncRemoteName();
     if (!chosen || !remote || chosen !== remote) return;
-    await this.host.serial(() => this.host.syncWith(remote)).catch((e: Error) => this.host.log(`peers: syncing with ${remote} failed: ${e.message}`));
+    await this.host.syncWith(remote).catch((e: Error) => this.host.log(`peers: syncing with ${remote} failed: ${e.message}`));
   }
 
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */

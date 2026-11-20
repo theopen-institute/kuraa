@@ -7,7 +7,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { existsSync, statSync, createReadStream } from 'node:fs';
+import { existsSync, lstatSync, statSync, createReadStream } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
@@ -70,6 +70,16 @@ export function sameToken(given: string | null | undefined, token: string): bool
   if (typeof given !== 'string') return false;
   const digest = (s: string) => createHash('sha256').update(s).digest();
   return timingSafeEqual(digest(given), digest(token));
+}
+
+/** Whether something is at a path, a link (even one pointing nowhere) included. */
+function lexists(abs: string): boolean {
+  try {
+    lstatSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Refuse a new name that some computer the workspace goes to could not hold (files.ts). */
@@ -261,15 +271,16 @@ const fileRoutes: Route[] = [
     const branch = await host.git.branch();
     const paths = [...new Set(out.split('\0').filter(Boolean))].sort();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
-    const files = (await Promise.all(paths.map((p) => host.treeEntry(p, branch)))).filter((f) => f !== null);
+    const files = await host.treeEntries(paths, branch);
     send(res, 200, { files });
   }),
 
   route('GET', '/api/files', ({ host, res, q }) => {
     const abs = host.resolvePath(host.relPath(str(q.get('path'), 'path')));
-    if (!existsSync(abs)) throw new HttpError(404, 'No such file');
+    if (!existsSync(abs) || !statSync(abs).isFile()) throw new HttpError(404, 'No such file');
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    createReadStream(abs).pipe(res);
+    // A read that fails half-way ends the answer, not the host.
+    createReadStream(abs).on('error', () => res.destroy()).pipe(res);
   }),
 
   route('POST', '/api/files', async ({ host, req, res }) => {
@@ -280,8 +291,9 @@ const fileRoutes: Route[] = [
     if (existsSync(abs)) throw new HttpError(409, 'File exists');
     const content = typeof body.content === 'string' ? body.content : '';
     const commit = await host.serial(async () => {
+      await host.requireWritable();
       await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content);
+      await writeFile(abs, content, { flag: 'wx' });
       return host.commitPaths([path], `Create ${path}`);
     });
     send(res, 201, { path, commit });
@@ -297,6 +309,7 @@ const fileRoutes: Route[] = [
     const abs = host.resolvePath(path);
     if (existsSync(abs)) throw new HttpError(409, 'A file or folder with that name exists');
     const commit = await host.serial(async () => {
+      await host.requireWritable();
       await mkdir(abs, { recursive: true });
       await writeFile(join(abs, '.gitkeep'), '');
       return host.commitPaths([`${path}/.gitkeep`], `Create folder ${path}`);
@@ -308,12 +321,13 @@ const fileRoutes: Route[] = [
   // title too (with `to` the same as `from`, only that).
   route('PATCH', '/api/files', async ({ host, req, res }) => {
     const body = await readBody(req);
-    const from = host.relPath(str(body.from, 'from'));
+    const from = host.relPath(str(body.from, 'from'), { link: 'self' });
     const to = host.relPath(str(body.to, 'to'));
     const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim() : undefined;
-    const absFrom = host.resolvePath(from);
+    // A link is renamed itself (never what it points to).
+    const absFrom = host.resolvePath(from, { link: 'self' });
     const absTo = host.resolvePath(to);
-    if (!existsSync(absFrom)) throw new HttpError(404, 'No such file or folder');
+    if (!lexists(absFrom)) throw new HttpError(404, 'No such file or folder');
     if (title !== undefined) {
       await host.checkTitle(from, title);
       if (!host.typeFor(to)?.title) throw new HttpError(400, `${to} would not be a document with a title`);
@@ -321,6 +335,7 @@ const fileRoutes: Route[] = [
     if (to === from) {
       if (title === undefined) throw new HttpError(400, 'Nothing to change');
       const commit = await host.serial(async () => {
+        await host.requireWritable();
         await host.setTitle(from, title);
         return host.commitPaths([from], `Retitle ${from}: ${title}`);
       });
@@ -329,11 +344,12 @@ const fileRoutes: Route[] = [
     checkPortable(to);
     if (existsSync(absTo)) throw new HttpError(409, `${to} already exists`);
     // A folder moves with everything in it, but never into itself.
-    const isFolder = statSync(absFrom).isDirectory();
+    const isFolder = lstatSync(absFrom).isDirectory();
     if (isFolder && to.startsWith(`${from}/`)) throw new HttpError(400, 'A folder cannot move into itself');
     // Only the folder changed: a move. Otherwise (the name changed too) a rename.
     const moveOnly = dirname(from) !== dirname(to) && basename(from) === basename(to);
     const commit = await host.serial(async () => {
+      await host.requireWritable();
       if (isFolder) await host.dropRoomsUnder(from);
       else await host.dropRoom(from);
       await mkdir(dirname(absTo), { recursive: true });
@@ -345,11 +361,16 @@ const fileRoutes: Route[] = [
   }),
 
   route('DELETE', '/api/files', async ({ host, res, q }) => {
-    const path = host.relPath(str(q.get('path'), 'path'));
-    const abs = host.resolvePath(path);
-    if (!existsSync(abs)) throw new HttpError(404, 'No such file');
+    const path = host.relPath(str(q.get('path'), 'path'), { link: 'self' });
+    // A link is deleted itself (never what it points to).
+    const abs = host.resolvePath(path, { link: 'self' });
+    if (!lexists(abs)) throw new HttpError(404, 'No such file');
+    const isFolder = lstatSync(abs).isDirectory();
     const commit = await host.serial(async () => {
-      await host.dropRoom(path);
+      await host.requireWritable();
+      // A folder's open rooms go with it.
+      if (isFolder) await host.dropRoomsUnder(path);
+      else await host.dropRoom(path);
       // Retried while Windows says busy (another program has a file open, for a moment).
       await rm(abs, { recursive: true, maxRetries: 5 });
       return host.commitPaths([path], `Delete ${path}`);

@@ -415,3 +415,8 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 - Edits made while disconnected are kept and sent on reconnect. If the host reseeded the file in
   the meantime (for example after its room cache was cleared), the client only warns.
 - The corpus does not yet include real working files from the project's first users.
+- Symbolic links in a workspace are listed but never opened or followed, and files not saved as
+  UTF-8 (a Latin-1 `.bib`) are not opened for editing ([decision 0037](docs/decisions/0037-host-safety.md)).
+- While git is in the middle of an operation in the folder (a rebase, a merge with conflicts), or no
+  branch is checked out, nothing is saved: edits wait in the app until it is done. A branch switched
+  outside the app moves open files to that branch's version, saving their edits on the old branch.

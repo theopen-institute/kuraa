@@ -153,11 +153,7 @@ export class Hub {
       if (why) throw new Error(why);
     } else {
       await mkdir(this.root, { recursive: true });
-      try {
-        this.entries = (JSON.parse(await readFile(this.registry, 'utf8')) as Entry[]).map(({ id, name, dir, added }) => ({ id, name, dir, added }));
-      } catch {
-        this.entries = [];
-      }
+      this.entries = await this.readRegistry();
       // Each workspace opens on its own (a host, git, perhaps the peer network): all at once.
       await Promise.all(this.entries.map((e) => this.open(e)));
     }
@@ -170,6 +166,42 @@ export class Hub {
     this.address = this.server.address() as AddressInfo;
     this.log(`hub serving ${this.entries.length} workspace${this.entries.length === 1 ? '' : 's'} from ${this.root} on http://${this.address.address}:${this.address.port}`);
     return this.address;
+  }
+
+  /**
+   * The list of workspaces. None yet only if there is no list: a list that cannot
+   * be read is never taken for an empty one (and then written over). One that is
+   * not valid is set aside, beside it, and the hub starts with none.
+   */
+  private async readRegistry(): Promise<Entry[]> {
+    let text: string;
+    try {
+      text = await readFile(this.registry, 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Could not read the list of workspaces (${this.registry}): ${(e as Error).message}`, { cause: e });
+    }
+    try {
+      const list = JSON.parse(text) as Entry[];
+      if (!Array.isArray(list)) throw new Error('not a list');
+      return list.map(({ id, name, dir, added }) => ({ id, name, dir, added }));
+    } catch (e) {
+      const aside = `${this.registry}.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      await renameOver(this.registry, aside);
+      this.log(`the list of workspaces could not be read (${(e as Error).message}): kept as ${aside}, starting with none`);
+      return [];
+    }
+  }
+
+  /** Write and commit every workspace's open edits now (each on its own: one failing stops none of the others). */
+  async saveAll(): Promise<void> {
+    await Promise.all([...this.hosts.entries()].map(async ([id, h]) => {
+      try {
+        await h.host.serial(() => h.host.commitAll());
+      } catch (e) {
+        this.log(`[${id}] could not save everything: ${(e as Error).message}`);
+      }
+    }));
   }
 
   private async save(): Promise<void> {
@@ -396,7 +428,7 @@ export class Hub {
     for (const s of this.tunnels) s.destroy();
     this.tunnels.clear();
     await closed;
-    await Promise.all([...this.hosts.values()].map((h) => h.close().catch(() => undefined)));
+    await Promise.all([...this.hosts.entries()].map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
     this.hosts.clear();
   }
 }

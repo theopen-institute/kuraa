@@ -1,7 +1,7 @@
 // M8: the Electron app opens a local folder, edits and commits; it can also join
 // a shared host. The M5 checks run against the folder while other programs
 // (plain file writes, git pull) change it.
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -93,7 +93,12 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.getByTestId('menu-button').click();
     await expect(page.getByLabel('Your name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Server address')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Open another folder…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Join a shared server…' })).toBeVisible();
+    await expect(page.getByTestId('menu-preferences')).toBeVisible();
+    await page.keyboard.press('Escape');
+    // Open a folder… is with the workspaces, as in a browser.
+    await page.getByTestId('workspace-switcher').click();
+    await expect(page.getByTestId('workspace-open-folder')).toBeVisible();
     await page.keyboard.press('Escape');
 
     // New and Rename ask in in-app dialogs (Electron has no window.prompt).
@@ -192,7 +197,10 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
 
     // It starts with its workspaces: none yet.
     await expect(page.getByTestId('no-workspace')).toContainText('No workspaces yet');
+    // Open a folder…: the folder from the app's own dialog, then the page asks, as in a browser (decision 0047).
     await page.getByRole('button', { name: 'Open a folder…' }).click();
+    await expect(page.getByTestId('ask')).toContainText(`Use “${basename(dir)}” as a workspace?`);
+    await page.getByTestId('ask').getByRole('button', { name: 'Use this folder' }).click();
     await openNotes(page);
     await expect(page.getByTestId('workspace-name')).toHaveText(basename(dir));
     expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
@@ -284,15 +292,19 @@ test('flags set what runs and which formats are on; the window shows only the ap
   }
 });
 
-/** Open the Preferences window from the app's menu. */
-async function openPreferences(app: ElectronApplication): Promise<Page> {
-  const opened = app.waitForEvent('window');
-  await app.evaluate(({ Menu }) => {
+/** Open Preferences from the app's menu (⌥⌘,): the client's dialog, in the window, as in a browser (decision 0047). */
+async function openPreferences(app: ElectronApplication, page: Page): Promise<Locator> {
+  const item = await app.evaluate(({ Menu }) => {
     const items = Menu.getApplicationMenu()!.items.flatMap((i) => i.submenu?.items ?? []);
-    items.find((i) => i.label === 'Preferences…')!.click();
+    const preferences = items.find((i) => i.label === 'Preferences…')!;
+    preferences.click();
+    return { accelerator: preferences.accelerator };
   });
-  const prefs = await opened;
+  expect(item.accelerator).toBe('CmdOrCtrl+Alt+,');
+  const prefs = page.getByTestId('preferences');
   await expect(prefs.getByTestId('pref-workspaces')).not.toHaveValue('');
+  // No window of its own.
+  expect(app.windows()).toHaveLength(1);
   return prefs;
 }
 
@@ -311,7 +323,7 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(true);
-    const prefs = await openPreferences(app);
+    const prefs = await openPreferences(app, page);
     // Whether code can run here is said up front (Podman installed and running, or not).
     await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
     await prefs.getByTestId('pref-run').uncheck();
@@ -323,7 +335,7 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     await expect(prefs.getByTestId('pref-error')).toContainText('memory limit should be a size');
     await prefs.getByTestId('pref-memory').fill('3g');
     await prefs.getByTestId('pref-format-rmarkdown').uncheck();
-    // The workspaces restart with them (writing and committing first), and the window reloads.
+    // The hub reopens the workspaces with them (writing and committing first), and the page reloads.
     const reloaded = page.waitForEvent('load', { timeout: 15_000 });
     await prefs.getByTestId('pref-save').click();
     await reloaded;
@@ -357,11 +369,16 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(false);
-    const prefs = await openPreferences(app);
+    const prefs = await openPreferences(app, page);
     await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
     await expect(prefs.getByTestId('pref-sync')).toBeChecked();
     await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');
     await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
+    // The page's own ⌥⌘, opens it too (as in a browser), and Escape closes it.
+    await page.keyboard.press('Escape');
+    await expect(prefs).toHaveCount(0);
+    await page.keyboard.press('ControlOrMeta+Alt+Comma');
+    await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
   } finally {
     await app.close();
   }

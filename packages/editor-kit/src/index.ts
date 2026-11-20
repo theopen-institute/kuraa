@@ -94,6 +94,24 @@ export interface FormatEditor {
   header?: HeaderSpec;
   /** Commands the client may offer by name (FormatCommands). */
   commands?(ctx: EditorContext): FormatCommands;
+  /**
+   * What people can type and press in documents of this type, for the client's
+   * Markdown and shortcuts sheet. Listed from the same data that makes the key
+   * bindings, where that is practical, so the sheet says what the keys do.
+   */
+  help?: HelpItem[];
+}
+
+/** One line of the Markdown and shortcuts sheet. */
+export interface HelpItem {
+  /** The heading it is listed under: 'Typing', 'Keys', 'Citations, images and tables'. */
+  group: string;
+  /** What to type, shown as written: '# ', '**bold**'. */
+  type?: string;
+  /** Or the keys, as key bindings write them ('Mod-b', 'Mod-Alt-1'); the client shows them for the system. */
+  keys?: string[];
+  /** What it does. */
+  does: string;
 }
 
 /**

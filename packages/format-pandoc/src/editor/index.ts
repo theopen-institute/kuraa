@@ -6,7 +6,7 @@
 //
 // `createPandocEditor` is the extension point, as `createPandocType` is for the
 // format: R Markdown adds its chunks through it.
-import type { EditorContext, FormatEditor, HeaderField } from '@kuraa/editor-kit';
+import type { EditorContext, FormatEditor, HeaderField, HelpItem } from '@kuraa/editor-kit';
 import type { Attrs, MarkType, NodeType, Schema } from 'prosemirror-model';
 import { TextSelection, type Command, type EditorState, type Plugin } from 'prosemirror-state';
 import { chainCommands, createParagraphNear, exitCode, lift, liftEmptyBlock, newlineInCode, setBlockType, splitBlock, toggleMark, wrapIn } from 'prosemirror-commands';
@@ -40,6 +40,8 @@ export interface PandocEditorExtension {
   rules?(schema: Schema): InputRule[];
   /** More header fields to offer, after Pandoc's (one with the same key replaces Pandoc's). */
   headerFields?: HeaderField[];
+  /** What its cues and keys do, for the Markdown and shortcuts sheet (each of its keys should be here). */
+  help?: HelpItem[];
 }
 
 /** Insert a node at the cursor, putting the cursor inside it if it holds text. */
@@ -172,6 +174,97 @@ function markdownRules(schema: Schema, ext: PandocEditorExtension): InputRule[] 
   return rules.filter((r): r is InputRule => r !== null);
 }
 
+/**
+ * The key bindings of a Pandoc document: marks, blocks, lists, footnotes,
+ * tables, conflicts, and the extension's. Each key with a modifier is named in
+ * PANDOC_HELP (a test checks), so the shortcuts sheet lists what is bound.
+ */
+export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditorExtension = {}, notes = footnotes(schema, ctx)): Record<string, Command> {
+  const n = schema.nodes;
+  const m = schema.marks;
+  // In a note, Shift+Enter starts a new paragraph; elsewhere it is a line break.
+  const newParagraph = chainCommands(splitListItem(n.list_item!), newlineInCode, createParagraphNear, liftEmptyBlock, splitBlock);
+  return {
+    'Mod-b': toggleMark(m.strong!),
+    'Mod-i': toggleMark(m.em!),
+    'Mod-e': toggleMark(m.code!),
+    'Mod-Shift-x': toggleMark(m.strike!),
+    'Mod-Shift-k': toggleLink(schema, ctx),
+    'Mod-Alt-0': setBlockType(n.paragraph!),
+    'Mod-Alt-1': setBlockType(n.heading!, { level: 1 }),
+    'Mod-Alt-2': setBlockType(n.heading!, { level: 2 }),
+    'Mod-Alt-3': setBlockType(n.heading!, { level: 3 }),
+    'Mod-Shift-8': wrapInList(n.bullet_list!),
+    'Mod-Shift-7': wrapInList(n.ordered_list!),
+    'Mod-Shift-.': wrapIn(n.blockquote!),
+    'Mod-[': lift,
+    'Mod-Alt-c': setBlockType(n.code_block!),
+    ...notes.keys,
+    Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitListItem(n.list_item!)),
+    'Shift-Enter': chainCommands(
+      (state, dispatch, view) => (notes.inNote(state) ? newParagraph(state, dispatch, view) : false),
+      exitCode,
+      (state, dispatch) => {
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(n.hard_break!.create()).scrollIntoView());
+        return true;
+      },
+    ),
+    Backspace: undoInputRule,
+    ...tableKeys(),
+    Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
+    'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
+    'Mod-Alt-n': nextConflict,
+    ...(ext.keys?.(schema, ctx) ?? {}),
+  };
+}
+
+const TYPING = 'Typing';
+const WRITING = 'Citations, images, math and tables';
+const KEYS = 'Keys';
+
+/** What Pandoc markdown's cues and keys do: the Markdown and shortcuts sheet (decisions 0008, 0040). */
+export const PANDOC_HELP: HelpItem[] = [
+  { group: TYPING, type: '# ', does: 'Heading (## for the next level, up to ######)' },
+  { group: TYPING, type: '> ', does: 'Block quote' },
+  { group: TYPING, type: '- ', does: 'Bullet list (or * or +)' },
+  { group: TYPING, type: '1. ', does: 'Numbered list' },
+  { group: TYPING, type: '**bold**', does: 'Bold (or __bold__)' },
+  { group: TYPING, type: '*italic*', does: 'Italic (or _italic_)' },
+  { group: TYPING, type: '~~gone~~', does: 'Struck through' },
+  { group: TYPING, type: '`code`', does: 'Code in a line' },
+  { group: TYPING, type: 'H~2~O   x^2^', does: 'Subscript, superscript' },
+  { group: TYPING, type: '[text](https://…)', does: 'Link' },
+  { group: TYPING, type: '---', does: 'A line across the page' },
+  { group: TYPING, type: '``` then Enter', does: 'Code block (```python for a language)' },
+  { group: TYPING, type: '[^label]', does: 'Footnote: a new one is added at the end' },
+  { group: TYPING, type: '^[text]', does: 'Inline note' },
+  { group: TYPING, keys: ['Backspace'], does: 'Straight after a cue: back to what you typed' },
+  { group: WRITING, type: '@', does: 'Cite: choose from the bibliography the header names' },
+  { group: WRITING, type: '[@smith2020, p. 3]', does: 'A citation as Pandoc writes it (@smith2020 alone cites in the text)' },
+  { group: WRITING, type: '![caption](plot.png)', does: 'Image; or paste or drop an image file' },
+  { group: WRITING, type: '$x^2$', does: 'Math in the line' },
+  { group: WRITING, type: '$$ then Enter', does: 'Display math, on lines of its own' },
+  { group: WRITING, type: '| a | b | then Enter', does: 'Table with those headings' },
+  { group: WRITING, keys: ['Tab', 'Shift-Tab'], does: 'In a table: the next or previous cell' },
+  { group: WRITING, keys: ['Shift-F10'], does: 'In a table: rows and columns (or right-click)' },
+  { group: KEYS, keys: ['Mod-b'], does: 'Bold' },
+  { group: KEYS, keys: ['Mod-i'], does: 'Italic' },
+  { group: KEYS, keys: ['Mod-e'], does: 'Code' },
+  { group: KEYS, keys: ['Mod-Shift-x'], does: 'Struck through' },
+  { group: KEYS, keys: ['Mod-Shift-k'], does: 'Link the selected text' },
+  { group: KEYS, keys: ['Mod-Alt-1', 'Mod-Alt-2', 'Mod-Alt-3'], does: 'Heading 1, 2, 3' },
+  { group: KEYS, keys: ['Mod-Alt-0'], does: 'Plain paragraph' },
+  { group: KEYS, keys: ['Mod-Shift-8'], does: 'Bullet list' },
+  { group: KEYS, keys: ['Mod-Shift-7'], does: 'Numbered list' },
+  { group: KEYS, keys: ['Mod-Shift-.'], does: 'Block quote' },
+  { group: KEYS, keys: ['Mod-['], does: 'Out of a list or quote' },
+  { group: KEYS, keys: ['Mod-Alt-c'], does: 'Code block' },
+  { group: KEYS, keys: ['Mod-Alt-f'], does: 'A numbered footnote' },
+  { group: KEYS, keys: ['Shift-Enter'], does: 'Line break; in a note, a new paragraph' },
+  { group: KEYS, keys: ['Mod-Enter'], does: 'Leave a code block or table' },
+  { group: KEYS, keys: ['Mod-Alt-n'], does: 'The next conflict' },
+];
+
 /** A Pandoc markdown editor, optionally extended (R Markdown adds its chunks). */
 export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEditor {
   return {
@@ -180,42 +273,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
       const notes = footnotes(schema, ctx);
       const header = headerBehaviour(schema, ctx);
       if (ctx.readOnly) return notes.plugins;
-      const n = schema.nodes;
-      const m = schema.marks;
-      // In a note, Shift+Enter starts a new paragraph; elsewhere it is a line break.
-      const newParagraph = chainCommands(splitListItem(n.list_item!), newlineInCode, createParagraphNear, liftEmptyBlock, splitBlock);
-      const keys: Record<string, Command> = {
-        'Mod-b': toggleMark(m.strong!),
-        'Mod-i': toggleMark(m.em!),
-        'Mod-e': toggleMark(m.code!),
-        'Mod-Shift-x': toggleMark(m.strike!),
-        'Mod-Shift-k': toggleLink(schema, ctx),
-        'Mod-Alt-0': setBlockType(n.paragraph!),
-        'Mod-Alt-1': setBlockType(n.heading!, { level: 1 }),
-        'Mod-Alt-2': setBlockType(n.heading!, { level: 2 }),
-        'Mod-Alt-3': setBlockType(n.heading!, { level: 3 }),
-        'Mod-Shift-8': wrapInList(n.bullet_list!),
-        'Mod-Shift-7': wrapInList(n.ordered_list!),
-        'Mod-Shift-.': wrapIn(n.blockquote!),
-        'Mod-[': lift,
-        'Mod-Alt-c': setBlockType(n.code_block!),
-        ...notes.keys,
-        Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitListItem(n.list_item!)),
-        'Shift-Enter': chainCommands(
-          (state, dispatch, view) => (notes.inNote(state) ? newParagraph(state, dispatch, view) : false),
-          exitCode,
-          (state, dispatch) => {
-            if (dispatch) dispatch(state.tr.replaceSelectionWith(n.hard_break!.create()).scrollIntoView());
-            return true;
-          },
-        ),
-        Backspace: undoInputRule,
-        ...tableKeys(),
-        Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
-        'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
-        'Mod-Alt-n': nextConflict,
-        ...(ext.keys?.(schema, ctx) ?? {}),
-      };
+      const keys = pandocKeys(schema, ctx, ext, notes);
       return [
         ...citationPlugins(ctx),
         inputRules({ rules: [...(ext.rules?.(schema) ?? []), ...notes.rules, ...imageRules(schema), ...citationRules(schema), ...markdownRules(schema, ext)] }),
@@ -235,6 +293,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
     }),
     header: headerSpec(ext.headerFields),
     commands: () => ({ insertTable, nextConflict }),
+    help: [...PANDOC_HELP, ...(ext.help ?? [])],
   };
 }
 

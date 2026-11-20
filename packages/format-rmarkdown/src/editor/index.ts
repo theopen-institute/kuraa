@@ -16,6 +16,10 @@ export const rmarkdownEditor: FormatEditor = {
       return chunk && info.startsWith('{') ? { type: chunk, attrs: chunkAttrs(info.slice(1, -1)) } : null;
     },
     keys: (schema) => ({ 'Mod-Alt-i': insertNode(schema.nodes.code_chunk) }),
+    help: [
+      { group: 'R Markdown', type: '```{r} then Enter', does: 'An R chunk (```{r label, echo=FALSE} for its options)' },
+      { group: 'R Markdown', keys: ['Mod-Alt-i'], does: 'A new R chunk' },
+    ],
     headerFields: [
       {
         key: 'output',

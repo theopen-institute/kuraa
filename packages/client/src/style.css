@@ -388,6 +388,10 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-name { font-weight: 500; }
 .component-about { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .component-unavailable { color: var(--warn); }
+.component.tool { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
+.component.tool .component-text { cursor: default; }
+.tool-actions { display: flex; gap: 6px; align-items: start; }
+.render-needs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 .r-state.unsandboxed::after { content: ' · not sandboxed'; color: var(--warn); }
 .component-warn { font-weight: 400; color: var(--warn); }
 .components-note code { font-size: 12px; }

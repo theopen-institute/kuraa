@@ -91,6 +91,8 @@ const menuPanel = ref<'menu' | 'access'>('menu');
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 const componentsOpen = ref(false);
+/** Goes up when the host says a tool changed (downloaded, removed): the Components dialog and the preview ask again. */
+const toolsKey = ref(0);
 const addingWorkspace = ref(false);
 /** Inviting people: whether the workspace already syncs with devices. */
 const inviting = shallowRef<{ syncing: boolean } | null>(null);
@@ -565,6 +567,7 @@ function useSettings(s: Settings) {
               @title="(t) => (liveTitle = { path: path!, title: t })"
               @conflicts="(n) => (liveConflicts = { path: path!, count: n })"
               @files-changed="refreshTree()"
+              @tools-changed="toolsKey++"
               @committed="historyKey++"
               @outside-conflict="outsideConflict"
             />
@@ -602,6 +605,7 @@ function useSettings(s: Settings) {
         :trigger="renderAsked"
         :written-at="status?.lastFlushAt ?? null"
         :unsynced="status?.unsynced ?? 0"
+        :tools-key="toolsKey"
         @close="sidePanel = null"
       />
       <SearchPanel v-else-if="sidePanel === 'search'" :api="api" :focus-key="searchAsked" @open="openMatch" @close="sidePanel = null" />
@@ -653,6 +657,7 @@ function useSettings(s: Settings) {
       :api="api"
       :editors="editors"
       :editors-off="editorsOff"
+      :tools-key="toolsKey"
       @editors-off="setEditorsOff"
       @close="componentsOpen = false"
     />

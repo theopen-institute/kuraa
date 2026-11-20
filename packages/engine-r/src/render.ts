@@ -32,7 +32,7 @@ const LATEX = ['pdflatex', 'xelatex', 'lualatex', 'latexmk'];
  * the tool is mounted before the process starts.
  */
 export async function latexWanted(input: string): Promise<string | null> {
-  let text = '';
+  let text: string;
   try {
     const handle = await openFile(input, 'r');
     try {

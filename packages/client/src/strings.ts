@@ -441,6 +441,18 @@ export const S = {
     files: (ext: string) => `${ext} files`,
     formatOff: 'A file whose format is off opens as a Text file, while that is on.',
     editing: 'Editing · just you',
+    tools: 'Downloaded when needed',
+    toolsAbout: 'Kept once on this computer, for every workspace, and used only where code runs.',
+    toolsOff: 'Downloading tools is turned off on this server; whoever runs it can turn it on.',
+    toolSize: (mb: string) => `About ${mb} to download.`,
+    toolReady: (mb: string) => `Downloaded: ${mb} on this computer.`,
+    toolParts: (n: number, label: string) => (n ? ` ${n.toLocaleString()} ${label} added since.` : ''),
+    toolBusy: { downloading: 'Downloading…', adding: 'Adding…', removing: 'Removing…' } as Record<string, string>,
+    download: 'Download',
+    downloadTitle: (label: string, mb: string) => `Download ${label} (about ${mb}) to this computer`,
+    remove: 'Remove',
+    removeTitle: (label: string) => `Remove ${label} from this computer. Documents that need it are made without it until it is downloaded again.`,
+    failed: (why: string) => `Did not work: ${why}`,
   },
 
   packages: {
@@ -517,6 +529,9 @@ export const S = {
     rendering: (label: string, progress: string | null) => `Rendering ${label}…${progress ? ` ${progress}` : ''}`,
     done: (message: string, at: string, by: string | null) => `${message} ${at}${by ? `, for ${by}` : ''}.`,
     frame: 'The rendered document',
+    download: (label: string, mb: string) => `Download ${label} (about ${mb})`,
+    downloading: (label: string, progress: string | null) => `Downloading ${label}…${progress ? ` ${progress}` : ''}`,
+    downloadFailed: (label: string, why: string) => `${label} could not be downloaded: ${why}`,
     formats: { html: 'HTML', docx: 'Word', pdf: 'PDF' } as Record<string, string>,
   },
 

@@ -2,11 +2,13 @@
 // The Preview panel: the open document rendered to HTML by the host (where code
 // runs), shown in a frame that runs nothing; and Word, PDF and HTML files to
 // save. It renders when asked (Render, ⇧⌘R), and, if chosen, each time the
-// document is written to its file.
+// document is written to its file. A render that needs a tool this computer
+// lacks (LaTeX, for a PDF) offers to download it, and renders again once it is
+// there (decision 0045).
 import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { HostApi, RenderFormat, RenderInfo, RenderState } from './api.js';
 import { outputName, previewDocument, saveFile } from './preview.js';
-import { time } from './labels.js';
+import { megabytes, time } from './labels.js';
 import { APP_KEYS, keyLabel } from './keys.js';
 import { S } from './strings.js';
 import { useReturnFocus } from './vue.js';
@@ -22,6 +24,8 @@ const props = defineProps<{
   writtenAt: string | null;
   /** Edits made here that have not reached the host yet: a render waits for them (briefly). */
   unsynced: number;
+  /** Goes up when the host says a tool changed. */
+  toolsKey?: number;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -46,7 +50,52 @@ watch(onSave, (v) => {
 let asked = 0;
 let opened = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
-onBeforeUnmount(() => clearTimeout(timer));
+let toolTimer: ReturnType<typeof setTimeout> | undefined;
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  clearTimeout(toolTimer);
+});
+
+/** A tool being downloaded for a render: which, what it is doing, and the render to make once it is there. */
+const fetching = shallowRef<{ tool: string; label: string; progress: string | null; format: RenderFormat; save: boolean } | null>(null);
+
+async function download(needs: NonNullable<RenderState['needs']>, format: RenderFormat) {
+  const save = toSave.has(format) || shown.value?.format === format && format !== 'html';
+  fetching.value = { tool: needs.tool, label: needs.label, progress: null, format, save };
+  error.value = null;
+  try {
+    await props.api.downloadTool(needs.tool);
+  } catch (e) {
+    fetching.value = null;
+    error.value = e;
+    return;
+  }
+  await followTool();
+}
+
+/** Follow the download; render again once the tool is there. */
+async function followTool() {
+  clearTimeout(toolTimer);
+  const f = fetching.value;
+  if (!f) return;
+  try {
+    const t = (await props.api.tools()).tools.find((x) => x.id === f.tool);
+    if (fetching.value !== f) return;
+    if (t?.state === 'ready') {
+      fetching.value = null;
+      void render(f.format, f.save);
+    } else if (!t || (t.state === 'absent' && t.error)) {
+      fetching.value = null;
+      error.value = new Error(S.render.downloadFailed(f.label, t?.error ?? ''));
+    } else {
+      fetching.value = { ...f, progress: t.progress };
+      toolTimer = setTimeout(() => void followTool(), 700);
+    }
+  } catch (e) {
+    fetching.value = null;
+    error.value = e;
+  }
+}
 
 const busy = computed(() => !!info.value?.renders.some((r) => r.state === 'rendering'));
 
@@ -125,8 +174,12 @@ async function save(format: RenderFormat) {
   }
 }
 
+watch(() => props.toolsKey, () => {
+  if (fetching.value) void followTool();
+});
 watch(() => props.path, () => {
   asked++;
+  fetching.value = null;
   info.value = null;
   html.value = null;
   shown.value = null;
@@ -145,6 +198,7 @@ watch(() => props.writtenAt, (at, before) => {
 
 const status = computed(() => {
   const s = shown.value;
+  if (fetching.value) return S.render.downloading(fetching.value.label, fetching.value.progress);
   if (!s) return null;
   if (s.state === 'rendering') return S.render.rendering(LABELS[s.format]!, s.progress);
   if (s.state === 'failed') return s.message;
@@ -177,8 +231,11 @@ const status = computed(() => {
       <label class="render-on-save"><input v-model="onSave" type="checkbox" :disabled="!!info.unavailable" data-testid="render-on-save"> {{ S.render.onSave }}</label>
     </div>
     <p v-else-if="info" class="muted pad">{{ S.render.cannot }}</p>
-    <div v-if="status" :class="['render-status', shown?.state]" data-testid="render-status" role="status">
+    <div v-if="status" :class="['render-status', fetching ? 'rendering' : shown?.state]" data-testid="render-status" role="status">
       {{ status }}
+      <div v-if="shown?.state === 'failed' && shown.needs && !fetching" class="render-needs">
+        <button type="button" class="primary" data-testid="render-download-tool" @click="download(shown.needs, shown.format)">{{ S.render.download(shown.needs.label, megabytes(shown.needs.downloadBytes)) }}</button>
+      </div>
       <details v-if="shown?.log && shown.state !== 'rendering'" class="render-log">
         <summary>{{ S.common.details }}</summary>
         <pre data-testid="render-log">{{ shown.log }}</pre>

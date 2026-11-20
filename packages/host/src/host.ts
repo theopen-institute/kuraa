@@ -292,6 +292,8 @@ export class Host {
       stateDir: join(await this.git.gitDir(), 'kuraa'),
       runner: this.runner,
       flush: async (path) => {
+        // Not while git is busy outside the app: the file may be half-way through it.
+        await this.requireWritable();
         const rec = this.records.get(`${await this.git.branch()}:${path}`);
         if (rec) await this.serial(() => this.flushNow(rec));
       },

@@ -5,7 +5,8 @@
 // someone has open are searched as their rooms have them now instead, so what
 // was typed a moment ago is found before it reaches the file. It reads only,
 // so it runs beside the host's serial work, not in its queue.
-import { lstat } from 'node:fs/promises';
+import { isUtf8 } from 'node:buffer';
+import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Host } from './host.js';
 
@@ -127,7 +128,12 @@ export async function searchWorkspace(host: Host, query: string, caseSensitive: 
   for (const [path, matches] of [...byPath].sort(([a], [b]) => a.localeCompare(b))) {
     if (!matches.length) continue;
     // A link the workspace tracks is searched as its target's name by git: not a file to show.
-    if ((await lstat(join(host.dir, path)).catch(() => null))?.isSymbolicLink()) continue;
+    if (!live.has(path)) {
+      if ((await lstat(join(host.dir, path)).catch(() => null))?.isSymbolicLink()) continue;
+      // Text not in UTF-8 (Latin-1, say) would show with its characters changed, and the app does not open it.
+      const bytes = await readFile(join(host.dir, path)).catch(() => null);
+      if (!bytes || !isUtf8(bytes)) continue;
+    }
     if (total >= MAX_MATCHES) {
       truncated = true;
       break;

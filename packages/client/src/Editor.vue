@@ -200,7 +200,10 @@ function open(): () => void {
             if (!cancelled) reopen();
           }, 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
-        else if (m.type === 'save-status') update({ notice: { kind: m.state === 'ok' ? 'info' : 'warn', text: m.message } });
+        else if (m.type === 'save-status') {
+          savePaused = m.state === 'paused' ? m.message : null;
+          update({ notice: { kind: m.state === 'ok' ? 'info' : 'warn', text: m.message } });
+        }
       },
     });
     connection = conn;
@@ -289,6 +292,8 @@ onBeforeUnmount(() => {
 // What other panels ask of the live document (docActions.ts): a search match to
 // show (once the document is open), a past version to restore, its text now.
 let pendingReveal: MatchTarget | null = null;
+/** Why saving is paused (git is busy outside the app), from the host; null if it is not. */
+let savePaused: string | null = null;
 function applyReveal() {
   const v = view.value;
   if (!v || v.isDestroyed || !pendingReveal) return;
@@ -312,6 +317,8 @@ defineExpose({
     if (tr) v.dispatch(tr.scrollIntoView());
     return true;
   },
+  /** Why saving is paused, if it is: a past version is not restored meanwhile. */
+  savePaused: (): string | null => savePaused,
   text: (): string | null => (view.value && !view.value.isDestroyed ? props.type.serialize(view.value.state.doc) : null),
 });
 

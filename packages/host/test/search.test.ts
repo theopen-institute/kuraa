@@ -36,9 +36,10 @@ describe('search', () => {
     writeFileSync(join(dir, '.gitignore'), '*.log\n');
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'Initial');
-    // Untracked, ignored, binary, large, and a link out of the workspace.
+    // Untracked, ignored, binary, not UTF-8, large, and a link out of the workspace.
     writeFileSync(join(dir, 'draft.txt'), 'tide tables\n');
     writeFileSync(join(dir, 'run.log'), 'tide in the log\n');
+    writeFileSync(join(dir, 'latin.txt'), Buffer.from('tide at the caf\xe9\n', 'latin1'));
     writeFileSync(join(dir, 'data.bin'), Buffer.concat([Buffer.from('tide'), Buffer.alloc(64), Buffer.from('tide')]));
     writeFileSync(join(dir, 'big.csv'), `tide\n${'x'.repeat(3 * 1024 * 1024)}\n`);
     writeFileSync(join(outside, 'secret.txt'), 'tide secret\n');

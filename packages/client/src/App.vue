@@ -118,6 +118,11 @@ async function restoreVersion() {
   const v = viewing.value;
   if (!v) return;
   const date = new Date(v.commit.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const paused = editor.value?.savePaused();
+  if (paused) {
+    notice.value = { kind: 'warn', text: `${paused} Restore the version once it is done.` };
+    return;
+  }
   const ok = await askConfirm(`Make the document read as it did on ${date}? Everyone editing it will see the change, and you can undo it (⌘Z or Ctrl+Z) like any edit.`, 'Restore');
   if (!ok || viewing.value !== v) return;
   if (!editor.value?.replaceText(v.text)) {

@@ -486,15 +486,15 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .history-saves { list-style: none; margin: 0 0 4px 14px; padding: 0; border-left: 1px solid var(--border); }
 .history-saves .history-subject { font-weight: 400; font-size: 13px; }
 .history-merge .history-subject { font-weight: 500; color: var(--muted); }
-/* Devices: paired devices and whether each is connected; work waiting to be accepted. */
-.menu-devices, .menu-proposals { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+/* Devices: who is in the workspace, and whether each is connected. */
+.menu-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .menu-devices li { display: flex; align-items: center; gap: 6px; }
 .device-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
 .device-dot.online { background: var(--accent); }
 .device-tag { font-size: 11px; padding: 0 5px; border-radius: 3px; background: var(--selected); color: var(--muted); }
 .device-state { margin-left: auto; font-size: 12px; color: var(--muted); }
-.menu-proposals li { display: flex; align-items: center; gap: 8px; }
-.proposal-what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.menu-devices button { font-size: 12px; padding: 1px 8px; }
+.device-who { min-width: 0; overflow-wrap: anywhere; }
 /* Adding a workspace. */
 .naming-hint { margin: 0; font-size: 12.5px; color: var(--muted); }
 .add-workspace textarea { font: 12px var(--mono); resize: vertical; }
@@ -514,10 +514,13 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .invite-links h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .invite-links ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; max-height: 140px; overflow: auto; }
 .invite-links li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.invite-links .revoked, .invite-links .expired { color: var(--muted); }
+.invite-links .revoked, .invite-links .expired, .invite-links .used { color: var(--muted); }
 .invite-links button.danger { color: var(--warn); font-size: 12px; padding: 1px 8px; }
 
 .person-key { display: grid; gap: 6px; }
+.person-advanced { display: grid; gap: 6px; font-size: 13px; }
+.person-advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.person-advanced[open] { gap: 6px; }
 .menu-panel-head { display: flex; align-items: center; gap: 12px; padding: 10px 0 4px; }
 .modal .menu-panel-head h2 { margin: 0; font-size: 15px; }
 .menu-back { padding: 2px 8px; }
@@ -526,6 +529,53 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .person-error { color: var(--warn); }
 .person-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .person-keys li { display: flex; gap: 8px; align-items: center; }
+
+/* Writing (0040): citations, images, tables, find and the outline. */
+.editor-pane { position: relative; }
+.atom.citation { font: inherit; font-size: 0.92em; background: var(--accent-soft); color: var(--text); padding: 0 0.35em; }
+.atom.citation-unknown { background: var(--warn-soft); color: var(--warn); text-decoration: underline dotted; }
+.citation-picker {
+  position: fixed; z-index: 30; min-width: 280px; max-width: min(520px, 90vw); max-height: 260px; overflow: auto; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.16);
+  font: 13px var(--font);
+}
+.citation-option { display: flex; gap: 10px; justify-content: space-between; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.citation-option.active, .citation-option:hover { background: var(--selected); }
+.citation-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.citation-option-key { color: var(--muted); font-family: var(--mono); font-size: 12px; flex: none; }
+.image-node { display: inline-block; max-width: 100%; }
+.image-node img { max-width: 100%; vertical-align: bottom; }
+.image-node.ProseMirror-selectednode img { outline: 2px solid var(--accent); }
+.image-node.image-missing::after { content: attr(data-missing); font: 12px var(--mono); color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 2px 6px; }
+.image-node.image-missing img { display: none; }
+.image-uploading { font: 12px var(--font); color: var(--muted); background: var(--panel); border-radius: 4px; padding: 2px 6px; }
+.prose th { background: var(--panel); font-family: var(--font); font-weight: 600; text-align: left; }
+.prose td, .prose th { min-width: 3em; }
+.find-match { background: rgb(250 204 21 / 0.35); border-radius: 2px; }
+.find-current { background: rgb(250 160 21 / 0.7); }
+.find-bar {
+  position: absolute; top: 8px; right: 16px; z-index: 20; display: grid; gap: 6px; padding: 6px 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); font-size: 13px;
+}
+.find-row { display: flex; align-items: center; gap: 4px; }
+.find-row input { width: 14rem; font: inherit; padding: 3px 6px; }
+.find-row button { font-size: 12px; padding: 3px 7px; }
+.find-row button.active { background: var(--accent-soft); }
+.find-count { min-width: 4.5em; color: var(--muted); font-size: 12px; text-align: right; }
+.outline-panel {
+  position: absolute; top: 8px; left: 16px; z-index: 20; width: 16rem; max-height: calc(100% - 24px); overflow: auto; padding: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); font: 13px var(--font);
+}
+.outline-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 6px; color: var(--muted); }
+.outline-head button { border: 0; background: none; padding: 0 4px; }
+.outline-panel ul { list-style: none; margin: 0; padding: 0; }
+.outline-entry { display: block; width: 100%; border: 0; background: none; text-align: left; padding: 3px 8px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-entry:hover, .outline-entry:focus-visible { background: var(--selected); outline: none; }
+.outline-entry.current { color: var(--accent); font-weight: 600; }
+.outline-empty { margin: 4px 6px; color: var(--muted); }
+.tree-conflict { cursor: pointer; text-decoration: underline dotted; }
+/* The count is what to click on a file with conflicts; Rename and Delete stay in its right-click menu. */
+.tree-file.has-conflicts:hover > .tree-actions { display: none; }
 
 /* The Preview and Search panels, beside the document (RenderPanel.vue, SearchPanel.vue). */
 .side-panel { display: flex; flex-direction: column; overflow: hidden; }

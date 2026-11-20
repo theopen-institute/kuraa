@@ -1,5 +1,7 @@
 # 0034 · Signatures are people; every host is one person
 
+*Since [0038](0038-equal-peers.md), work is never judged by its signer: signatures say who wrote what, nothing more.*
+
 *Refined by 0035: a person's identity no longer signs commits itself; it vouches for a signing key
 of theirs on each computer, which does.*
 

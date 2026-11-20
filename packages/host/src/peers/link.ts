@@ -42,15 +42,13 @@ export type ControlMessage =
       workspace: string;
       forkedFrom: string | null;
       name: string;
-      /** A one-time invitation, from a device joining. */
-      invite?: string;
-      /** A subscription link, from a device that joined (or is joining) by one. */
+      /** An invite link, from a device that joined (or is joining) by one. */
       link?: string;
       /** How it merges (merging.ts, mergeSignature). */
       merges: string;
       /**
        * Every signed membership record it holds (records.ts): who is in, who was
-       * removed, links revoked, rules, people. Only to a device it is paired with:
+       * removed, links revoked or used, people. Only to a device it is paired with:
        * none to one it does not know yet.
        */
       records: unknown[];

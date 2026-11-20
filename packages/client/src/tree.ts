@@ -73,6 +73,8 @@ export interface TreeContext {
   dragging: Ref<string | null>;
   over: Ref<string | null>;
   select(path: string): void;
+  /** Open a file at its first conflict. */
+  showConflicts(path: string): void;
   toggle(folder: string): void;
   create(folder?: string): void;
   newFolder(inside?: string): void;

@@ -1,0 +1,59 @@
+// The HTTP routes for rendering documents (renders.ts) and searching the
+// workspace (search.ts), added to http.ts's table.
+import { basename } from 'node:path';
+import type { Context, Route } from './http.js';
+import { readBody, send } from './http.js';
+import { HttpError } from './errors.js';
+import { MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
+import { searchWorkspace } from './search.js';
+
+const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
+
+const pathOf = (c: Context, v: unknown) => {
+  if (typeof v !== 'string' || !v) throw new HttpError(400, 'Missing path');
+  return c.host.relPath(v);
+};
+
+const formatOf = (v: unknown): RenderFormat => {
+  if (!RENDER_FORMATS.includes(v as RenderFormat)) throw new HttpError(400, 'Not a format: html, docx or pdf');
+  return v as RenderFormat;
+};
+
+/** What a rendered page may do if opened on its own: show itself, nothing more (no scripts, no requests). */
+const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; font-src data:; media-src data:";
+
+// Rendering documents to HTML, Word and PDF, where code runs; outputs are kept in .git/kuraa/renders.
+export const renderRoutes: Route[] = [
+  route('GET', '/api/renders', async (c) => send(c.res, 200, await c.host.renders.info(pathOf(c, c.q.get('path'))))),
+
+  route('POST', '/api/renders', async (c) => {
+    const body = await readBody(c.req);
+    const path = pathOf(c, body.path);
+    const by = body.by && typeof body.by === 'object' && typeof (body.by as { name?: unknown }).name === 'string' ? (body.by as { name: string }).name : null;
+    const { state } = await c.host.renders.render(path, formatOf(body.format), by);
+    send(c.res, state.state === 'failed' ? 422 : 202, state);
+  }),
+
+  route('GET', '/api/renders/file', async (c) => {
+    const path = pathOf(c, c.q.get('path'));
+    const format = formatOf(c.q.get('format'));
+    const bytes = await c.host.renders.output(path, format);
+    if (!bytes) throw new HttpError(404, 'Not rendered yet');
+    const name = `${basename(path).replace(/\.[^.]*$/, '')}.${format}`;
+    c.res.writeHead(200, {
+      'content-type': MIME[format], 'content-length': bytes.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      ...(format === 'html' ? { 'content-security-policy': RENDER_CSP } : {}),
+    });
+    c.res.end(bytes);
+  }),
+];
+
+// Searching the workspace's text files, and open documents as they are being edited.
+export const searchRoutes: Route[] = [
+  route('GET', '/api/search', async (c) => {
+    const query = c.q.get('q') ?? '';
+    if (!query.trim() || query.length > 500 || query.includes('\n')) throw new HttpError(400, 'Search for a phrase of up to 500 characters, on one line');
+    send(c.res, 200, await searchWorkspace(c.host, query, c.q.get('case') === '1'));
+  }),
+];

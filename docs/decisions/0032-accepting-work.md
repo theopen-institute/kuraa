@@ -1,5 +1,7 @@
 # 0032 · Each device decides whose work it accepts
 
+*Superseded by [0038](0038-equal-peers.md): every member's work comes in, and every member's changes to the members are taken; there are no rules, proposals or integrators. The sync remote is superseded by the online copy, [0039](0039-online-copy.md).*
+
 *Rules now also name folders and files, and people; they are published as records; and who commits
 a shared room follows from them: 0033.*
 

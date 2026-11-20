@@ -10,6 +10,7 @@ import { isComplete, loadSettings, saveSettings, type Settings } from './setting
 import { loadEditorsOff, saveEditorsOff } from './editor-choices.js';
 import { webShell } from './shell.js';
 import { useWorkspaces } from './workspaces.js';
+import { ensureIdentity, personShellFor } from './hostPerson.js';
 import type { AppProps, EditorStatus, Notice } from './types.js';
 import Editor from './Editor.vue';
 import FileTree from './FileTree.vue';
@@ -56,6 +57,12 @@ const { hubApi, workspaces: hub, canAdd, canInvite, known: hubKnown, chosen, rea
   onError: (message) => (error.value = message),
 });
 
+// You on this computer: an identity made for you from your name, the first time there is one (0038).
+watch(() => [settings.value.name, ready.value] as const, ([name, isReady]) => {
+  if (!isReady || !name.trim()) return;
+  void personShellFor(props.shell, api.value).then((p) => p && ensureIdentity(p, name)).catch(() => undefined);
+}, { immediate: true });
+
 // The open workspace: what the host says of it, its files, and the file open.
 const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
@@ -93,7 +100,6 @@ const shownFiles = computed(() => {
 const sidePanel = ref<'preview' | 'search' | null>(null);
 const renderAsked = ref(0);
 const searchAsked = ref(0);
-const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
 
 function preview() {
   if (!path.value || !type.value) return;
@@ -135,6 +141,15 @@ async function restoreVersion() {
 
 /** The Header dialog is open for the open file. */
 const headerOpen = ref(false);
+/** The live editor: its find bar, outline and format commands, for the menu. */
+const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
+/** A file to show at its first conflict once open (its count in the file list was clicked). */
+const conflictJump = ref<string | null>(null);
+function showConflicts(next: string) {
+  select(next);
+  view(null);
+  conflictJump.value = next;
+}
 
 async function invite() {
   let syncing = false;
@@ -365,6 +380,7 @@ function useSettings(s: Settings) {
         :header-types="headerTypes"
         @select="select"
         @header="openHeader"
+        @conflicts="showConflicts"
         @changed="refreshTree"
         @error="(m) => (error = m)"
       >
@@ -411,7 +427,7 @@ function useSettings(s: Settings) {
         <div v-if="hub && chosen === null && hubKnown" class="empty">
           <div class="no-workspace" data-testid="no-workspace">
             <h2>{{ hub.length ? 'Choose a workspace' : 'No workspaces yet' }}</h2>
-            <p v-if="canAdd">A workspace is a folder of documents, kept with git. Make a new one, or join one someone shared with you with their invitation or link.</p>
+            <p v-if="canAdd">A workspace is a folder of documents, kept with git. Make a new one, or join one someone shared with you with their invite link.</p>
             <p v-else>None of this server’s workspaces can be opened now.</p>
             <div v-if="canAdd" class="actions">
               <button type="button" class="primary" data-testid="add-workspace-button" @click="addingWorkspace = true">Add a workspace…</button>
@@ -437,6 +453,8 @@ function useSettings(s: Settings) {
               :run="workspace?.run ?? null"
               :format-editor="editorFor(type.id)"
               :header-open="headerOpen"
+              :jump-to-conflict="conflictJump === path"
+              @jumped="conflictJump = null"
               @status="(s) => (status = s)"
               @close-header="headerOpen = false"
               @title="(t) => (liveTitle = { path: path!, title: t })"
@@ -497,15 +515,19 @@ function useSettings(s: Settings) {
       :settings="settings"
       :shell="shell"
       :api="api"
+      :conflicts="file?.conflicts ?? 0"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @header="headerOpen = true"
+      @find="editor?.openFind()"
+      @outline="editor?.toggleOutline()"
+      @insert-table="editor?.command('insertTable')"
+      @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
       @sync="sync"
       @save-settings="useSettings"
       @packages="(runner, engine) => (packages = { runner, engine })"
       @components="componentsOpen = true"
-      @accepted="refreshTree(); historyKey++"
       @invite="invite"
       @preview="preview"
       @search="openSearch"

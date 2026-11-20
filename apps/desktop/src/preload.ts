@@ -28,3 +28,7 @@ const appBridge: AppBridge = {
   chooseFolder: () => ipcRenderer.invoke('kuraa:choose-folder') as Promise<string | null>,
 };
 contextBridge.exposeInMainWorld('kuraaApp', appBridge);
+
+// A right-click the page answered with a menu of its own (a table's, the file list's) gets no
+// native one: the main process is told, once the page's handlers have run, whether it was.
+window.addEventListener('contextmenu', (e) => ipcRenderer.send('kuraa:context-menu', e.defaultPrevented));

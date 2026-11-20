@@ -329,6 +329,7 @@ describe('host safety', () => {
   it('syncing talks to its remote outside the save queue: a slow remote holds up no saving', async () => {
     git(dir, 'config', 'protocol.ext.allow', 'always');
     git(dir, 'remote', 'add', 'origin', 'ext::sleep 3');
+    git(dir, 'config', '--add', 'kuraa.online', 'origin');
     await start();
     const a = await connect('notes.md');
     const syncing = api('/api/sync', { method: 'POST' });
@@ -339,7 +340,8 @@ describe('host safety', () => {
     await running.host.commitRoom(record());
     expect(Date.now() - t0).toBeLessThan(2000);
     expect(git(dir, 'show', 'HEAD:notes.md')).toContain('While syncing: ');
-    expect((await syncing).status).toBe(500);
+    // Not synced: said, not thrown (backups.ts, the online copy).
+    expect((await syncing).status).toBe(409);
   });
 
   it('removes temporary files a stopped write left behind', async () => {

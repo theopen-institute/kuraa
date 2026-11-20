@@ -1,8 +1,7 @@
-// Subscription links: signed by the device that made them, checked by any member.
+// Invite links: signed by the device that made them, checked by any member.
 import { describe, expect, it } from 'vitest';
 import crypto from 'hypercore-crypto';
-import { checkLink, decodeLink, encodeLink, type SubscriptionLink } from '../src/peers/identity.js';
-import { canonicalRules } from '../src/peers/accept.js';
+import { checkLink, decodeLink, encodeLink, type InviteLink } from '../src/peers/identity.js';
 import { signRecord, traced } from '../src/peers/records.js';
 
 const issuer = crypto.keyPair();
@@ -10,36 +9,42 @@ const ws = { id: 'ab'.repeat(16), secret: 'cd'.repeat(32), forkedFrom: null };
 
 const first = crypto.keyPair();
 
-function make(expires: number, key = issuer): SubscriptionLink {
+function make(expires: number, o: { key?: typeof issuer; once?: boolean } = {}): InviteLink {
+  const key = o.key ?? issuer;
+  const once = o.once ?? false;
   const id = '0123456789abcdef';
-  const rules = { rules: [], membership: null };
   const through = [first.publicKey.toString('hex')];
-  const message = Buffer.from(`kuraa-link\0${ws.id}\0${id}\0${expires}\0${key.publicKey.toString('hex')}\0${through.join(',')}\0${canonicalRules(rules)}`);
-  return { workspace: ws, issuer: { key: key.publicKey.toString('hex'), name: 'desk' }, through, id, expires, signature: crypto.sign(message, key.secretKey).toString('hex'), rules };
+  const message = Buffer.from(`kuraa-invite\0${ws.id}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${key.publicKey.toString('hex')}\0${through.join(',')}`);
+  return { workspace: ws, issuer: { key: key.publicKey.toString('hex'), name: 'desk' }, through, id, expires, once, signature: crypto.sign(message, key.secretKey).toString('hex') };
 }
 
-const ok = { workspace: ws.id, issuers: [issuer.publicKey.toString('hex')], revoked: [] };
+const ok = { workspace: ws.id, members: [issuer.publicKey.toString('hex')], revoked: [] };
 
-describe('subscription links', () => {
-  it('survive encoding', () => {
-    const link = make(0);
-    expect(decodeLink(encodeLink(link))).toEqual(link);
-    expect(encodeLink(link)).toMatch(/^kuraa-link:[A-Za-z0-9_-]+$/);
-    expect(() => decodeLink('kuraa-invite:abc')).toThrow('Not a subscription link');
-    expect(() => decodeLink(`kuraa-link:${Buffer.from('a|b').toString('base64url')}`)).toThrow('damaged');
+describe('invite links', () => {
+  it('survive encoding, for one person or anyone', () => {
+    for (const once of [false, true]) {
+      const link = make(0, { once });
+      expect(decodeLink(encodeLink(link))).toEqual(link);
+    }
+    expect(encodeLink(make(0))).toMatch(/^kuraa-invite:[A-Za-z0-9_-]+$/);
+    expect(() => decodeLink('kuraa-link:abc')).toThrow('Not an invite link');
+    expect(() => decodeLink(`kuraa-invite:${Buffer.from('a|b').toString('base64url')}`)).toThrow('damaged');
   });
 
-  it('are good when signed by a device this one takes links from, unexpired and not revoked', () => {
+  it('are good when signed by a member, unexpired, and neither revoked nor used', () => {
     expect(checkLink(make(0), ok)).toBeNull();
     expect(checkLink(make(Date.now() + 60_000), ok)).toBeNull();
     expect(checkLink(make(Date.now() - 1), ok)).toBe('the link has expired');
     expect(checkLink(make(0), { ...ok, revoked: ['0123456789abcdef'] })).toBe('the link was revoked');
+    expect(checkLink(make(0, { once: true }), { ...ok, revoked: ['0123456789abcdef'] })).toBe('the link was used, or revoked');
     expect(checkLink(make(0), { ...ok, workspace: 'ef'.repeat(16) })).toBe('the link is for another workspace');
-    expect(checkLink(make(0, crypto.keyPair()), ok)).toBe('the link was made by a device this one does not take links from');
-    // A link whose expiry was changed no longer matches its signature.
+    // Any member's link counts; a stranger's does not.
+    const other = crypto.keyPair();
+    expect(checkLink(make(0, { key: other }), { ...ok, members: [...ok.members, other.publicKey.toString('hex')] })).toBeNull();
+    expect(checkLink(make(0, { key: crypto.keyPair() }), ok)).toBe('the link was made by a device that is not in the workspace');
+    // A link whose expiry was changed no longer matches its signature; nor one made for anyone from one for one person.
     expect(checkLink({ ...make(Date.now() - 1), expires: 0 }, ok)).toBe('the link is not signed by the device it names');
-    // So does one whose rules, or the devices its maker came in through, were changed.
-    expect(checkLink({ ...make(0), rules: { rules: [{ branch: 'main', path: '', from: ['ab'.repeat(32)] }], membership: null } }, ok)).toBe('the link is not signed by the device it names');
+    expect(checkLink({ ...make(0, { once: true }), once: false }, ok)).toBe('the link is not signed by the device it names');
     expect(checkLink({ ...make(0), through: [] }, ok)).toBe('the link is not signed by the device it names');
   });
 

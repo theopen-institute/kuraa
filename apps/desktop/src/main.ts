@@ -167,8 +167,8 @@ async function ensureHub(): Promise<RunningHub> {
     host: '127.0.0.1',
     port: 0,
     // What runs and which formats are on: this app's flags.
-    // This app is its own operator: the person using it sets up backups, with their own git credentials.
-    hosts: { run: runOptions(), formats: list(flags.format), timings: timings(), manageBackups: true },
+    // This app is its own operator: the person using it sets up the online copy, with their own git credentials.
+    hosts: { run: runOptions(), formats: list(flags.format), timings: timings(), manageOnline: true },
     peers: { everywhere: flags.peer === true || preferences.syncDevices },
     log: (m) => console.log(`[hub] ${m}`),
   });
@@ -272,18 +272,11 @@ async function preferencesView(): Promise<PreferencesView> {
 }
 
 /**
- * This computer now acts for a person (made or imported): restart the workspaces,
- * so each says so to its other devices as it starts syncing (and commits first).
+ * This computer now acts for a person (made, imported, or a key revoked): each
+ * workspace that syncs says so to its other devices now, not at its next save.
  */
 async function personChanged(): Promise<void> {
-  if (!hub) return;
-  await stopHub();
-  try {
-    await showWorkspaces();
-  } catch (e) {
-    dialog.showErrorBox('Could not open your workspaces', (e as Error).message);
-    await showLauncher();
-  }
+  for (const w of hub?.hub.list() ?? []) await hub?.hub.hostOf(w.id)?.host.peers?.node.signingKey().catch(() => undefined);
 }
 
 /** Run a change to this computer's person; an error message for the window, or null. */
@@ -442,7 +435,24 @@ app.on('web-contents-created', (_e, contents) => {
     event.preventDefault();
     openOutside(url);
   });
-  contents.on('context-menu', (_event, params) => showContextMenu(contents, params));
+  contents.on('context-menu', (_event, params) => {
+    // Only if the page did not show a menu of its own: the preload says, usually first; wait briefly for it.
+    const decide = (tries: number) => {
+      if (Date.now() - pageMenu.at < 500) {
+        const { prevented } = pageMenu;
+        pageMenu = { prevented: false, at: 0 };
+        if (!prevented) showContextMenu(contents, params);
+      } else if (tries > 0) setTimeout(() => decide(tries - 1), 20);
+      else showContextMenu(contents, params);
+    };
+    decide(5);
+  });
+});
+
+/** The page's word on its latest right-click: whether it answered it itself (preload.ts). */
+let pageMenu = { prevented: false, at: 0 };
+ipcMain.on('kuraa:context-menu', (e, prevented: unknown) => {
+  if (fromOwnPage(e)) pageMenu = { prevented: prevented === true, at: Date.now() };
 });
 
 /**

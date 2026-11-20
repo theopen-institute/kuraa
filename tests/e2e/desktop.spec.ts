@@ -215,7 +215,7 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
     await openNotes(page);
     await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
 
-    // Joined, not managed: Identity and access shows the host and token.
+    // Joined, not managed: Host and token… shows them.
     await page.getByTestId('menu-button').click();
     await page.getByTestId('menu-access').click();
     await expect(page.getByLabel('Host URL')).toHaveValue(host.url);
@@ -350,7 +350,7 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
   }
 });
 
-test('your key: made in the menu’s Identity and access panel, said in each workspace that syncs, and taken to another computer', async () => {
+test('you on this computer: made from your name, said in each workspace that syncs, and taken to another computer', async () => {
   const dir = makeRepo();
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const person = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
@@ -358,53 +358,49 @@ test('your key: made in the menu’s Identity and access panel, said in each wor
   let line: string;
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
-    const key = page.getByTestId('person-key');
-    await expect(key).toContainText('You have no identity on this computer');
-    // Filled in with the display name; changed here.
-    await key.getByTestId('person-name').fill('Ada Lovelace');
-    const reloaded = page.waitForEvent('load', { timeout: 15_000 });
-    await key.getByTestId('person-create').click();
-    // The workspaces restart (the page with them), each saying to its other devices that this computer's key is Ada's.
-    await reloaded;
-    expect(JSON.parse(readFileSync(person, 'utf8')).name).toBe('Ada Lovelace');
+    // Made without asking, from the name in Settings (git's, here), and said to the workspace's other devices.
+    const name = () => {
+      try {
+        return (JSON.parse(readFileSync(person, 'utf8')) as { name: string }).name;
+      } catch {
+        return null;
+      }
+    };
+    await expect.poll(name, { timeout: 15_000 }).toBe('Desk Top');
     const said = () => {
       try {
-        return (JSON.parse(readFileSync(join(dir, '.git', 'kuraa', 'records.json'), 'utf8')) as { kind: string; name?: string }[]).some((r) => r.kind === 'vouch' && r.name === 'Ada Lovelace');
+        return (JSON.parse(readFileSync(join(dir, '.git', 'kuraa', 'records.json'), 'utf8')) as { kind: string; name?: string }[]).some((r) => r.kind === 'vouch' && r.name === 'Desk Top');
       } catch {
         return false;
       }
     };
     await expect.poll(said, { timeout: 15_000 }).toBe(true);
-    // Copy key: one line, to take to another computer.
-    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    // The menu says so in plain words; the keys are under Advanced.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
-    await expect(page.getByTestId('identity')).toContainText('You are Ada Lovelace');
-    await page.getByTestId('person-copy').click();
+    const key = page.getByTestId('person-key');
+    await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
+    await key.getByText('Advanced').click();
+    await key.getByTestId('person-copy').click();
     await expect(page.getByTestId('person-status')).toContainText('Copied');
     line = await app.evaluate(({ clipboard }) => clipboard.readText());
     expect(line).toMatch(/^kuraa-id:/);
   } finally {
     await app.close();
   }
-  // Another computer (another key file): imported, the same person.
+  // Another computer (another key file), with an identity of its own made there: the first one's replaces it.
   const elsewhere = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
   ({ app, page } = await launch(['--open', makeRepo()], timings, { KURAA_PERSON: elsewhere }));
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    await expect.poll(() => existsSync(elsewhere), { timeout: 15_000 }).toBe(true);
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
-    await page.getByTestId('person-line').fill(line);
-    const reloaded = page.waitForEvent('load', { timeout: 15_000 });
-    await page.getByTestId('person-import').click();
-    await reloaded;
+    const key = page.getByTestId('person-key');
+    await key.getByText('Advanced').click();
+    await key.getByTestId('person-line').fill(line);
+    await key.getByTestId('person-import').click();
+    await expect(page.getByTestId('person-status')).toContainText('Your identity is here now');
     expect(JSON.parse(readFileSync(elsewhere, 'utf8')).publicKey).toBe(JSON.parse(readFileSync(person, 'utf8')).publicKey);
-    await expect(page.getByTestId('file:notes.md')).toBeVisible();
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
-    await expect(page.getByTestId('identity')).toContainText('You are Ada Lovelace');
+    await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
   } finally {
     await app.close();
   }

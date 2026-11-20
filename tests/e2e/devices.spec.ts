@@ -1,8 +1,7 @@
 // Two devices of one workspace, each with its own host and a browser on it:
-// people on the two edit one document live, the menu shows the devices, and work
-// a device does not accept on its own waits there until someone accepts it; a
-// document a device would not take another's changes to opens read-only there.
-// On a local DHT, so nothing leaves this machine.
+// people on the two edit one document live; the menu lists the devices, and
+// the device that joined last renames itself and removes the first, with the
+// same say as any member (0038). On a local DHT, so nothing leaves this machine.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +14,7 @@ import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
 
-test('people on two devices edit one document, and held work is accepted', async ({ browser }) => {
+test('people on two devices edit one document, and any member renames its device and removes another', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-a-'));
@@ -27,12 +26,12 @@ test('people on two devices edit one document, and held work is accepted', async
   git(dirA, 'add', '-A');
   git(dirA, 'commit', '-q', '-m', 'Initial');
   const peers = { bootstrap: testnet.bootstrap as never };
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers });
+  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers, invites: { peers } });
   const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-b-')), 'notes');
-  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.invitation(), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000 });
+  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000 });
   git(dirB, 'config', 'user.name', 'Bo');
   git(dirB, 'config', 'user.email', 'bo@example.org');
-  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers });
+  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers, invites: { peers } });
   try {
     const open = async (h: typeof a, name: string) => {
       const page = await (await browser.newContext()).newPage();
@@ -57,38 +56,29 @@ test('people on two devices edit one document, and held work is accepted', async
     await expect.poll(() => readFileSync(join(dirA, 'notes.md'), 'utf8'), { timeout: 20_000 }).toContain('Ada was here. So was Bo.');
     await expect.poll(() => git(dirA, 'rev-parse', 'HEAD') === git(dirB, 'rev-parse', 'HEAD') && git(dirB, 'status', '--porcelain') === '', { timeout: 20_000 }).toBe(true);
 
-    // The menu shows the devices.
+    // The menu lists the devices, in plain words: online or offline, no keys or branches.
     await ada.getByTestId('menu-button').click();
-    await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device connected');
-    await expect(ada.getByTestId('device:laptop')).toContainText('connected');
+    await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device online');
+    await expect(ada.getByTestId('device:laptop')).toContainText('online');
+    await expect(ada.getByTestId('devices')).not.toContainText(/[0-9a-f]{8}/);
     await ada.keyboard.press('Escape');
 
-    // Ada's device integrates main: on it, it accepts only its own work on its own. Bo's new file waits there.
-    await a.host.peers!.node.identity.acceptOn('main', '', [a.host.peers!.node.myKey]);
-    await a.host.peers!.node.membersChanged();
-    const res = await fetch(`${b.url}/api/files`, { method: 'POST', headers: { authorization: `Bearer ${b.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ path: 'idea.md', content: '---\ntitle: An idea\n---\n' }) });
-    expect(res.status).toBe(201);
-    await ada.getByTestId('menu-button').click();
-    const proposal = ada.getByTestId('proposal:laptop/main');
-    await expect(proposal).toContainText('Create idea.md', { timeout: 20_000 });
-    await expect(ada.getByTestId('file:idea.md')).toHaveCount(0);
-    await proposal.getByRole('button', { name: 'Accept' }).click();
-    await expect(proposal).toHaveCount(0);
-    await ada.keyboard.press('Escape');
-    await expect(ada.getByTestId('file:idea.md')).toContainText('An idea');
-
-    // Ada's device takes changes to notes.md only from itself: on Bo's device it opens read-only, saying so,
-    // until Bo chooses to edit anyway.
-    await a.host.peers!.node.identity.acceptOn('main', 'notes.md', [a.host.peers!.node.myKey]);
-    await a.host.peers!.node.membersChanged();
-    await expect.poll(async () => !!(await b.host.peers!.node.identity.rulesOf(a.host.peers!.node.myKey))?.rules.some((r) => r.path === 'notes.md'), { timeout: 20_000 }).toBe(true);
-    await bo.reload();
-    await bo.getByTestId('file:notes.md').click();
-    await expect(bo.getByTestId('declined-banner')).toContainText('does not take changes made here to this document');
-    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'false');
-    await bo.getByTestId('edit-anyway').click();
-    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'true');
-    await expect(bo.getByTestId('declined-banner')).toContainText('Editing anyway');
+    // On Bo's device, the one that joined last: rename it, then remove Ada's device. It is permanent, and she keeps her copy.
+    await bo.getByTestId('menu-button').click();
+    await bo.getByTestId('rename-device').click();
+    await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');
+    await bo.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
+    await expect(bo.getByTestId('this-device')).toContainText('You are on bo-s-laptop');
+    const adas = bo.getByTestId('devices').locator('li');
+    await expect(adas).toHaveCount(1);
+    await adas.getByRole('button', { name: 'Remove…' }).click();
+    await expect(bo.getByTestId('ask')).toContainText('permanent');
+    await expect(bo.getByTestId('ask')).toContainText('keeps their copy');
+    await bo.getByTestId('ask').getByRole('button', { name: 'Remove' }).click();
+    await expect(bo.getByTestId('devices')).toContainText('No one else has joined yet', { timeout: 20_000 });
+    // Ada's device learns it, and stops syncing; her files stay as they were.
+    await expect.poll(() => { try { return git(dirA, 'config', '--get-all', 'kuraa.removed'); } catch { return ''; } }, { timeout: 20_000 }).toBe(a.host.peers!.node.myKey);
+    expect(readFileSync(join(dirA, 'notes.md'), 'utf8')).toContain('Ada was here. So was Bo.');
   } finally {
     await b.close();
     await a.close();

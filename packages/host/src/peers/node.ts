@@ -1,16 +1,14 @@
 // This device among the workspace's devices: finding them (Hyperswarm, by the
-// workspace's topic), checking who they are, pairing new ones by invitation,
+// workspace's topic), checking who they are, pairing new ones by invite link,
 // sharing who the members are, and letting paired devices fetch from it.
 //
 // Who is let in: a paired device that has not been removed, and a device not
-// yet paired that presents an invitation this one made, or a subscription link
-// a member made (any member checks it). A device joining pairs with the device
-// that invited it, or, by a link, with one the link's maker vouches for: the
-// maker, or one its pairing records trace back to it (records.ts, traced).
-// Records go only to paired devices.
-// Membership spreads: a device paired with one member is accepted by the others
-// once that member vouches for it, if each takes membership changes from it
-// (accept.ts; see docs/decisions/0028-peers.md and 0032).
+// yet paired that presents an invite link a member made (any member checks it).
+// A device joining pairs with one the link's maker vouches for: the maker, or
+// one its pairing records trace back to it (records.ts, traced). Records go
+// only to paired devices. Membership spreads: a device paired with one member
+// is paired by the others once that member vouches for it; every member has the
+// same say (see docs/decisions/0028-peers.md and 0038).
 import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
@@ -38,9 +36,9 @@ export interface NodeOptions {
   /** The branch a joining device should start on. */
   branch(): Promise<string>;
   log(m: string): void;
-  /** Joining: the invitation to present to the inviting device, or the subscription link to present to any. */
-  ticket?: { kind: 'invite'; key: string; token: string } | { kind: 'link'; link: string };
-  /** Joining: the device that invited this one lets it in or, by a link, any the link's maker vouches for. */
+  /** Joining: the invite link to present to the workspace's devices. */
+  ticket?: string;
+  /** Joining: any device the link's maker vouches for lets this one in. */
   joining?: boolean;
   /** How this device merges, told to the others (merging.ts, mergeSignature). */
   merges?: string;
@@ -61,7 +59,7 @@ export interface NodeEvents {
   refs?(link: PeerLink): void;
   /** A message about rooms. */
   room?(link: PeerLink, m: Extract<ControlMessage, { type: 'room' }>): void;
-  /** The inviting device's answer, when joining. */
+  /** The answer of the device that let this one in, when joining. */
   welcome?(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>): void;
   /** The members changed (a device paired or removed). */
   members?(): void;
@@ -80,9 +78,8 @@ export class PeerNode {
   // Kept for the firewall, which must answer at once.
   private removedKeys = new Set<string>();
   private closing = false;
-  /** This computer's person's key as last read (from its file, unless given), and the key this device last said it signs with. */
+  /** This computer's person's key as last read (from its file, unless given). */
   private personRead: { stamp: string; person: Person | null } | null = null;
-  private signing: KeyPair | null = null;
   /** What this device last said in this workspace about its signing key and its person (syncPerson). */
   private saidFor: string | null = null;
 
@@ -111,8 +108,6 @@ export class PeerNode {
     this.ws = ws ?? (await this.identity.found());
     this.key = await this.identity.deviceKey();
     this.name = await this.identity.deviceName();
-    // Whose work this device accepts: published, so the others know (they may have changed while it was off).
-    await this.identity.publishRules();
     // Whose this device is, if this computer keeps a person's key: said in this workspace, with their signature.
     await this.syncPerson();
     await this.refresh();
@@ -132,7 +127,6 @@ export class PeerNode {
     this.o.log(`peers: this device is ${this.name} (${this.myKey.slice(0, 8)}…) in workspace ${this.ws.id.slice(0, 8)}…`);
   }
 
-  /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
   /**
    * This computer's person's key, if it keeps one (person.ts): read again when
    * its file changes, so a key made or imported while the host runs is used from
@@ -150,10 +144,9 @@ export class PeerNode {
     return this.personRead.person;
   }
 
-  /** This computer's signing key, for its person (person.ts: made on first use, never copied). Tests give theirs. */
-  private async signingKeyNow(): Promise<KeyPair> {
-    this.signing ??= this.o.signing ?? await signingKey();
-    return this.signing;
+  /** This computer's signing key, for its person (person.ts: made on first use, never copied; read each time, as importing an identity replaces it). Tests give theirs. */
+  private signingKeyNow(): Promise<KeyPair> {
+    return this.o.signing ? Promise.resolve(this.o.signing) : signingKey();
   }
 
   /**
@@ -192,6 +185,7 @@ export class PeerNode {
     return this.signingKeyNow();
   }
 
+  /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
   async refresh(): Promise<void> {
     this.removedKeys = new Set(await this.identity.removed());
     // The keys commits here are signed with, named by their person (or device), as git checks them.
@@ -203,24 +197,17 @@ export class PeerNode {
     await writeAllowedSigners(this.o.git, join(this.o.stateDir, 'allowed_signers'), signers).catch((e: Error) => this.o.log(`peers: allowed signers: ${e.message}`));
   }
 
-  /**
-   * Pair with a device this one lets in (by invitation or link), on record so
-   * the others pair with it too. Where the others take membership changes only
-   * from some devices, and this is not one of them, the pairing stays its own.
-   */
+  /** Pair with a device this one lets in (by an invite link), on record so the others pair with it too. */
   private async admit(key: string, name: string): Promise<string | null> {
-    try {
-      await this.identity.decide('add', key, { name });
-    } catch {
-      return this.identity.addMember(key, name);
-    }
+    if ((await this.identity.removed()).includes(key)) return null;
+    await this.identity.decide('add', key, { name });
     return (await this.identity.members()).find((m) => m.key === key)?.name ?? null;
   }
 
   /**
    * Whether to turn a device away before it says anything: a removed one. Only
    * devices that know the workspace's secret find it at all; any other device
-   * not paired is turned away after its hello, unless it brings an invitation.
+   * not paired is turned away after its hello, unless it brings an invite link.
    */
   private refuse(key: string): boolean {
     return this.closing || this.removedKeys.has(key);
@@ -250,17 +237,16 @@ export class PeerNode {
       // Who is in, and who people are: nothing for a device not known yet (it may never be let in).
       records: paired ? await this.identity.records() : [],
       merges: this.o.merges ?? '',
-      ...(this.o.ticket?.kind === 'invite' && this.o.ticket.key === link.key ? { invite: this.o.ticket.token } : {}),
       // A device that came in by a link shows it to devices that may not know it yet.
       ...(shown ? { link: shown } : {}),
     };
   }
 
   private async linkToShow(): Promise<string | null> {
-    return this.o.ticket?.kind === 'link' ? this.o.ticket.link : this.identity.joinedLink();
+    return this.o.ticket ?? this.identity.joinedLink();
   }
 
-  /** Why a subscription link does not let a device in here, or null if it does. */
+  /** Why an invite link does not let a device in here, or null if it does. */
   private async refuseLink(code: string): Promise<string | null> {
     let l;
     try {
@@ -268,9 +254,9 @@ export class PeerNode {
     } catch (e) {
       return (e as Error).message;
     }
-    // Links from the devices whose membership changes this one accepts.
-    const issuers = (await this.identity.rules()).membership ?? [this.myKey, ...(await this.identity.members()).map((m) => m.key)];
-    return checkLink(l, { workspace: this.ws.id, issuers, revoked: await this.identity.revokedLinks() });
+    // Any member's links (0038).
+    const members = [this.myKey, ...(await this.identity.members()).map((m) => m.key)];
+    return checkLink(l, { workspace: this.ws.id, members, revoked: await this.identity.revokedLinks() });
   }
 
   /**
@@ -314,25 +300,24 @@ export class PeerNode {
     if (!same && !related) return bye('another workspace');
     let member: Member | undefined = (await this.identity.members()).find((x) => x.key === link.key);
     if (!member && this.o.joining) {
-      // Joining by a link: another device of the workspace may let this one in; it is paired with
-      // once its welcome shows the link's maker vouches for it (welcomed). By an invitation, only the inviter.
-      if (same && this.o.ticket?.kind === 'link') {
+      // Joining: a device of the workspace may let this one in; it is paired with
+      // once its welcome shows the link's maker vouches for it (welcomed).
+      if (same && this.o.ticket) {
         link.hello = h;
         return;
       }
       return bye('not paired with this device');
     }
     if (!member) {
-      if (!same) return bye('not paired with this device');
-      let how: string;
-      if (typeof h.invite === 'string' && (await this.identity.redeem(h.invite))) how = 'by invitation';
-      else if (typeof h.link === 'string') {
-        const why = await this.refuseLink(h.link);
-        if (why) return bye(`not paired with this device, and ${why}`);
-        how = `by subscription link ${decodeLink(h.link).id}`;
-      } else return bye('not paired with this device');
+      if (!same || typeof h.link !== 'string') return bye('not paired with this device');
+      const why = await this.refuseLink(h.link);
+      if (why) return bye(`not paired with this device, and ${why}`);
+      const l = decodeLink(h.link);
       const name = await this.admit(link.key, h.name);
       if (!name) return bye('this device was removed from the workspace');
+      // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
+      if (l.once) await this.identity.useLink(l.id);
+      const how = `by invite link ${l.id}${l.once ? ', now used' : ''}`;
       member = { key: link.key, name };
       await this.refresh();
       this.o.log(`peers: paired with ${name} (${link.key.slice(0, 8)}…), ${how}`);
@@ -348,8 +333,8 @@ export class PeerNode {
   }
 
   /**
-   * A device let this one in (joining). The inviting device, or the link's
-   * maker, is paired already. Any other must show, by the records it sends, that
+   * A device let this one in (joining). The link's maker is paired already.
+   * Any other must show, by the records it sends, that
    * the link's maker vouches for it (traced from the maker and the devices it
    * came in through, as the link says, signed): someone who only knows the
    * workspace's secret, from an old link, say, does not get to be the device
@@ -362,8 +347,8 @@ export class PeerNode {
     let members = Array.isArray(m.members) ? m.members : [];
     if (!link.accepted) {
       const t = this.o.ticket;
-      if (t?.kind !== 'link' || !link.hello || link.hello.workspace !== this.ws.id) return;
-      const l = decodeLink(t.link);
+      if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
+      const l = decodeLink(t);
       const known = traced([l.issuer.key, ...l.through], records, this.ws.id);
       if (!known.has(link.key)) {
         this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the link's maker does not vouch for it; not joining through it`);
@@ -403,8 +388,7 @@ export class PeerNode {
       } else if (r.kind === 'remove') {
         this.links.get(r.subject)?.close();
         this.o.log(`peers: ${who} removed ${r.subject.slice(0, 8)}…`);
-      } else if (r.kind === 'revoke-link') this.o.log(`peers: ${who} revoked subscription link ${r.subject}`);
-      else if (r.kind === 'rules') this.o.log(`peers: ${who} published whose work it accepts`);
+      } else if (r.kind === 'revoke-link') this.o.log(`peers: ${who} ${r.name === 'used' ? 'let someone in by' : 'revoked'} invite link ${r.subject}`);
       else this.o.log(`peers: ${who} acts for ${r.name ?? 'someone'}`);
     }
     await this.membersChanged(link);

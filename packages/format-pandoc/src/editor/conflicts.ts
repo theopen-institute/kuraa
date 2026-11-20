@@ -3,18 +3,63 @@
 // keep one, or keep both one after the other. Choosing is an ordinary edit, so
 // it reaches everyone, and nothing has to be chosen straight away: the rest of
 // the document is edited as usual, and so are the versions themselves.
+import type { EditorContext } from '@kuraa/editor-kit';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
+import { TextSelection, type Command } from 'prosemirror-state';
 import type { EditorView, NodeView, NodeViewConstructor } from 'prosemirror-view';
 import { isConflictAttrs, isVersionAttrs } from '../merge.js';
 
 const DIV = 'fenced_div';
 
 /** A version's author and commit, from its attributes: `{.version by="Ada" commit="3f2c1e0"}`. */
+export function versionOf(attrs: string): { by: string; commit: string | null } {
+  return { by: /\bby="([^"]*)"/.exec(attrs)?.[1] || 'Someone', commit: /\bcommit="([^"]*)"/.exec(attrs)?.[1] ?? null };
+}
+
+/** How a version is labelled before (or without) knowing when its commit was made: who, and the commit. */
 export function versionLabel(attrs: string): string {
-  const by = /\bby="([^"]*)"/.exec(attrs)?.[1] ?? 'Someone';
-  const commit = /\bcommit="([^"]*)"/.exec(attrs)?.[1];
+  const { by, commit } = versionOf(attrs);
   return commit ? `${by} · ${commit}` : by;
 }
+
+/** "Ada, 3 November at 14:05": who wrote a version, and when they committed it (the year if not this one). */
+export function versionDateLabel(by: string, date: string, now = new Date()): string {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return by;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const day = d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return `${by}, ${day} at ${time}`;
+}
+
+/** Where each conflict block starts. */
+export function conflictPositions(doc: PMNode): number[] {
+  const out: number[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name === DIV && isConflictAttrs(String(node.attrs.attrs))) {
+      out.push(pos);
+      return false;
+    }
+    return true;
+  });
+  return out;
+}
+
+/** The next conflict after the cursor (round to the first): the cursor goes into its first version. */
+export const nextConflict: Command = (state, dispatch, view) => {
+  const all = conflictPositions(state.doc);
+  if (!all.length) return false;
+  const after = all.find((p) => p > state.selection.from) ?? all[0]!;
+  if (dispatch) {
+    const sel = TextSelection.findFrom(state.doc.resolve(after + 1), 1, true);
+    const tr = state.tr;
+    if (sel) tr.setSelection(sel);
+    dispatch(tr.scrollIntoView());
+    // Bring the whole block into view, not only the line.
+    (view?.nodeDOM(after) as HTMLElement | null)?.scrollIntoView?.({ block: 'center' });
+  }
+  return true;
+};
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string) => {
   const e = document.createElement(tag);
@@ -90,12 +135,16 @@ class VersionView implements NodeView {
   contentDOM: HTMLElement;
   private readonly label: HTMLElement;
 
-  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined, readOnly: boolean) {
+  private shown = '';
+
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined, readOnly: boolean, private readonly ctx?: EditorContext) {
     this.dom = el('div', 'conflict-version');
     this.dom.dataset.testid = 'conflict-version';
     const bar = el('div', 'conflict-version-bar');
     bar.contentEditable = 'false';
-    this.label = el('span', 'conflict-by', versionLabel(String(node.attrs.attrs)));
+    this.label = el('span', 'conflict-by');
+    this.label.dataset.testid = 'conflict-by';
+    this.labelFor(String(node.attrs.attrs));
     bar.append(this.label);
     if (!readOnly) {
       bar.append(button('Keep this', 'Keep this version, and drop the other', 'conflict-keep', () => {
@@ -111,8 +160,21 @@ class VersionView implements NodeView {
 
   update(node: PMNode): boolean {
     if (node.type.name !== DIV || !isVersionAttrs(String(node.attrs.attrs))) return false;
-    this.label.textContent = versionLabel(String(node.attrs.attrs));
+    this.labelFor(String(node.attrs.attrs));
     return true;
+  }
+
+  /** Who and when: the date its commit was made once the host says, the commit until then. */
+  private labelFor(attrs: string): void {
+    if (attrs === this.shown) return;
+    this.shown = attrs;
+    const { by, commit } = versionOf(attrs);
+    this.label.textContent = versionLabel(attrs);
+    this.label.title = commit ? `Commit ${commit}` : '';
+    if (!commit || !this.ctx?.files) return;
+    void this.ctx.files.commit(commit).then((info) => {
+      if (info && this.shown === attrs) this.label.textContent = versionDateLabel(by, info.date);
+    }, () => undefined);
   }
 
   stopEvent(e: Event): boolean {
@@ -139,7 +201,7 @@ class PlainDivView implements NodeView {
 }
 
 /** Fenced divs: conflict blocks and their versions drawn as such; any other div as before. */
-export function conflictViews(readOnly: boolean): Record<string, NodeViewConstructor> {
+export function conflictViews(readOnly: boolean, ctx?: EditorContext): Record<string, NodeViewConstructor> {
   return {
     [DIV]: (node, view, getPos) => {
       const attrs = String(node.attrs.attrs);
@@ -147,7 +209,7 @@ export function conflictViews(readOnly: boolean): Record<string, NodeViewConstru
       if (isVersionAttrs(attrs)) {
         const pos = getPos();
         const parent = pos === undefined ? null : view.state.doc.resolve(pos).parent;
-        if (parent?.type.name === DIV && isConflictAttrs(String(parent.attrs.attrs))) return new VersionView(node, view, getPos, readOnly);
+        if (parent?.type.name === DIV && isConflictAttrs(String(parent.attrs.attrs))) return new VersionView(node, view, getPos, readOnly, ctx);
       }
       return new PlainDivView(node);
     },

@@ -7,16 +7,12 @@
 // - Paired devices: git remotes whose URL is `kuraa://<device key>`, so
 //   `git fetch laptop` works and their branches are `laptop/main`.
 // - Devices removed from the workspace: `kuraa.removed`, never accepted again.
-// - Invitations not yet used: .git/kuraa/invites.json.
-// - Subscription links this device made: .git/kuraa/links.json; revoked ones,
+// - Invite links this device made: .git/kuraa/links.json; revoked or used ones,
 //   `kuraa.revokedlinks` (shared with the other devices, as removals are). The
 //   link this device joined by: .git/kuraa/joined-link.
 // - Every change to the members, signed by the device that made it:
 //   .git/kuraa/records.json (records.ts). The config above is what the records
-//   this device took say, applied.
-// - Whose work this device accepts on its own, by branch, and whose membership
-//   changes: .git/kuraa/accept.json (accept.ts). Its own choice (0032).
-// - The sync remote: the ordinary git remote Sync uses (GitHub, say), if it is not origin: `kuraa.syncremote`.
+//   this device took say, applied. Every member's are taken (0038).
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -26,7 +22,6 @@ import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
-import { EVERYONE, canonicalRules, readRules, rulePath, encodeRules, decodeRules, type AcceptRules } from './accept.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
 
@@ -104,9 +99,6 @@ export class Identity {
     const ws = { id: randomBytes(16).toString('hex'), secret: randomBytes(32).toString('hex'), forkedFrom: `${old.id}@${commit}` };
     await this.adopt(ws);
     await this.git.run(['config', 'kuraa.originsecret', old.secret]);
-    await this.setSyncRemote(null);
-    // A workspace of its own: it accepts everyone's work, until its devices say otherwise.
-    await this.setRules({ rules: [], membership: null });
     return ws;
   }
 
@@ -186,82 +178,12 @@ export class Identity {
     return this.getAll('kuraa.removed');
   }
 
-  /** The sync remote: the ordinary git remote Sync fetches from, merges and pushes to (GitHub, say), if one is chosen. */
-  async syncRemote(): Promise<string | null> {
-    return this.get('kuraa.syncremote');
-  }
-
-  async setSyncRemote(remote: string | null): Promise<void> {
-    if (remote === null) await this.git.run(['config', '--unset', 'kuraa.syncremote'], { allowFail: true });
-    else await this.git.run(['config', 'kuraa.syncremote', remote]);
-  }
-
-  // Whose work this device accepts on its own (accept.ts) ----------------------
-
-  private get rulesFile(): string {
-    return join(this.stateDir, 'accept.json');
-  }
-
-  /** This device's rules: every member's work, until it says otherwise. */
-  async rules(): Promise<AcceptRules> {
-    const cached = await this.fresh(this.rulesFile, this.rulesCache);
-    if (cached) return structuredClone(cached.value);
-    try {
-      const rules = readRules(JSON.parse(await readFile(this.rulesFile, 'utf8')));
-      this.rulesCache = { stamp: await this.stamp(this.rulesFile), value: rules };
-      return structuredClone(rules);
-    } catch {
-      const rules: AcceptRules = { ...EVERYONE, rules: [] };
-      // Written once, so the rules are read from the file from now on (published when the device starts syncing).
-      await this.writeRules(rules);
-      return rules;
-    }
-  }
-
-  /** Keep this device's rules, and publish them to the others (a rules record), if this is a shared workspace. */
-  async setRules(r: AcceptRules): Promise<void> {
-    await this.writeRules(readRules(r));
-    await this.publishRules();
-  }
-
-  private async writeRules(r: AcceptRules): Promise<void> {
-    await mkdir(this.stateDir, { recursive: true });
-    await writeFile(this.rulesFile, JSON.stringify(r, null, 1));
-    this.rulesCache = null;
-  }
-
-  /** Publish this device's rules to the others (a rules record), if they changed since it last did; in a shared workspace. */
-  async publishRules(): Promise<void> {
-    if (!(await this.workspace())) return;
-    const self = (await this.deviceKey()).publicKey.toString('hex');
-    const text = canonicalRules(await this.rules());
-    if (this.latest('rules', self, await this.records())?.rules !== text) await this.decide('rules', '', { rules: text });
-  }
-
-  /**
-   * On `branch`, at `path` ('' the whole branch, 'dir/' a folder, else a file),
-   * accept only the work of these devices or people on its own; null: every member's.
-   */
-  async acceptOn(branch: string, path: string, from: string[] | null): Promise<void> {
-    const r = await this.rules();
-    const at = rulePath(path);
-    r.rules = r.rules.filter((x) => !(x.branch === branch && x.path === at));
-    if (from) r.rules.push({ branch, path: at, from });
-    await this.setRules(r);
-  }
-
-  /** Accept membership changes only from these devices or people (null: every member's). */
-  async acceptMembershipFrom(from: string[] | null): Promise<void> {
-    await this.setRules({ ...(await this.rules()), membership: from });
-  }
-
   // Signed records (records.ts) --------------------------------------------
 
   private get recordsFile(): string {
     return join(this.stateDir, 'records.json');
   }
 
-  private rulesCache: { stamp: string; value: AcceptRules } | null = null;
   private recordsCache: { stamp: string; value: MemberRecord[] } | null = null;
 
   private async stamp(file: string): Promise<string> {
@@ -292,7 +214,7 @@ export class Identity {
     }
   }
 
-  /** The latest record of a kind a device made about itself (rules, person). */
+  /** The latest record of a kind a device made about itself (signs). */
   private latest(kind: RecordKind, by: string, list: MemberRecord[]): MemberRecord | undefined {
     let best: MemberRecord | undefined;
     for (const r of list) if (r.kind === kind && r.by === by && (!best || r.at > best.at || (r.at === best.at && r.sig > best.sig))) best = r;
@@ -319,19 +241,6 @@ export class Identity {
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(this.recordsFile, JSON.stringify(list, null, 1));
     this.recordsCache = null;
-  }
-
-  /** Another device's rules, as it last published them; null if it has not. */
-  async rulesOf(device: string): Promise<AcceptRules | null> {
-    const self = (await this.deviceKey()).publicKey.toString('hex');
-    if (device === self) return this.rules();
-    const r = this.latest('rules', device, await this.records());
-    if (!r?.rules) return null;
-    try {
-      return readRules(JSON.parse(r.rules));
-    } catch {
-      return null;
-    }
   }
 
   /**
@@ -366,22 +275,6 @@ export class Identity {
   async personOf(deviceOrKey: string): Promise<{ key: string; name: string } | null> {
     const w = this.who(await this.records());
     return w.personOf.get(w.signsWith.get(deviceOrKey) ?? deviceOrKey) ?? null;
-  }
-
-  /**
-   * Who a device or a signing key is, for rules: the key itself, the signing key
-   * a device signs with, and the person whose that is. A revoked key is only
-   * itself from the moment this device takes the revocation: work it signed
-   * that this device already has stays as it is, and none that comes after counts as theirs.
-   */
-  async identitiesOf(deviceOrKey: string): Promise<string[]> {
-    return this.identitiesIn(this.who(await this.records()), deviceOrKey);
-  }
-
-  private identitiesIn(w: ReturnType<Identity['who']>, k: string): string[] {
-    const signing = w.signsWith.get(k);
-    const person = w.personOf.get(signing ?? k);
-    return [k, ...(signing ? [signing] : []), ...(person ? [person.key] : [])];
   }
 
   /** The people whose identities vouched for signing keys in this workspace: their keys, and the devices that sign with them. */
@@ -429,14 +322,11 @@ export class Identity {
   /** What this device knows, to judge a record by. */
   private async standing(): Promise<Standing> {
     const ws = await this.workspace();
-    const w = this.who(await this.records());
     return {
       workspace: ws?.id ?? '',
       self: (await this.deviceKey()).publicKey.toString('hex'),
       members: new Set((await this.members()).map((m) => m.key)),
       removed: new Set(await this.removed()),
-      acceptsFrom: (await this.rules()).membership,
-      identitiesOf: (device: string) => this.identitiesIn(w, device),
     };
   }
 
@@ -448,15 +338,14 @@ export class Identity {
     if (r.kind === 'add') await this.addMemberNow(r.subject, r.name ?? 'device');
     else if (r.kind === 'remove') await this.removeMemberNow(r.subject);
     else if (r.kind === 'revoke-link' && !(await this.revokedLinks()).includes(r.subject)) await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
-    // rules, signs, vouch, revoke-key: kept as they are, and read from the records.
+    // signs, vouch, revoke-key: kept as they are, and read from the records.
   }
 
   /**
    * A change this device makes: signed with its key, kept, applied here, and
-   * passed on. Any device may make one; each other device takes it or not by its
-   * own rule (records.ts, judge).
+   * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; rules?: string; proof?: string; keyProof?: string; person?: string } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
@@ -468,7 +357,7 @@ export class Identity {
   }
 
   /**
-   * Records from another device: each taken if this device may (records.ts,
+   * Records from another device: each taken if its signer is a member (records.ts,
    * judge), until no more can be (an add may make another's signer known).
    * Returns those taken.
    */
@@ -503,32 +392,7 @@ export class Identity {
     });
   }
 
-  // Invitations ------------------------------------------------------------
-
-  private get invitesFile(): string {
-    return join(this.stateDir, 'invites.json');
-  }
-
-  private async invites(): Promise<{ token: string; expires: number }[]> {
-    try {
-      return (JSON.parse(await readFile(this.invitesFile, 'utf8')) as { token: string; expires: number }[]).filter((i) => i.expires > Date.now());
-    } catch {
-      return [];
-    }
-  }
-
-  /** Make a one-time invitation, good for `hours`. Returns its token. */
-  async invite(hours = 24): Promise<string> {
-    const token = randomBytes(16).toString('hex');
-    const list = await this.invites();
-    // Only a hash is kept: the file does not let anyone join.
-    list.push({ token: createHash('sha256').update(token).digest('hex'), expires: Date.now() + hours * 3600_000 });
-    await mkdir(this.stateDir, { recursive: true });
-    await writeFile(this.invitesFile, JSON.stringify(list), { mode: 0o600 });
-    return token;
-  }
-
-  // Subscription links ------------------------------------------------------
+  // Invite links ------------------------------------------------------------
 
   private get linksFile(): string {
     return join(this.stateDir, 'links.json');
@@ -544,11 +408,12 @@ export class Identity {
   }
 
   /**
-   * Make a subscription link: anyone with it can join the workspace as a full
-   * device, any number of times, until it expires (`hours`; null: never) or is
-   * revoked. Signed with this device's key, so any member can check it.
+   * Make an invite link: whoever has it can join the workspace as a full device,
+   * until it expires (`hours`; null: never) or is revoked; `once`, for one
+   * person: the first device it lets in uses it up. Signed with this device's
+   * key, so any member can check it and let them in.
    */
-  async createLink(hours: number | null): Promise<string> {
+  async createLink(hours: number | null, once: boolean): Promise<string> {
     const ws = await this.workspace();
     if (!ws) throw new Error('This repository is not a workspace shared between devices');
     const key = await this.deviceKey();
@@ -556,13 +421,12 @@ export class Identity {
     const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
     const issuer = key.publicKey.toString('hex');
     const through = await this.cameInThrough();
-    const rules = await this.rules();
-    const signature = crypto.sign(linkMessage(ws.id, id, expires, issuer, through, rules), key.secretKey).toString('hex');
+    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through), key.secretKey).toString('hex');
     const list = await this.links();
-    list.push({ id, expires, created: Date.now() });
+    list.push({ id, expires, once, created: Date.now() });
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
-    return encodeLink({ workspace: ws, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, signature, rules });
+    return encodeLink({ workspace: ws, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature });
   }
 
   /**
@@ -592,8 +456,19 @@ export class Identity {
     await this.decide('revoke-link', id);
   }
 
+  /** A link for one person has let them in: on record, so no device lets anyone else in by it. */
+  async useLink(id: string): Promise<void> {
+    await this.decide('revoke-link', id, { name: 'used' });
+  }
+
+  /** Links that no longer let anyone in: revoked, or used (for one person). */
   async revokedLinks(): Promise<string[]> {
     return this.getAll('kuraa.revokedlinks');
+  }
+
+  /** Of those, the links for one person that were used. */
+  async usedLinks(): Promise<string[]> {
+    return (await this.records()).filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject);
   }
 
   /** The link this device joined by, shown to devices it meets that do not know it yet. */
@@ -609,100 +484,67 @@ export class Identity {
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(join(this.stateDir, 'joined-link'), link, { mode: 0o600 });
   }
-
-  /** Use up an invitation; whether it was good. */
-  async redeem(token: string): Promise<boolean> {
-    const hash = createHash('sha256').update(token).digest('hex');
-    const list = await this.invites();
-    const left = list.filter((i) => i.token !== hash);
-    if (left.length === list.length) return false;
-    await writeFile(this.invitesFile, JSON.stringify(left), { mode: 0o600 });
-    return true;
-  }
 }
 
-/** A subscription link as the device that made it keeps it. */
+/** An invite link as the device that made it keeps it. */
 export interface IssuedLink {
   id: string;
   /** When it stops working (ms since 1970); 0: never. */
   expires: number;
+  /** For one person: it lets one device in. */
+  once: boolean;
   created: number;
 }
 
-/** What a subscription link carries: the workspace, the device that made it, and its signature. */
-export interface SubscriptionLink {
+/** What an invite link carries: the workspace, the device that made it, and its signature. */
+export interface InviteLink {
   workspace: WorkspaceIdentity;
   issuer: Member;
   /** The devices the issuer came into the workspace through, back to the first (Identity.cameInThrough). */
   through: string[];
   id: string;
   expires: number;
-  /** The issuer's signature over the workspace id, link id, expiry, issuer key, the devices it came in through, and the rules, hex. */
+  /** For one person: the first device it lets in uses it up. */
+  once: boolean;
+  /** The issuer's signature over the workspace id, link id, expiry, whether it is for one person, issuer key and the devices it came in through, hex. */
   signature: string;
-  /** Whose work its maker accepts on its own: the device joining starts with the same rules, its own to change. */
-  rules: AcceptRules;
 }
 
-const linkMessage = (workspace: string, id: string, expires: number, issuer: string, through: string[], rules: AcceptRules) =>
-  Buffer.from(`kuraa-link\0${workspace}\0${id}\0${expires}\0${issuer}\0${through.join(',')}\0${canonicalRules(rules)}`);
+const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[]) =>
+  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}`);
 
-export function encodeLink(l: SubscriptionLink): string {
-  const payload = [l.workspace.id, l.workspace.secret, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.signature, encodeRules(l.rules), l.through.join(',')].join('|');
-  return `kuraa-link:${Buffer.from(payload, 'utf8').toString('base64url')}`;
+export function encodeLink(l: InviteLink): string {
+  const payload = [l.workspace.id, l.workspace.secret, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(',')].join('|');
+  return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
 }
 
-export function decodeLink(code: string): SubscriptionLink {
-  const m = /^kuraa-link:([A-Za-z0-9_-]+)$/.exec(code.trim());
-  if (!m) throw new Error('Not a subscription link (it starts with kuraa-link:)');
-  const [id, secret, forkedFrom, key, name, linkId, expires, signature, rulesField, throughField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
-  const rules = decodeRules(rulesField);
+export function decodeLink(code: string): InviteLink {
+  const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
+  if (!m) throw new Error('Not an invite link (it starts with kuraa-invite:)');
+  const [id, secret, forkedFrom, key, name, linkId, expires, once, signature, throughField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
   const through = throughField ? throughField.split(',') : [];
-  if (!id || !secret || !key || !name || !linkId || !signature || !rules || throughField === undefined || !hex.test(id) || !hex.test(secret) || !hex.test(key) || !/^[0-9a-f]{16}$/.test(linkId) || !/^\d+$/.test(expires ?? '') || !hex.test(signature)
+  if (!id || !secret || !key || !name || !linkId || !signature || throughField === undefined || !hex.test(id) || !hex.test(secret) || !hex.test(key) || !/^[0-9a-f]{16}$/.test(linkId) || !/^\d+$/.test(expires ?? '') || (once !== '0' && once !== '1') || !hex.test(signature)
     || through.some((k) => !/^[0-9a-f]{64}$/.test(k))) {
-    throw new Error('This subscription link is damaged');
+    throw new Error('This invite link is damaged');
   }
-  return { workspace: { id, secret, forkedFrom: forkedFrom || null }, issuer: { key, name }, through, id: linkId, expires: Number(expires), signature, rules };
+  return { workspace: { id, secret, forkedFrom: forkedFrom || null }, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature };
 }
 
 /**
  * Why a link does not let a device join this workspace, or null if it does:
- * it is for this workspace, made by a device this one accepts links from, signed
- * by it, not expired and not revoked.
+ * it is for this workspace, made by a member (any member's counts: 0038),
+ * signed by it, not expired, and neither revoked nor used.
  */
-export function checkLink(l: SubscriptionLink, o: { workspace: string; issuers: string[]; revoked: string[]; now?: number }): string | null {
+export function checkLink(l: InviteLink, o: { workspace: string; members: string[]; revoked: string[]; now?: number }): string | null {
   if (l.workspace.id !== o.workspace) return 'the link is for another workspace';
-  if (!o.issuers.includes(l.issuer.key)) return 'the link was made by a device this one does not take links from';
+  if (!o.members.includes(l.issuer.key)) return 'the link was made by a device that is not in the workspace';
   if (!linkSigned(l)) return 'the link is not signed by the device it names';
   if (l.expires !== 0 && l.expires < (o.now ?? Date.now())) return 'the link has expired';
-  if (o.revoked.includes(l.id)) return 'the link was revoked';
+  if (o.revoked.includes(l.id)) return l.once ? 'the link was used, or revoked' : 'the link was revoked';
   return null;
 }
 
 /** Whether a link is as the device it names made it: its signature over all it says but the workspace's secret. */
-export function linkSigned(l: SubscriptionLink): boolean {
-  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.issuer.key, l.through, l.rules), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
-}
-
-/** What an invitation carries: the workspace, who invited, and the one-time token. */
-export interface Invitation {
-  workspace: WorkspaceIdentity;
-  /** The inviting device's key, hex, and name. */
-  inviter: Member;
-  token: string;
-  /** Whose work the inviting device accepts on its own: the device joining starts with the same. */
-  rules: AcceptRules;
-}
-
-export function encodeInvitation(inv: Invitation): string {
-  const payload = [inv.workspace.id, inv.workspace.secret, inv.workspace.forkedFrom ?? '', inv.inviter.key, inv.inviter.name, inv.token, encodeRules(inv.rules)].join('|');
-  return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
-}
-
-export function decodeInvitation(code: string): Invitation {
-  const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
-  if (!m) throw new Error('Not an invitation (it starts with kuraa-invite:)');
-  const [id, secret, forkedFrom, key, name, token, rulesField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
-  const rules = decodeRules(rulesField);
-  if (!id || !secret || !key || !name || !token || !rules || !hex.test(id) || !hex.test(secret) || !hex.test(key) || !hex.test(token)) throw new Error('This invitation is damaged');
-  return { workspace: { id, secret, forkedFrom: forkedFrom || null }, inviter: { key, name }, token, rules };
+export function linkSigned(l: InviteLink): boolean {
+  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
 }

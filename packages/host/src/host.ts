@@ -8,11 +8,11 @@ import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
-import { Git, NON_INTERACTIVE } from './git.js';
+import { Git } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
 import { commitSigned, signCommitObject } from './signing.js';
-import { Backups } from './backups.js';
+import { OnlineCopies } from './backups.js';
 import { serialQueue } from './serial.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
@@ -32,8 +32,10 @@ export interface HostTimings {
   maxCommitMs: number;
   /** Drop an empty room after this long. */
   dropMs: number;
-  /** Push to backups this long after the last commit (backups.ts). */
-  backupMs: number;
+  /** Push to the online copies this long after the last commit (backups.ts). */
+  onlineMs: number;
+  /** Fetch from the online copies, merge and push, this often. */
+  onlineSyncMs: number;
   /** Look this often at where git is (a branch switched, an operation under way outside the app) while rooms are open. */
   gitPollMs: number;
 }
@@ -83,23 +85,20 @@ export interface HostOptions {
    */
   managePerson?: boolean;
   /**
-   * People using the app may add and remove backups (backups.ts): git servers
-   * pushed to with this computer's credentials. Only where the one running the
-   * host is the one using it (the desktop app, `pnpm dev`; --manage-backups).
-   * Everyone sees them, and may ask for a push.
+   * People using the app may add and remove online copies (backups.ts): git
+   * servers synced with this computer's credentials. Only where the one running
+   * the host is the one using it (the desktop app, `pnpm dev`; --manage-online).
+   * Everyone sees them, and Sync syncs with them.
    */
-  manageBackups?: boolean;
+  manageOnline?: boolean;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }
 
-/** How long a sync may wait for its remote, fetching and pushing. */
 /** How many files the file list reads at once. */
 const TREE_READS = 16;
-const FETCH_MS = 5 * 60_000;
-const PUSH_MS = 10 * 60_000;
 
-export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, backupMs: 30_000, gitPollMs: 1000 };
+export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, onlineMs: 30_000, onlineSyncMs: 5 * 60_000, gitPollMs: 1000 };
 
 interface RoomRecord {
   key: string;
@@ -125,8 +124,6 @@ interface RoomRecord {
   /** Flushed but not committed. */
   uncommitted: boolean;
   contributors: Map<string, PresenceUser>;
-  /** Edited by someone on this device (not another device's edits) since its last commit. */
-  localEdits: boolean;
   editingSince: number | null;
   lastFlushAt: string | null;
   lastCommitAt: string | null;
@@ -192,8 +189,8 @@ export class Host {
   readonly dir: string;
   readonly token: string;
   readonly timings: HostTimings;
-  /** Git servers this workspace is pushed to, and nothing more (backups.ts). */
-  readonly backups: Backups;
+  /** Git servers this workspace keeps a copy on, and syncs with (backups.ts). */
+  readonly online: OnlineCopies;
   readonly workspace: string;
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
@@ -232,7 +229,7 @@ export class Host {
       GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,
       GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email,
     } : {});
-    this.backups = new Backups(this.git, { delayMs: this.timings.backupMs, log: (m) => this.log(m), serial: (fn) => this.serial(fn) });
+    this.online = new OnlineCopies(this.git, { delayMs: this.timings.onlineMs, everyMs: this.timings.onlineSyncMs, log: (m) => this.log(m), serial: (fn) => this.serial(fn), bringIn: (name) => this.bringInFrom(name) });
     this.allTypes = options.types ?? standardTypes;
     const known = this.allTypes.map((t) => t.id);
     for (const id of options.formats ?? []) if (!known.includes(id)) throw new Error(`Unknown format "${id}". Known: ${known.join(', ')}.`);
@@ -269,9 +266,10 @@ export class Host {
     this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
     this.gitState = await this.readGitState();
     this.onBranch = this.gitState.branch;
-    // Backups take what was committed, a while after; and, at start, whatever was committed while the host was away.
-    this.onRefsChanged(() => this.backups.changed());
-    this.backups.changed();
+    // Online copies take what was committed, a while after; and, at start, whatever was committed while the host was away.
+    this.onRefsChanged(() => this.online.changed());
+    this.online.changed();
+    this.online.start();
     const run = this.options.run;
     this.runner = new Runner({
       root: this.dir,
@@ -321,7 +319,7 @@ export class Host {
       },
       load: (room) => this.loadRoom(room),
       loaded: (room) => this.peers?.rooms.opened(room),
-      changed: (room, user, local) => this.onClientChange(room, user, local),
+      changed: (room, user) => this.onClientChange(room, user),
       store: (room, state) => {
         const rec = this.byRoom.get(room);
         if (rec) {
@@ -347,7 +345,7 @@ export class Host {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.backups.close();
+    this.online.close();
     this.renders?.close();
     this.watcher?.close();
     clearInterval(this.gitPoll);
@@ -534,7 +532,6 @@ export class Host {
       dirty: false,
       uncommitted: false,
       contributors: new Map(),
-      localEdits: false,
       editingSince: null,
       lastFlushAt: null,
       lastCommitAt: null,
@@ -572,11 +569,10 @@ export class Host {
     return { state: rec.state };
   }
 
-  private onClientChange(room: string, user: PresenceUser | null, local = true): void {
+  private onClientChange(room: string, user: PresenceUser | null): void {
     const rec = this.byRoom.get(room);
     if (!rec) return;
     rec.dirty = true;
-    if (local) rec.localEdits = true;
     if (user) rec.contributors.set(user.email || user.name, user);
     const t = rec.timers;
     if (t.flush) clearTimeout(t.flush);
@@ -767,7 +763,6 @@ export class Host {
     rec.uncommitted = false;
     if (!committed) return null;
     rec.contributors.clear();
-    rec.localEdits = false;
     rec.baseCommit = committed;
     rec.lastCommit = committed;
     rec.lastCommitAt = new Date().toISOString();
@@ -1170,8 +1165,8 @@ export class Host {
    * Merge commits as every device does (see merging.ts), reading files with
    * this host's document types.
    */
-  merge(x: string, y: string, override?: (path: string) => string | undefined, keep?: (path: string) => boolean): Promise<MergeOutcome> {
-    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, keep, tmpDir: this.tmpDir });
+  merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir });
   }
 
   /**
@@ -1179,13 +1174,13 @@ export class Host {
    * every device makes it. Open rooms are committed first, and take the result
    * as an outside change. Call inside serial().
    */
-  async integrate(ref: string, override?: (path: string) => string | undefined, keep?: (path: string) => boolean): Promise<MergeOutcome> {
+  async integrate(ref: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
     // Not into the middle of someone's rebase or merge: it comes in once that is done.
     await this.requireWritable();
     await this.commitAll();
     const theirs = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
     const head = await this.git.head();
-    const outcome = head ? await this.merge(head, theirs, override, keep) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
+    const outcome = head ? await this.merge(head, theirs, override) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
     if (outcome.commit !== head) {
       // Rooms another device commits (shared rooms, peers/rooms.ts) are left to it:
       // only the device that commits a shared room brings changes from git into
@@ -1266,30 +1261,6 @@ export class Host {
     return this.byRoom.get(name)?.baseCommit ?? null;
   }
 
-  /** Whether someone on this device (not another device) has edited the room since its last commit. */
-  localEditsIn(name: string): boolean {
-    return this.byRoom.get(name)?.localEdits ?? false;
-  }
-
-  /**
-   * Put a file as given (null: delete it), into its open room as an outside
-   * change, and commit it. For taking another device's version of a file
-   * (peers.ts). Call inside serial().
-   */
-  async replaceFile(path: string, content: string | null, message: string): Promise<string | null> {
-    await this.requireWritable();
-    const abs = this.resolvePath(path);
-    if (content === null) await rm(abs, { force: true });
-    else {
-      await mkdir(dirname(abs), { recursive: true });
-      await this.writeAtomic(abs, content);
-    }
-    const branch = await this.git.branch();
-    const rec = this.records.get(`${branch}:${path}`);
-    if (rec) await this.checkOutside(rec);
-    return this.commitPaths([path], message);
-  }
-
   /** Who has edited a room since its last commit. */
   roomContributors(name: string): PresenceUser[] {
     return [...(this.byRoom.get(name)?.contributors.values() ?? [])];
@@ -1355,62 +1326,56 @@ export class Host {
   }
 
   /**
-   * The sync remote: the ordinary git remote (GitHub, say) Sync fetches from,
-   * merges and pushes to, two ways, like any clone of it. The
-   * workspace's choice (`kuraa.syncremote`), else origin, else the only one.
+   * Bring a commit into a branch, as every device merges: the checked-out one
+   * through the working tree (integrate), others by their ref alone, made here
+   * if this repository lacks them. Call inside serial().
    */
-  async syncRemoteName(): Promise<string | null> {
-    const urls = await this.git.run(['config', '--get-regexp', '^remote\\..*\\.url$'], { allowFail: true });
-    // Not devices (they sync with each other), and not backups (they only receive).
-    const backups = await this.backups.names();
-    const remotes = urls.stdout.split('\n').map((l) => /^remote\.(.+)\.url (.*)$/.exec(l.trim())).filter((m) => m && !m[2]!.startsWith('kuraa://')).map((m) => m![1]!).filter((r) => !backups.includes(r));
-    const chosen = (await this.git.run(['config', '--get', 'kuraa.syncremote'], { allowFail: true })).stdout.trim();
-    if (chosen && remotes.includes(chosen)) return chosen;
-    if (chosen && this.peers) return null;
-    return remotes.includes('origin') ? 'origin' : (remotes[0] ?? null);
-  }
-
-  /**
-   * Fetch from an ordinary remote, bring its branch in (never stopping on a
-   * conflict), and push. Call outside serial(): it takes its turn for the parts
-   * that change branches and files, and talks to the remote outside it, so a
-   * slow or silent server holds up no saving. Never asks for credentials, and
-   * gives up after a while.
-   */
-  async syncWith(remote: string): Promise<{ ok: boolean; message: string; head?: string | null }> {
-    const branch = await this.serial(async () => {
-      await this.requireWritable();
-      await this.commitAll();
-      return (await this.readGitState()).branch!;
-    });
-    const fetched = await this.git.run(['fetch', remote], { allowFail: true, timeoutMs: FETCH_MS, env: NON_INTERACTIVE });
-    if (fetched.code !== 0) throw new Error(`Could not fetch from ${remote}: ${(fetched.stderr || fetched.stdout).trim() || 'it took too long'}`);
-    const { kept, head } = await this.serial(async () => {
-      if ((await this.readGitState()).branch !== branch) throw new HttpError(409, `The branch changed while syncing (now not ${branch}): sync again`);
-      const hasRemoteBranch = (await this.git.run(['rev-parse', '--verify', '-q', `${remote}/${branch}`], { allowFail: true })).code === 0;
-      // Never stops on a conflict: both versions stay in the document, to choose between there.
-      const outcome = hasRemoteBranch ? await this.integrate(`${remote}/${branch}`) : null;
-      return { kept: outcome ? describeOutcome(outcome) : '', head: await this.git.head() };
-    });
-    if (head) {
-      const pushed = await this.git.run(['push', remote, `${head}:refs/heads/${branch}`], { allowFail: true, timeoutMs: PUSH_MS, env: NON_INTERACTIVE });
-      if (pushed.code !== 0) throw new Error(`Could not push to ${remote}: ${(pushed.stderr || pushed.stdout).trim() || 'it took too long'}`);
+  async bringBranch(branch: string, ref: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    if (branch === (await this.git.branch())) return this.integrate(ref, override);
+    const oid = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
+    const mine = (await this.git.run(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true })).stdout.trim();
+    if (!mine) {
+      await this.git.run(['update-ref', `refs/heads/${branch}`, oid, '']);
+      this.refsChanged();
+      return { commit: oid, kind: 'fast-forward', conflicts: [], copies: [] };
     }
-    return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head };
+    const outcome = await this.merge(mine, oid);
+    if (outcome.commit !== mine) {
+      await this.git.run(['update-ref', `refs/heads/${branch}`, outcome.commit, mine]);
+      this.refsChanged();
+    }
+    return outcome;
   }
 
-  /** Sync: with the paired devices that are connected, and with the sync remote if there is one. */
+  /** Bring an online copy's branches in, as fetched (backups.ts): what the merge into the open branch kept, to say. */
+  async bringInFrom(name: string): Promise<string> {
+    const prefix = `refs/remotes/${name}/`;
+    const refs = (await this.git.out(['for-each-ref', '--format=%(refname)', prefix])).split('\n').filter((r) => r && r !== `${prefix}HEAD`);
+    return this.serial(async () => {
+      const current = await this.git.branch();
+      let said = '';
+      for (const ref of refs) {
+        const branch = ref.slice(prefix.length);
+        const outcome = await this.bringBranch(branch, ref);
+        if (branch === current) said = `/${branch}${describeOutcome(outcome)}`;
+      }
+      return said;
+    });
+  }
+
+  /** Sync: commit, then bring in the work of connected devices, and sync with the online copies. */
   async syncNow(): Promise<{ ok: boolean; message: string; head?: string | null }> {
-    const remote = await this.syncRemoteName();
+    await this.serial(() => this.commitAll());
     const said: string[] = [];
+    let ok = true;
     if (this.peers) said.push(await this.peers.syncAll());
-    if (remote) {
-      const r = await this.syncWith(remote);
-      if (!this.peers) return r;
-      said.push(r.message);
+    if ((await this.online.names()).length) {
+      const r = await this.online.syncAll();
+      ok = r.ok;
+      said.push(...r.messages);
     }
-    if (!said.length) return { ok: false, message: 'There is no sync remote, and no device to sync with' };
-    return { ok: true, message: said.join('. '), head: await this.git.head() };
+    if (!said.length) return { ok: false, message: 'There is no online copy, and no device to sync with' };
+    return { ok, message: said.join('. '), head: await this.git.head() };
   }
 
   // -------------------------------------------------------------------------

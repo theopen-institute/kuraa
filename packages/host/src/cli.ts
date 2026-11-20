@@ -16,13 +16,13 @@
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
 //   devices:      --peer [--bootstrap host:port]...   sync with paired devices (see peers/cli.ts
-//                 for invite, join, devices, sync-remote, fork); --allow-invites lets people make
-//                 invitations and links from the app (a hub always does, for its workspaces)
+//                 for invite, join, devices, online, fork); --allow-invites lets people make
+//                 invite links and remove devices from the app (a hub always does, for its workspaces)
 //   people:       --manage-person   let people using the app see, make and import this computer's
 //                 person's key (for one's own computer, as pnpm dev; refused unless --host is
 //                 this computer alone, 127.0.0.1; never on a shared server)
-//   backups:      --manage-backups  let people using the app add and remove backups (git servers
-//                 pushed to with this computer's credentials); kuraa-host backup … from the command line
+//   online copy:  --manage-online  let people using the app add and remove online copies (git servers
+//                 synced with this computer's credentials); kuraa-host online … from the command line
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { lastResort, startHub } from './index.js';
@@ -64,7 +64,7 @@ const { values } = parseArgs({
     peer: { type: 'boolean', default: false },
     'allow-invites': { type: 'boolean', default: false },
     'manage-person': { type: 'boolean', default: false },
-    'manage-backups': { type: 'boolean', default: false },
+    'manage-online': { type: 'boolean', default: false },
     bootstrap: { type: 'string', multiple: true },
     'flush-ms': { type: 'string' },
     'commit-ms': { type: 'string' },
@@ -113,7 +113,7 @@ const hub = await startHub({
   token: values.token ?? process.env.KURAA_TOKEN,
   staticDir: values.static,
   // Nothing runs unless an engine is on.
-  hosts: { formats: values.format, run: runOptions, timings, managePerson: values['manage-person'], manageBackups: values['manage-backups'] },
+  hosts: { formats: values.format, run: runOptions, timings, managePerson: values['manage-person'], manageOnline: values['manage-online'] },
   peers: { bootstrap: values.bootstrap, everywhere: values.peer },
   // A hub of many lets people invite others to its workspaces; for one folder, the operator says (--allow-invites).
   invites: !!values.workspaces || values['allow-invites'],

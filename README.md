@@ -46,9 +46,9 @@ menu, and cannot add others; `--workspaces` instead serves a folder of workspace
 | `--token` | random | Or set `KURAA_TOKEN` |
 | `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below |
 | `--peer` | off | Sync with this workspace's other devices, directly. See below |
-| `--allow-invites` | off | Let people make invitations and links from the app (`--workspaces` always does) |
-| `--manage-backups` | off | Let people using the app add and remove backups (desktop app and `pnpm dev`: on). See below |
-| `--manage-person` | off | Let people using the app see, make and import this computer's person's key (your own computer only; `pnpm dev`: on) |
+| `--allow-invites` | off | Let people make invite links, remove devices and rename this one from the app (`--workspaces` always does) |
+| `--manage-online` | off | Let people using the app add and remove the online copy (desktop app and `pnpm dev`: on). See below |
+| `--manage-person` | off | Let people using the app see and import this computer's identity (your own computer only; `pnpm dev`: on) |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
 | `--engine` | off | Turn on running code: `--engine r`. See below |
@@ -70,7 +70,14 @@ co-author credit) and a cursor colour under **Settings** in the client.
 
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
-full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
+full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Citations are typed as
+Pandoc writes them (`[@smith2020, p. 3]`, `@smith2020`); typing `@` offers the keys of the
+bibliography the header names, and citations show as "Smith 2020", a key the bibliography lacks
+marked. Paste or drop an image to keep it in `images/` beside the document; `| a | b |` then Enter
+makes a table (Tab between cells, right-click for rows and columns; **Insert table** in the menu);
+`$$` then Enter starts display math. ⌘F finds and replaces, ⌥⌘O shows the outline, and ⌥⌘N goes to
+the next conflict; clicking a file's conflict count opens it at the first
+([decision 0040](docs/decisions/0040-writing-in-the-editor.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;
@@ -112,16 +119,18 @@ read-only and no network), so it needs `--engine r` and Podman, like running chu
 what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the document
 ([decision 0041](docs/decisions/0041-rendering.md)).
 
-## Backups
+## An online copy
 
-A workspace can be backed up to plain git servers: GitHub, GitLab, any git host, or a folder. In the
-menu's **Backups** section (the desktop app, `pnpm dev`, or a host started with `--manage-backups`),
-add the address of an empty repository, such as `git@github.com:you/notes.git`; from the command
-line, `pnpm host backup add <address> --dir <workspace>`. Every branch is pushed to it after each
-save, with your own git credentials (an SSH key, or a credential helper for https). Nothing comes
-back from a backup, and it is never force-pushed: if another of your devices pushed first, the
-backup waits until this one has that work. For a remote that work also comes back from, use a
-sync remote (**Sync**) instead ([decision 0036](docs/decisions/0036-backups.md)).
+A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. In the
+menu's **Online copy** section (the desktop app, `pnpm dev`, or a host started with
+`--manage-online`), add the address of an empty repository, such as
+`git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
+<workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
+with your own git credentials (an SSH key, or a credential helper for https). On **Sync**, and
+every few minutes, it is fetched from and its work merged in, as another device's would be, so
+computers that cannot reach each other directly still meet through it: add the same address on
+each. If someone else pushed first, this device fetches, merges and pushes again; it never
+force-pushes ([decision 0039](docs/decisions/0039-online-copy.md)).
 
 ## Many workspaces: a hub
 
@@ -134,8 +143,8 @@ pnpm host --workspaces ~/research --static apps/web/dist
 
 In the app, the workspace's name at the top of the sidebar switches between them and adds new
 ones: a new folder (made a git repository, inside `~/research`), or a workspace someone shared,
-joined with their invitation or subscription link. **Invite people…** (there, and in the menu)
-makes a link or invitation for the open workspace, to send to whoever should join it. The desktop app works this way by itself:
+joined with their invite link. **Invite people…** (there, and in the menu) makes an invite link
+for the open workspace, to send to whoever should join it. The desktop app works this way by itself:
 new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
 any folder on the computer.
 
@@ -150,52 +159,41 @@ sides changed differently stays in the document with both versions, to choose be
 
 ```sh
 # On the first device (its host running with --peer):
-pnpm host invite --dir ~/research/notes          # a one-time invitation, for one device
-pnpm host link --dir ~/research/notes            # or a subscription link, for anyone, for a week
+pnpm host invite --dir ~/research/notes          # an invite link for one person, for a week
+pnpm host invite --anyone --forever --dir ~/research/notes   # or for anyone with it, with no expiry
 # On another device:
-pnpm host join kuraa-invite:… --dir ~/notes      # or kuraa-link:…; fetches the workspace
+pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
 pnpm host --dir ~/notes --peer --static apps/web/dist
 ```
 
-A subscription link lets anyone who has it join as a full device, as often as they like, until it
-expires (`--hours`, or `--forever`) or is revoked (`pnpm host revoke-link <id>`; `pnpm host links`
-lists them). Any device of the workspace that is running can let them in; the joining device
-checks, by the workspace's signed pairing records, that the link's maker vouches for it. Share it
-only with people who may join: it carries the workspace's secret.
+**Every member has the same say** ([decision 0038](docs/decisions/0038-equal-peers.md)): every
+member's work comes in, on every branch, and any member may invite people, remove anyone, and
+revoke links. An invite link is for one person (the first device it lets in uses it up) or for
+anyone who has it, and lasts a day, a week (`--hours`) or forever (`--forever`), unless revoked
+(`pnpm host revoke-invite <id>`; `pnpm host invites` lists them). Any running device of the
+workspace can let someone in. Whoever joins can read and change everything, and invite and remove
+others: share a link only with people you trust with that. It carries the workspace's secret.
+The trust model is to be redesigned; its known weaknesses are listed in 0038.
 
-Paired devices are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device
-has. `pnpm host devices` lists them; `remove-device`, `name` and `fork` manage them.
+In the app, the menu's **Devices** section lists who is in the workspace, by person and computer,
+online or offline, with **Remove…** (for good; they keep their copy) and **Rename this
+computer…**; **Invite people…** makes and lists invite links, to revoke. From the command line,
+`pnpm host devices` lists them; `remove-device`, `name` and `fork` manage them. Paired devices
+are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.
 
-Each device decides whose work it accepts ([decision 0032](docs/decisions/0032-accepting-work.md)).
-By default, every member's work comes in on its own. `pnpm host accept main self` makes this
-device an integrator on `main`: other devices' work there waits as a proposal, accepted in the
-menu's **Devices** section; `pnpm host accept main desk` takes `main` only from the device `desk`,
-and `everyone` goes back. `pnpm host accept --membership <device|self>…` likewise chooses whose
-changes to the members (pairings, removals, revoked links) this device takes. A device joining by
-an invitation or link starts with its inviter's rules.
+Merges are the same on every device, so work done apart comes together into one history. A
+document open on several devices is one live room there, saved by one of them (the one with the
+lowest key). Commits are signed, for attribution only: each person has a signing key on each
+computer, which their identity vouches for, so `git log --show-signature` and the app can say who
+wrote what ([0035](docs/decisions/0035-identities-and-signing-keys.md)). Your identity is made for
+you, from your name, the first time the app knows it; the menu's **You** section says "You on this
+computer", and keeps the keys under **Advanced**: copy your identity there to a second computer
+(it replaces the one made there), or revoke a lost computer's key. From the command line, `pnpm
+host person [create | export | import | revoke <key>]`; `pnpm host signing-key` prints this
+computer's signing key, to add to GitHub as a signing key.
 
-Rules can also name a folder or file: `pnpm host accept main --path chapters/ ada` takes changes
-to `chapters/` only from Ada. Others' history still comes in, but this device keeps its own version
-there, and lists theirs under **Devices**, with **Take theirs**. Devices publish their rules, so
-the editor on another device opens such a document read-only, saying who would not take its edits,
-with **Edit anyway** ([decision 0033](docs/decisions/0033-document-rules-and-people.md)). Rules may
-name people as well as devices ([decision 0035](docs/decisions/0035-identities-and-signing-keys.md)).
-Each person has a signing key on each computer (made there, never copied), which signs the commits
-they make there, and an identity that vouches for those keys, so their work counts as theirs
-whichever computer it was made on and whichever device it comes through; a lost computer's key can
-be revoked. Every host is one person: whoever runs it. The menu's **Identity and access** panel
-shows this computer's key and makes, imports, copies or revokes with your identity: in the desktop
-app, and in a browser where the host allows it (`--manage-person`, which `pnpm dev` passes); from
-the command line, `pnpm host person create "Ada Lovelace"`, `person export`, `person import` and
-`person revoke <key>`. Changes to the members are signed by the
-device that made them, and commits with the signing key of whoever made them, so `git log
---show-signature` names them ([decision 0031](docs/decisions/0031-signed-membership.md)); `pnpm host signing-key`
-prints the key, to add to GitHub as a signing key. `pnpm host sync-remote <remote>` chooses the
-sync remote, the ordinary git remote **Sync** fetches from, merges and pushes to (default:
-`origin`).
-
-In the desktop app, turn on **Sync every workspace with its
-paired devices** in Preferences (or pass `--peer`).
+In the desktop app, turn on **Sync every workspace with the other computers it is on** in
+Preferences (or pass `--peer`); workspaces you invited people to, or joined, always sync.
 
 Devices running different versions of kuraa can work together. Each tells the others how it merges
 (a version, and the document types that merge on their own); where two differ, only the one with
@@ -376,6 +374,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | M2–M5, M9 | `packages/host/test`: headless clients against a real host and git repo |
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
+| — | `tests/e2e/citations.spec.ts`, `images.spec.ts`, `tables.spec.ts`, `find.spec.ts`: the citation picker and chips, pasted images, tables, find and replace, the outline and going to conflicts |
 | — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
 | — | `packages/host/test/render.test.ts`, `render-podman.test.ts`, `tests/e2e/render.spec.ts`: documents render to HTML, Word and PDF in Podman, from the live text, never into the workspace, previewed without running anything (Podman ones skipped without it) |
 | — | `packages/host/test/search.test.ts`, `tests/e2e/search.spec.ts`: search finds text in every text file and in what is being typed, and opens the match; `tests/e2e/versions.spec.ts`: past versions compared and restored |

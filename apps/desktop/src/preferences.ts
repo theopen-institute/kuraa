@@ -7,7 +7,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export interface Preferences {
-  /** Sync every workspace with its paired devices (--peer). Workspaces joined from an invitation or link always do. */
+  /** Sync every workspace with the other computers it is on (--peer). Workspaces shared by an invite link always do. */
   syncDevices: boolean;
   /** Run code in documents: the R engine (--engine r; --engine none turns it off). */
   runCode: boolean;

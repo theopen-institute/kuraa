@@ -32,6 +32,7 @@ import { EditorView, keymap, lineNumbers, drawSelection } from '@codemirror/view
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
+import { search, searchKeymap } from '@codemirror/search';
 import { highlighter } from './languages.js';
 
 /** Marks document transactions made from the source view, so they are not echoed back. */
@@ -92,8 +93,7 @@ export class SourceEditor {
   /** The last text parsed, and its parse: each keystroke parses the source before and after, and the next one's before is this one's after. */
   private parsed: { text: string; result: ParsedDocument } | null = null;
 
-  /** `readOnly`: shown, not edited (no one would take edits made here: Editor.vue). */
-  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string, readOnly = false) {
+  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string) {
     this.base = initial;
     this.cm = new EditorView({
       parent,
@@ -103,12 +103,12 @@ export class SourceEditor {
           lineNumbers(),
           drawSelection(),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          // ⌘F: find and replace in the source, with CodeMirror's own bar; replacing is ordinary editing.
+          search({ top: true }),
+          keymap.of([...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           markdown(),
           syntaxHighlighting(highlighter),
           EditorView.lineWrapping,
-          EditorState.readOnly.of(readOnly),
-          EditorView.editable.of(!readOnly),
           EditorView.contentAttributes.of({ 'data-testid': 'source-editor', spellcheck: 'true' }),
           EditorView.updateListener.of((u) => {
             if (!u.docChanged || u.transactions.every((t) => t.annotation(fromDocument))) return;

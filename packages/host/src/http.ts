@@ -15,8 +15,8 @@ import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
-import { MIME as RENDER_MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
-import { searchWorkspace } from './search.js';
+import { renderRoutes, searchRoutes } from './render-routes.js';
+import { writingRoutes } from './writing.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -112,7 +112,7 @@ function chunkRefOf(v: unknown): ChunkRef | undefined {
 // ---------------------------------------------------------------------------
 // Routes
 
-interface Context {
+export interface Context {
   host: Host;
   req: IncomingMessage;
   res: ServerResponse;
@@ -122,7 +122,7 @@ interface Context {
   params: string[];
 }
 
-interface Route {
+export interface Route {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string | RegExp;
   handle(c: Context): Promise<void> | void;
@@ -148,8 +148,7 @@ const workspaceRoutes: Route[] = [
 
   route('GET', '/api/rooms', async ({ host, res, q }) => {
     const rec = await host.room(str(q.get('path'), 'path'));
-    // Who would not take edits made here to it (peers.ts, declinedBy): the editor says so.
-    send(res, 200, { ...host.describe(rec), declinedBy: host.peers ? await host.peers.declinedBy(rec.branch, rec.path) : [] });
+    send(res, 200, host.describe(rec));
   }),
 
   route('POST', '/api/versions', async ({ host, req, res }) => {
@@ -222,47 +221,6 @@ const runRoutes: Route[] = [
     else await host.runner.clear(path, chunkRefOf(body.chunk));
     send(res, 200, { ok: true });
   })),
-];
-
-// Rendering documents to HTML, Word and PDF (renders.ts), where code runs; outputs are kept in .git/kuraa/renders.
-const formatOf = (v: unknown): RenderFormat => {
-  if (!RENDER_FORMATS.includes(v as RenderFormat)) throw new HttpError(400, 'Not a format: html, docx or pdf');
-  return v as RenderFormat;
-};
-// What a rendered page may do if opened on its own: show itself, nothing more (no scripts, no requests).
-const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; font-src data:; media-src data:";
-const renderRoutes: Route[] = [
-  route('GET', '/api/renders', async ({ host, res, q }) => send(res, 200, await host.renders.info(host.relPath(str(q.get('path'), 'path'))))),
-
-  route('POST', '/api/renders', async ({ host, req, res }) => {
-    const body = await readBody(req);
-    const path = host.relPath(str(body.path, 'path'));
-    const { state } = await host.renders.render(path, formatOf(body.format), personOf(body.by)?.name ?? null);
-    send(res, state.state === 'failed' ? 422 : 202, state);
-  }),
-
-  route('GET', '/api/renders/file', async ({ host, res, q }) => {
-    const path = host.relPath(str(q.get('path'), 'path'));
-    const format = formatOf(q.get('format'));
-    const bytes = await host.renders.output(path, format);
-    if (!bytes) throw new HttpError(404, 'Not rendered yet');
-    const name = `${basename(path).replace(/\.[^.]*$/, '')}.${format}`;
-    res.writeHead(200, {
-      'content-type': RENDER_MIME[format], 'content-length': bytes.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
-      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
-      ...(format === 'html' ? { 'content-security-policy': RENDER_CSP } : {}),
-    });
-    res.end(bytes);
-  }),
-];
-
-// Searching the workspace's text files, and open documents as they are being edited (search.ts).
-const searchRoutes: Route[] = [
-  route('GET', '/api/search', async ({ host, res, q }) => {
-    const query = q.get('q') ?? '';
-    if (!query.trim() || query.length > 500 || query.includes('\n')) throw new HttpError(400, 'Search for a phrase of up to 500 characters, on one line');
-    send(res, 200, await searchWorkspace(host, query, q.get('case') === '1'));
-  }),
 ];
 
 const fileRoutes: Route[] = [
@@ -409,10 +367,10 @@ const historyRoutes: Route[] = [
   }),
 ];
 
-// The workspace's devices, as the app shows them: who this device is, which are
-// paired and connected, the sync remote, and work waiting to be accepted. Pairing is
-// the operator's (CLI); invitations and subscription links are made from the app
-// where the operator allows it.
+// The workspace's devices, as the app shows them: who this device is, and which are
+// paired and connected. Where the operator allows it (canInvite), people using the
+// app make and revoke invite links, remove devices and rename this one: every
+// member has the same say (0038).
 // You on this computer (peers/person.ts, 0035), where the one running the host allows it
 // (managePerson): this computer's signing key, your identity if it is here, and your keys
 // the workspace knows of.
@@ -468,33 +426,32 @@ const personRoutes: Route[] = [
   }),
 ];
 
-// Backups (backups.ts): git servers this workspace is pushed to. Everyone sees them and may ask for a push;
-// adding and removing them is for the one running the host (manageBackups).
-const mayManageBackups = (host: Host) => {
-  if (!host.options.manageBackups) throw new HttpError(403, 'Backups here are set up by whoever runs this host');
+// Online copies (backups.ts): git servers this workspace keeps a copy on, and syncs with. Everyone
+// sees them (Sync syncs with them); adding and removing them is for the one running the host (manageOnline).
+const mayManageOnline = (host: Host) => {
+  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy here is set up by whoever runs this host');
 };
-const backupRoutes: Route[] = [
-  route('GET', '/api/backups', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageBackups, backups: await host.backups.list() })),
-  route('POST', '/api/backups', async ({ host, req, res }) => {
-    mayManageBackups(host);
+const onlineRoutes: Route[] = [
+  route('GET', '/api/online', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageOnline, copies: await host.online.list() })),
+  route('POST', '/api/online', async ({ host, req, res }) => {
+    mayManageOnline(host);
     const target = str((await readBody(req)).target, 'target');
     try {
-      await host.backups.add(target);
+      await host.online.add(target);
     } catch (e) {
       throw new HttpError(400, (e as Error).message);
     }
-    send(res, 201, { backups: await host.backups.list() });
+    send(res, 201, { copies: await host.online.list() });
   }),
-  route('DELETE', /^\/api\/backups\/([A-Za-z0-9._-]+)$/, async ({ host, res, params }) => {
-    mayManageBackups(host);
+  route('DELETE', /^\/api\/online\/([A-Za-z0-9._-]+)$/, async ({ host, res, params }) => {
+    mayManageOnline(host);
     try {
-      await host.backups.remove(params[0]!);
+      await host.online.remove(params[0]!);
     } catch (e) {
       throw new HttpError(404, (e as Error).message);
     }
-    send(res, 200, { backups: await host.backups.list() });
+    send(res, 200, { copies: await host.online.list() });
   }),
-  route('POST', '/api/backups/now', async ({ host, res }) => send(res, 200, { backups: await host.backups.pushAll() })),
 ];
 
 const peerRoutes: Route[] = [
@@ -513,13 +470,8 @@ const peerRoutes: Route[] = [
     const hours = body.hours === null ? null : Number(body.hours);
     if (hours !== null && !(hours > 0 && hours <= 24 * 366)) throw new HttpError(400, 'A link lasts some hours (up to a year), or has no expiry (null)');
     const peers = await host.peersForInvites();
-    const link = await peers.subscriptionLink(hours);
+    const link = await peers.inviteLink({ hours, once: body.once === true });
     send(res, 201, { link, ...(await peers.links()).at(-1)! });
-  }),
-
-  route('POST', '/api/peers/invitations', async ({ host, res }) => {
-    const peers = await host.peersForInvites();
-    send(res, 201, { invitation: await peers.invitation(24) });
   }),
 
   route('DELETE', /^\/api\/peers\/links\/([0-9a-f]{16})$/, async ({ host, res, params }) => {
@@ -528,33 +480,29 @@ const peerRoutes: Route[] = [
     send(res, 200, { ok: true });
   }),
 
-  // Another device's version of a file this device's rules keep its own of (a declined file): take it.
-  route('POST', '/api/peers/take', async ({ host, req, res }) => {
-    if (!host.peers) throw new HttpError(404, 'This host does not sync with other devices');
-    const body = await readBody(req);
-    const device = str(body.device, 'device');
-    const branch = str(body.branch, 'branch');
-    const path = str(body.path, 'path');
-    host.resolvePath(path);
-    const status = await host.peers.status();
-    if (!status.declined.some((d) => d.device === device && d.branch === branch && d.path === path)) throw new HttpError(404, `${device}'s version of ${path} is not one this device keeps its own of`);
-    await host.peers.takeVersion(device, branch, path);
+  // Removing a device: permanent, passed on to every device; it keeps its copy.
+  route('DELETE', /^\/api\/peers\/devices\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+    const peers = await host.peersForInvites();
+    try {
+      await peers.removeDevice(params[0]!);
+    } catch (e) {
+      throw new HttpError(404, (e as Error).message);
+    }
     send(res, 200, { ok: true });
   }),
 
-  route('POST', '/api/peers/accept', async ({ host, req, res }) => {
-    if (!host.peers) throw new HttpError(404, 'This host does not sync with other devices');
-    const body = await readBody(req);
-    const device = str(body.device, 'device');
-    const branch = str(body.branch, 'branch');
-    const status = await host.peers.status();
-    if (!status.proposals.some((p) => p.device === device && p.branch === branch)) throw new HttpError(404, `Nothing from ${device} on ${branch} waits to be accepted`);
-    await host.peers.accept(device, branch);
-    send(res, 200, { ok: true });
+  route('POST', '/api/peers/name', async ({ host, req, res }) => {
+    const peers = await host.peersForInvites();
+    try {
+      await peers.rename(str((await readBody(req)).name, 'name'));
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    send(res, 200, { name: peers.node.name });
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

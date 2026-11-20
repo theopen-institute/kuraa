@@ -38,7 +38,7 @@ test('the Preview panel renders the document as it is now, and saves Word', asyn
   await page.getByTestId('menu-button').click();
   await page.getByTestId('menu-preview').click();
   const panel = page.getByTestId('preview-panel');
-  await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 540_000 });
+  await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 240_000 });
   const frame = page.getByTestId('render-frame');
   await expect(frame).toHaveAttribute('sandbox', '');
   const body = page.frameLocator('[data-testid="render-frame"]').locator('body');

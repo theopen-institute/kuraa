@@ -106,6 +106,8 @@ watch(() => props.path, () => {
   toSave.clear();
   void refresh(true);
 }, { immediate: true });
+// Opened by asking for a render (the menu, ⇧⌘R): render now.
+if (props.trigger) void render('html');
 watch(() => props.trigger, () => void render('html'));
 watch(() => props.writtenAt, (at, before) => {
   if (onSave.value && at && at !== before && !busy.value) void render('html');

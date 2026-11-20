@@ -50,7 +50,7 @@ const tip = (f: TreeFile) => {
   <li
     v-for="f in folder.files"
     :key="f.path"
-    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path }]"
+    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path, 'has-conflicts': !!f.conflicts }]"
     draggable="true"
     @dragstart="t.dragStart($event, f.path)"
     @dragend="t.dragEnd()"

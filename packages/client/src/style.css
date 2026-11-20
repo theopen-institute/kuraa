@@ -569,3 +569,5 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .outline-entry.current { color: var(--accent); font-weight: 600; }
 .outline-empty { margin: 4px 6px; color: var(--muted); }
 .tree-conflict { cursor: pointer; text-decoration: underline dotted; }
+/* The count is what to click on a file with conflicts; Rename and Delete stay in its right-click menu. */
+.tree-file.has-conflicts:hover > .tree-actions { display: none; }

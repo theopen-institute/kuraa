@@ -61,13 +61,18 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+/** Its buttons leave the cursor in the field being typed in, so Enter goes on finding. */
+function keepFocus(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('button')) e.preventDefault();
+}
+
 function all() {
   replaceAll(props.view, replacement.value);
 }
 </script>
 
 <template>
-  <div class="find-bar" role="search" data-testid="find-bar" @keydown="onKey">
+  <div class="find-bar" role="search" data-testid="find-bar" @keydown="onKey" @mousedown="keepFocus">
     <div class="find-row">
       <input
         ref="input"

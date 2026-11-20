@@ -49,8 +49,7 @@ test('find and replace in the document, seen by everyone', async ({ browser }) =
 
   await ada.getByTestId('find-toggle-replace').click();
   await ada.getByTestId('replace-input').fill('sea');
-  await ada.getByTestId('replace-one').click(); // goes to the match
-  await ada.getByTestId('replace-one').click(); // replaces it
+  await ada.getByTestId('replace-one').click(); // the match the cursor is on
   await expect(ada.getByTestId('find-count')).toHaveText(/of 3$/);
   await ada.getByTestId('replace-all').click();
   await expect(ada.getByTestId('find-count')).toHaveText('None');
@@ -62,7 +61,7 @@ test('find and replace in the document, seen by everyone', async ({ browser }) =
 
   const file = join(E2E.dir, path);
   await expect.poll(() => readFileSync(file, 'utf8'), { timeout: 10_000 }).toContain('No sea today.');
-  expect(readFileSync(file, 'utf8')).toContain('# sea\n');
+  expect(readFileSync(file, 'utf8')).toContain('# seas\n');
 });
 
 test('the outline lists the headings, follows the document and goes to them', async ({ page }) => {

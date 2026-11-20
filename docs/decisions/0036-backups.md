@@ -1,5 +1,7 @@
 # 0036 · Backups: git servers pushed to, and nothing more
 
+*Superseded by [0039](0039-online-copy.md): a backup and the sync remote are one online copy, pushed to after each save and fetched from and merged on Sync, never forced.*
+
 A workspace can be backed up to plain git servers (GitHub, GitLab, any git host, or a folder), set
 up by the person using it. A backup only receives:
 

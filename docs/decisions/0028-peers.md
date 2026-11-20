@@ -1,5 +1,7 @@
 # 0028 · Devices of one workspace sync with each other, without a server
 
+*Since [0038](0038-equal-peers.md): one kind of invite link (for one person or anyone) replaces invitations and subscription links, every member's work and changes to the members are taken, and a shared room is committed by the lowest key in it. The sync remote is now the online copy ([0039](0039-online-copy.md)).*
+
 A workspace can live on several devices at once, each running its own host. Hosts connect
 directly to each other: git carries what was done apart, and when people on two devices have the
 same document open, their rooms join so they edit it together live. Browsers and the app still

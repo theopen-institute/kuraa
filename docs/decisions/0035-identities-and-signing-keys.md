@@ -1,5 +1,7 @@
 # 0035 · Identities vouch for signing keys, one per person per computer
 
+*Superseded in part by [0038](0038-equal-peers.md): keys and identities stay, for attribution only (who wrote what); no rule names them. Your identity is made for you, and the keys are under Advanced.*
+
 Refines 0034 (signatures are people), the way git signing is usually set up: a key on each
 computer, tied to one person (as an account lists your SSH keys, or a GPG primary key certifies
 subkeys). Copying one secret to every computer is the shortcut this replaces.

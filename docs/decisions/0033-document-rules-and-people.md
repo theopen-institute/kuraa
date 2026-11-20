@@ -1,5 +1,7 @@
 # 0033 · Rules for documents, published, and people
 
+*Superseded by [0038](0038-equal-peers.md): there are no rules for folders or files, no published rules, and documents never open read-only. People (now 0035) remain, for attribution only.*
+
 Builds on 0032 (each device decides whose work it accepts). Still not security: the files on a
 device are its owner's, who may edit them directly or fork. The rules say whose changes a device is
 interested in, and now the app can say so before anyone edits.

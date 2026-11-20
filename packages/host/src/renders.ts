@@ -11,7 +11,7 @@
 // One render runs at a time per document; asking again for one under way
 // joins it.
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, posix, resolve } from 'node:path';
 import type { RenderFormat } from '@kuraa/run-kit';
@@ -159,8 +159,9 @@ export class Renders {
     // The document as it is now: what is being typed reaches the file first.
     await this.o.flush(path);
     const scratch = join(this.o.stateDir, 'run', 'render', createHash('sha1').update(path).digest('hex').slice(0, 12));
-    await rm(scratch, { recursive: true, force: true });
+    // Emptied, not made again: Podman on a Mac can take a folder removed and made again for one missing.
     await mkdir(scratch, { recursive: true });
+    await emptyDir(scratch);
     try {
       const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, (m) => (state.progress = m));
       const result = await found.renderer.render(ctx, { input: resolve(this.o.root, path), format });
@@ -184,7 +185,7 @@ export class Renders {
     } finally {
       state.progress = null;
       state.finishedAt = new Date().toISOString();
-      await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+      await emptyDir(scratch).catch(() => undefined);
     }
   }
 
@@ -225,4 +226,10 @@ export async function readOutput(scratch: string, relative: string): Promise<Buf
   } catch {
     return null;
   }
+}
+
+/** Remove what is in a folder, keeping the folder. */
+async function emptyDir(dir: string): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[]);
+  await Promise.all(names.map((n) => rm(join(dir, n), { recursive: true, force: true })));
 }

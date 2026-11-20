@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
-import { Git, NON_INTERACTIVE } from './git.js';
+import { Git } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
 import { commitSigned, signCommitObject } from './signing.js';

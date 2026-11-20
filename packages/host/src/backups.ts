@@ -16,7 +16,7 @@
 // credential helper), never asking for any and never waiting forever; only the
 // merge runs in the queue (`bringIn`).
 import { devNull } from 'node:os';
-import type { Git } from './git.js';
+import { NON_INTERACTIVE, type Git } from './git.js';
 
 export interface OnlineCopyStatus {
   /** The git remote it is. */
@@ -54,6 +54,8 @@ export interface OnlineOptions {
   /** Fetch, merge and push this often (0: never on its own). */
   everyMs: number;
   log: (m: string) => void;
+  /** Run in turn with the host's commits and merges: reading which commits the branches are at, so none is half made. */
+  serial: <T>(fn: () => Promise<T>) => Promise<T>;
   /**
    * Bring the copy's branches (fetched into refs/remotes/<name>/) into this
    * repository's, merging as every device does, in turn with the host's other
@@ -190,7 +192,11 @@ export class OnlineCopies {
           if (f.code !== 0) return fail(gitSays(f));
           said = (await this.o.bringIn?.(name)) ?? '';
         }
-        const p = await this.network(['push', '--porcelain', name, 'refs/heads/*:refs/heads/*']);
+        // Which commits the branches are at, read in turn with commits and merges; the push itself holds up no saving.
+        const refs = await this.o.serial(() => this.git.out(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/']));
+        const specs = refs.split('\n').filter(Boolean).map((l) => l.replace(' ', ':'));
+        if (!specs.length) return null;
+        const p = await this.network(['push', '--porcelain', name, ...specs]);
         const rejected = p.stdout.split('\n').filter((l) => l.startsWith('!'));
         if (p.code === 0 && !rejected.length) {
           s.lastSync = new Date().toISOString();
@@ -217,7 +223,7 @@ export class OnlineCopies {
     return this.git.run(['-c', `core.hooksPath=${devNull}`, ...args], {
       allowFail: true,
       timeoutMs: NETWORK_MS,
-      env: { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes' },
+      env: NON_INTERACTIVE,
     });
   }
 

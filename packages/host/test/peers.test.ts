@@ -269,7 +269,9 @@ describe('equal members, and forks', () => {
     await until(async () => (await b2.host.peers!.status()).devices.some((d) => d.online && d.related), 15_000, 'the fork meets its origin');
     await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'origin-only.md', content: '# Origin\n' }) });
     // Fetched into the fork's remote branch, but not merged.
-    await until(() => { try { return git(dirB, 'branch', '-r', '--contains', head(dirA)).trim() !== ''; } catch { return false; } }, 15_000, 'the fork fetches the origin');
+    // Until it is fetched, git says it has no such commit: a probe, so its complaint is not shown.
+    const fetched = () => execFileSync('git', ['branch', '-r', '--contains', head(dirA)], { cwd: dirB, encoding: 'utf8', stdio: 'pipe' }).trim() !== '';
+    await until(() => { try { return fetched(); } catch { return false; } }, 15_000, 'the fork fetches the origin');
     expect(() => readFileSync(join(dirB, 'origin-only.md'))).toThrow();
     expect(head(dirB)).not.toBe(head(dirA));
   });

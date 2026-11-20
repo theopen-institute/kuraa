@@ -172,7 +172,7 @@ export async function peerCommand(argv: string[]): Promise<void> {
       const { git } = await identityAt(values.dir!);
       const { OnlineCopies } = await import('../backups.js');
       // Merging needs the host's document types: a running host brings the copy's work in, at its next sync.
-      const online = new OnlineCopies(git, { delayMs: 0, everyMs: 0, log: () => undefined });
+      const online = new OnlineCopies(git, { delayMs: 0, everyMs: 0, log: () => undefined, serial: (fn) => fn() });
       if (arg === 'add') {
         const name = await online.add(more.join(' '));
         const said = await online.sync(name, false);

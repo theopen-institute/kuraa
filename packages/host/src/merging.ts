@@ -9,6 +9,7 @@
 // parents in a fixed order, a fixed author, the later of their dates, and a
 // message made from them. So two devices merging the same commits make the same
 // commit, and nothing more needs merging.
+import { isUtf8 } from 'node:buffer';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -22,7 +23,7 @@ export const MERGE_AUTHOR = { name: 'Kuraa', email: 'merge@kuraa.invalid' };
  * here, in git's part of it, or in the kernel's line and word merges. (A
  * type's own merge is covered by its version.)
  */
-export const MERGE_VERSION = 1;
+export const MERGE_VERSION = 2;
 
 /**
  * How this device merges, as a short text devices compare: the merge version,
@@ -78,7 +79,8 @@ function parseMergeTree(out: string): { tree: string; files: Map<string, Map<num
   return { tree, files };
 }
 
-const isBinary = (b: Buffer) => b.subarray(0, 8000).includes(0);
+/** Not text the host can merge: a NUL early on, or not UTF-8 (a Latin-1 .bib would be corrupted as text). */
+const isBinary = (b: Buffer) => b.subarray(0, 8000).includes(0) || !isUtf8(b);
 
 /** A name beside `path` for the other version: notes.conflict-9a41d7b.pdf. */
 function besideName(path: string, commit: string): string {
@@ -152,7 +154,8 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
     const env = { GIT_INDEX_FILE: index };
     try {
       await git.run(['read-tree', tree], { env });
-      await git.run(['update-index', '--index-info'], { env, input: `${entries.join('\n')}\n` });
+      // NUL-separated: a path may hold a newline.
+      await git.run(['update-index', '-z', '--index-info'], { env, input: `${entries.join('\0')}\0` });
       finalTree = await git.out(['write-tree'], { env });
     } finally {
       await rm(index, { force: true });

@@ -34,7 +34,7 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, personKeys, startHub, useGit, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, personKeys, startHub, useGit, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 import { preferencesFrom, readPreferences, writePreferences, type Preferences, type PreferencesView } from './preferences.js';
@@ -444,6 +444,10 @@ app.whenReady().then(async () => {
     await showLauncher();
   }
 });
+
+// An error nothing caught: said, every workspace's edits saved that can be, and the app goes on (no
+// dialog, no quitting over one workspace's error); errors coming too fast quit, saving first.
+lastResort({ log: (m) => console.error(`[kuraa] ${m}`), save: async () => hub?.hub.saveAll(), stop: () => app.quit() });
 
 // Flush and commit before quitting.
 app.on('before-quit', (event) => {

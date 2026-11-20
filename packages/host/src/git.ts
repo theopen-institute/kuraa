@@ -54,6 +54,26 @@ export function spawnGit(args: string[], opts: { cwd?: string; env?: NodeJS.Proc
   return spawn(program.command, [...AS_STORED, ...args], { detached: OWN_GROUP, ...opts });
 }
 
+/**
+ * For git talking to other computers (fetch, push): never wait for anyone to type
+ * a password or accept a host key; with no credentials, fail and say so.
+ */
+export const NON_INTERACTIVE: Record<string, string> = {
+  GIT_TERMINAL_PROMPT: '0',
+  GCM_INTERACTIVE: 'never',
+  GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes',
+};
+
+/** Stop a git process and what it started (it has its own process group, where it can). */
+function killGroup(child: ChildProcessWithoutNullStreams): void {
+  try {
+    if (OWN_GROUP && child.pid) process.kill(-child.pid, 'SIGTERM');
+    else child.kill('SIGTERM');
+  } catch {
+    child.kill('SIGTERM');
+  }
+}
+
 export class Git {
   constructor(readonly dir: string, private env: Record<string, string> = {}) {}
 
@@ -69,7 +89,8 @@ export class Git {
       child.stdout.on('data', (d: Buffer) => out.push(d));
       child.stderr.on('data', (d: Buffer) => err.push(d));
       child.on('error', reject);
-      const timer = opts.timeoutMs ? setTimeout(() => child.kill('SIGTERM'), opts.timeoutMs) : undefined;
+      // Past its time, the whole group goes (git, and the ssh or helper it started).
+      const timer = opts.timeoutMs ? setTimeout(() => killGroup(child), opts.timeoutMs) : undefined;
       child.on('close', (exit, signal) => {
         clearTimeout(timer);
         const bytes = Buffer.concat(out);

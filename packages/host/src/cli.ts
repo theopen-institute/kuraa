@@ -25,7 +25,7 @@
 //                 synced with this computer's credentials); kuraa-host online … from the command line
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
-import { startHub } from './index.js';
+import { lastResort, startHub } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
@@ -154,3 +154,5 @@ const stop = (signal: string) => {
 };
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
+// An error nothing caught: said, everything saved that can be, and the server goes on (lastresort.ts).
+lastResort({ log: (m) => console.error(`[kuraa] ${m}`), save: () => hub.hub.saveAll(), stop: () => stop('too many errors') });

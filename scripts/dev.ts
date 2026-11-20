@@ -123,6 +123,9 @@ const stop = (forward: boolean) => {
 };
 process.on('SIGINT', () => stop(false));
 process.on('SIGTERM', () => stop(true));
+// The host saves its own edits on an unexpected error (cli.ts); here, one is said, and the processes go on.
+process.on('unhandledRejection', (e) => console.error(`[dev] unexpected error: ${String(e)}`));
+process.on('uncaughtException', (e) => console.error(`[dev] unexpected error: ${e.stack ?? e.message}`));
 for (const child of [host, web]) {
   child.on('exit', (code) => {
     if (!stopping) {

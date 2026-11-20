@@ -32,6 +32,8 @@ export interface TreeFile {
   title?: string | null;
   /** Conflicts a merge kept in it, to choose between: absent if none. */
   conflicts?: number;
+  /** Why the app does not open it (a link, a file not in UTF-8): its type is then null. */
+  cannotOpen?: string;
 }
 /** The workspace's devices, as the host reports them: every member has the same say. */
 export type PeersInfo =

@@ -15,6 +15,7 @@ const indent = computed(() => ({ paddingLeft: `${8 + props.depth * 14}px` }));
 /** A document still without a title shows its filename, dimmed. */
 const untitled = (f: TreeFile) => f.title === null;
 const tip = (f: TreeFile) => {
+  if (f.cannotOpen) return `${f.path}: ${f.cannotOpen}`;
   if (!f.type) return `${f.path}: no document type opens this file`;
   if (untitled(f)) return `${f.path}: no title yet (Rename… or Header… gives it one)`;
   return f.title ? `${f.title}\n${f.path}` : f.path;

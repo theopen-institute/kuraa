@@ -131,7 +131,7 @@ export interface Route {
 const route = (method: Route['method'], path: Route['path'], handle: Route['handle']): Route => ({ method, path, handle });
 
 function requireRunning(host: Host, hint = ''): void {
-  if (!host.runner.enabled) throw new HttpError(403, `Running code is turned off on this host.${hint}`);
+  if (!host.runner.enabled) throw new HttpError(403, `Running code is turned off on this server.${hint}`);
 }
 
 const workspaceRoutes: Route[] = [
@@ -193,11 +193,11 @@ const runRoutes: Route[] = [
   }),
 
   route('POST', '/api/runs', async ({ host, req, res }) => {
-    requireRunning(host, ' Start it with --engine to turn it on.');
+    requireRunning(host, ' Whoever runs the server can turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     const engine = host.runner.engineFor(String(body.engine ?? ''));
-    if (!engine) throw new HttpError(400, `Nothing on this host runs ${String(body.engine)} chunks.`);
+    if (!engine) throw new HttpError(400, `Nothing on this server runs ${String(body.engine)} chunks.`);
     const { environment } = await host.runner.describe();
     if (!environment?.available) throw new HttpError(503, environment?.message ?? 'No environment to run code in.');
     const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
@@ -213,7 +213,7 @@ const runRoutes: Route[] = [
   }),
 
   ...(['interrupt', 'restart', 'clear'] as const).map((op) => route('POST', `/api/runs/${op}`, async ({ host, req, res }) => {
-    requireRunning(host, ' Start it with --engine to turn it on.');
+    requireRunning(host, ' Whoever runs the server can turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     if (op === 'interrupt') host.runner.interrupt(path);
@@ -429,7 +429,7 @@ const personRoutes: Route[] = [
 // Online copies (backups.ts): git servers this workspace keeps a copy on, and syncs with. Everyone
 // sees them (Sync syncs with them); adding and removing them is for the one running the host (manageOnline).
 const mayManageOnline = (host: Host) => {
-  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy here is set up by whoever runs this host');
+  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy here is set up by whoever runs this server');
 };
 const onlineRoutes: Route[] = [
   route('GET', '/api/online', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageOnline, copies: await host.online.list() })),
@@ -461,7 +461,7 @@ const peerRoutes: Route[] = [
   }),
 
   route('GET', '/api/peers/links', async ({ host, res }) => {
-    if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this host');
+    if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this server');
     send(res, 200, { links: host.peers ? await host.peers.links() : [] });
   }),
 

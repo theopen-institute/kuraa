@@ -1149,7 +1149,7 @@ export class Host {
   /** The workspace's devices, syncing, for making an invitation from the app; refused unless the operator allows it. */
   async peersForInvites(): Promise<Peers> {
     const allowed = this.options.invites;
-    if (!allowed) throw new HttpError(403, 'Making invitations from the app is turned off on this host (start it with --allow-invites)');
+    if (!allowed) throw new HttpError(403, 'Making invitations from the app is turned off on this server; whoever runs it can turn it on');
     if (this.peers) return this.peers;
     const peers = await this.startPeers(allowed.peers ?? {});
     this.log('syncing with other devices is now on, for an invitation');

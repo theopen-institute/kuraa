@@ -38,6 +38,7 @@ import { gitIdentity, inspectFolder, lastResort, personKeys, startHub, useGit, t
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 import { preferencesFrom, readPreferences, writePreferences, type Preferences, type PreferencesView } from './preferences.js';
+import { D } from './strings.js';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
@@ -188,16 +189,17 @@ async function showWorkspaces(workspace?: string, folder = app.getPath('home')):
 
 /** Add a local folder to the workspaces, and open it. Returns false if the user declined. */
 async function openFolder(path: string): Promise<boolean> {
-  if (!existsSync(path)) throw new Error(`No such folder: ${path}`);
+  if (!existsSync(path)) throw new Error(D.folder.missing(path));
   const folder = await inspectFolder(path);
   if (!folder.repoRoot) {
+    // Not yet a git repository: say what using it means, in plain words (git is named once, in passing).
     const { response } = await dialog.showMessageBox(window!, {
       type: 'question',
-      buttons: ['Initialise', 'Cancel'],
+      buttons: [D.folder.use, D.folder.cancel],
       defaultId: 0,
       cancelId: 1,
-      message: `${basename(folder.dir)} is not a git repository.`,
-      detail: `Initialise one here${folder.entries ? ` and commit the ${folder.entries} item(s) already in the folder` : ''}? The folder stays usable by git and other tools.`,
+      message: D.folder.useAsk(basename(folder.dir)),
+      detail: D.folder.useDetail(folder.entries),
     });
     if (response !== 0) return false;
   }
@@ -221,12 +223,12 @@ async function leave(): Promise<void> {
 }
 
 async function pickFolder(): Promise<void> {
-  const r = await dialog.showOpenDialog(window!, { properties: ['openDirectory', 'createDirectory'], message: 'Choose a workspace folder' });
+  const r = await dialog.showOpenDialog(window!, { properties: ['openDirectory', 'createDirectory'], message: D.folder.choose });
   if (r.canceled || !r.filePaths[0]) return;
   try {
     await openFolder(r.filePaths[0]);
   } catch (e) {
-    dialog.showErrorBox('Could not open the folder', (e as Error).message);
+    dialog.showErrorBox(D.folder.couldNotOpen, (e as Error).message);
   }
 }
 
@@ -302,15 +304,22 @@ async function savePreferences(v: unknown): Promise<void> {
   try {
     await showWorkspaces();
   } catch (e) {
-    dialog.showErrorBox('Could not open your workspaces', (e as Error).message);
+    dialog.showErrorBox(D.errors.workspaces, (e as Error).message);
     await showLauncher();
   }
 }
 
+/** Ask the page to show its Markdown and shortcuts sheet (the client, if it is loaded). */
+function showHelp(): void {
+  if (config && window) window.webContents.send('kuraa:help');
+}
+
 function buildMenu(): void {
   const isMac = process.platform === 'darwin';
-  // Not "Settings", which in the client are the person's own (name, email, colour).
-  const preferencesItem = { label: 'Preferences…', accelerator: 'CmdOrCtrl+,', click: () => showPreferences() };
+  // Not "Settings", which in the client are the person's own (name, email, colour). ⌘, is the
+  // page's own (its menu, which holds your settings), so Preferences takes ⌥⌘, (decision 0044);
+  // the in-app menu also opens it (App preferences…).
+  const preferencesItem = { label: D.menu.preferences, accelerator: 'CmdOrCtrl+Alt+,', click: () => showPreferences() };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(isMac ? [{
       label: app.name,
@@ -323,9 +332,9 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'Your Workspaces', click: () => void showWorkspaces() },
-        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => void pickFolder() },
-        { label: 'Join Shared Host…', click: () => void leave() },
+        { label: D.menu.yourWorkspaces, click: () => void showWorkspaces() },
+        { label: D.menu.openFolder, accelerator: 'CmdOrCtrl+O', click: () => void pickFolder() },
+        { label: D.menu.join, click: () => void leave() },
         ...(isMac ? [] : [{ type: 'separator' as const }, preferencesItem]),
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
@@ -343,6 +352,8 @@ function buildMenu(): void {
       ],
     },
     { role: 'windowMenu' },
+    // ⌘/ is the page's own key for the sheet: shown here, not taken from the page.
+    { role: 'help', label: D.menu.help, submenu: [{ label: D.menu.shortcuts, accelerator: 'CmdOrCtrl+/', registerAccelerator: false, click: () => showHelp() }] },
   ]));
 }
 
@@ -356,10 +367,13 @@ ipcMain.handle('kuraa:open-folder', (e) => (fromOwnPage(e) ? pickFolder() : unde
 ipcMain.handle('kuraa:leave', (e) => (fromOwnPage(e) ? leave() : undefined));
 ipcMain.handle('kuraa:home', (e) => (fromOwnPage(e) ? showWorkspaces() : undefined));
 ipcMain.handle('kuraa:preferences', (e) => (fromOwnPage(e) ? preferencesView() : null));
+ipcMain.handle('kuraa:show-preferences', (e) => {
+  if (fromOwnPage(e)) showPreferences();
+});
 ipcMain.handle('kuraa:save-preferences', (e, v: unknown) => (fromOwnPage(e) ? savePreferences(v) : undefined));
 ipcMain.handle('kuraa:choose-folder', async (e) => {
   if (!fromOwnPage(e) || !preferencesWindow) return null;
-  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openDirectory', 'createDirectory'], message: 'Where new workspaces go' });
+  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openDirectory', 'createDirectory'], message: D.folder.whereNew });
   return r.canceled ? null : (r.filePaths[0] ?? null);
 });
 // This computer's person's key, for the menu's You section (packages/client/src/PersonKey.vue).
@@ -377,15 +391,15 @@ ipcMain.handle('kuraa:person', async (e) => {
   return keys.personInfo(known);
 });
 ipcMain.handle('kuraa:revoke-key', async (e, key: unknown) => {
-  if (!fromOwnPage(e)) return 'Not allowed.';
+  if (!fromOwnPage(e)) return D.errors.notAllowed;
   return personDo(async () => (await personKeys()).revokeKey(String(key ?? '')));
 });
 ipcMain.handle('kuraa:create-person', async (e, name: unknown) => {
-  if (!fromOwnPage(e)) return 'Not allowed.';
+  if (!fromOwnPage(e)) return D.errors.notAllowed;
   return personDo(async () => (await personKeys()).createPerson(String(name ?? '')));
 });
 ipcMain.handle('kuraa:import-person', async (e, line: unknown) => {
-  if (!fromOwnPage(e)) return 'Not allowed.';
+  if (!fromOwnPage(e)) return D.errors.notAllowed;
   return personDo(async () => (await personKeys()).importPerson(String(line ?? '')));
 });
 ipcMain.handle('kuraa:copy-person', async (e) => {
@@ -397,12 +411,12 @@ ipcMain.handle('kuraa:copy-person', async (e) => {
   return true;
 });
 ipcMain.handle('kuraa:join', async (e, url: string, token: string) => {
-  if (!fromOwnPage(e)) return 'Not allowed.';
+  if (!fromOwnPage(e)) return D.errors.notAllowed;
   try {
     const res = await fetch(`${url.replace(/\/$/, '')}/api/workspace`, { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) return res.status === 401 ? 'The host rejected the token.' : `The host answered ${res.status}.`;
+    if (!res.ok) return res.status === 401 ? D.join.rejected : D.join.answered(res.status);
   } catch (e) {
-    return `Cannot reach ${url}: ${(e as Error).message}`;
+    return D.join.unreachable(url, (e as Error).message);
   }
   await joinHost(url, token);
   return null;
@@ -467,13 +481,13 @@ function showContextMenu(contents: WebContents, params: ContextMenuParams): void
     for (const suggestion of params.dictionarySuggestions.slice(0, 6)) {
       items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) });
     }
-    if (!params.dictionarySuggestions.length) items.push({ label: 'No suggestions', enabled: false });
-    items.push({ label: 'Add to Dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(word) });
+    if (!params.dictionarySuggestions.length) items.push({ label: D.noSuggestions, enabled: false });
+    items.push({ label: D.addToDictionary, click: () => contents.session.addWordToSpellCheckerDictionary(word) });
     items.push({ type: 'separator' });
   }
   const selected = params.selectionText.trim();
   if (process.platform === 'darwin' && selected) {
-    items.push({ label: `Look Up “${selected.length > 24 ? `${selected.slice(0, 24)}…` : selected}”`, click: () => contents.showDefinitionForSelection() });
+    items.push({ label: D.lookUp(selected.length > 24 ? `${selected.slice(0, 24)}…` : selected), click: () => contents.showDefinitionForSelection() });
     items.push({ type: 'separator' });
   }
   const { editFlags } = params;

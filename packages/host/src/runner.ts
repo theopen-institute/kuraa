@@ -369,7 +369,7 @@ export class Runner {
   }
 
   async installPackages(engineId: string, refs: string[], by: PresenceUser | null): Promise<PackageResult> {
-    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Installing packages is turned off on this host (start it with --allow-installs).', log: '', restart: false };
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Installing packages is turned off on this server; whoever runs it can turn it on.', log: '', restart: false };
     const engine = this.packagesOf(engineId);
     const result = await this.queueInstall(async () => engine.packages.install(await this.packageContext(engine, by), refs));
     this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });
@@ -377,7 +377,7 @@ export class Runner {
   }
 
   async removePackages(engineId: string, names: string[], by: PresenceUser | null): Promise<PackageResult> {
-    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Changing packages is turned off on this host (start it with --allow-installs).', log: '', restart: false };
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Changing packages is turned off on this server; whoever runs it can turn it on.', log: '', restart: false };
     const engine = this.packagesOf(engineId);
     const result = await this.queueInstall(async () => engine.packages.remove(await this.packageContext(engine, by), names));
     this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });

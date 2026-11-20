@@ -205,7 +205,7 @@ export class OnlineCopies {
         }
         // Moved since this device last fetched: fetch, merge and push again.
         if (!rejected.length || !rejected.every((l) => /\[rejected\]|non-fast-forward|fetch first/.test(l))) return fail(gitSays(p));
-        if (!this.o.bringIn) return fail('It has work this device does not have yet: the host brings it in when it next syncs.');
+        if (!this.o.bringIn) return fail('It has work this device does not have yet: it is brought in at the next sync.');
       }
       return fail('It kept changing while this device synced with it; this device tries again after its next save.');
     } catch (e) {

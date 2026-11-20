@@ -1,5 +1,5 @@
-// The parts of the app around the editor: first-run settings, settings from the
-// menu, saving a named version, and reading a past version as rendered or source.
+// The parts of the app around the editor: the first run's welcome, settings from
+// the menu, saving a named version, and reading a past version as rendered or source.
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { E2E, NOTES } from './env.js';
@@ -23,16 +23,18 @@ async function openFile(page: Page, path: string): Promise<void> {
   await expect(page.getByTestId('status')).toContainText('Connected');
 }
 
-test('the first run asks for settings; the menu changes them', async ({ page }) => {
+test('the first run welcomes you and asks your name; the menu changes it', async ({ page }) => {
   const path = await createNotes();
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await expect(page.getByLabel('Display name')).toBeFocused();
-  await expect(page.getByLabel('Host URL')).toHaveValue(E2E.url);
+  await expect(page.getByRole('dialog', { name: 'Welcome to kuraa' })).toBeVisible();
+  await expect(page.getByText('What should we call you?')).toBeVisible();
+  await expect(page.getByLabel('Your name')).toBeFocused();
+  // No link brought the server's address and access code, so they are asked for too.
+  await expect(page.getByLabel('Server address')).toHaveValue(E2E.url);
   await expect(page.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
-  await page.getByLabel('Display name').fill('First Run');
-  await page.getByLabel('Access token').fill(E2E.token);
-  await page.getByRole('button', { name: 'Save settings' }).click();
+  await page.getByLabel('Your name').fill('First Run');
+  await page.getByLabel('Access code').fill(E2E.token);
+  await page.getByRole('button', { name: 'Start writing' }).click();
   await expect(page.getByTestId('workspace-name')).toHaveText('kuraa-e2e-workspace');
 
   await openFile(page, path);
@@ -40,14 +42,14 @@ test('the first run asks for settings; the menu changes them', async ({ page }) 
 
   // A new name, from the menu, reaches the others at once (and is kept).
   await page.getByTestId('menu-button').click();
-  // The host and its token are behind Host and token…, not beside the name.
-  await expect(page.getByTestId('menu').getByLabel('Host URL')).toHaveCount(0);
+  // The server and its access code are behind Server and access code…, not beside the name.
+  await expect(page.getByTestId('menu').getByLabel('Server address')).toHaveCount(0);
   await page.getByTestId('menu-access').click();
-  await expect(page.getByTestId('menu-connection').getByLabel('Host URL')).toHaveValue(E2E.url);
-  await expect(page.getByTestId('menu-connection').getByLabel('Access token')).toHaveValue(E2E.token);
+  await expect(page.getByTestId('menu-connection').getByLabel('Server address')).toHaveValue(E2E.url);
+  await expect(page.getByTestId('menu-connection').getByLabel('Access code')).toHaveValue(E2E.token);
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('menu').getByLabel('Display name')).toHaveValue('First Run');
-  await page.getByTestId('menu').getByLabel('Display name').fill('Renamed');
+  await expect(page.getByTestId('menu').getByLabel('Your name')).toHaveValue('First Run');
+  await page.getByTestId('menu').getByLabel('Your name').fill('Renamed');
   await page.getByTestId('menu').getByRole('button', { name: 'Save settings' }).click();
   await expect(page.getByTestId('menu')).toHaveCount(0);
   await expect(page.getByTestId('peers')).toHaveText('Renamed (you)');

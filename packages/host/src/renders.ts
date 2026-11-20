@@ -83,8 +83,8 @@ export class Renders {
   /** Why a document cannot be rendered here, or null if it can. */
   private async unavailable(path: string): Promise<string | null> {
     const { runner } = this.o;
-    if (!runner.enabled) return 'Rendering is turned off on this host: documents are rendered where code runs, and running code is off (start the host with --engine r).';
-    if (!runner.rendererFor(path)) return 'Nothing on this host renders this kind of file.';
+    if (!runner.enabled) return 'Rendering is turned off on this server: documents are rendered where code runs, and running code is off here. Whoever runs the server can turn it on.';
+    if (!runner.rendererFor(path)) return 'Nothing on this server renders this kind of file.';
     const { environment } = await runner.describe();
     if (!environment?.available) return environment?.message ?? 'There is nowhere to render documents.';
     return null;

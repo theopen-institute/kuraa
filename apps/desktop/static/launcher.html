@@ -5,9 +5,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
   <title>kuraa</title>
   <style>
-    :root { --bg: #fbfaf8; --surface: #fff; --text: #1d1c1a; --muted: #6b675f; --border: #e2ded6; --accent: #2f6f5e; --warn: #9a3412; color-scheme: light; }
+    :root { --bg: #fbfaf8; --surface: #fff; --text: #1d1c1a; --muted: #635f58; --border: #e2ded6; --accent: #2f6f5e; --warn: #9a3412; color-scheme: light; }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #9b978e; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; color-scheme: dark; }
+      :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #a5a198; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; color-scheme: dark; }
     }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
@@ -33,16 +33,16 @@
     <div class="cards">
       <section>
         <h2>Your workspaces</h2>
-        <p>Folders on this computer, kept with git: new ones, folders you open, and workspaces others shared with you. The app writes plain files and commits them; other tools can use the folders at the same time.</p>
+        <p>Folders on this computer, with every version kept: new ones, folders you open, and workspaces others shared with you. The app saves plain files, so other programs can use the folders at the same time.</p>
         <button id="home" type="button">Your workspaces</button>
         <button id="open" type="button" class="secondary">Open folder…</button>
       </section>
       <form id="join">
         <section>
-          <h2>Join a shared host</h2>
-          <p>Edit live with others on a host someone has shared with you.</p>
-          <label>Host URL <input name="url" type="url" required placeholder="http://192.168.1.20:4321" /></label>
-          <label>Access token <input name="token" type="password" required autocomplete="off" /></label>
+          <h2>Join a shared server</h2>
+          <p>Edit live with others on a server someone has shared with you.</p>
+          <label>Server address <input name="url" type="url" required placeholder="http://192.168.1.20:4321" /></label>
+          <label>Access code <input name="token" type="password" required autocomplete="off" /></label>
           <button type="submit">Join</button>
           <div class="error" id="error" role="alert"></div>
         </section>

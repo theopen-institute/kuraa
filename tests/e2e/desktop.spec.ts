@@ -91,8 +91,8 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
 
     // The app manages this host: Settings has no host or token, and offers the shell's actions.
     await page.getByTestId('menu-button').click();
-    await expect(page.getByLabel('Display name')).toHaveValue('Desk Top');
-    await expect(page.getByLabel('Host URL')).toHaveCount(0);
+    await expect(page.getByLabel('Your name')).toHaveValue('Desk Top');
+    await expect(page.getByLabel('Server address')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open another folder…' })).toBeVisible();
     await page.keyboard.press('Escape');
 
@@ -143,7 +143,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     // M5 (c): a conflicting outside edit to the paragraph being typed in.
     await typeAtEnd(page, 'Mateus', ' Live words.');
     writeFileSync(join(dir, 'notes.md'), read(dir).replace(/Mateus recalibrated[^\n]*/, 'Mateus did not recalibrate anything.'));
-    await expect(page.getByTestId('notice')).toContainText('conflicting outside edit', { timeout: 10_000 });
+    await expect(page.getByTestId('notice')).toContainText('changed this file outside the app', { timeout: 10_000 });
     await expect(editorText(page)).toContainText('Live words.');
     await expect.poll(() => readdirSync(dir).some((f) => f.startsWith('notes.md.outside-'))).toBe(true);
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Live words.');
@@ -201,24 +201,24 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
 
     // Menu → Join a shared host: back to the launcher; the embedded host stops and commits.
     await page.getByTestId('menu-button').click();
-    await page.getByRole('button', { name: 'Join a shared host…' }).click();
+    await page.getByRole('button', { name: 'Join a shared server…' }).click();
     await expect(page.getByRole('button', { name: 'Open folder…' })).toBeVisible();
     expect(git(dir, 'status', '--porcelain')).toBe('');
     expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Opened from the launcher.');
 
-    await page.getByLabel('Host URL').fill(host.url);
-    await page.getByLabel('Access token').fill('wrong');
+    await page.getByLabel('Server address').fill(host.url);
+    await page.getByLabel('Access code').fill('wrong');
     await page.getByRole('button', { name: 'Join' }).click();
-    await expect(page.getByRole('alert')).toContainText('rejected the token');
-    await page.getByLabel('Access token').fill(host.token);
+    await expect(page.getByRole('alert')).toContainText('did not accept the access code');
+    await page.getByLabel('Access code').fill(host.token);
     await page.getByRole('button', { name: 'Join' }).click();
     await openNotes(page);
     await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
 
-    // Joined, not managed: Host and token… shows them.
+    // Joined, not managed: Server and access code… shows them.
     await page.getByTestId('menu-button').click();
     await page.getByTestId('menu-access').click();
-    await expect(page.getByLabel('Host URL')).toHaveValue(host.url);
+    await expect(page.getByLabel('Server address')).toHaveValue(host.url);
   } finally {
     await app.close();
     await host.close();

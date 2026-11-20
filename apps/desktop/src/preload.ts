@@ -19,6 +19,11 @@ const bridge: ShellBridge = {
   importPerson: (line) => ipcRenderer.invoke('kuraa:import-person', line) as Promise<string | null>,
   copyPerson: () => ipcRenderer.invoke('kuraa:copy-person') as Promise<boolean>,
   revokeKey: (key) => ipcRenderer.invoke('kuraa:revoke-key', key) as Promise<string | null>,
+  preferences: () => ipcRenderer.invoke('kuraa:show-preferences'),
+  // The Help menu's Markdown and Shortcuts: the page shows its sheet.
+  onHelp: (show) => {
+    ipcRenderer.on('kuraa:help', () => show());
+  },
 };
 contextBridge.exposeInMainWorld('kuraa', bridge);
 

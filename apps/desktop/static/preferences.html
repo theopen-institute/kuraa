@@ -5,9 +5,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
   <title>Preferences</title>
   <style>
-    :root { --bg: #fbfaf8; --surface: #fff; --text: #1d1c1a; --muted: #6b675f; --border: #e2ded6; --accent: #2f6f5e; --warn: #9a3412; --ok: #2f6f5e; color-scheme: light; }
+    :root { --bg: #fbfaf8; --surface: #fff; --text: #1d1c1a; --muted: #635f58; --border: #e2ded6; --accent: #2f6f5e; --warn: #9a3412; --ok: #2f6f5e; color-scheme: light; }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #9b978e; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; --ok: #7cc4ad; color-scheme: dark; }
+      :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #a5a198; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; --ok: #7cc4ad; color-scheme: dark; }
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 system-ui, -apple-system, sans-serif; }
@@ -60,7 +60,7 @@
       </div>
       <span class="hint flag" data-flag="workspaces" hidden>Set by --workspaces on the command line.</span>
     </fieldset>
-    <p class="note">Saving restarts your workspaces, which writes and commits any pending edits first.</p>
+    <p class="note">Saving restarts your workspaces, saving any edits first.</p>
     <div class="error" id="error" role="alert" data-testid="pref-error"></div>
     <div class="actions">
       <button type="button" id="cancel">Cancel</button>

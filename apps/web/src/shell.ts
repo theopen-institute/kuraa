@@ -28,6 +28,10 @@ export function resolveShell(): ResolvedShell {
         workspace: config?.workspace,
         openFolder: () => void bridge.openFolder(),
         leave: () => void bridge.leave(),
+        // Its own workspaces again, with the hub's current address and access code.
+        ...(config?.managesHost ? { reconnect: () => void bridge.home() } : {}),
+        ...(bridge.preferences ? { preferences: () => void bridge.preferences!() } : {}),
+        ...(bridge.onHelp ? { onHelp: (show: () => void) => bridge.onHelp!(show) } : {}),
         // The key of this computer, which runs the host: only on the app's own workspaces.
         ...(config?.managesHost && bridge.person && bridge.createPerson && bridge.importPerson && bridge.copyPerson && bridge.revokeKey ? {
           person: {

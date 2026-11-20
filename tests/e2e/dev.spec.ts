@@ -50,7 +50,7 @@ test('pnpm dev serves the client against a live host with nothing to configure',
 
     // The dev server supplies the host, so Settings has no host or token.
     await page.getByTestId('menu-button').click();
-    await expect(page.getByLabel('Host URL')).toHaveCount(0);
+    await expect(page.getByLabel('Server address')).toHaveCount(0);
   } finally {
     process.kill(-dev.pid!, 'SIGINT');
     await exited;

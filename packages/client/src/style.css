@@ -641,7 +641,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .prose .empty-placeholder::before {
   content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
 }
-.prose .empty-placeholder-widget { margin: 0; cursor: text; }
+.prose .empty-placeholder-widget { cursor: text; min-height: 1.45em; }
+.prose .empty-placeholder-widget::before { float: none; height: auto; }
 
 /* The Markdown and shortcuts sheet. */
 .modal.help-sheet { width: min(760px, 94vw); max-height: 88vh; overflow: auto; }

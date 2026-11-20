@@ -169,7 +169,7 @@ function allFolders(dir: Folder = tree.value): string[] {
 
 /** Move to…: the keyboard's way to move a file or folder, by naming the folder it goes in. */
 async function moveTo(from: string) {
-  const name = from.slice(from.lastIndexOf('/') + 1);
+  const name = props.files.find((f) => f.path === from)?.title || from.slice(from.lastIndexOf('/') + 1);
   const answer = await askText(S.tree.moveAsk(name), folderOf(from), S.tree.move);
   if (answer === null) return;
   const folder = answer.trim().replace(/^\/+|\/+$/g, '');

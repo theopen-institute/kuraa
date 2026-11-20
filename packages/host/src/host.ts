@@ -1,16 +1,17 @@
 // The host: relay, bridge, committer and git peer for one workspace.
+import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, openSync, readSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
+import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
-import { Git } from './git.js';
+import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
-import { commitSigned } from './signing.js';
+import { commitSigned, signCommitObject } from './signing.js';
 import { Backups } from './backups.js';
 import { serialQueue } from './serial.js';
 import { initWorkspace } from './workspace.js';
@@ -32,6 +33,8 @@ export interface HostTimings {
   dropMs: number;
   /** Push to backups this long after the last commit (backups.ts). */
   backupMs: number;
+  /** Look this often at where git is (a branch switched, an operation under way outside the app) while rooms are open. */
+  gitPollMs: number;
 }
 
 export interface HostOptions {
@@ -89,7 +92,13 @@ export interface HostOptions {
   log?: (msg: string) => void;
 }
 
-export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, backupMs: 30_000 };
+/** How long a sync may wait for its remote, fetching and pushing. */
+/** How many files the file list reads at once. */
+const TREE_READS = 16;
+const FETCH_MS = 5 * 60_000;
+const PUSH_MS = 10 * 60_000;
+
+export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, backupMs: 30_000, gitPollMs: 1000 };
 
 interface RoomRecord {
   key: string;
@@ -122,8 +131,33 @@ interface RoomRecord {
   lastCommitAt: string | null;
   lastCommit: string | null;
   needsOutsideCheck: boolean;
-  timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout };
+  /** Writes or commits that failed in a row; retried with a growing wait. */
+  failures: number;
+  timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout };
 }
+
+/**
+ * Where git is in the working tree: the branch checked out (null: none, an
+ * earlier version is), and a git operation under way outside the app, if any.
+ */
+export interface GitState {
+  branch: string | null;
+  operation: string | null;
+}
+
+/** Files git keeps while an operation is under way (in the repository's git folder). */
+const OPERATIONS = ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG'];
+
+/** Why saving is paused, for people, or null if it is not. */
+export function pausedBecause(st: GitState): string | null {
+  if (st.operation) return 'Saving is paused while git is in the middle of an operation in this folder, outside the app. Your edits are kept, and saved when it is done.';
+  if (!st.branch) return 'Saving is paused: this folder is showing an earlier version, not a branch. Your edits are kept, and saved when it is back on a branch.';
+  return null;
+}
+
+/** The host never follows a symbolic link (docs/decisions/0037-host-safety.md). */
+const linkRefused = (path: string) => `${path} is a link to somewhere else: the app does not open or follow links`;
+const notUtf8 = (path: string) => `${path} is not saved as UTF-8 text (perhaps Latin-1 or another older encoding): the app cannot edit it without changing its characters. Save it as UTF-8 elsewhere to edit it here.`;
 
 interface CacheEntry {
   key: string;
@@ -168,13 +202,22 @@ export class Host {
   private cacheDir = '';
   private watchTimers = new Map<string, NodeJS.Timeout>();
   /** What the file list shows of files not open in a room, by path, with the file's size and time when read. */
-  private readonly factsCache = new Map<string, { stamp: string; title: string | null; conflicts: number }>();
+  private readonly factsCache = new Map<string, { stamp: string; title: string | null; conflicts: number; cannotOpen: string | null }>();
   /** Told when a branch moves (a commit, a merge): the peer layer tells other devices. */
   private readonly refsListeners = new Set<() => void>();
   /** The workspace's other devices, when this host is one of them (see peers/). */
   peers: Peers | null = null;
   private closed = false;
   address: AddressInfo | null = null;
+  /** The workspace folder with any links in its own path resolved (/var is /private/var on macOS). */
+  private realDir = '';
+  private gitDirPath = '';
+  /** Where git was when last looked at. */
+  private gitState: GitState = { branch: null, operation: null };
+  /** The branch rooms are written to: the one checked out when saving last could. */
+  private onBranch: string | null = null;
+  private gitCheck: Promise<void> | null = null;
+  private gitPoll: NodeJS.Timeout | undefined;
 
   constructor(readonly options: HostOptions) {
     this.dir = resolve(options.dir);
@@ -218,7 +261,11 @@ export class Host {
       await initWorkspace(this.dir);
       this.log(`initialised a git repository in ${this.dir}`);
     }
-    this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
+    this.gitDirPath = await this.git.gitDir();
+    this.realDir = realpathSync(this.dir);
+    this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
+    this.gitState = await this.readGitState();
+    this.onBranch = this.gitState.branch;
     // Backups take what was committed, a while after; and, at start, whatever was committed while the host was away.
     this.onRefsChanged(() => this.backups.changed());
     this.backups.changed();
@@ -242,6 +289,7 @@ export class Host {
       this.log(`running code: ${this.runner.turnedOn.join(', ')}, ${env.label}${env.sandboxed ? '' : ' (NOT SANDBOXED)'}`);
     }
     await mkdir(this.cacheDir, { recursive: true });
+    await this.removeLeftovers();
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.
     await this.git.run(['config', 'receive.denyCurrentBranch', 'updateInstead']);
@@ -263,7 +311,7 @@ export class Host {
         const rec = this.byRoom.get(room);
         if (rec) {
           rec.state = state;
-          void this.saveCache(rec);
+          this.saveCache(rec).catch((e) => this.log(`could not keep ${rec.path}'s room: ${e}`));
         }
       },
       empty: (room) => this.onRoomEmpty(room),
@@ -271,6 +319,11 @@ export class Host {
     }, { host: this.options.host ?? '127.0.0.1', port: this.options.port ?? 0 });
     this.address = await this.relay.listen();
     this.startWatcher();
+    // Branches switched and operations run outside the app are seen here (and by the watcher, sooner).
+    this.gitPoll = setInterval(() => {
+      if (this.records.size) void this.checkGit();
+    }, this.timings.gitPollMs);
+    this.gitPoll.unref();
     if (this.options.peers) await this.startPeers(this.options.peers === true ? {} : this.options.peers);
     this.log(`host serving ${this.dir} on http://${this.address.address}:${this.address.port}`);
     return this.address;
@@ -281,11 +334,17 @@ export class Host {
     this.closed = true;
     this.backups.close();
     this.watcher?.close();
+    clearInterval(this.gitPoll);
     for (const t of this.watchTimers.values()) clearTimeout(t);
+    // Every room, whatever happens to one of them: what is not written stays in the room's cache.
     await this.serial(async () => {
       for (const rec of this.records.values()) {
-        await this.flushNow(rec);
-        await this.commitNow(rec);
+        try {
+          await this.flushNow(rec);
+          await this.commitNow(rec);
+        } catch (e) {
+          this.log(`could not save ${rec.path} while stopping (kept in its room, for next time): ${(e as Error).message}`);
+        }
         this.clearTimers(rec);
       }
     });
@@ -308,8 +367,12 @@ export class Host {
   // -------------------------------------------------------------------------
   // Paths
 
-  /** Resolve a workspace-relative path, refusing anything outside the workspace. */
-  resolvePath(path: string): string {
+  /**
+   * Resolve a workspace-relative path, refusing anything outside the workspace,
+   * and any path through a symbolic link (`link: 'self'`: but for the last part,
+   * to delete or rename the link itself, never what it points to).
+   */
+  resolvePath(path: string, o: { link?: 'self' } = {}): string {
     const clean = path.replace(/\\/g, '/').replace(/^\/+/, '');
     const abs = resolve(this.dir, clean);
     if (abs !== this.dir && !abs.startsWith(this.dir + sep)) throw new HttpError(400, 'Path outside workspace');
@@ -320,7 +383,48 @@ export class Host {
     // and spaces Windows drops, or by its short name on Windows (GIT~1).
     const top = rel.split('/')[0]!.toLowerCase().replace(/[. ]+$/, '');
     if (top === '.git' || (process.platform === 'win32' && /^git~\d+$/.test(top))) throw new HttpError(400, 'Path inside .git');
+    this.refuseLinks(abs, rel, o.link === 'self');
     return abs;
+  }
+
+  /**
+   * The host never follows a symbolic link: refuse a path any part of which is
+   * one, and check that where it really is stays inside the workspace's real
+   * folder. Parts not there yet (a new file) have nothing to follow.
+   */
+  private refuseLinks(abs: string, rel: string, leafLink: boolean): void {
+    const parts = rel.split('/').filter(Boolean);
+    let at = this.dir;
+    let real = at;
+    for (let i = 0; i < parts.length; i++) {
+      const next = join(at, parts[i]!);
+      let s;
+      try {
+        s = lstatSync(next);
+      } catch {
+        break;
+      }
+      if (s.isSymbolicLink()) {
+        if (leafLink && i === parts.length - 1) break;
+        throw new HttpError(403, linkRefused(rel));
+      }
+      at = real = next;
+    }
+    if (!this.realDir) return;
+    let where: string;
+    try {
+      where = realpathSync(real);
+    } catch {
+      return;
+    }
+    if (where !== this.realDir && !where.startsWith(this.realDir + sep)) throw new HttpError(403, linkRefused(rel));
+  }
+
+  /** A workspace file's text; refused if it is not UTF-8 (it would come back with its characters changed). */
+  private async readText(abs: string, path: string): Promise<string> {
+    const bytes = await readNoFollow(abs);
+    if (!isUtf8(bytes)) throw new HttpError(415, notUtf8(path));
+    return bytes.toString('utf8');
   }
 
   relPath(path: string): string {
@@ -367,7 +471,10 @@ export class Host {
   }
 
   private async ensureRecord(path: string): Promise<RoomRecord> {
-    const branch = await this.git.branch();
+    const st = await this.readGitState();
+    // No branch to save to (an earlier version is checked out, or a rebase is under way): nothing new opens.
+    if (!st.branch) throw new HttpError(409, pausedBecause(st)!);
+    const branch = st.branch;
     const key = `${branch}:${path}`;
     const existing = this.records.get(key);
     if (existing) {
@@ -378,7 +485,7 @@ export class Host {
     if (!type) throw new HttpError(415, `No document type for ${path}`);
     const abs = this.resolvePath(path);
     if (!existsSync(abs)) throw new HttpError(404, `No such file: ${path}`);
-    const text = await readFile(abs, 'utf8');
+    const text = await this.readText(abs, path);
     const head = await this.git.head();
 
     // Resume the cached generation if it is for the same type version.
@@ -417,6 +524,7 @@ export class Host {
       lastCommitAt: null,
       lastCommit: null,
       needsOutsideCheck: false,
+      failures: 0,
       timers: {},
     };
     rec.room = this.roomName(rec);
@@ -444,7 +552,7 @@ export class Host {
     // The file changed after the room was named (an outside change): start from the blob, then make that change.
     if (rec.seedText !== null && rec.seedText !== rec.previous.text) rec.state = patchState(rec.state, rec.previous.doc);
     rec.seedText = null;
-    void this.saveCache(rec);
+    this.saveCache(rec).catch((e) => this.log(`could not keep ${rec.path}'s room: ${e}`));
     return { state: rec.state };
   }
 
@@ -476,12 +584,15 @@ export class Host {
     if (rec.timers.drop) clearTimeout(rec.timers.drop);
     rec.timers.drop = setTimeout(() => {
       if (this.relay.clients(rec.room) > 0) return;
-      void this.serial(async () => {
+      this.serial(async () => {
+        // Not if it was taken up again meanwhile, or still has edits to save (they are tried again).
+        if (this.relay.clients(rec.room) > 0 || this.records.get(rec.key) !== rec) return;
         await this.saveCache(rec);
+        if (rec.dirty || rec.uncommitted) return;
         this.clearTimers(rec);
         this.records.delete(rec.key);
         this.byRoom.delete(rec.room);
-      });
+      }).catch((e) => this.log(`could not close ${rec.path}'s room: ${e}`));
     }, this.timings.dropMs);
   }
 
@@ -500,10 +611,17 @@ export class Host {
   // -------------------------------------------------------------------------
   // Flush and commit
 
-  private async writeAtomic(abs: string, text: string): Promise<void> {
+  /** Write a file whole or not at all: a new file beside it, on the disk for sure, then renamed over it. */
+  private async writeAtomic(abs: string, text: string | Buffer): Promise<void> {
     const tmp = join(dirname(abs), `.${basename(abs)}.kuraa-tmp-${randomBytes(4).toString('hex')}`);
-    await writeFile(tmp, text);
     try {
+      const fh = await open(tmp, 'wx');
+      try {
+        await fh.writeFile(text);
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
       await renameOver(tmp, abs);
     } catch (e) {
       await rm(tmp, { force: true });
@@ -511,22 +629,62 @@ export class Host {
     }
   }
 
-  /** Serialize the room to its file if the text changed. */
+  /** Temporary files a write left when the host stopped half-way (writeAtomic): in the workspace and the room cache. */
+  private async removeLeftovers(): Promise<void> {
+    const r = await this.git.run(['ls-files', '--others', '--exclude-standard', '-z', '--', '*.kuraa-tmp-*'], { allowFail: true });
+    const tmp = /(^|\/)\.[^/]+\.kuraa-tmp-[0-9a-f]{8}$/;
+    const found = r.stdout.split('\0').filter((p) => tmp.test(p)).map((p) => join(this.dir, p));
+    for (const f of await readdir(this.cacheDir).catch(() => [] as string[])) if (tmp.test(f)) found.push(join(this.cacheDir, f));
+    for (const f of found) await rm(f, { force: true }).catch(() => undefined);
+    if (found.length) this.log(`removed ${found.length} unfinished temporary file${found.length === 1 ? '' : 's'}`);
+  }
+
+  /**
+   * Serialize the room to its file if the text changed. Only onto the branch the
+   * room is for, and not while git is in the middle of an operation: then the
+   * edits wait in the room (and its cache). Before writing, the file is read: if
+   * someone changed it since it was last seen (and the watcher missed it), that
+   * change is merged in first, or kept beside it.
+   */
   async flushNow(rec: RoomRecord): Promise<void> {
     if (rec.timers.flush) clearTimeout(rec.timers.flush);
     rec.timers.flush = undefined;
     if (!rec.dirty) return;
+    const live = this.relay.state(rec.room);
+    if (live) rec.state = live;
+    const st = await this.readGitState();
+    if (pausedBecause(st) || st.branch !== rec.branch) {
+      // Kept for later: committed onto its own branch (commitNow), or written when git is done.
+      await this.saveCache(rec);
+      if (st.branch !== this.gitState.branch || st.operation !== this.gitState.operation) void this.checkGit();
+      return;
+    }
+    let abs: string;
+    let disk: Buffer | null;
+    try {
+      abs = this.resolvePath(rec.path);
+      disk = existsSync(abs) ? await readNoFollow(abs) : null;
+    } catch (e) {
+      this.saveFailed(rec, e);
+      throw e;
+    }
+    const notText = !!disk && !isUtf8(disk);
+    if (disk && !notText && hashText(disk.toString('utf8')) !== rec.lastHash) {
+      // Changed outside the app since it was last seen: merged in first (applyOutside writes the result).
+      return this.applyOutside(rec, disk.toString('utf8'));
+    }
+    // Made something that is not text outside the app: keep that beside it, and write the room.
+    if (notText) await this.saveBeside(rec, disk!);
     const doc = this.current(rec);
     const text = rec.type.serialize(doc, rec.previous);
     rec.dirty = false;
-    const live = this.relay.state(rec.room);
-    if (live) rec.state = live;
-    if (text !== rec.previous.text) {
+    if (text !== rec.previous.text || notText) {
       try {
-        await this.writeAtomic(this.resolvePath(rec.path), text);
+        await this.writeAtomic(abs, text);
       } catch (e) {
-        // Not written (on Windows another program may hold the file): the edits wait for the next flush.
+        // Not written (on Windows another program may hold the file): the edits wait, and it is tried again.
         rec.dirty = true;
+        this.saveFailed(rec, e);
         throw e;
       }
       rec.lastHash = hashText(text);
@@ -545,23 +703,51 @@ export class Host {
     });
   }
 
-  /** Commit the room's file, with each contributor since the last commit as co-author. */
+  /**
+   * Commit the room's file, with each contributor since the last commit as
+   * co-author. A room for a branch that is no longer checked out is committed
+   * onto that branch by its ref alone (commitToBranch), never onto another's.
+   * Nothing is committed while git is in the middle of an operation.
+   */
   async commitNow(rec: RoomRecord, message?: string): Promise<string | null> {
     // A room shared with other devices is committed by one of them (peers/rooms.ts); a named version, by whoever names it.
     if (message === undefined && this.peers && !this.peers.rooms.commits(rec.room)) return null;
+    const st = await this.readGitState();
+    if (pausedBecause(st)) return null;
     const t = rec.timers;
-    for (const k of ['commit', 'max'] as const) {
+    for (const k of ['commit', 'max', 'retry'] as const) {
       if (t[k]) clearTimeout(t[k]);
       t[k] = undefined;
     }
     rec.editingSince = null;
-    // A named version says what it is; otherwise say what changed, and mark it as a save the host made.
+    const people = [...rec.contributors.values()];
+    const extra = message === undefined ? [AUTOSAVE_TRAILER] : [];
+    let committed: string | null;
     let text = message;
-    if (text === undefined) {
-      const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
-      text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, [...rec.contributors.values()].map((u) => u.name));
+    try {
+      if (st.branch === rec.branch) {
+        // A named version says what it is; otherwise say what changed, and mark it as a save the host made.
+        if (text === undefined) {
+          const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
+          text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, people.map((u) => u.name));
+        }
+        committed = await this.commitPaths([rec.path], text, people, extra);
+      } else {
+        const now = rec.type.serialize(this.current(rec), rec.previous);
+        if (text === undefined) {
+          const before = await this.git.run(['show', `refs/heads/${rec.branch}:${rec.path}`], { allowFail: true });
+          text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, now, people.map((u) => u.name));
+        }
+        committed = await this.commitToBranch(rec.branch, rec.path, now, withTrailers(text, people, extra));
+        rec.previous = rec.type.parse(now);
+        rec.lastHash = hashText(now);
+        rec.dirty = false;
+      }
+    } catch (e) {
+      this.saveFailed(rec, e);
+      throw e;
     }
-    const committed = await this.commitPaths([rec.path], text, [...rec.contributors.values()], message === undefined ? [AUTOSAVE_TRAILER] : []);
+    this.saveRecovered(rec);
     rec.uncommitted = false;
     if (!committed) return null;
     rec.contributors.clear();
@@ -574,20 +760,45 @@ export class Host {
     return committed;
   }
 
+  /**
+   * A write or commit did not go through (another program has git's index
+   * locked, a file cannot be written): the edits stay in the room, it is tried
+   * again after a wait that grows, and people are told.
+   */
+  private saveFailed(rec: RoomRecord, e: unknown): void {
+    rec.failures++;
+    const wait = Math.min(1000 * 2 ** (rec.failures - 1), 60_000);
+    const msg = e instanceof Error ? e.message : String(e);
+    this.log(`saving ${rec.path} failed (${msg.split('\n')[0]}); trying again in ${Math.round(wait / 1000)}s`);
+    if (this.closed) return;
+    if (rec.timers.retry) clearTimeout(rec.timers.retry);
+    rec.timers.retry = setTimeout(() => void this.commitRoom(rec).catch(() => undefined), wait);
+    const why = /index\.lock|\.lock'?: File exists/i.test(msg) ? 'another program is using git in this folder'
+      : e instanceof HttpError ? msg
+        : /EACCES|EPERM|EBUSY|EROFS|ENOSPC/.test(msg) ? 'the file could not be written'
+          : 'something went wrong';
+    const file = rec.path.slice(rec.path.lastIndexOf('/') + 1);
+    this.broadcast(rec, { type: 'save-status', at: new Date().toISOString(), state: 'failing', message: `Could not save ${file} just now (${why}). Your edits are kept, and saving is tried again.` });
+  }
+
+  private saveRecovered(rec: RoomRecord): void {
+    if (!rec.failures) return;
+    rec.failures = 0;
+    this.broadcast(rec, { type: 'save-status', at: new Date().toISOString(), state: 'ok', message: 'Saving again: everything is saved.' });
+  }
+
   /** Stage and commit the given paths. Returns the commit, or null if nothing changed. */
   async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = [], extra: string[] = []): Promise<string | null> {
+    // Never in the middle of a git operation, or with no branch checked out.
+    await this.requireWritable();
     // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
     const known = new Set((await this.git.out(['ls-files', '-z', '--', ...paths])).split('\0').filter(Boolean));
-    paths = paths.filter((p) => known.has(p) || existsSync(this.resolvePath(p)));
+    paths = paths.filter((p) => known.has(p) || existsSync(this.resolvePath(p, { link: 'self' })));
     if (!paths.length) return null;
     await this.git.run(['add', '-A', '--', ...paths]);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
     if (diff.code === 0) return null;
-    const trailers = coAuthors
-      .filter((u) => u.email)
-      .map((u) => `Co-authored-by: ${u.name.replace(/[<>\n]/g, '')} <${u.email.replace(/[<>\n\s]/g, '')}>`);
-    const unique = [...new Set([...trailers, ...extra])];
-    const full = unique.length ? `${message}\n\n${unique.join('\n')}` : message;
+    const full = withTrailers(message, coAuthors, extra);
     // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
     // Signed with this host's person's key if it keeps one, else its device's (0034).
     if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
@@ -596,6 +807,41 @@ export class Host {
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
     return head;
+  }
+
+  /**
+   * Commit a file's text onto a branch that is not checked out, by its ref alone:
+   * the branch's tree with this file changed, a commit on top (signed, when
+   * syncing with devices), and the ref moved only if it is still where it was.
+   * The working tree and the checked-out branch are not touched.
+   */
+  private async commitToBranch(branch: string, path: string, text: string, message: string): Promise<string | null> {
+    const ref = `refs/heads/${branch}`;
+    const tip = (await this.git.run(['rev-parse', '--verify', '-q', `${ref}^{commit}`], { allowFail: true })).stdout.trim();
+    if (!tip) throw new Error(`The branch ${branch} is gone: the edits to ${path} are kept in its room`);
+    const before = await this.git.run(['ls-tree', '-z', tip, '--', path], { allowFail: true });
+    const m = /^(\d+) blob ([0-9a-f]+)\t/.exec(before.stdout);
+    const blob = await this.git.out(['hash-object', '-w', '--stdin'], { input: text });
+    if (m && m[2] === blob) return null;
+    await mkdir(this.tmpDir, { recursive: true });
+    const env = { GIT_INDEX_FILE: join(this.tmpDir, `branch-index-${process.pid}-${randomBytes(4).toString('hex')}`) };
+    let tree: string;
+    try {
+      await this.git.run(['read-tree', tip], { env });
+      await this.git.run(['update-index', '-z', '--index-info'], { env, input: `${m?.[1] ?? '100644'} ${blob} 0\t${path}\0` });
+      tree = await this.git.out(['write-tree'], { env });
+    } finally {
+      await rm(env.GIT_INDEX_FILE, { force: true });
+    }
+    let commit = await this.git.out(['commit-tree', tree, '-p', tip, '-F', '-'], { input: `${message.trimEnd()}\n` });
+    if (this.peers) {
+      const raw = (await this.git.run(['cat-file', 'commit', commit])).bytes;
+      commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers.node.signingKey()) });
+    }
+    await this.git.run(['update-ref', '-m', `commit: ${message.split('\n')[0]}`, ref, commit, tip]);
+    this.log(`committed ${commit.slice(0, 7)} onto ${branch} (not checked out): ${message.split('\n')[0]}`);
+    this.refsChanged();
+    return commit;
   }
 
   onRefsChanged(fn: () => void): () => void {
@@ -607,12 +853,127 @@ export class Host {
     for (const fn of this.refsListeners) fn();
   }
 
-  /** Flush and commit every open room. */
+  /** Flush and commit every open room: each of them, even if one fails (the first failure is thrown after). */
   async commitAll(message?: string): Promise<void> {
-    for (const rec of this.records.values()) {
-      await this.flushNow(rec);
-      await this.commitNow(rec, message);
+    let failed: unknown = null;
+    for (const rec of [...this.records.values()]) {
+      try {
+        await this.flushNow(rec);
+        await this.commitNow(rec, message);
+      } catch (e) {
+        failed ??= e;
+      }
     }
+    if (failed) throw failed;
+  }
+
+  // -------------------------------------------------------------------------
+  // Git, as others use it in this folder: branches switched, operations under way
+
+  /** Where git is, from its files (cheap enough to read before every write). */
+  async readGitState(): Promise<GitState> {
+    let head = '';
+    try {
+      head = (await readFile(join(this.gitDirPath, 'HEAD'), 'utf8')).trim();
+    } catch {
+      // No HEAD to read: as if detached, so nothing is written.
+    }
+    const m = /^ref: refs\/heads\/(.+)$/.exec(head);
+    const operation = OPERATIONS.find((f) => existsSync(join(this.gitDirPath, f))) ?? null;
+    return { branch: m ? m[1]! : null, operation };
+  }
+
+  /** Throw (409, said plainly) if git is in the middle of an operation here, or no branch is checked out. */
+  async requireWritable(): Promise<void> {
+    const paused = pausedBecause(await this.readGitState());
+    if (paused) throw new HttpError(409, paused);
+  }
+
+  /** Look at where git is, and follow it (followGit). One look at a time; asked again meanwhile, the queued one serves. */
+  checkGit(): Promise<void> {
+    this.gitCheck ??= this.serial(() => this.followGit())
+      .catch((e) => this.log(`following git failed: ${e}`))
+      .finally(() => {
+        this.gitCheck = null;
+      });
+    return this.gitCheck;
+  }
+
+  /**
+   * Follow git as someone else moved it. In the middle of an operation, or with
+   * no branch checked out, pause: edits wait in their rooms, and people are told.
+   * When it is done, resume: bring in what it changed, and write what waited.
+   * When the branch changed, the old branch's rooms are committed onto it by its
+   * ref, and people move to the new branch's version of their file.
+   * Call inside serial().
+   */
+  private async followGit(): Promise<void> {
+    if (this.closed) return;
+    const was = this.gitState;
+    const st = await this.readGitState();
+    this.gitState = st;
+    const paused = pausedBecause(st);
+    const at = new Date().toISOString();
+    if (paused) {
+      if (paused !== pausedBecause(was)) {
+        this.log(st.operation ? `git is in the middle of an operation (${st.operation}): saving paused` : 'no branch checked out: saving paused');
+        for (const rec of this.records.values()) this.broadcast(rec, { type: 'save-status', at, state: 'paused', message: paused });
+      }
+      return;
+    }
+    const resumed = !!pausedBecause(was);
+    if (resumed) {
+      this.log('saving again');
+      for (const rec of this.records.values()) this.broadcast(rec, { type: 'save-status', at, state: 'ok', message: 'Saving again.' });
+    }
+    const from = this.onBranch;
+    this.onBranch = st.branch;
+    if (from && from !== st.branch) await this.branchMoved(from, st.branch!);
+    else if (resumed) {
+      // The operation may have changed files: bring that into the rooms, then write and commit what waited.
+      const head = await this.git.head();
+      for (const rec of [...this.records.values()]) {
+        if (rec.branch !== st.branch) continue;
+        rec.baseCommit = head;
+        try {
+          await this.checkOutside(rec);
+          await this.flushNow(rec);
+          if (rec.uncommitted) this.commitSoon(rec.room);
+        } catch (e) {
+          this.log(`could not bring ${rec.path} up to date: ${e}`);
+        }
+      }
+      for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at });
+    }
+  }
+
+  /**
+   * The branch checked out changed, outside the app. Rooms are per branch: the
+   * old branch's edits are committed onto it (by its ref: the working tree now
+   * holds the other branch), and whoever has a file open moves to the new
+   * branch's room for it. Call inside serial().
+   */
+  private async branchMoved(from: string, to: string): Promise<void> {
+    this.log(`the branch checked out changed from ${from} to ${to}`);
+    const at = new Date().toISOString();
+    for (const rec of [...this.records.values()]) {
+      if (rec.branch === to) {
+        // Back on a branch whose rooms are still here: the files may have moved on meanwhile.
+        await this.checkOutside(rec).catch((e) => this.log(`could not bring ${rec.path} up to date: ${e}`));
+        continue;
+      }
+      if (rec.dirty || rec.uncommitted) await this.commitNow(rec).catch(() => undefined); // failures are retried, and said
+      if (!this.relay.isOpen(rec.room)) continue;
+      let next: RoomRecord | null = null;
+      try {
+        next = await this.ensureRecord(rec.path);
+      } catch {
+        // Not on the new branch (or not openable there): the room stays, its edits on its own branch.
+      }
+      if (next) this.relay.broadcast(rec.room, { type: 'reseeded', at, room: next.room, why: `This folder was switched to the branch ${to}: showing its version of the file. Edits made on ${from} are saved there.` });
+      else this.broadcast(rec, { type: 'save-status', at, state: 'paused', message: `This folder was switched to the branch ${to}, which does not have this file. Your edits are saved on ${from}.` });
+    }
+    for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at });
   }
 
   // -------------------------------------------------------------------------
@@ -623,12 +984,14 @@ export class Host {
       this.watcher = watch(this.dir, { recursive: true }, (_event, filename) => {
         if (!filename) return;
         const rel = String(filename).split(sep).join('/');
-        if (rel.startsWith('.git/') || rel === '.git' || rel.includes('.kuraa-tmp-')) return;
+        // A branch switched, or an operation begun or ended, outside the app: follow it (and the poll does, if this is missed).
+        const gitFile = /^\.git\/(HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|BISECT_LOG|rebase-merge|rebase-apply)$/.test(rel);
+        if (!gitFile && (rel.startsWith('.git/') || rel === '.git' || rel.includes('.kuraa-tmp-'))) return;
         const prev = this.watchTimers.get(rel);
         if (prev) clearTimeout(prev);
         this.watchTimers.set(rel, setTimeout(() => {
           this.watchTimers.delete(rel);
-          void this.checkPath(rel);
+          (gitFile ? this.checkGit() : this.checkPath(rel)).catch((e) => this.log(`checking ${rel} failed: ${e}`));
         }, 50));
       });
     } catch (err) {
@@ -645,17 +1008,42 @@ export class Host {
     await this.serial(() => this.checkOutside(rec));
   }
 
-  /** Re-check every open room against its file, e.g. after a git operation. */
+  /** Re-check every open room against its file, e.g. after a git operation: each of them, even if one fails. */
   async checkAll(): Promise<void> {
-    for (const rec of [...this.records.values()]) await this.checkOutside(rec);
+    for (const rec of [...this.records.values()]) {
+      await this.checkOutside(rec).catch((e) => this.log(`could not check ${rec.path} against its file: ${(e as Error).message}`));
+    }
   }
 
+  /**
+   * Take a change made to a room's file outside the app into the room. Only for
+   * rooms of the branch checked out, and not while git is in the middle of an
+   * operation (its half-done files are taken once it is done). A file become a
+   * link, or not text, is not read: the room's next write keeps it beside.
+   */
   private async checkOutside(rec: RoomRecord): Promise<void> {
+    const st = await this.readGitState();
+    if (pausedBecause(st) || st.branch !== rec.branch) return;
     const abs = this.resolvePath(rec.path);
     if (!existsSync(abs)) return;
-    const text = await readFile(abs, 'utf8');
+    const bytes = await readNoFollow(abs);
+    if (!isUtf8(bytes)) {
+      rec.dirty = true;
+      return this.flushNow(rec);
+    }
+    const text = bytes.toString('utf8');
     if (hashText(text) === rec.lastHash) return;
     await this.applyOutside(rec, text);
+  }
+
+  /** Keep a version of a room's file made outside the app beside it (name.outside-<time>), and say so. */
+  private async saveBeside(rec: RoomRecord, content: string | Buffer): Promise<string> {
+    const at = new Date().toISOString();
+    const savedAs = `${rec.path}.outside-${at.replace(/[:.]/g, '-')}`;
+    await this.writeAtomic(this.resolvePath(savedAs), content);
+    this.broadcast(rec, { type: 'conflict', at, savedAs });
+    this.log(`outside change to ${rec.path} kept beside it as ${savedAs}`);
+    return savedAs;
   }
 
   /**
@@ -688,10 +1076,7 @@ export class Host {
       if (!quiet) this.broadcast(rec, { type: 'outside-change', at, merged: true });
       this.log(`outside change merged into ${rec.path}`);
     } else {
-      const savedAs = `${rec.path}.outside-${at.replace(/[:.]/g, '-')}`;
-      await writeFile(this.resolvePath(savedAs), text);
-      this.broadcast(rec, { type: 'conflict', at, savedAs });
-      this.log(`outside change to ${rec.path} conflicted; saved as ${savedAs}`);
+      await this.saveBeside(rec, text);
     }
     // The room now differs from the file: write it back soon.
     rec.dirty = true;
@@ -779,6 +1164,8 @@ export class Host {
    * as an outside change. Call inside serial().
    */
   async integrate(ref: string, override?: (path: string) => string | undefined, keep?: (path: string) => boolean): Promise<MergeOutcome> {
+    // Not into the middle of someone's rebase or merge: it comes in once that is done.
+    await this.requireWritable();
     await this.commitAll();
     const theirs = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
     const head = await this.git.head();
@@ -810,7 +1197,7 @@ export class Host {
       for (const rec of held) {
         // Uncommitted edits of a room this device commits (none, after commitAll) would merge in as an outside change.
         if (override?.(rec.path) === undefined && !(this.peers && !this.peers.rooms.commits(rec.room))) continue;
-        const now = existsSync(this.resolvePath(rec.path)) ? await readFile(this.resolvePath(rec.path), 'utf8') : '';
+        const now = existsSync(this.resolvePath(rec.path)) ? await this.readText(this.resolvePath(rec.path), rec.path) : '';
         rec.previous = rec.type.parse(now);
         rec.lastHash = hashText(now);
         await this.flushNow(rec);
@@ -917,8 +1304,6 @@ export class Host {
       const rec = this.byRoom.get(name);
       if (!rec || rec.generation === seed) return;
       await this.flushNow(rec);
-      const ours = rec.type.serialize(this.current(rec), rec.previous);
-      const theirs = rec.type.serialize(decodeDoc(state, rec.type.schema), rec.previous);
       // The base is the file where the two rooms' histories meet: at the merge base of the
       // commits each started from; failing that, the blob this room started from.
       const show = async (rev: string) => {
@@ -927,7 +1312,12 @@ export class Host {
       };
       const meet = rec.baseCommit && theirBase ? await this.git.run(['merge-base', rec.baseCommit, theirBase], { allowFail: true }) : null;
       const blob = await this.git.run(['cat-file', 'blob', rec.generation], { allowFail: true });
-      const base = (meet?.code === 0 ? ((await show(meet.stdout.trim())) ?? '') : null) ?? (blob.code === 0 ? blob.stdout : null) ?? (await show('HEAD')) ?? ours;
+      const atMeet = meet?.code === 0 ? ((await show(meet.stdout.trim())) ?? '') : null;
+      const atHead = await show('HEAD');
+      // Read after the waits above: edits people made meanwhile are in it (nothing waits from here to the switch).
+      const ours = rec.type.serialize(this.current(rec), rec.previous);
+      const theirs = rec.type.serialize(decodeDoc(state, rec.type.schema), rec.previous);
+      const base = atMeet ?? (blob.code === 0 ? blob.stdout : null) ?? atHead ?? ours;
       const sides: [{ by: string }, { by: string }] = [{ by: this.peers?.node.name ?? 'this device' }, { by: from }];
       const merged = rec.type.merge ? rec.type.merge(base, ours, theirs, sides) : mergeLines(base, ours, theirs, sides);
       const next = merged.text === theirs ? state : patchState(state, rec.type.parse(merged.text).doc);
@@ -963,20 +1353,33 @@ export class Host {
     return remotes.includes('origin') ? 'origin' : (remotes[0] ?? null);
   }
 
-  /** Fetch from an ordinary remote, bring its branch in (never stopping on a conflict), and push. Call inside serial(). */
+  /**
+   * Fetch from an ordinary remote, bring its branch in (never stopping on a
+   * conflict), and push. Call outside serial(): it takes its turn for the parts
+   * that change branches and files, and talks to the remote outside it, so a
+   * slow or silent server holds up no saving. Never asks for credentials, and
+   * gives up after a while.
+   */
   async syncWith(remote: string): Promise<{ ok: boolean; message: string; head?: string | null }> {
-    await this.commitAll();
-    const branch = await this.git.branch();
-    await this.git.run(['fetch', remote]);
-    const hasRemoteBranch = (await this.git.run(['rev-parse', '--verify', '-q', `${remote}/${branch}`], { allowFail: true })).code === 0;
-    let kept = '';
-    if (hasRemoteBranch) {
+    const branch = await this.serial(async () => {
+      await this.requireWritable();
+      await this.commitAll();
+      return (await this.readGitState()).branch!;
+    });
+    const fetched = await this.git.run(['fetch', remote], { allowFail: true, timeoutMs: FETCH_MS, env: NON_INTERACTIVE });
+    if (fetched.code !== 0) throw new Error(`Could not fetch from ${remote}: ${(fetched.stderr || fetched.stdout).trim() || 'it took too long'}`);
+    const { kept, head } = await this.serial(async () => {
+      if ((await this.readGitState()).branch !== branch) throw new HttpError(409, `The branch changed while syncing (now not ${branch}): sync again`);
+      const hasRemoteBranch = (await this.git.run(['rev-parse', '--verify', '-q', `${remote}/${branch}`], { allowFail: true })).code === 0;
       // Never stops on a conflict: both versions stay in the document, to choose between there.
-      const outcome = await this.integrate(`${remote}/${branch}`);
-      kept = describeOutcome(outcome);
+      const outcome = hasRemoteBranch ? await this.integrate(`${remote}/${branch}`) : null;
+      return { kept: outcome ? describeOutcome(outcome) : '', head: await this.git.head() };
+    });
+    if (head) {
+      const pushed = await this.git.run(['push', remote, `${head}:refs/heads/${branch}`], { allowFail: true, timeoutMs: PUSH_MS, env: NON_INTERACTIVE });
+      if (pushed.code !== 0) throw new Error(`Could not push to ${remote}: ${(pushed.stderr || pushed.stdout).trim() || 'it took too long'}`);
     }
-    await this.git.run(['push', remote, `HEAD:${branch}`]);
-    return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head: await this.git.head() };
+    return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head };
   }
 
   /** Sync: with the paired devices that are connected, and with the sync remote if there is one. */
@@ -985,7 +1388,7 @@ export class Host {
     const said: string[] = [];
     if (this.peers) said.push(await this.peers.syncAll());
     if (remote) {
-      const r = await this.serial(() => this.syncWith(remote));
+      const r = await this.syncWith(remote);
       if (!this.peers) return r;
       said.push(r.message);
     }
@@ -1006,15 +1409,17 @@ export class Host {
     const abs = join(this.dir, path);
     let s;
     try {
-      s = await stat(abs);
+      s = await lstat(abs);
     } catch {
       return null;
     }
+    // A link (git keeps them as they are) is listed, never opened or read.
+    if (s.isSymbolicLink()) return { path, type: null, cannotOpen: 'A link to somewhere else: the app does not open links' };
     const type = this.typeFor(path);
     const entry: TreeEntry = { path, type: type?.id ?? null };
     if (!type) return entry;
-    const facts = (text: string) => ({ title: type.title?.read(text) ?? null, conflicts: conflictsIn(text, type) });
-    let found: { title: string | null; conflicts: number };
+    const facts = (text: string) => ({ title: type.title?.read(text) ?? null, conflicts: conflictsIn(text, type), cannotOpen: null as string | null });
+    let found: { title: string | null; conflicts: number; cannotOpen: string | null };
     const rec = this.records.get(`${branch}:${path}`);
     if (rec) found = facts(type.serialize(this.current(rec), rec.previous));
     else {
@@ -1022,17 +1427,35 @@ export class Host {
       const hit = this.factsCache.get(path);
       if (hit?.stamp === stamp) found = hit;
       else {
+        let bytes: Buffer;
         try {
-          found = facts(await readFile(abs, 'utf8'));
+          bytes = await readFile(abs);
         } catch {
-          found = { title: null, conflicts: 0 };
+          // Not read this time (gone meanwhile, or held by another program): shown plainly, and read again next time.
+          return entry;
         }
+        found = isUtf8(bytes) ? facts(bytes.toString('utf8')) : { title: null, conflicts: 0, cannotOpen: 'Not saved as UTF-8 text: the app cannot edit it without changing its characters' };
         this.factsCache.set(path, { stamp, ...found });
       }
     }
+    if (found.cannotOpen) return { path, type: null, cannotOpen: found.cannotOpen };
     if (type.title) entry.title = found.title;
     if (found.conflicts) entry.conflicts = found.conflicts;
     return entry;
+  }
+
+  /** The file list's entries for these paths, a few files read at a time (TREE_READS). */
+  async treeEntries(paths: string[], branch: string): Promise<TreeEntry[]> {
+    const out: (TreeEntry | null)[] = new Array(paths.length).fill(null);
+    let next = 0;
+    const worker = async () => {
+      while (next < paths.length) {
+        const i = next++;
+        out[i] = await this.treeEntry(paths[i]!, branch);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(TREE_READS, paths.length) }, worker));
+    return out.filter((e) => e !== null);
   }
 
   // -------------------------------------------------------------------------
@@ -1046,7 +1469,7 @@ export class Host {
     const type = this.typeFor(path);
     if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
     try {
-      type.title.write(await readFile(this.resolvePath(path), 'utf8'), title);
+      type.title.write(await this.readText(this.resolvePath(path), path), title);
     } catch (e) {
       throw new HttpError(400, (e as Error).message);
     }
@@ -1062,7 +1485,7 @@ export class Host {
     const rec = this.records.get(`${await this.git.branch()}:${path}`);
     if (rec) await this.flushNow(rec);
     const abs = this.resolvePath(path);
-    const text = await readFile(abs, 'utf8');
+    const text = await this.readText(abs, path);
     let next: string;
     try {
       next = type.title.write(text, title);
@@ -1128,6 +1551,25 @@ export function describeOutcome(outcome: MergeOutcome): string {
   return kept;
 }
 
+/** A file's bytes, refusing a symbolic link as its last part (where the system can tell). */
+async function readNoFollow(abs: string): Promise<Buffer> {
+  const fh = await open(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    return await fh.readFile();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** A commit message with its trailers: co-authors (those with an email), then any others, each once. */
+function withTrailers(message: string, coAuthors: PresenceUser[], extra: string[]): string {
+  const trailers = coAuthors
+    .filter((u) => u.email)
+    .map((u) => `Co-authored-by: ${u.name.replace(/[<>\n]/g, '')} <${u.email.replace(/[<>\n\s]/g, '')}>`);
+  const unique = [...new Set([...trailers, ...extra])];
+  return unique.length ? `${message}\n\n${unique.join('\n')}` : message;
+}
+
 /** A text's git blob id, as `git hash-object` gives it. */
 export function blobId(text: string): string {
   const bytes = Buffer.from(text, 'utf8');
@@ -1159,6 +1601,8 @@ export interface TreeEntry {
   type: string | null;
   /** Documents only: its title, or null if it has none. */
   title?: string | null;
+  /** Why the app does not open it, when it is a file a type would open (a link, a file not in UTF-8). Its type is then null. */
+  cannotOpen?: string;
   /** How many conflicts it keeps, when it keeps any. */
   conflicts?: number;
 }

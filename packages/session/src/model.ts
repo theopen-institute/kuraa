@@ -15,7 +15,14 @@ export type RoomMessage =
   | { type: 'committed'; at: string; commit: string; message: string }
   | { type: 'outside-change'; at: string; merged: boolean }
   | { type: 'conflict'; at: string; savedAs: string }
-  | { type: 'reseeded'; at: string; room: string }
+  /** The room was replaced: move to `room`. `why` says why, when it is not another device's room joined. */
+  | { type: 'reseeded'; at: string; room: string; why?: string }
+  /**
+   * Saving is held up, or going again: paused while a git operation runs outside
+   * the app, failing (a write or commit did not go through, and is tried again),
+   * or ok. The message is for people, to show as it is.
+   */
+  | { type: 'save-status'; at: string; state: 'paused' | 'failing' | 'ok'; message: string }
   /** Files changed under everyone (a merge from another device): reload the list. */
   | { type: 'files-changed'; at: string }
   | { type: 'run'; run: RunRecord }

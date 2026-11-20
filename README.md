@@ -89,10 +89,28 @@ or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/002
 Everything else is in the **menu**, from the bottom of the sidebar or
 ⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
-**Header…**, **Save version**, when it was last written and committed; the code session; the workspace's branch,
-**Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
+**Header…**, **Save version**, **Preview** (below), when it was last written and committed; the code session; the workspace's branch,
+**Search…** (⇧⌘F: every text file, and open documents as they are being typed; a result opens the
+file at the match, [0042](docs/decisions/0042-search.md)), **Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
 connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
 as a note in the corner.
+
+A past version opened from **History** (shown by its date and who made it) can be compared with the
+document now (**Compare with now**: changed paragraphs, the words in them marked) or restored
+(**Restore this version…**: an edit like any other, which everyone sees and ⌘Z undoes;
+[0043](docs/decisions/0043-past-versions.md)).
+
+## Rendering: HTML, Word and PDF
+
+**Preview** in the menu, or ⇧⌘R, renders the document as it is now (R Markdown knitted by
+rmarkdown, Markdown by pandoc) and shows the page beside it, in a frame where nothing in the document
+runs; **Update when saved** renders it again each time it is saved. **Save as** HTML, Word or PDF
+renders that format and saves the file. The header's `output:` (or `format:`) settings apply. PDFs are
+made with Typst, which the environment has, so no TeX is needed; a header asking for a LaTeX engine
+gets it if the environment has one. Rendering runs where code runs (in Podman, with the workspace
+read-only and no network), so it needs `--engine r` and Podman, like running chunks; the panel says
+what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the document
+([decision 0041](docs/decisions/0041-rendering.md)).
 
 ## Backups
 
@@ -359,6 +377,8 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
 | — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
+| — | `packages/host/test/render.test.ts`, `render-podman.test.ts`, `tests/e2e/render.spec.ts`: documents render to HTML, Word and PDF in Podman, from the live text, never into the workspace, previewed without running anything (Podman ones skipped without it) |
+| — | `packages/host/test/search.test.ts`, `tests/e2e/search.spec.ts`: search finds text in every text file and in what is being typed, and opens the match; `tests/e2e/versions.spec.ts`: past versions compared and restored |
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
@@ -369,7 +389,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | --- | --- |
 | `packages/kernel` | Document type registry, hook bus and merging (lines, words, blocks). No DOM, no Node, no formats |
 | `packages/run-kit` | The contract between run components: engines (languages) and environments (where processes run), the policy |
-| `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate` |
+| `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate`, and rendering R Markdown and Markdown (rmarkdown, pandoc, Typst) |
 | `packages/env-podman` | Environment component: a locked-down Podman container |
 | `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |

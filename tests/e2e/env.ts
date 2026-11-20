@@ -2,9 +2,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// KURAA_E2E_PORT moves the host, for running beside another checkout's tests (with its own TMPDIR).
+const PORT = Number(process.env.KURAA_E2E_PORT ?? 4400);
+
 export const E2E = {
-  port: 4400,
-  url: 'http://127.0.0.1:4400',
+  port: PORT,
+  url: `http://127.0.0.1:${PORT}`,
   token: 'e2e-token',
   dir: join(tmpdir(), 'kuraa-e2e-workspace'),
 };

@@ -14,7 +14,9 @@
 // and the `format:` of Quarto-style headers (toc, number-sections, pdf-engine).
 // HTML is always self-contained (images and styles inside), with math as MathML
 // unless the header chooses, so it shows without scripts or the network. PDF is
-// made with Typst unless the header asks for a LaTeX engine the environment has.
+// made with Typst unless the header asks for a LaTeX engine the environment has
+// (the image's, or a tool's: render.ts mounts TinyTeX and names its programs'
+// folder in KURAA_TOOL_PATH).
 //
 // Kept as a string so it ships inside every bundle. The R code uses no backticks
 // or dollar-brace sequences, to stay a plain template.
@@ -49,7 +51,20 @@ local({
   ws_lib <- Sys.getenv("KURAA_R_LIB")
   if (nzchar(ws_lib) && dir.exists(ws_lib)) .libPaths(c(ws_lib, .libPaths()))
 
+  # A tool's programs (TinyTeX's), first on PATH for this process and what it starts.
+  tool_path <- Sys.getenv("KURAA_TOOL_PATH")
+  if (nzchar(tool_path)) Sys.setenv(PATH = paste(tool_path, Sys.getenv("PATH"), sep = .Platform$path.sep))
+  # The tool is mounted read-only and there is no network: tinytex must never
+  # try to install LaTeX packages itself (it would only fail, slowly). It
+  # already decides so (its folder is not writable); this makes sure. The host
+  # adds what the log says was missing, and renders again.
+  if (requireNamespace("tinytex", quietly = TRUE)) {
+    try(utils::assignInNamespace("tlmgr_writable", function() FALSE, "tinytex"), silent = TRUE)
+  }
+
   have <- function(program) nzchar(Sys.which(program))
+  # A program that is there but cannot start (a TeX built for another C library, say).
+  runs <- function(program) isTRUE(tryCatch(suppressWarnings(system2(program, "--version", stdout = FALSE, stderr = FALSE)) == 0, error = function(e) FALSE))
   LATEX <- c("pdflatex", "xelatex", "lualatex", "tectonic", "latexmk")
 
   main <- function() {
@@ -88,10 +103,13 @@ local({
     pdf_engine <- NULL
     if (format == "pdf") {
       wanted <- or(opts$latex_engine, or(q[["pdf-engine"]], header[["pdf-engine"]]))
-      if (!is.null(wanted) && wanted %in% LATEX && have(wanted)) pdf_engine <- wanted
+      broken <- !is.null(wanted) && wanted %in% LATEX && have(wanted) && !runs(wanted)
+      if (!is.null(wanted) && wanted %in% LATEX && have(wanted) && !broken) pdf_engine <- wanted
       else if (have("typst")) {
         pdf_engine <- "typst"
-        if (!is.null(wanted) && wanted %in% LATEX) {
+        if (broken) {
+          notes <<- c(notes, sprintf("The header asks for %s, which cannot run in this environment's image, so the PDF was made with Typst: settings only LaTeX understands were left out.", wanted))
+        } else if (!is.null(wanted) && wanted %in% LATEX) {
           notes <<- c(notes, sprintf("The header asks for %s, which this environment does not have, so the PDF was made with Typst: settings only LaTeX understands were left out.", wanted))
         }
       } else {

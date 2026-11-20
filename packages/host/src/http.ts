@@ -16,6 +16,7 @@ import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
 import { renderRoutes, searchRoutes } from './render-routes.js';
+import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 
 const MIME: Record<string, string> = {
@@ -502,7 +503,7 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

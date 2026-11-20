@@ -278,7 +278,7 @@ const fileRoutes: Route[] = [
   // title too (with `to` the same as `from`, only that).
   route('PATCH', '/api/files', async ({ host, req, res }) => {
     const body = await readBody(req);
-    const from = host.relPath(str(body.from, 'from'));
+    const from = host.relPath(str(body.from, 'from'), { link: 'self' });
     const to = host.relPath(str(body.to, 'to'));
     const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim() : undefined;
     // A link is renamed itself (never what it points to).
@@ -318,7 +318,7 @@ const fileRoutes: Route[] = [
   }),
 
   route('DELETE', '/api/files', async ({ host, res, q }) => {
-    const path = host.relPath(str(q.get('path'), 'path'));
+    const path = host.relPath(str(q.get('path'), 'path'), { link: 'self' });
     // A link is deleted itself (never what it points to).
     const abs = host.resolvePath(path, { link: 'self' });
     if (!lexists(abs)) throw new HttpError(404, 'No such file');

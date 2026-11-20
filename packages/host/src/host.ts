@@ -427,8 +427,8 @@ export class Host {
     return bytes.toString('utf8');
   }
 
-  relPath(path: string): string {
-    return relative(this.dir, this.resolvePath(path)).split(sep).join('/');
+  relPath(path: string, o: { link?: 'self' } = {}): string {
+    return relative(this.dir, this.resolvePath(path, o)).split(sep).join('/');
   }
 
   typeFor(path: string): DocumentType | undefined {

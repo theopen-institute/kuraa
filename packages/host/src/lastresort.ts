@@ -11,6 +11,8 @@ export interface LastResortOptions {
   stop(): void;
   /** How many errors in a minute are too many. Default 20. */
   limit?: number;
+  /** Where the errors are told of (default: this process). */
+  on?: Pick<NodeJS.Process, 'on' | 'off'>;
 }
 
 /** Handle uncaught exceptions and unhandled rejections in this process, from now on. Returns a function that stops handling them. */
@@ -34,10 +36,11 @@ export function lastResort(o: LastResortOptions): () => void {
   };
   const rejection = handle('unexpected error (not waited for)');
   const exception = handle('unexpected error');
-  process.on('unhandledRejection', rejection);
-  process.on('uncaughtException', exception);
+  const on = o.on ?? process;
+  on.on('unhandledRejection', rejection);
+  on.on('uncaughtException', exception);
   return () => {
-    process.off('unhandledRejection', rejection);
-    process.off('uncaughtException', exception);
+    on.off('unhandledRejection', rejection);
+    on.off('uncaughtException', exception);
   };
 }

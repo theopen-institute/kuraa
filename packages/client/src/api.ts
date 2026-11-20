@@ -23,6 +23,29 @@ export interface ComponentsInfo {
   formats: { id: string; label: string; description: string; extensions: string[]; on: boolean }[];
 }
 export interface PackageInfo { name: string; version: string; source: 'workspace' | 'environment' }
+/** A tool (TeX, say): downloaded on request, kept once per computer (the host's tools.ts). */
+export interface ToolInfo {
+  id: string;
+  label: string;
+  description: string;
+  version: string;
+  downloadBytes: number;
+  state: 'absent' | 'downloading' | 'ready' | 'adding' | 'removing';
+  progress: string | null;
+  error: string | null;
+  size: number | null;
+  installedAt: string | null;
+  /** Why it cannot be downloaded here (no build for this kind of computer). */
+  unavailable: string | null;
+  note: string | null;
+  parts: { label: string; added: number } | null;
+}
+export interface ToolsInfo {
+  /** People here may download tools and remove them. */
+  allowInstalls: boolean;
+  arch: string | null;
+  tools: ToolInfo[];
+}
 export interface PackageResult { ok: boolean; message: string; log: string; restart: boolean }
 export interface RunRequest { path: string; engine: string; code: string; header: string; chunk: ChunkRef; by: { name: string; email: string; color: string } }
 /** A file in the workspace. A document has a title (null if it has none yet); other files have no `title`. */
@@ -94,6 +117,8 @@ export interface RenderState {
   startedAt: string;
   finishedAt: string | null;
   output: { at: string; size: number } | null;
+  /** A tool the document needs that this computer lacks, and people may download. */
+  needs?: { tool: string; label: string; downloadBytes: number } | null;
 }
 export interface RenderInfo {
   /** Formats the document can be rendered to here; none if it cannot be. */
@@ -168,6 +193,11 @@ export class HostApi {
   history(path: string) { return this.json<{ commits: CommitInfo[] }>(`/api/history?path=${encodeURIComponent(path)}`).then((r) => r.commits); }
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   components() { return this.json<ComponentsInfo>('/api/components'); }
+  /** Tools, and how each stands on the host's computer. */
+  tools() { return this.json<ToolsInfo>('/api/tools'); }
+  /** Start downloading a tool (or join its download); follow it with tools(). */
+  downloadTool(id: string) { return this.json<{ ok: boolean; message: string }>('/api/tools/download', { method: 'POST', body: JSON.stringify({ id }) }); }
+  removeTool(id: string) { return this.json<{ ok: boolean; message: string }>('/api/tools/remove', { method: 'POST', body: JSON.stringify({ id }) }); }
   peers() { return this.json<PeersInfo>('/api/peers'); }
   peerLinks() { return this.json<{ links: InviteLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
   /** An invite link: for one person (`once`) or anyone, lasting `hours` (null: no expiry). Turns syncing on if it is not. */

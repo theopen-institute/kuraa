@@ -2,7 +2,7 @@
 // workspace (search.ts), added to http.ts's table.
 import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
-import { readBody, send } from './http.js';
+import { personOf, readBody, send } from './http.js';
 import { HttpError } from './errors.js';
 import { MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
 import { searchWorkspace } from './search.js';
@@ -29,8 +29,7 @@ export const renderRoutes: Route[] = [
   route('POST', '/api/renders', async (c) => {
     const body = await readBody(c.req);
     const path = pathOf(c, body.path);
-    const by = body.by && typeof body.by === 'object' && typeof (body.by as { name?: unknown }).name === 'string' ? (body.by as { name: string }).name : null;
-    const { state } = await c.host.renders.render(path, formatOf(body.format), by);
+    const { state } = await c.host.renders.render(path, formatOf(body.format), personOf(body.by));
     send(c.res, state.state === 'failed' ? 422 : 202, state);
   }),
 

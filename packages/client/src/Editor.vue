@@ -57,6 +57,8 @@ const emit = defineEmits<{
   conflicts: [count: number];
   /** Files changed under everyone (work from another device came in). */
   filesChanged: [];
+  /** A tool (TeX) is being downloaded, changed or removed: whoever shows tools asks again. */
+  toolsChanged: [];
   /** It went to the first conflict, as asked. */
   jumped: [];
   /** Someone changed the file outside the app as it was edited here: their version is kept beside it, at this path. */
@@ -213,6 +215,7 @@ function open(): () => void {
             if (!cancelled) reopen();
           }, 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
+        else if (m.type === 'tools') emit('toolsChanged');
         else if (m.type === 'save-status') {
           // Paused or failing stays in a banner until it is over (App.vue); then a note says so.
           savePaused = m.state === 'paused' ? m.message : null;

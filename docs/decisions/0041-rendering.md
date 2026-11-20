@@ -31,6 +31,9 @@ read-only, as for runs.
   (`latex_engine`, `pdf-engine`) and the environment has it, LaTeX is used instead. When it asks for
   one the environment lacks, the PDF is made with Typst and the message says so ("settings only
   LaTeX understands were left out"). With neither, the message says to render to HTML or Word.
+  *Since [0045](0045-tools.md):* LaTeX is a tool, TinyTeX, downloaded on request where installs are
+  allowed and mounted read-only into the renders that ask for it; without it, the render offers the
+  download, and falls back to Typst only where downloads are not allowed, saying why.
 - **The header.** R Markdown's `output:` decides the format function and its options (the first
   `…html…`, `…word…|…docx…`, `…pdf…` entry; `bookdown::html_document2` and the like work if
   installed); `toc` and `number_sections`, and a Quarto-style `format:` (`toc`, `number-sections`,

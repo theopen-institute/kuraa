@@ -10,16 +10,26 @@
 // served to the app (GET /api/renders/file) for the preview and for saving.
 // One render runs at a time per document; asking again for one under way
 // joins it.
+//
+// Tools (decision 0045): a render may use one (TeX), which the runner mounts
+// for it. A render whose log says the tool lacks parts (LaTeX packages) runs
+// again once they are added, where installs are allowed: a few times at most,
+// as long as each round adds something (a package's own needs show only once
+// it loads). One that needs a tool this computer does not have says so, with
+// what to offer people (`needs`).
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, posix, resolve } from 'node:path';
-import type { RenderFormat } from '@kuraa/run-kit';
+import type { RenderFormat, RenderResult } from '@kuraa/run-kit';
+import type { PresenceUser } from '@kuraa/session/server';
 import type { Runner } from './runner.js';
 import { renameOver } from './files.js';
 
 export type { RenderFormat };
 export const RENDER_FORMATS: RenderFormat[] = ['html', 'docx', 'pdf'];
+/** The most times a render runs again after adding parts its tools lacked. */
+const MAX_REPAIRS = 4;
 /** The largest output kept. */
 const MAX_OUTPUT = 256 * 1024 * 1024;
 /** The most of a render's log kept and sent. */
@@ -40,6 +50,8 @@ export interface RenderState {
   finishedAt: string | null;
   /** The latest output of this format, if there is one (it may be from before a failed render). */
   output: { at: string; size: number } | null;
+  /** A tool the document needs that this computer lacks, and people may download: what to offer. */
+  needs?: { tool: string; label: string; downloadBytes: number } | null;
 }
 
 /** What the app is told about rendering a document. */
@@ -119,7 +131,8 @@ export class Renders {
   }
 
   /** Render a document, or join its render in this format under way. Resolves once it has started; `done` when it has finished. */
-  async render(path: string, format: RenderFormat, by: string | null): Promise<{ state: RenderState; done: Promise<RenderState> }> {
+  async render(path: string, format: RenderFormat, person: PresenceUser | null): Promise<{ state: RenderState; done: Promise<RenderState> }> {
+    const by = person?.name ?? null;
     const key = `${path}\0${format}`;
     const under = this.current.get(key);
     if (under) return under;
@@ -135,7 +148,7 @@ export class Renders {
       const failed = { ...state, state: 'failed' as const, message: why ?? `This document cannot be rendered to ${format}.`, finishedAt: now };
       return { state: failed, done: Promise.resolve(failed) };
     }
-    const job = (this.queues.get(path) ?? Promise.resolve()).then(() => this.run(state, found));
+    const job = (this.queues.get(path) ?? Promise.resolve()).then(() => this.run(state, found, person));
     const done = job.then(() => state, (e: Error) => {
       Object.assign(state, { state: 'failed', message: e.message, finishedAt: new Date().toISOString(), progress: null });
       return state;
@@ -153,7 +166,7 @@ export class Renders {
     return entry;
   }
 
-  private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>): Promise<void> {
+  private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>, person: PresenceUser | null): Promise<void> {
     const { path, format } = state;
     state.message = 'Rendering…';
     // The document as it is now: what is being typed reaches the file first.
@@ -162,9 +175,28 @@ export class Renders {
     // Emptied, not made again: Podman on a Mac can take a folder removed and made again for one missing.
     await mkdir(scratch, { recursive: true });
     await emptyDir(scratch);
+    const progress = (m: string) => (state.progress = m);
+    const tools = this.o.runner.renderTools(person && person.email ? person : null, progress);
     try {
-      const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, (m) => (state.progress = m));
-      const result = await found.renderer.render(ctx, { input: resolve(this.o.root, path), format });
+      let result: RenderResult;
+      const added: string[] = [];
+      for (let round = 0; ; round++) {
+        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools);
+        result = await found.renderer.render(ctx, { input: resolve(this.o.root, path), format });
+        if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;
+        // Parts its tools lacked (LaTeX packages): added, then rendered again.
+        const repair = await tools.repair(result.log);
+        if (!repair) break;
+        if (!repair.ok) {
+          result = { ...result, message: `${result.message} ${repair.message}` };
+          break;
+        }
+        added.push(...repair.added);
+        progress('Rendering again…');
+        await emptyDir(scratch);
+      }
+      if (added.length) result = { ...result, message: `${result.message} Added ${added.join(', ')} to this computer for it.` };
+      state.needs = result.needs ? this.o.runner.toolOffer(result.needs.tool) : null;
       state.log = result.log.length > MAX_LOG ? `…\n${result.log.slice(-MAX_LOG)}` : result.log;
       state.message = result.message;
       if (result.ok && result.output) {
@@ -183,6 +215,7 @@ export class Renders {
         }
       } else state.state = 'failed';
     } finally {
+      tools.release();
       state.progress = null;
       state.finishedAt = new Date().toISOString();
       await emptyDir(scratch).catch(() => undefined);

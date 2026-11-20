@@ -1,4 +1,5 @@
-// Run components: engines (languages) and environments (places processes run),
+// Run components: engines (languages), environments (places processes run) and
+// tools (toolchains processes may use, downloaded on request: tools.ts),
 // separate components that meet only through @kuraa/run-kit. The host imports
 // none: whoever starts it passes them (the command line, the desktop app and
 // `pnpm dev` pass @kuraa/run-components, plus any named with --component). A component
@@ -7,11 +8,12 @@
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RUN_API_VERSION, type Engine, type Environment, type RunComponent } from '@kuraa/run-kit';
+import { RUN_API_VERSION, type Engine, type Environment, type RunComponent, type Tool } from '@kuraa/run-kit';
 
 export interface RunComponents {
   engines: Map<string, Engine>;
   environments: Map<string, Environment>;
+  tools: Map<string, Tool>;
 }
 
 function check(component: unknown, from: string): RunComponent {
@@ -24,6 +26,13 @@ function check(component: unknown, from: string): RunComponent {
   for (const e of p.environments ?? []) {
     if (typeof e?.id !== 'string' || typeof e.check !== 'function' || typeof e.start !== 'function') throw new Error(`${from}: an environment needs an id, check() and start().`);
     if (typeof e.sandboxed !== 'boolean') throw new Error(`${from}: the environment "${e.id}" must say whether it is sandboxed.`);
+  }
+  for (const t of p.tools ?? []) {
+    // Its id and version name folders in the data folder.
+    if (typeof t?.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(t.id)) throw new Error(`${from}: a tool needs an id of lower-case letters, digits and dashes.`);
+    if (typeof t.version !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$/.test(t.version)) throw new Error(`${from}: the tool "${t.id}" needs a version of letters, digits, dots and dashes.`);
+    if (!t.installer || typeof t.installer.install !== 'function' || typeof t.path !== 'function' || !t.inside?.startsWith('/')) throw new Error(`${from}: the tool "${t.id}" needs an installer, path() and the folder it is seen at inside.`);
+    if (t.parts && !/^\.kuraa\/[A-Za-z0-9._-]+\.json$/.test(t.parts.record)) throw new Error(`${from}: the tool "${t.id}" must record its parts in a .json file in .kuraa/.`);
   }
   return p as RunComponent;
 }
@@ -50,7 +59,7 @@ async function importComponent(spec: string): Promise<unknown> {
 
 /** Components given as modules already loaded, or as a path or package name to load. */
 export async function loadRunComponents(components: (RunComponent | string)[] = []): Promise<RunComponents> {
-  const out: RunComponents = { engines: new Map(), environments: new Map() };
+  const out: RunComponents = { engines: new Map(), environments: new Map(), tools: new Map() };
   for (const entry of components) {
     const from = typeof entry === 'string' ? entry : (entry as Partial<RunComponent>)?.name ?? 'a run component';
     const component = check(typeof entry === 'string' ? await importComponent(entry) : entry, from);
@@ -61,6 +70,10 @@ export async function loadRunComponents(components: (RunComponent | string)[] = 
     for (const e of component.environments ?? []) {
       if (out.environments.has(e.id)) throw new Error(`Two run components define the environment "${e.id}" (the second is ${from}).`);
       out.environments.set(e.id, e);
+    }
+    for (const t of component.tools ?? []) {
+      if (out.tools.has(t.id)) throw new Error(`Two run components define the tool "${t.id}" (the second is ${from}).`);
+      out.tools.set(t.id, t);
     }
   }
   return out;

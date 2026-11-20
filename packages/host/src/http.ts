@@ -16,6 +16,7 @@ import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
 import { renderRoutes, searchRoutes } from './render-routes.js';
+import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 
 const MIME: Record<string, string> = {
@@ -94,7 +95,7 @@ function str(v: unknown, name: string): string {
 }
 
 /** Who asked, as the client says: a name, an email (for credit) and a colour. Null without a name, unless `anonymous` stands in. */
-function personOf(v: unknown, anonymous?: string): PresenceUser | null {
+export function personOf(v: unknown, anonymous?: string): PresenceUser | null {
   const by = (v && typeof v === 'object' ? v : {}) as { name?: unknown; email?: unknown; color?: unknown };
   const name = typeof by.name === 'string' ? by.name : anonymous;
   if (name === undefined) return null;
@@ -506,7 +507,7 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

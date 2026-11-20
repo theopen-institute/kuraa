@@ -9,11 +9,13 @@
 // rights: --component, --allow-unsandboxed and --podman. Those stay flags.
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, rename, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { parseSize } from '@kuraa/run-kit';
 import { HttpError } from './errors.js';
 import type { HostTimings } from './host.js';
-import { defaultDataDir as hostDataDir, type RunOptions } from './runner.js';
+import { DATA_MARKER, defaultDataDir as hostDataDir, markDataDir, type RunOptions } from './runner.js';
+
+export { DATA_MARKER };
 
 export interface Settings {
   /** Sync every workspace with the other computers it is on (--peer). Workspaces shared by an invite link always do. */
@@ -76,8 +78,8 @@ export const DEFAULT_SETTINGS: Settings = {
   formats: null, saveSeconds: null, versionSeconds: null, workspaces: null,
 };
 
-/** The small file that marks a folder as one kuraa keeps packages and tools in. */
-export const DATA_MARKER = '.kuraa-data';
+/** What packages and tools put in the data folder (runner.ts, tools.ts): a folder holding only these is one. */
+const DATA_ENTRIES = new Set([DATA_MARKER, 'engines', 'tools', '.DS_Store']);
 
 /** A size as the limits take them ('2g', '512m'). */
 export const isSize = (s: string) => (parseSize(s) ?? 0) > 0;
@@ -179,8 +181,10 @@ export async function writeSettings(file: string, s: Settings): Promise<void> {
 
 /**
  * A folder may hold packages and tools if it is new, empty, the app's own data
- * folder, or already holds them (it has the marker): never a folder with other
- * things in it, which the app would fill and could clear. Marked once accepted.
+ * folder, or already holds them (it has the marker, or only what packages and
+ * tools put there): never a folder with other things in it, which the app would
+ * fill and could clear. Marked once accepted (and by the runner when packages or
+ * tools first use a folder).
  */
 export async function checkDataDir(dir: string, defaultDir: string): Promise<void> {
   const folder = resolve(dir);
@@ -192,13 +196,12 @@ export async function checkDataDir(dir: string, defaultDir: string): Promise<voi
     } catch (e) {
       throw new HttpError(400, `${folder} cannot be used for packages and tools: ${(e as Error).message}`);
     }
-    if (entries.length && !entries.includes(DATA_MARKER)) {
+    if (!entries.includes(DATA_MARKER) && !entries.every((e) => DATA_ENTRIES.has(e))) {
       throw new HttpError(400, `${folder} already has other things in it. Choose an empty folder, or one the app already keeps packages and tools in.`);
     }
   }
   try {
-    await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, DATA_MARKER), 'kuraa keeps packages and tools in this folder.\n', { flag: 'a' });
+    await markDataDir(folder);
   } catch (e) {
     throw new HttpError(400, `${folder} cannot be used for packages and tools: ${(e as Error).message}`);
   }

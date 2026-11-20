@@ -124,6 +124,11 @@ describe('settings', () => {
     // Marked, it may be chosen again once it holds packages.
     writeFileSync(join(base, 'empty', 'cache.db'), '');
     await checkDataDir(join(base, 'empty'), app);
+    // A data folder from before the marker, holding only what packages and tools put there: marked now.
+    mkdirSync(join(base, 'older', 'tools', 'tinytex'), { recursive: true });
+    mkdirSync(join(base, 'older', 'engines'));
+    await checkDataDir(join(base, 'older'), app);
+    expect(existsSync(join(base, 'older', DATA_MARKER))).toBe(true);
     // Not a folder with other things in it.
     mkdirSync(join(base, 'papers'));
     writeFileSync(join(base, 'papers', 'thesis.md'), '# Thesis\n');

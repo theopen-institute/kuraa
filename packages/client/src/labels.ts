@@ -8,6 +8,9 @@ export const time = (iso: string | null) => {
   return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString();
 };
 
+/** A size people read: '54 MB' (never less than 1 MB, for something to download). */
+export const megabytes = (bytes: number) => `${Math.max(1, Math.round(bytes / 1e6)).toLocaleString()} MB`;
+
 /** A commit's time, with seconds. */
 export const when = (iso: string) => {
   const d = new Date(iso);

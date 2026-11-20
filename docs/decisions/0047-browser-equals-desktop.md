@@ -59,11 +59,15 @@ and opens them again with the new options. The address and access code do not ch
 reloads. The desktop app no longer stops and restarts its hub, nor reloads the window itself.
 
 The folder for **packages and tools** (`dataDir`) must be new, empty, the app's own data folder, or one
-already used for them: accepted folders get a small marker file, `.kuraa-data`. A folder with other
-things in it is refused, so a mistaken choice cannot be filled (or later cleared) by the app.
+already used for them: it has a small marker file, `.kuraa-data`, or holds only what packages and tools
+put there (`engines/`, `tools/`). The marker is written when a folder is accepted, and by the runner
+the first time packages or tools ([0045](0045-tools.md)) use a folder. A folder with other things in it
+is refused, so a mistaken choice cannot be filled (or later cleared) by the app.
 
 `allowInstalls` is on by default everywhere, as a setting (`--no-allow-installs` turns it off as a
-flag). Running R is on by default too, where the R engine is loaded.
+flag). It gates installing packages and downloading, removing and adding parts to tools alike, so
+these follow Preferences once saved; what is refused says to turn it on there. Running R is on by
+default too, where the R engine is loaded.
 
 **`pnpm host` alone is "your workspaces"**, like the desktop app: with neither `--dir` nor
 `--workspaces`, new workspaces go in the settings' folder (default `~/Documents/kuraa`), and the list

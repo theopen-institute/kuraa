@@ -16,11 +16,18 @@ describe('R image recipe', () => {
     expect(context).toEqual({});
   });
 
+  it('can render documents: rmarkdown, pandoc, and Typst for PDFs (its release checked)', () => {
+    const { containerfile } = imageRecipe(undefined, ws());
+    expect(containerfile).toContain('RUN command -v pandoc >/dev/null || /rocker_scripts/install_pandoc.sh\n');
+    expect(containerfile).toContain('/usr/lib/rstudio-server/bin/quarto/bin/tools/$arch/typst');
+    expect(containerfile).toContain('sha256sum -c -');
+  });
+
   it('adds the packages, system libraries and image the workspace asks for', () => {
     const { containerfile } = imageRecipe({ image: 'docker.io/rocker/r-ver:4.4.2', packages: ['dplyr', 'data.table'], system: ['libxml2-dev'] }, ws(), { images: ['docker.io/rocker/r-ver:4.4.2'] });
     expect(containerfile).toContain('FROM docker.io/rocker/r-ver:4.4.2\n');
     expect(containerfile).toContain('evaluate jsonlite knitr ragg rmarkdown dplyr data.table');
-    expect(containerfile).toContain('libwebp-dev libxml2-dev');
+    expect(containerfile).toContain('libwebp-dev curl xz-utils libxml2-dev');
   });
 
   it('restores renv.lock when asked and present', () => {

@@ -232,12 +232,18 @@ importers:
       '@kuraa/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@kuraa/formats':
+        specifier: workspace:*
+        version: link:../../packages/formats
       '@kuraa/host':
         specifier: workspace:*
         version: link:../../packages/host
       '@kuraa/run-components':
         specifier: workspace:*
         version: link:../../packages/run-components
+      '@kuraa/run-kit':
+        specifier: workspace:*
+        version: link:../../packages/run-kit
       electron:
         specifier: 45.3.2
         version: 45.3.2(supports-color@7.2.0)

@@ -12,12 +12,13 @@
 //   --workspaces <folder>               where new workspaces go (default: Documents/kuraa)
 //
 // For folders it opens itself, the configuration is its Preferences
-// (preferences.ts), or flags, which win over them:
+// (preferences.ts: everything a host's flags set that suits one person's own
+// computer, decision 0046), or these flags, which win over them:
 //   --engine <id>...     engines to turn on (default: r); --engine none for none
 //   --env <id>           where code runs (default: the only environment loaded)
 //   --format <id>...     document formats to turn on (default: all)
-//   --component <spec>...   more run components (engines, environments)
-//   --allow-unsandboxed  allow an environment that is not sandboxed
+//   --component <spec>...   more run components (engines, environments): flag only, see 0046
+//   --allow-unsandboxed  allow an environment that is not sandboxed: flag only, see 0046
 //   --r-image <image>... base images a workspace may name for R (besides the default)
 //   --peer               sync with the folder's paired devices (pair them with kuraa-host invite / join)
 // The components that ship (@kuraa/run-components: R, Podman containers) are loaded.
@@ -34,7 +35,9 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, personKeys, startHub, useGit, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
+import { DEFAULT_TIMINGS, defaultDataDir, gitIdentity, inspectFolder, lastResort, personKeys, startHub, useGit, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
+import { standardTypes } from '@kuraa/formats';
+import { DEFAULT_POLICY } from '@kuraa/run-kit';
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 import { preferencesFrom, readPreferences, writePreferences, type Preferences, type PreferencesView } from './preferences.js';
@@ -109,6 +112,8 @@ function setByFlags(): (keyof Preferences)[] {
   if (flags.peer === true) keys.push('syncDevices');
   if (list(flags.engine)) keys.push('runCode');
   if (list(flags['r-image'])) keys.push('rImages');
+  if (list(flags.format)) keys.push('formats');
+  if (typeof flags.env === 'string') keys.push('environment');
   if (typeof flags.workspaces === 'string') keys.push('workspaces');
   return keys;
 }
@@ -122,26 +127,41 @@ let quitting = false;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
 
-/** What runs, for folders this app opens itself: R if the preferences say so, unless --engine says otherwise, where --env says. */
+/** Environments the app has loaded (those that ship; --component may add more). */
+const shippedEnvironments = () => standardRunComponents.flatMap((c) => c.environments ?? []);
+
+/** What runs, for folders this app opens itself: the preferences, with flags winning where given. */
 function runOptions(): RunOptions {
   const engines = (list(flags.engine) ?? (preferences.runCode ? ['r'] : [])).filter((e) => e !== 'none');
+  // A preferred environment that is no longer loaded is passed over, not an error at every start.
+  const preferred = preferences.environment && shippedEnvironments().some((e) => e.id === preferences.environment) ? preferences.environment : undefined;
   return {
     engines,
-    environment: typeof flags.env === 'string' ? flags.env : undefined,
+    environment: typeof flags.env === 'string' ? flags.env : preferred,
     components: [...standardRunComponents, ...(list(flags.component) ?? [])],
     allowUnsandboxed: flags['allow-unsandboxed'] === true,
-    allowInstalls: true,
-    // Base images a workspace may name for R, besides the default.
-    options: { r: { images: list(flags['r-image']) ?? preferences.rImages } },
+    allowInstalls: preferences.allowInstalls,
+    allowWorkspaceWrite: preferences.allowWrite,
+    allowNetwork: preferences.allowNetwork,
+    dataDir: preferences.dataDir ?? undefined,
+    memory: preferences.memory ?? undefined,
+    cpus: preferences.cpus ?? undefined,
+    disk: preferences.disk ?? undefined,
+    // Base images a workspace may name for R, besides the default; the Podman program, if chosen.
+    options: { r: { images: list(flags['r-image']) ?? preferences.rImages }, podman: { podman: preferences.podman ?? undefined } },
   };
 }
 
-/** Host timings may be shortened for automated tests. */
+/** Host timings: the preferences, which automated tests may shorten further (KURAA_TIMINGS). */
 function timings(): Partial<HostTimings> {
+  const chosen: Partial<HostTimings> = {
+    ...(preferences.saveSeconds !== null ? { flushMs: Math.round(preferences.saveSeconds * 1000) } : {}),
+    ...(preferences.versionSeconds !== null ? { idleCommitMs: Math.round(preferences.versionSeconds * 1000) } : {}),
+  };
   try {
-    return JSON.parse(process.env.KURAA_TIMINGS ?? '{}') as Partial<HostTimings>;
+    return { ...chosen, ...(JSON.parse(process.env.KURAA_TIMINGS ?? '{}') as Partial<HostTimings>) };
   } catch {
-    return {};
+    return chosen;
   }
 }
 
@@ -169,8 +189,8 @@ async function ensureHub(): Promise<RunningHub> {
     port: 0,
     // What runs and which formats are on: this app's flags.
     // This app is its own operator: the person using it sets up the online copy, with their own git credentials.
-    hosts: { run: runOptions(), formats: list(flags.format), timings: timings(), manageOnline: true },
-    peers: { everywhere: flags.peer === true || preferences.syncDevices },
+    hosts: { run: runOptions(), formats: list(flags.format) ?? knownFormats(preferences.formats), timings: timings(), manageOnline: true },
+    peers: { everywhere: flags.peer === true || preferences.syncDevices, ...(preferences.bootstrap.length ? { bootstrap: preferences.bootstrap } : {}) },
     log: (m) => console.log(`[hub] ${m}`),
   });
   console.log(`[desktop] hub ${hub.url} on ${hub.hub.root}`);
@@ -247,9 +267,10 @@ function showPreferences(): void {
   preferencesWindow = new BrowserWindow({
     parent: window ?? undefined,
     modal: process.platform !== 'darwin',
-    width: 560,
-    height: 560,
-    resizable: false,
+    width: 600,
+    height: 680,
+    minHeight: 420,
+    resizable: true,
     minimizable: false,
     maximizable: false,
     title: 'Preferences',
@@ -260,17 +281,34 @@ function showPreferences(): void {
   void preferencesWindow.loadFile(PREFERENCES);
 }
 
-/** What the Preferences window shows: the preferences, which flags override, and whether code can run. */
+/** The preferred formats the app has (a format since removed is passed over); undefined for all. */
+function knownFormats(ids: string[] | null): string[] | undefined {
+  const known = ids?.filter((id) => standardTypes.some((t) => t.id === id));
+  return known?.length ? known : undefined;
+}
+
+/** What the Preferences window shows: the preferences, which flags override, the defaults, and whether code can run. */
 async function preferencesView(): Promise<PreferencesView> {
   const run = runOptions();
-  const environments = await Promise.all(standardRunComponents.flatMap((c) => c.environments ?? []).map(async (e) => {
+  const environments = await Promise.all(shippedEnvironments().map(async (e) => {
     try {
-      return { label: e.label, ...(await e.check(run.options?.[e.id])) };
+      return { id: e.id, label: e.label, ...(await e.check(run.options?.[e.id])) };
     } catch (err) {
-      return { label: e.label, available: false, message: (err as Error).message };
+      return { id: e.id, label: e.label, available: false, message: (err as Error).message };
     }
   }));
-  return { preferences, fromFlags: setByFlags(), defaultWorkspaces: defaultWorkspaces(), environments };
+  return {
+    preferences,
+    fromFlags: setByFlags(),
+    defaultWorkspaces: defaultWorkspaces(),
+    defaultDataDir: defaultDataDir(),
+    defaults: {
+      memory: DEFAULT_POLICY.memory, cpus: DEFAULT_POLICY.cpus, disk: DEFAULT_POLICY.disk,
+      saveSeconds: DEFAULT_TIMINGS.flushMs / 1000, versionSeconds: DEFAULT_TIMINGS.idleCommitMs / 1000,
+    },
+    environments,
+    formats: standardTypes.map((t) => ({ id: t.id, label: t.label })),
+  };
 }
 
 /**
@@ -294,7 +332,8 @@ async function personDo(fn: () => Promise<unknown>): Promise<string | null> {
 
 /** Save the preferences; if they changed, restart this app's hub (which commits first) so they apply. */
 async function savePreferences(v: unknown): Promise<void> {
-  const next = preferencesFrom(v);
+  // Strict: a value that is wrong is refused with what is wrong, shown in the window, which stays open.
+  const next = preferencesFrom(v, true);
   const changed = JSON.stringify(next) !== JSON.stringify(preferences);
   preferences = next;
   await writePreferences(PREFERENCES_FILE, next);
@@ -371,9 +410,15 @@ ipcMain.handle('kuraa:show-preferences', (e) => {
   if (fromOwnPage(e)) showPreferences();
 });
 ipcMain.handle('kuraa:save-preferences', (e, v: unknown) => (fromOwnPage(e) ? savePreferences(v) : undefined));
-ipcMain.handle('kuraa:choose-folder', async (e) => {
+ipcMain.handle('kuraa:choose-folder', async (e, purpose: unknown) => {
   if (!fromOwnPage(e) || !preferencesWindow) return null;
-  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openDirectory', 'createDirectory'], message: D.folder.whereNew });
+  const message = purpose === 'data' ? D.folder.whereData : D.folder.whereNew;
+  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openDirectory', 'createDirectory'], message });
+  return r.canceled ? null : (r.filePaths[0] ?? null);
+});
+ipcMain.handle('kuraa:choose-file', async (e) => {
+  if (!fromOwnPage(e) || !preferencesWindow) return null;
+  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openFile', 'treatPackageAsDirectory'], message: D.folder.whichPodman });
   return r.canceled ? null : (r.filePaths[0] ?? null);
 });
 // This computer's person's key, for the menu's You section (packages/client/src/PersonKey.vue).

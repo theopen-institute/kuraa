@@ -10,98 +10,270 @@
       :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #a5a198; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; --ok: #7cc4ad; color-scheme: dark; }
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 system-ui, -apple-system, sans-serif; }
-    form { padding: 18px 22px; display: grid; gap: 16px; }
+    form { height: 100%; display: grid; grid-template-rows: 1fr auto; }
+    .scroll { overflow-y: auto; padding: 18px 22px 8px; display: grid; gap: 18px; align-content: start; }
+    .footer { padding: 10px 22px 16px; border-top: 1px solid var(--border); display: grid; gap: 8px; }
     fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
     legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
     .check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; }
     .check input { margin: 3px 0 0; }
     .hint { color: var(--muted); grid-column: 2; }
     .hint.flag { color: var(--warn); }
+    .hint.warn { color: var(--warn); }
     .status { grid-column: 2; }
     .status.ok { color: var(--ok); }
     .status.no { color: var(--warn); }
     .row { display: flex; gap: 8px; align-items: center; }
-    input[type=text], textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
+    .limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .limits label { display: grid; gap: 2px; color: var(--muted); }
+    .timing { display: grid; grid-template-columns: 1fr 6em; gap: 6px 10px; align-items: center; }
+    input[type=text], input[type=number], textarea, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
     textarea { min-height: 3.2em; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
     button { font: inherit; border-radius: 6px; padding: 5px 12px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); white-space: nowrap; }
     button.primary { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+    details { border-top: 1px solid var(--border); padding-top: 8px; }
+    details > summary { cursor: pointer; color: var(--muted); }
+    details[open] > summary { margin-bottom: 8px; }
+    details > div { display: grid; gap: 10px; }
     .actions { display: flex; gap: 8px; justify-content: flex-end; }
     .note { color: var(--muted); margin: 0; }
     .error { color: var(--warn); }
     .error:empty { display: none; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   </style>
 </head>
 <body>
-  <form id="form">
-    <fieldset>
-      <legend>Other computers</legend>
-      <label class="check"><input id="syncDevices" type="checkbox" data-testid="pref-sync" /> Sync every workspace with the other computers it is on
-        <span class="hint">Edits and history go directly between computers, and through the online copy where a workspace has one. Workspaces you invited people to, or joined from an invite link, always sync.</span>
-        <span class="hint flag" data-flag="syncDevices" hidden>Set by --peer on the command line.</span>
-      </label>
-    </fieldset>
-    <fieldset>
-      <legend>Running code</legend>
-      <label class="check"><input id="runCode" type="checkbox" data-testid="pref-run" /> Run R code in documents
-        <span class="status" id="environments" data-testid="pref-environments"></span>
-        <span class="hint flag" data-flag="runCode" hidden>Set by --engine on the command line.</span>
-      </label>
-      <label for="rImages" class="note">Other base images a workspace may use for R, one per line (the default needs none)</label>
-      <textarea id="rImages" data-testid="pref-images" spellcheck="false" placeholder="docker.io/rocker/r-ver:4.4.2"></textarea>
-      <span class="hint flag" data-flag="rImages" hidden>Set by --r-image on the command line.</span>
-    </fieldset>
-    <fieldset>
-      <legend>New workspaces</legend>
-      <div class="row">
-        <input id="workspaces" type="text" readonly data-testid="pref-workspaces" />
-        <button type="button" id="choose">Choose…</button>
-        <button type="button" id="reset">Default</button>
+  <form id="form" novalidate>
+    <div class="scroll">
+      <fieldset>
+        <legend>Other computers</legend>
+        <label class="check"><input id="syncDevices" type="checkbox" data-testid="pref-sync" /> Sync every workspace with the other computers it is on
+          <span class="hint">Edits and history go directly between computers, and through the online copy where a workspace has one. Workspaces you invited people to, or joined from an invite link, always sync.</span>
+          <span class="hint flag" data-flag="syncDevices" hidden>Set by --peer on the command line.</span>
+        </label>
+        <details data-testid="pref-network-advanced">
+          <summary>Advanced</summary>
+          <div>
+            <label for="bootstrap" class="note">Servers to find other computers through, one per line as host:port. Leave empty to use the public ones; a private network names its own.</label>
+            <textarea id="bootstrap" data-testid="pref-bootstrap" spellcheck="false" placeholder="node.example.org:49737"></textarea>
+          </div>
+        </details>
+      </fieldset>
+
+      <fieldset>
+        <legend>Kinds of documents</legend>
+        <div id="formats" data-testid="pref-formats"></div>
+        <span class="hint">A file whose kind is turned off opens as plain text.</span>
+        <span class="hint flag" data-flag="formats" hidden>Set by --format on the command line.</span>
+      </fieldset>
+
+      <fieldset>
+        <legend>Running code</legend>
+        <label class="check"><input id="runCode" type="checkbox" data-testid="pref-run" /> Run R code in documents
+          <span class="status" id="environments" data-testid="pref-environments"></span>
+          <span class="hint flag" data-flag="runCode" hidden>Set by --engine on the command line.</span>
+        </label>
+        <div id="environmentRow" hidden>
+          <label for="environment" class="note">Where code runs</label>
+          <select id="environment" data-testid="pref-environment"></select>
+          <span class="hint flag" data-flag="environment" hidden>Set by --env on the command line.</span>
+        </div>
+        <label class="check"><input id="allowInstalls" type="checkbox" data-testid="pref-installs" /> Let documents install packages and download tools
+          <span class="hint">Installs use the network, apart from your documents; the code in them never gets it this way.</span>
+        </label>
+        <details data-testid="pref-run-advanced">
+          <summary>Advanced</summary>
+          <div>
+            <div>
+              <div class="note">Limits for each document's code</div>
+              <div class="limits">
+                <label>Memory <input id="memory" type="text" data-testid="pref-memory" spellcheck="false" /></label>
+                <label>CPUs <input id="cpus" type="number" min="0.1" step="0.1" data-testid="pref-cpus" /></label>
+                <label>Disk <input id="disk" type="text" data-testid="pref-disk" spellcheck="false" /></label>
+              </div>
+              <span class="note">Sizes such as 4g or 512m. Leave empty for the default shown.</span>
+            </div>
+            <div>
+              <div class="note">What a workspace may ask for, in its settings file</div>
+              <label class="check"><input id="allowWrite" type="checkbox" data-testid="pref-allow-write" /> Let code change files in its own workspace
+                <span class="hint warn">Code could then rewrite or delete anything in the workspace. Your history keeps earlier versions.</span>
+              </label>
+              <label class="check"><input id="allowNetwork" type="checkbox" data-testid="pref-allow-network" /> Let code use the network
+                <span class="hint warn">Code could then send what it can read anywhere.</span>
+              </label>
+            </div>
+            <div>
+              <label for="rImages" class="note">Other base images a workspace may use for R, one per line (the default needs none)</label>
+              <textarea id="rImages" data-testid="pref-images" spellcheck="false" placeholder="docker.io/rocker/r-ver:4.4.2"></textarea>
+              <span class="hint flag" data-flag="rImages" hidden>Set by --r-image on the command line.</span>
+            </div>
+            <div>
+              <div class="note">The Podman program</div>
+              <div class="row">
+                <input id="podman" type="text" readonly data-testid="pref-podman" placeholder="Found automatically" />
+                <button type="button" id="choosePodman">Choose…</button>
+                <button type="button" id="resetPodman">Find it</button>
+              </div>
+            </div>
+            <div>
+              <div class="note">Where packages and tools are kept, shared by all workspaces</div>
+              <div class="row">
+                <input id="dataDir" type="text" readonly data-testid="pref-data-dir" />
+                <button type="button" id="chooseData">Choose…</button>
+                <button type="button" id="resetData">Default</button>
+              </div>
+              <span class="note">Moving it does not take what is already installed: packages are installed again as documents need them.</span>
+            </div>
+          </div>
+        </details>
+      </fieldset>
+
+      <fieldset>
+        <legend>New workspaces</legend>
+        <div class="row">
+          <input id="workspaces" type="text" readonly data-testid="pref-workspaces" />
+          <button type="button" id="choose">Choose…</button>
+          <button type="button" id="reset">Default</button>
+        </div>
+        <span class="hint flag" data-flag="workspaces" hidden>Set by --workspaces on the command line.</span>
+      </fieldset>
+
+      <fieldset>
+        <legend>Saving</legend>
+        <details data-testid="pref-saving-advanced">
+          <summary>Advanced</summary>
+          <div class="timing">
+            <label for="saveSeconds">Write edits to the file after this many seconds without typing</label>
+            <input id="saveSeconds" type="number" min="0.2" max="3600" step="0.1" data-testid="pref-save-seconds" />
+            <label for="versionSeconds">Save a version after this many seconds without typing</label>
+            <input id="versionSeconds" type="number" min="1" max="3600" step="1" data-testid="pref-version-seconds" />
+          </div>
+        </details>
+      </fieldset>
+    </div>
+    <div class="footer">
+      <p class="note">Saving restarts your workspaces, saving any edits first.</p>
+      <div class="error" id="error" role="alert" data-testid="pref-error"></div>
+      <div class="actions">
+        <button type="button" id="cancel">Cancel</button>
+        <button type="submit" class="primary" data-testid="pref-save" id="save" disabled>Save</button>
       </div>
-      <span class="hint flag" data-flag="workspaces" hidden>Set by --workspaces on the command line.</span>
-    </fieldset>
-    <p class="note">Saving restarts your workspaces, saving any edits first.</p>
-    <div class="error" id="error" role="alert" data-testid="pref-error"></div>
-    <div class="actions">
-      <button type="button" id="cancel">Cancel</button>
-      <button type="submit" class="primary" data-testid="pref-save" id="save" disabled>Save</button>
     </div>
   </form>
   <script>
     const $ = (id) => document.getElementById(id);
+    const lines = (id) => $(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
+    const empty = (id) => ($(id).value.trim() === '' ? null : $(id).value.trim());
     let defaultFolder = '';
+    let defaultData = '';
     let folder = null;
-    const showFolder = () => { $('workspaces').value = folder ?? defaultFolder; };
+    let dataDir = null;
+    let podman = null;
+    const show = () => {
+      $('workspaces').value = folder ?? defaultFolder;
+      $('dataDir').value = dataDir ?? defaultData;
+      $('podman').value = podman ?? '';
+    };
 
-    window.kuraaApp.preferences().then(({ preferences: p, fromFlags, defaultWorkspaces, environments }) => {
+    window.kuraaApp.preferences().then((view) => {
+      const { preferences: p, fromFlags, environments, formats, defaults } = view;
       $('syncDevices').checked = p.syncDevices;
+      $('bootstrap').value = p.bootstrap.join('\n');
       $('runCode').checked = p.runCode;
+      $('allowInstalls').checked = p.allowInstalls;
+      $('allowWrite').checked = p.allowWrite;
+      $('allowNetwork').checked = p.allowNetwork;
       $('rImages').value = p.rImages.join('\n');
-      defaultFolder = defaultWorkspaces;
+      $('memory').value = p.memory ?? '';
+      $('memory').placeholder = defaults.memory;
+      $('cpus').value = p.cpus ?? '';
+      $('cpus').placeholder = String(defaults.cpus);
+      $('disk').value = p.disk ?? '';
+      $('disk').placeholder = defaults.disk;
+      $('saveSeconds').value = p.saveSeconds ?? '';
+      $('saveSeconds').placeholder = String(defaults.saveSeconds);
+      $('versionSeconds').value = p.versionSeconds ?? '';
+      $('versionSeconds').placeholder = String(defaults.versionSeconds);
+      defaultFolder = view.defaultWorkspaces;
+      defaultData = view.defaultDataDir;
       folder = p.workspaces;
-      showFolder();
-      for (const key of fromFlags) for (const el of document.querySelectorAll(`[data-flag="${key}"]`)) el.hidden = false;
+      dataDir = p.dataDir;
+      podman = p.podman;
+      show();
+
+      // Kinds of documents: each one the app has, on unless the preferences name others.
+      for (const f of formats) {
+        const label = document.createElement('label');
+        label.className = 'check';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = f.id;
+        box.checked = !p.formats || p.formats.includes(f.id);
+        box.dataset.testid = `pref-format-${f.id}`;
+        label.append(box, ` ${f.label}`);
+        $('formats').append(label);
+      }
+
+      // Where code runs: a choice only when there is one to make.
+      if (environments.length > 1) {
+        $('environmentRow').hidden = false;
+        const auto = new Option('The only one available', '');
+        $('environment').append(auto, ...environments.map((e) => new Option(e.label, e.id)));
+        $('environment').value = p.environment ?? '';
+      }
       const env = $('environments');
       if (!environments.length) env.textContent = 'No environment to run code in is loaded.';
-      for (const e of environments) {
-        env.textContent = e.available ? `Code runs ${e.label}.` : e.message;
-        env.className = `status ${e.available ? 'ok' : 'no'}`;
+      const shown = environments.find((e) => e.id === p.environment) ?? environments[0];
+      if (shown) {
+        env.textContent = shown.available ? `Code runs ${shown.label}.` : shown.message;
+        env.className = `status ${shown.available ? 'ok' : 'no'}`;
       }
+
+      for (const key of fromFlags) for (const el of document.querySelectorAll(`[data-flag="${key}"]`)) el.hidden = false;
       $('save').disabled = false;
     });
+
     $('choose').addEventListener('click', async () => {
-      const picked = await window.kuraaApp.chooseFolder();
-      if (picked) { folder = picked; showFolder(); }
+      const picked = await window.kuraaApp.chooseFolder('workspaces');
+      if (picked) { folder = picked; show(); }
     });
-    $('reset').addEventListener('click', () => { folder = null; showFolder(); });
+    $('reset').addEventListener('click', () => { folder = null; show(); });
+    $('chooseData').addEventListener('click', async () => {
+      const picked = await window.kuraaApp.chooseFolder('data');
+      if (picked) { dataDir = picked; show(); }
+    });
+    $('resetData').addEventListener('click', () => { dataDir = null; show(); });
+    $('choosePodman').addEventListener('click', async () => {
+      const picked = await window.kuraaApp.chooseFile();
+      if (picked) { podman = picked; show(); }
+    });
+    $('resetPodman').addEventListener('click', () => { podman = null; show(); });
     $('cancel').addEventListener('click', () => window.close());
     $('form').addEventListener('submit', (e) => {
       e.preventDefault();
       $('error').textContent = '';
+      const boxes = [...$('formats').querySelectorAll('input[type=checkbox]')];
+      const on = boxes.filter((b) => b.checked).map((b) => b.value);
       window.kuraaApp.savePreferences({
         syncDevices: $('syncDevices').checked,
+        bootstrap: lines('bootstrap'),
         runCode: $('runCode').checked,
-        rImages: $('rImages').value.split('\n').map((s) => s.trim()).filter(Boolean),
+        environment: $('environment').value || null,
+        rImages: lines('rImages'),
+        memory: empty('memory'),
+        cpus: empty('cpus'),
+        disk: empty('disk'),
+        allowWrite: $('allowWrite').checked,
+        allowNetwork: $('allowNetwork').checked,
+        allowInstalls: $('allowInstalls').checked,
+        podman,
+        dataDir,
+        // All on is the default: kept as such, so kinds added later are on too.
+        formats: on.length === boxes.length ? null : on,
+        saveSeconds: empty('saveSeconds'),
+        versionSeconds: empty('versionSeconds'),
         workspaces: folder,
       }).catch((err) => { $('error').textContent = `Could not save: ${err.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`; });
     });

@@ -30,7 +30,8 @@ contextBridge.exposeInMainWorld('kuraa', bridge);
 const appBridge: AppBridge = {
   preferences: () => ipcRenderer.invoke('kuraa:preferences') as Promise<PreferencesView>,
   savePreferences: (p) => ipcRenderer.invoke('kuraa:save-preferences', p),
-  chooseFolder: () => ipcRenderer.invoke('kuraa:choose-folder') as Promise<string | null>,
+  chooseFolder: (purpose) => ipcRenderer.invoke('kuraa:choose-folder', purpose) as Promise<string | null>,
+  chooseFile: () => ipcRenderer.invoke('kuraa:choose-file') as Promise<string | null>,
 };
 contextBridge.exposeInMainWorld('kuraaApp', appBridge);
 

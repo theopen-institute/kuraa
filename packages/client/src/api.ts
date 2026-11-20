@@ -87,6 +87,32 @@ export interface CommitInfo {
   kind: 'autosave' | 'merge' | 'commit';
 }
 
+export type RenderFormat = 'html' | 'docx' | 'pdf';
+/** A document's latest render in one format (the host's renders.ts). */
+export interface RenderState {
+  path: string;
+  format: RenderFormat;
+  state: 'rendering' | 'done' | 'failed';
+  message: string;
+  progress: string | null;
+  log: string;
+  by: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  output: { at: string; size: number } | null;
+}
+export interface RenderInfo {
+  /** Formats the document can be rendered to here; none if it cannot be. */
+  formats: RenderFormat[];
+  /** Why it cannot be rendered now, if it cannot. */
+  unavailable: string | null;
+  renders: RenderState[];
+}
+/** Where a phrase was found (the host's search.ts). */
+export interface SearchMatch { line: number; column: number; text: string; at: number }
+export interface SearchFile { path: string; type: string | null; title?: string | null; live: boolean; matches: SearchMatch[] }
+export interface SearchResult { files: SearchFile[]; truncated: boolean }
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -165,6 +191,23 @@ export class HostApi {
   packages(engine: string) { return this.json<{ packages: PackageInfo[] }>(`/api/packages?engine=${encodeURIComponent(engine)}`).then((r) => r.packages); }
   installPackages(engine: string, refs: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/install', { method: 'POST', body: JSON.stringify({ engine, refs, by }) }); }
   removePackages(engine: string, names: string[], by: { name: string; email: string; color: string }) { return this.json<PackageResult>('/api/packages/remove', { method: 'POST', body: JSON.stringify({ engine, names, by }) }); }
+  /** What a document can be rendered to here, and its latest renders. */
+  renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
+  /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }): Promise<RenderState> {
+    try {
+      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by }) });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 422) return { path, format, state: 'failed', message: e.message, progress: null, log: '', by: by.name, startedAt: '', finishedAt: null, output: null };
+      throw e;
+    }
+  }
+  /** A document's latest output in a format. */
+  async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
+    return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
+  }
+  /** Search the workspace's text files, and open documents as they are now. */
+  search(query: string, caseSensitive: boolean) { return this.json<SearchResult>(`/api/search?q=${encodeURIComponent(query)}${caseSensitive ? '&case=1' : ''}`); }
   clearRuns(path: string, chunk?: ChunkRef) { return this.json('/api/runs/clear', { method: 'POST', body: JSON.stringify({ path, chunk }) }); }
 }
 

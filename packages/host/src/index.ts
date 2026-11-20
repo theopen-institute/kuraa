@@ -5,6 +5,7 @@ import { localUrl } from './http.js';
 export { Host, DEFAULT_TIMINGS, type HostOptions, type HostTimings, type TreeEntry } from './host.js';
 export { HttpError } from './errors.js';
 export { useGit } from './git.js';
+export { lastResort, type LastResortOptions } from './lastresort.js';
 export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';

@@ -241,5 +241,5 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
 export const pandocEditor: FormatEditor = {
   ...createPandocEditor(),
   label: 'Markdown editing',
-  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), footnotes kept numbered and in order, the header (title, authors, …) edited in its own dialog, and conflict blocks shown with a way to choose.',
+  description: 'Formatting as you type markdown, its keys (⌘B, ⌘I, …), footnotes kept numbered and in order, citations from the bibliography, images pasted into the workspace, tables, the header (title, authors, …) edited in its own dialog, and conflict blocks shown with a way to choose.',
 };

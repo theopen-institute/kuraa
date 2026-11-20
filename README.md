@@ -65,8 +65,9 @@ menu, and cannot add others; `--workspaces` instead serves a folder of workspace
 | `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
 | `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
 
-Everyone who has the URL and token can edit. Each person sets a display name, an email (for
-co-author credit) and a cursor colour under **Settings** in the client.
+Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
+what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
+section changes them. In the app the URL and token are the **server address** and **access code**.
 
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
@@ -77,7 +78,10 @@ marked. Paste or drop an image to keep it in `images/` beside the document; `| a
 makes a table (Tab between cells, right-click for rows and columns; **Insert table** in the menu);
 `$$` then Enter starts display math. ⌘F finds and replaces, ⌥⌘O shows the outline, and ⌥⌘N goes to
 the next conflict; clicking a file's conflict count opens it at the first
-([decision 0040](docs/decisions/0040-writing-in-the-editor.md)).
+([decision 0040](docs/decisions/0040-writing-in-the-editor.md)). An empty document says how to start,
+and ⌘/ (Ctrl+/), the menu, or the desktop app's Help menu lists everything that can be typed and
+pressed, from the same tables the editor binds its keys from
+([decision 0044](docs/decisions/0044-polish.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;
@@ -85,8 +89,11 @@ text and source files by filename, each with a small icon its type defines (a pa
 settings, a bibliography, …: [decision 0023](docs/decisions/0023-file-icons.md)). A new document is asked for its title, and its filename is made
 from it (`Tidal notes: Café` → `tidal-notes-cafe.md`); **Rename…** changes a document's title and
 its filename, together or apart ([decision 0022](docs/decisions/0022-titles-and-filenames.md)). Drag a file or folder onto a folder to move it there, or onto the
-workspace name to move it to the top level; each move is committed. Right-click a file for
-**Open**, **Header…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it and **Rename…** (everything in it goes with it).
+workspace name to move it to the top level, or use **Move to…** in its right-click menu; each move is
+committed. Right-click a file for **Open**, **Header…**, **Rename…**, **Move to…**, a new file or folder
+beside it and **Delete…**, or a folder for a new file or folder in it, **Rename…** (everything in it goes
+with it) and **Move to…**. The list works from the keyboard as a tree: arrows move and open folders,
+Enter opens, F2 renames, Delete deletes, Shift+F10 shows the menu.
 
 A Markdown or R Markdown document's **header** (the YAML block at the top: title, authors, date,
 bibliography, PDF and HTML settings, …) is not shown in the page. **Header…** opens it as fields
@@ -94,13 +101,19 @@ to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 
 Everything else is in the **menu**, from the bottom of the sidebar or
-⌘, (Ctrl+,): the document's **Source** (the markdown, which you can edit there too, alongside
+⌘, (Ctrl+,), which takes the keyboard's focus as every dialog does: the document's **Source** (the markdown, which you can edit there too, alongside
 others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
-**Header…**, **Save version**, **Preview** (below), when it was last written and committed; the code session; the workspace's branch,
+**Header…**, **Save version**, **Preview** (below), when it was last saved and kept in the history; the code session; the workspace,
 **Search…** (⇧⌘F: every text file, and open documents as they are being typed; a result opens the
-file at the match, [0042](docs/decisions/0042-search.md)), **Sync** and who is here; **Components…**; and your settings. The bottom of the sidebar shows whether you are
-connected and how many others are here. Passing news (an outside edit merged, a conflict) appears
-as a note in the corner.
+file at the match, [0042](docs/decisions/0042-search.md)), **Sync** (offered once there is an online
+copy or another device; it says "Up to date" or how many changes it brought in) and who is here;
+**Components…** and **Markdown and shortcuts**; and your settings. Commit ids and branch names are
+behind **Details**. The bottom of the sidebar shows whether you are connected and how many others are
+here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
+**Try again now**. Saving paused or failing (git busy outside the app) is a banner while it lasts.
+Passing news (an outside edit merged) appears as a note in the corner; an outside edit that
+conflicted has **Open** and **Compare** in its note. Errors are said in plain words, with what was
+actually said behind **Details** ([decision 0044](docs/decisions/0044-polish.md)).
 
 A past version opened from **History** (shown by its date and who made it) can be compared with the
 document now (**Compare with now**: changed paragraphs, the words in them marked) or restored
@@ -282,7 +295,7 @@ changes to the host, session, kernel or format packages restart the host, and op
 reconnect without losing anything typed. Ctrl+C writes and commits pending edits before exiting.
 
 To point the dev client at some other host instead, run `pnpm web:dev` and enter that host's
-URL and token in **Settings**.
+URL and token in the welcome, or later in the menu's **Server and access code…**.
 
 ## Run the desktop app
 
@@ -302,7 +315,8 @@ changes appear in the editor. Quitting writes and commits any pending edits.
 
 Joining a shared host or hub runs none of the app's own; the launcher leads back to your workspaces.
 
-**Preferences…** (in the app menu on a Mac, ⌘,; in File elsewhere) sets what the flags would: syncing with other
+**Preferences…** (in the app menu on a Mac, ⌥⌘,; in File elsewhere, Ctrl+Alt+,; or **App preferences…** in
+the in-app menu, which keeps ⌘, for itself) sets what the flags would: syncing with other
 devices, running R code (and whether Podman is ready for it), base images R may use, and where new
 workspaces go. Saving restarts your workspaces, committing pending edits first. A flag given on the
 command line wins over its preference.
@@ -378,6 +392,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
 | — | `packages/host/test/render.test.ts`, `render-podman.test.ts`, `tests/e2e/render.spec.ts`: documents render to HTML, Word and PDF in Podman, from the live text, never into the workspace, previewed without running anything (Podman ones skipped without it) |
 | — | `packages/host/test/search.test.ts`, `tests/e2e/search.spec.ts`: search finds text in every text file and in what is being typed, and opens the match; `tests/e2e/versions.spec.ts`: past versions compared and restored |
+| — | `packages/client/test/polish.test.ts`, `packages/format-pandoc/test/editor-help.test.ts`, `tests/e2e/polish.spec.ts`: the shortcuts sheet lists what is bound, errors in plain words, the offline banner, the keyboard file tree, dialogs keeping focus |
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |

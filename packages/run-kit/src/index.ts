@@ -256,6 +256,59 @@ export interface Engine {
   open(ctx: EngineContext): EngineSession;
   /** If the engine manages packages for a workspace. */
   packages?: PackageManager;
+  /** If the engine renders documents (R: R Markdown and Markdown, to HTML, Word and PDF). */
+  render?: DocumentRenderer;
+}
+
+// ---------------------------------------------------------------------------
+// Rendering documents: a whole document to a file people read elsewhere (knitting).
+// Like a run, a render's processes start through the environment, with the
+// workspace read-only and no network, whatever the workspace asks for.
+
+export type RenderFormat = 'html' | 'docx' | 'pdf';
+
+export interface RenderContext extends ComponentContext {
+  /**
+   * An empty folder on the host for this render, writable by its processes
+   * (see PathView): intermediate files and the output go here, never into the
+   * workspace.
+   */
+  scratch: string;
+  /**
+   * The longest its processes may run once started, in ms (building an image
+   * does not count): past it, the renderer ends them and says so.
+   */
+  timeLimitMs: number;
+  /** Aborted when the render is no longer wanted (the host is closing): end its processes. */
+  signal: AbortSignal;
+}
+
+export interface RenderRequest {
+  /** The document, on the host (inside the workspace). */
+  input: string;
+  format: RenderFormat;
+}
+
+export interface RenderResult {
+  ok: boolean;
+  /**
+   * Where the output is, relative to scratch ('out/document.html'). The host
+   * reads it from there, refusing links and anything but a plain file: the
+   * process that made it ran people's code.
+   */
+  output?: string;
+  /** What to tell people, in plain words: what was made, or why not. */
+  message: string;
+  /** What the tools said (rmarkdown's and pandoc's log), for when something went wrong. */
+  log: string;
+}
+
+/** Renders documents of some file types to some formats, through the engine's environment. */
+export interface DocumentRenderer {
+  /** File extensions it renders, lower case, with the dot: ['.rmd', '.md']. */
+  extensions: string[];
+  formats: RenderFormat[];
+  render(ctx: RenderContext, req: RenderRequest): Promise<RenderResult>;
 }
 
 // ---------------------------------------------------------------------------

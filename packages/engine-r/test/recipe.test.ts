@@ -12,14 +12,14 @@ describe('R image recipe', () => {
   it('starts from rocker/r-ver and installs the driver packages', () => {
     const { containerfile, context } = imageRecipe(undefined, ws());
     expect(containerfile).toContain(`FROM ${DEFAULT_IMAGE}\n`);
-    expect(containerfile).toContain('RUN install2.r --error --skipinstalled evaluate jsonlite knitr ragg\n');
+    expect(containerfile).toContain('RUN install2.r --error --skipinstalled evaluate jsonlite knitr ragg rmarkdown\n');
     expect(context).toEqual({});
   });
 
   it('adds the packages, system libraries and image the workspace asks for', () => {
     const { containerfile } = imageRecipe({ image: 'docker.io/rocker/r-ver:4.4.2', packages: ['dplyr', 'data.table'], system: ['libxml2-dev'] }, ws(), { images: ['docker.io/rocker/r-ver:4.4.2'] });
     expect(containerfile).toContain('FROM docker.io/rocker/r-ver:4.4.2\n');
-    expect(containerfile).toContain('evaluate jsonlite knitr ragg dplyr data.table');
+    expect(containerfile).toContain('evaluate jsonlite knitr ragg rmarkdown dplyr data.table');
     expect(containerfile).toContain('libwebp-dev libxml2-dev');
   });
 

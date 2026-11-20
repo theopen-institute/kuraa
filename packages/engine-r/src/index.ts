@@ -22,8 +22,10 @@ import { R_DRIVER, REPLY_PREFIX } from './driver.js';
 import { imageRecipe } from './recipe.js';
 import { layout, rPackages } from './packages.js';
 import { Capped, splitLines, writeIfChanged } from './lines.js';
+import { rRenderer } from './render.js';
 
 export { DEFAULT_IMAGE, imageRecipe, type ROptions } from './recipe.js';
+export { rRenderer } from './render.js';
 export { checkRefs, formatManifest, readManifest, MANIFEST, type Manifest } from './packages.js';
 
 /** How long R has to say it is ready, once its process has started. */
@@ -290,6 +292,7 @@ export const rEngine: Engine = {
   handles: ['r'],
   open: (ctx) => new RSession(ctx),
   packages: rPackages,
+  render: rRenderer,
 };
 
 export default defineRunComponent({ name: '@kuraa/engine-r', engines: [rEngine] });

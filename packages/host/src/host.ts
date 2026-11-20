@@ -15,6 +15,7 @@ import { Backups } from './backups.js';
 import { serialQueue } from './serial.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
+import { Renders } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
 import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
@@ -164,6 +165,8 @@ export class Host {
   private readonly byRoom = new Map<string, RoomRecord>();
   private relay!: Relay;
   runner!: Runner;
+  /** Documents rendered to HTML, Word and PDF (renders.ts). */
+  renders!: Renders;
   private watcher: FSWatcher | null = null;
   private cacheDir = '';
   private watchTimers = new Map<string, NodeJS.Timeout>();
@@ -237,6 +240,16 @@ export class Host {
       },
       log: (m) => this.log(m),
     });
+    this.renders = new Renders({
+      root: this.dir,
+      stateDir: join(await this.git.gitDir(), 'kuraa'),
+      runner: this.runner,
+      flush: async (path) => {
+        const rec = this.records.get(`${await this.git.branch()}:${path}`);
+        if (rec) await this.serial(() => this.flushNow(rec));
+      },
+      log: (m) => this.log(m),
+    });
     if (this.runner.enabled) {
       const env = (await this.runner.describe()).environment!;
       this.log(`running code: ${this.runner.turnedOn.join(', ')}, ${env.label}${env.sandboxed ? '' : ' (NOT SANDBOXED)'}`);
@@ -280,6 +293,7 @@ export class Host {
     if (this.closed) return;
     this.closed = true;
     this.backups.close();
+    this.renders?.close();
     this.watcher?.close();
     for (const t of this.watchTimers.values()) clearTimeout(t);
     await this.serial(async () => {

@@ -28,6 +28,27 @@ export interface ROptions {
   images?: string[];
 }
 
+/**
+ * Typst, for PDFs without a TeX installation of several gigabytes: the one
+ * RStudio's Quarto brings (rocker/tidyverse has it), else a pinned release,
+ * checked against its checksum.
+ */
+const TYPST_VERSION = '0.14.2';
+const TYPST_SHA256: Record<string, string> = {
+  x86_64: 'a6044cbad2a954deb921167e257e120ac0a16b20339ec01121194ff9d394996d',
+  aarch64: '491b101aa40a3a7ea82a3f8a6232cabb4e6a7e233810082e5ac812d43fdcd47a',
+};
+const TYPST = [
+  'RUN arch=$(uname -m); quarto=/usr/lib/rstudio-server/bin/quarto/bin/tools/$arch/typst; \\',
+  '  if command -v typst >/dev/null; then :; \\',
+  '  elif [ -x "$quarto" ]; then ln -s "$quarto" /usr/local/bin/typst; \\',
+  '  else case "$arch" in ' + Object.entries(TYPST_SHA256).map(([a, sum]) => `${a}) sum=${sum};;`).join(' ') + ' *) echo "No Typst for $arch: PDFs need LaTeX"; exit 0;; esac; \\',
+  `    curl -fsSL -o /tmp/typst.tar.xz https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-$arch-unknown-linux-musl.tar.xz \\`,
+  '    && echo "$sum  /tmp/typst.tar.xz" | sha256sum -c - \\',
+  '    && tar -xJf /tmp/typst.tar.xz -C /tmp && mv /tmp/typst-$arch-unknown-linux-musl/typst /usr/local/bin/typst \\',
+  '    && rm -rf /tmp/typst.tar.xz /tmp/typst-$arch-unknown-linux-musl; fi',
+].join('\n');
+
 const names = (v: unknown, what: string): string[] => {
   if (v === undefined) return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && NAME.test(x))) throw new Error(`${what} must be a list of plain package names.`);
@@ -50,11 +71,14 @@ export function imageRecipe(requirements: unknown, workspace: string, options?: 
   const lines = [
     `FROM ${image}`,
     'RUN apt-get update && apt-get install -y --no-install-recommends \\',
-    `    ${['libfontconfig1-dev', 'libfreetype6-dev', 'libharfbuzz-dev', 'libfribidi-dev', 'libpng-dev', 'libtiff5-dev', 'libjpeg-dev', 'libwebp-dev', ...system].join(' ')} \\`,
+    `    ${['libfontconfig1-dev', 'libfreetype6-dev', 'libharfbuzz-dev', 'libfribidi-dev', 'libpng-dev', 'libtiff5-dev', 'libjpeg-dev', 'libwebp-dev', 'curl', 'xz-utils', ...system].join(' ')} \\`,
     ' && rm -rf /var/lib/apt/lists/*',
-    `RUN install2.r --error --skipinstalled evaluate jsonlite knitr ragg ${packages.join(' ')}`.trimEnd(),
+    `RUN install2.r --error --skipinstalled evaluate jsonlite knitr ragg rmarkdown ${packages.join(' ')}`.trimEnd(),
     // pak installs packages for the workspace (see packages.ts), with their system requirements known.
     `RUN R -q -e 'install.packages("pak", repos = sprintf("https://r-lib.github.io/p/pak/stable/%s/%s/%s", .Platform$pkgType, R.Version()$os, R.Version()$arch))'`,
+    // Rendering documents (render.ts): pandoc (rocker's images other than r-ver have it), and Typst for PDFs.
+    'RUN command -v pandoc >/dev/null || /rocker_scripts/install_pandoc.sh',
+    TYPST,
   ];
   const context: Record<string, string> = {};
   const lockfile = join(workspace, 'renv.lock');

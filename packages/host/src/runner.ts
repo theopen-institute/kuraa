@@ -24,7 +24,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   DEFAULT_POLICY, parseSize,
   type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
-  type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunComponent,
+  type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RunComponent,
 } from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
 import type { RunComponents } from './components.js';
@@ -60,6 +60,8 @@ export interface RunOptions {
   allowInstalls?: boolean;
   /** Where engines keep what is shared by every workspace (a package cache). Default: the user's app data folder. */
   dataDir?: string;
+  /** The longest a render of a document may take once its process has started, in ms (default: 10 minutes). */
+  renderTimeoutMs?: number;
 }
 
 /** The per-user folder for data shared by workspaces on this computer. */
@@ -308,6 +310,34 @@ export class Runner {
     const status = await this.status(this.env!);
     if (!status.available) throw new Error(status.message);
     return this.env!;
+  }
+
+  /** The engine that renders a file, by its extension (renders.ts), if one that is on does. */
+  rendererFor(path: string): { engine: Engine; renderer: DocumentRenderer } | null {
+    const dot = path.lastIndexOf('.');
+    const ext = dot > path.lastIndexOf('/') ? path.slice(dot).toLowerCase() : '';
+    if (!this.enabled || !ext) return null;
+    for (const engine of this.engines) if (engine.render?.extensions.includes(ext)) return { engine, renderer: engine.render };
+    return null;
+  }
+
+  /**
+   * What a render works with: as a session's, but the workspace only read and no
+   * network, whatever the workspace asks for. Throws, saying why, if the
+   * environment is not there.
+   */
+  async renderContext(engine: Engine, scratch: string, signal: AbortSignal, status: (m: string) => void): Promise<RenderContext> {
+    await this.available();
+    const ctx = this.context(engine, await this.config());
+    return {
+      ...ctx,
+      policy: { ...ctx.policy, workspace: 'read-only', network: false },
+      scratch,
+      timeLimitMs: this.o.options?.renderTimeoutMs ?? 10 * 60_000,
+      signal,
+      log: (m) => this.o.log(`${engine.id} render: ${m}`),
+      status,
+    };
   }
 
   /** What a package manager works with, for this workspace, crediting `by`. */

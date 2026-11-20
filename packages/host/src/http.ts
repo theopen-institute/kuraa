@@ -15,6 +15,8 @@ import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
+import { MIME as RENDER_MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
+import { searchWorkspace } from './search.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -210,6 +212,47 @@ const runRoutes: Route[] = [
     else await host.runner.clear(path, chunkRefOf(body.chunk));
     send(res, 200, { ok: true });
   })),
+];
+
+// Rendering documents to HTML, Word and PDF (renders.ts), where code runs; outputs are kept in .git/kuraa/renders.
+const formatOf = (v: unknown): RenderFormat => {
+  if (!RENDER_FORMATS.includes(v as RenderFormat)) throw new HttpError(400, 'Not a format: html, docx or pdf');
+  return v as RenderFormat;
+};
+// What a rendered page may do if opened on its own: show itself, nothing more (no scripts, no requests).
+const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; font-src data:; media-src data:";
+const renderRoutes: Route[] = [
+  route('GET', '/api/renders', async ({ host, res, q }) => send(res, 200, await host.renders.info(host.relPath(str(q.get('path'), 'path'))))),
+
+  route('POST', '/api/renders', async ({ host, req, res }) => {
+    const body = await readBody(req);
+    const path = host.relPath(str(body.path, 'path'));
+    const { state } = await host.renders.render(path, formatOf(body.format), personOf(body.by)?.name ?? null);
+    send(res, state.state === 'failed' ? 422 : 202, state);
+  }),
+
+  route('GET', '/api/renders/file', async ({ host, res, q }) => {
+    const path = host.relPath(str(q.get('path'), 'path'));
+    const format = formatOf(q.get('format'));
+    const bytes = await host.renders.output(path, format);
+    if (!bytes) throw new HttpError(404, 'Not rendered yet');
+    const name = `${basename(path).replace(/\.[^.]*$/, '')}.${format}`;
+    res.writeHead(200, {
+      'content-type': RENDER_MIME[format], 'content-length': bytes.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      ...(format === 'html' ? { 'content-security-policy': RENDER_CSP } : {}),
+    });
+    res.end(bytes);
+  }),
+];
+
+// Searching the workspace's text files, and open documents as they are being edited (search.ts).
+const searchRoutes: Route[] = [
+  route('GET', '/api/search', async ({ host, res, q }) => {
+    const query = q.get('q') ?? '';
+    if (!query.trim() || query.length > 500 || query.includes('\n')) throw new HttpError(400, 'Search for a phrase of up to 500 characters, on one line');
+    send(res, 200, await searchWorkspace(host, query, q.get('case') === '1'));
+  }),
 ];
 
 const fileRoutes: Route[] = [
@@ -490,7 +533,7 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

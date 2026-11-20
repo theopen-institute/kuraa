@@ -53,6 +53,12 @@ local({
   LATEX <- c("pdflatex", "xelatex", "lualatex", "tectonic", "latexmk")
 
   main <- function() {
+    # The host has just written the document (atomically, as a new file): a folder shared
+    # into a virtual machine (Podman on a Mac) can take a moment to show it.
+    for (i in 1:50) {
+      if (file.exists(input)) break
+      Sys.sleep(0.1)
+    }
     if (!requireNamespace("rmarkdown", quietly = TRUE)) stop("Rendering needs the rmarkdown package, which this environment does not have.")
     header <- tryCatch(rmarkdown::yaml_front_matter(input), error = function(e) list())
     if (!is.list(header)) header <- list()

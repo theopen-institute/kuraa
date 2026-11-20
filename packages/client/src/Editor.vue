@@ -18,6 +18,7 @@ import { SourceEditor } from './SourceEditor.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
 import { defaultBlock } from './blocks.js';
+import { locateMatch, replaceWithText, selectionFor, type MatchTarget } from './docActions.js';
 import HeaderDialog from './HeaderDialog.vue';
 
 const props = defineProps<{
@@ -282,6 +283,35 @@ watch([() => props.api, () => props.path, () => props.type, () => props.settings
 onBeforeUnmount(() => {
   close?.();
   close = null;
+});
+
+// What other panels ask of the live document (docActions.ts): a search match to
+// show (once the document is open), a past version to restore, its text now.
+let pendingReveal: MatchTarget | null = null;
+function applyReveal() {
+  const v = view.value;
+  if (!v || v.isDestroyed || !pendingReveal) return;
+  const range = locateMatch(props.type, v.state.doc, pendingReveal);
+  pendingReveal = null;
+  if (!range) return;
+  v.focus();
+  v.dispatch(v.state.tr.setSelection(selectionFor(v.state.doc, range)).scrollIntoView());
+}
+watch(view, applyReveal, { flush: 'post' });
+defineExpose({
+  reveal(target: MatchTarget) {
+    pendingReveal = target;
+    applyReveal();
+  },
+  /** Make the document read as `text`, as this person's edit (undoable). False if it is not open, or read-only. */
+  replaceText(text: string): boolean {
+    const v = view.value;
+    if (!v || v.isDestroyed || locked.value) return false;
+    const tr = replaceWithText(v.state, props.type, text);
+    if (tr) v.dispatch(tr.scrollIntoView());
+    return true;
+  },
+  text: (): string | null => (view.value && !view.value.isDestroyed ? props.type.serialize(view.value.state.doc) : null),
 });
 
 watch(user, (u) => connection?.setUser(u));

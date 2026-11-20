@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The client: a file tree, one live editor, and a history sidebar that starts
 // closed. Everything else is in the menu, so the page is mostly the document.
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
 import type { CommitInfo, HubWorkspace, TreeFile, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
@@ -24,6 +24,9 @@ import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
+import RenderPanel from './RenderPanel.vue';
+import SearchPanel from './SearchPanel.vue';
+import type { MatchTarget } from './docActions.js';
 
 const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}) });
 
@@ -86,6 +89,45 @@ const shownFiles = computed(() => {
     return out;
   });
 });
+/** The Preview or Search panel, beside the document (renders and searches: RenderPanel, SearchPanel). */
+const sidePanel = ref<'preview' | 'search' | null>(null);
+const renderAsked = ref(0);
+const searchAsked = ref(0);
+const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
+
+function preview() {
+  if (!path.value || !type.value) return;
+  sidePanel.value = 'preview';
+  renderAsked.value++;
+}
+function openSearch() {
+  sidePanel.value = 'search';
+  searchAsked.value++;
+}
+
+/** Open a file at a search match. */
+async function openMatch(p: string, target: MatchTarget) {
+  if (p !== path.value) select(p);
+  else view(null);
+  await nextTick();
+  editor.value?.reveal(target);
+}
+
+/** Make the document read as the past version shown, as this person's edit. */
+async function restoreVersion() {
+  const v = viewing.value;
+  if (!v) return;
+  const date = new Date(v.commit.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const ok = await askConfirm(`Make the document read as it did on ${date}? Everyone editing it will see the change, and you can undo it (⌘Z or Ctrl+Z) like any edit.`, 'Restore');
+  if (!ok || viewing.value !== v) return;
+  if (!editor.value?.replaceText(v.text)) {
+    notice.value = { kind: 'warn', text: 'The document cannot be changed here now, so the version was not restored.' };
+    return;
+  }
+  void view(null);
+  notice.value = { kind: 'info', text: `Restored the version of ${date}.` };
+}
+
 /** The Header dialog is open for the open file. */
 const headerOpen = ref(false);
 
@@ -158,11 +200,17 @@ function setEditorsOff(ids: string[]) {
   saveEditorsOff(ids);
 }
 
-// ⌘, (Ctrl+,) opens and closes the menu.
+// ⌘, (Ctrl+,) opens and closes the menu; ⇧⌘F searches every file; ⇧⌘R renders the document to preview it.
 const onKey = (e: KeyboardEvent) => {
   if ((e.metaKey || e.ctrlKey) && e.key === ',') {
     e.preventDefault();
     menuOpen.value = !menuOpen.value;
+  } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    openSearch();
+  } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    preview();
   }
 };
 onMounted(() => window.addEventListener('keydown', onKey));
@@ -301,7 +349,7 @@ function useSettings(s: Settings) {
   <div class="app">
     <div v-if="error" class="banner warn" role="alert">{{ error }} <button type="button" @click="error = null">Dismiss</button></div>
 
-    <div :class="['panes', { 'history-open': historyOpen }]">
+    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!sidePanel }]">
       <FileTree
         v-if="ready"
         :api="api"
@@ -374,6 +422,7 @@ function useSettings(s: Settings) {
         <div v-if="path && type && !versionMismatch && !editingSettings" class="centre-stack">
           <div :style="{ display: viewing ? 'none' : 'contents' }">
             <Editor
+              ref="editor"
               :key="`${api.baseUrl}|${path}|${type.id}`"
               :api="api"
               :settings="settings"
@@ -398,7 +447,9 @@ function useSettings(s: Settings) {
             :type="type"
             :path="viewing.commit.path || path"
             :format-editor="editorFor(type.id)"
+            :now="() => editor?.text() ?? null"
             @back="view(null)"
+            @restore="restoreVersion"
           />
         </div>
       </main>
@@ -411,6 +462,16 @@ function useSettings(s: Settings) {
         :viewing="viewing?.commit.hash ?? null"
         @view="view"
       />
+      <RenderPanel
+        v-if="sidePanel === 'preview' && path && type"
+        :api="api"
+        :path="path"
+        :by="{ name: settings.name, email: settings.email, color: settings.color }"
+        :trigger="renderAsked"
+        :written-at="status?.lastFlushAt ?? null"
+        @close="sidePanel = null"
+      />
+      <SearchPanel v-else-if="sidePanel === 'search'" :api="api" :focus-key="searchAsked" @open="openMatch" @close="sidePanel = null" />
     </div>
 
     <NoticeToast :notice="shownNotice" @dismiss="notice = null" />
@@ -441,6 +502,8 @@ function useSettings(s: Settings) {
       @components="componentsOpen = true"
       @accepted="refreshTree(); historyKey++"
       @invite="invite"
+      @preview="preview"
+      @search="openSearch"
       @close="menuOpen = false"
     />
     <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? 'this workspace'" :syncing="inviting.syncing" @close="inviting = null; void loadHub()" />

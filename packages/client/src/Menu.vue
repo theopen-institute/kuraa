@@ -51,6 +51,10 @@ const emit = defineEmits<{
   accepted: [];
   /** Invite people to the workspace. */
   invite: [];
+  /** Render the document and show the Preview panel. */
+  preview: [];
+  /** Search every file of the workspace. */
+  search: [];
   close: [];
 }>();
 
@@ -114,6 +118,7 @@ const hasAccess = computed(() => !!personShell.value || !props.shell.managesHost
             {{ historyOpen ? 'Hide history' : 'History' }}
           </button>
           <button type="button" @click="emit('saveVersion'); emit('close')">Save version…</button>
+          <button v-if="!type!.editor?.layout" type="button" title="Render the document to HTML, Word or PDF (⇧⌘R)" data-testid="menu-preview" @click="emit('preview'); emit('close')">Preview</button>
         </div>
         <p v-if="status" class="menu-facts">
           <span data-testid="last-flush">Written {{ time(status.lastFlushAt) }}</span>
@@ -140,6 +145,7 @@ const hasAccess = computed(() => !!personShell.value || !props.shell.managesHost
           </li>
         </ul>
         <div class="menu-actions">
+          <button type="button" :disabled="!workspace" title="Search every file (⇧⌘F)" data-testid="menu-search" @click="emit('search'); emit('close')">Search…</button>
           <button type="button" :disabled="syncing || !workspace" title="Commit; bring in the work of connected devices; fetch, merge and push against the sync remote, if there is one" @click="emit('sync'); emit('close')">
             {{ syncing ? 'Syncing…' : 'Sync' }}
           </button>

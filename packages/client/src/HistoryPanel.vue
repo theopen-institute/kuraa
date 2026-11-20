@@ -34,6 +34,18 @@ watch([() => props.api, () => props.path, () => props.refreshKey], ([api, path],
 }, { immediate: true });
 
 const people = (c: CommitInfo) => peopleOf([c]);
+/**
+ * What a commit is called in the list: a named version by its name; a merge, or
+ * a save the host made, by what happened, in words rather than its message.
+ */
+const title = (c: CommitInfo) => {
+  if (c.kind === 'merge') return 'Work from elsewhere combined';
+  if (c.kind === 'autosave') {
+    const parts = partsOf([c]);
+    return parts.length ? `Saved: ${parts.join(', ')}` : 'Saved';
+  }
+  return c.subject;
+};
 const entries = computed(() => groupHistory(commits.value));
 const open = ref(new Set<string>());
 function toggle(id: string) {
@@ -58,8 +70,8 @@ const summary = (cs: CommitInfo[]) => {
       <template v-for="e in entries" :key="e.kind === 'session' ? e.id : e.commit.hash">
         <li v-if="e.kind === 'commit'" :class="['history-' + e.commit.kind, { selected: viewing === e.commit.hash }]">
           <button type="button" @click="emit('view', viewing === e.commit.hash ? null : e.commit)">
-            <span class="history-subject">{{ e.commit.subject }}</span>
-            <span class="history-meta"><code>{{ e.commit.hash.slice(0, 7) }}</code> · {{ when(e.commit.date) }}{{ e.commit.hash === latest ? ' · latest' : '' }}</span>
+            <span class="history-subject">{{ title(e.commit) }}</span>
+            <span class="history-meta">{{ when(e.commit.date) }}{{ e.commit.hash === latest ? ' · latest' : '' }}</span>
             <span class="history-people">{{ people(e.commit) }}</span>
           </button>
         </li>
@@ -72,8 +84,8 @@ const summary = (cs: CommitInfo[]) => {
           <ol v-if="open.has(e.id)" class="history-saves">
             <li v-for="c in e.commits" :key="c.hash" :class="{ selected: viewing === c.hash }">
               <button type="button" @click="emit('view', viewing === c.hash ? null : c)">
-                <span class="history-subject">{{ c.subject }}</span>
-                <span class="history-meta"><code>{{ c.hash.slice(0, 7) }}</code> · {{ when(c.date) }}</span>
+                <span class="history-subject">{{ when(c.date) }}</span>
+                <span class="history-meta">{{ people(c) }}{{ partsOf([c]).length ? ` · ${partsOf([c]).join(', ')}` : '' }}</span>
               </button>
             </li>
           </ol>

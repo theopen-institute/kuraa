@@ -45,6 +45,10 @@ const props = defineProps<{
   api: HostApi;
   /** How many conflicts the open document keeps. */
   conflicts?: number;
+  /** Preferences may be changed here (the server's owner, decision 0047). */
+  canChangeSettings?: boolean;
+  /** Why Preferences and your identity are not available here, if they are not. */
+  ownerOff?: string | null;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -68,6 +72,8 @@ const emit = defineEmits<{
   search: [];
   /** The Markdown and shortcuts sheet. */
   help: [];
+  /** The server's Preferences. */
+  preferences: [];
   close: [];
 }>();
 
@@ -95,10 +101,10 @@ onMounted(async () => {
 
 const doc = computed(() => !!props.path && !!props.type && !props.viewing);
 
-// You on this computer: the shell's (desktop app), else the host's where it allows (`pnpm dev`).
-const personShell = shallowRef<PersonShell | null>(props.shell.person ?? null);
+// You on this computer: through the host, where it listens only on this computer (0047).
+const personShell = shallowRef<PersonShell | null>(null);
 onMounted(async () => {
-  if (!personShell.value) personShell.value = await personShellFor(props.shell, props.api);
+  personShell.value = await personShellFor(props.api);
 });
 const runner = computed(() => props.status?.runner ?? null);
 
@@ -207,10 +213,11 @@ const runner = computed(() => props.status?.runner ?? null);
           <h3>{{ S.menu.you }}</h3>
           <SettingsForm :initial="settings" :shell="shell" part="profile" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
           <PersonKey v-if="personShell" :person="personShell" :display-name="settings.name" />
-          <div v-if="!shell.managesHost || shell.preferences" class="menu-actions">
+          <div v-if="!shell.managesHost || canChangeSettings" class="menu-actions">
             <button v-if="!shell.managesHost" type="button" data-testid="menu-access" @click="panel = 'access'">{{ S.menu.access }}</button>
-            <button v-if="shell.preferences" type="button" :title="S.menu.preferencesTitle" data-testid="menu-preferences" @click="emit('close'); shell.preferences()">{{ S.menu.preferences }}</button>
+            <button v-if="canChangeSettings" type="button" :title="S.menu.preferencesTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-preferences" @click="emit('close'); emit('preferences')">{{ S.menu.preferences }}</button>
           </div>
+          <p v-if="ownerOff" class="menu-facts" data-testid="menu-owner-off">{{ ownerOff }}</p>
         </section>
 
         <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>

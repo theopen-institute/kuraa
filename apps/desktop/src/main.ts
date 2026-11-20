@@ -11,14 +11,16 @@
 //   electron . --join <url> --token <t> join a shared host or hub; none of its own
 //   --workspaces <folder>               where new workspaces go (default: Documents/kuraa)
 //
-// For folders it opens itself, the configuration is its Preferences
-// (preferences.ts: everything a host's flags set that suits one person's own
-// computer, decision 0046), or these flags, which win over them:
+// For folders it opens itself, the configuration is its Preferences: the hub's
+// settings (@kuraa/host's settings.ts, decisions 0046 and 0047), kept in
+// preferences.json with the app's data, changed in the client's Preferences
+// dialog as in a browser, and applied by the hub in place. These flags win:
 //   --engine <id>...     engines to turn on (default: r); --engine none for none
 //   --env <id>           where code runs (default: the only environment loaded)
 //   --format <id>...     document formats to turn on (default: all)
-//   --component <spec>...   more run components (engines, environments): flag only, see 0046
-//   --allow-unsandboxed  allow an environment that is not sandboxed: flag only, see 0046
+//   --component <spec>...   more run components (engines, environments): flag only, see 0047
+//   --allow-unsandboxed  allow an environment that is not sandboxed: flag only, see 0047
+//   --podman <path>      the Podman program (also KURAA_PODMAN): flag only, see 0047
 //   --r-image <image>... base images a workspace may name for R (besides the default)
 //   --peer               sync with the folder's paired devices (pair them with kuraa-host invite / join)
 // The components that ship (@kuraa/run-components: R, Podman containers) are loaded.
@@ -30,24 +32,20 @@
 // The window shows only the app's own pages: it does not navigate elsewhere or
 // open other windows (web links open in the browser), and the bridge answers
 // only the app's own pages.
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, type ContextMenuParams, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type ContextMenuParams, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { DEFAULT_TIMINGS, defaultDataDir, gitIdentity, inspectFolder, lastResort, personKeys, startHub, useGit, type HostTimings, type RunOptions, type RunningHub } from '@kuraa/host';
-import { standardTypes } from '@kuraa/formats';
-import { DEFAULT_POLICY } from '@kuraa/run-kit';
+import { gitIdentity, inspectFolder, lastResort, SettingsStore, startHub, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
-import { preferencesFrom, readPreferences, writePreferences, type Preferences, type PreferencesView } from './preferences.js';
 import { D } from './strings.js';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
-const PREFERENCES = join(__dirname, 'static', 'preferences.html');
 /** The only pages the windows may show. */
-const OWN_PAGES = [WEB_INDEX, LAUNCHER, PREFERENCES].map((p) => pathToFileURL(p).href);
+const OWN_PAGES = [WEB_INDEX, LAUNCHER].map((p) => pathToFileURL(p).href);
 const isOwnPage = (url: string) => OWN_PAGES.includes(url.split(/[?#]/)[0]!);
 
 const { values: flags } = parseArgs({
@@ -58,6 +56,7 @@ const { values: flags } = parseArgs({
     component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' }, peer: { type: 'boolean' },
     workspaces: { type: 'string' },
     'r-image': { type: 'string', multiple: true },
+    podman: { type: 'string' },
   },
   strict: false,
 });
@@ -103,65 +102,37 @@ const windowOptions = () => ({
     backgroundThrottling: !HIDDEN,
   },
 });
+// Its preferences: the hub's settings, kept where they always were, with the app's data.
 const PREFERENCES_FILE = join(app.getPath('userData'), 'preferences.json');
-let preferences = readPreferences(PREFERENCES_FILE);
 
-/** The preferences that flags set, which the Preferences window shows as such. */
-function setByFlags(): (keyof Preferences)[] {
-  const keys: (keyof Preferences)[] = [];
-  if (flags.peer === true) keys.push('syncDevices');
-  if (list(flags.engine)) keys.push('runCode');
-  if (list(flags['r-image'])) keys.push('rImages');
-  if (list(flags.format)) keys.push('formats');
-  if (typeof flags.env === 'string') keys.push('environment');
-  if (typeof flags.workspaces === 'string') keys.push('workspaces');
-  return keys;
+/** The settings flags set, which win over the preferences, and which the Preferences dialog shows as such. */
+function flagSettings(): Partial<Settings> {
+  const engines = list(flags.engine);
+  return {
+    ...(flags.peer === true ? { syncDevices: true } : {}),
+    ...(engines ? { runCode: engines.some((e) => e !== 'none') } : {}),
+    ...(list(flags['r-image']) ? { rImages: list(flags['r-image']) } : {}),
+    ...(list(flags.format) ? { formats: list(flags.format) } : {}),
+    ...(typeof flags.env === 'string' ? { environment: flags.env } : {}),
+    ...(typeof flags.workspaces === 'string' ? { workspaces: resolve(flags.workspaces) } : {}),
+  };
 }
+const settings = new SettingsStore(PREFERENCES_FILE, flagSettings());
 
 const defaultWorkspaces = () => join(app.getPath('documents'), 'kuraa');
 
 let window: BrowserWindow | null = null;
-let preferencesWindow: BrowserWindow | null = null;
 let hub: RunningHub | null = null;
 let quitting = false;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
 
-/** Environments the app has loaded (those that ship; --component may add more). */
-const shippedEnvironments = () => standardRunComponents.flatMap((c) => c.environments ?? []);
-
-/** What runs, for folders this app opens itself: the preferences, with flags winning where given. */
-function runOptions(): RunOptions {
-  const engines = (list(flags.engine) ?? (preferences.runCode ? ['r'] : [])).filter((e) => e !== 'none');
-  // A preferred environment that is no longer loaded is passed over, not an error at every start.
-  const preferred = preferences.environment && shippedEnvironments().some((e) => e.id === preferences.environment) ? preferences.environment : undefined;
-  return {
-    engines,
-    environment: typeof flags.env === 'string' ? flags.env : preferred,
-    components: [...standardRunComponents, ...(list(flags.component) ?? [])],
-    allowUnsandboxed: flags['allow-unsandboxed'] === true,
-    allowInstalls: preferences.allowInstalls,
-    allowWorkspaceWrite: preferences.allowWrite,
-    allowNetwork: preferences.allowNetwork,
-    dataDir: preferences.dataDir ?? undefined,
-    memory: preferences.memory ?? undefined,
-    cpus: preferences.cpus ?? undefined,
-    disk: preferences.disk ?? undefined,
-    // Base images a workspace may name for R, besides the default; the Podman program, if chosen.
-    options: { r: { images: list(flags['r-image']) ?? preferences.rImages }, podman: { podman: preferences.podman ?? undefined } },
-  };
-}
-
-/** Host timings: the preferences, which automated tests may shorten further (KURAA_TIMINGS). */
-function timings(): Partial<HostTimings> {
-  const chosen: Partial<HostTimings> = {
-    ...(preferences.saveSeconds !== null ? { flushMs: Math.round(preferences.saveSeconds * 1000) } : {}),
-    ...(preferences.versionSeconds !== null ? { idleCommitMs: Math.round(preferences.versionSeconds * 1000) } : {}),
-  };
+/** Automated tests may shorten the host's timings (KURAA_TIMINGS): they win over the preferences. */
+function testTimings(): Partial<HostTimings> {
   try {
-    return { ...chosen, ...(JSON.parse(process.env.KURAA_TIMINGS ?? '{}') as Partial<HostTimings>) };
+    return JSON.parse(process.env.KURAA_TIMINGS ?? '{}') as Partial<HostTimings>;
   } catch {
-    return chosen;
+    return {};
   }
 }
 
@@ -182,15 +153,24 @@ async function ensureHub(): Promise<RunningHub> {
   if (hub) return hub;
   // --workspaces keeps the list in that folder; otherwise it lives with the app's own data, so it survives choosing another folder.
   const custom = typeof flags.workspaces === 'string';
+  const engines = list(flags.engine);
   hub = await startHub({
-    root: custom ? (flags.workspaces as string) : (preferences.workspaces ?? defaultWorkspaces()),
-    registry: custom ? undefined : join(app.getPath('userData'), 'workspaces.json'),
+    ...(custom ? { root: flags.workspaces as string } : { registry: join(app.getPath('userData'), 'workspaces.json') }),
+    defaultRoot: defaultWorkspaces(),
+    // Loopback: the person using the app is its owner (Preferences, Open a folder…, identity, online copy).
     host: '127.0.0.1',
     port: 0,
-    // What runs and which formats are on: this app's flags.
-    // This app is its own operator: the person using it sets up the online copy, with their own git credentials.
-    hosts: { run: runOptions(), formats: list(flags.format) ?? knownFormats(preferences.formats), timings: timings(), manageOnline: true },
-    peers: { everywhere: flags.peer === true || preferences.syncDevices, ...(preferences.bootstrap.length ? { bootstrap: preferences.bootstrap } : {}) },
+    settings,
+    // What only flags set: more components, the sandbox, the Podman program, engines named; and tests' timings.
+    hosts: {
+      run: {
+        ...(engines ? { engines } : {}),
+        components: [...standardRunComponents, ...(list(flags.component) ?? [])],
+        allowUnsandboxed: flags['allow-unsandboxed'] === true,
+        options: { podman: { podman: typeof flags.podman === 'string' ? flags.podman : undefined } },
+      },
+      timings: testTimings(),
+    },
     log: (m) => console.log(`[hub] ${m}`),
   });
   console.log(`[desktop] hub ${hub.url} on ${hub.hub.root}`);
@@ -242,7 +222,13 @@ async function leave(): Promise<void> {
   await showLauncher();
 }
 
+/**
+ * Open a folder… from the app's menu: the page does it, through the hub, as in a
+ * browser (its own dialogs). From the launcher, or while joined to another
+ * server, this app's own workspaces are opened with it.
+ */
 async function pickFolder(): Promise<void> {
+  if (config?.managesHost && window) return void window.webContents.send('kuraa:open-folder');
   const r = await dialog.showOpenDialog(window!, { properties: ['openDirectory', 'createDirectory'], message: D.folder.choose });
   if (r.canceled || !r.filePaths[0]) return;
   try {
@@ -258,94 +244,13 @@ function showLauncher(): Promise<void> {
   return window!.loadFile(LAUNCHER);
 }
 
-/** The Preferences window, over the main one. */
-function showPreferences(): void {
-  if (preferencesWindow) {
-    if (!HIDDEN) preferencesWindow.focus();
-    return;
-  }
-  preferencesWindow = new BrowserWindow({
-    parent: window ?? undefined,
-    modal: process.platform !== 'darwin',
-    width: 600,
-    height: 680,
-    minHeight: 420,
-    resizable: true,
-    minimizable: false,
-    maximizable: false,
-    title: 'Preferences',
-    ...windowOptions(),
-  });
-  preferencesWindow.setMenuBarVisibility(false);
-  preferencesWindow.on('closed', () => (preferencesWindow = null));
-  void preferencesWindow.loadFile(PREFERENCES);
-}
-
-/** The preferred formats the app has (a format since removed is passed over); undefined for all. */
-function knownFormats(ids: string[] | null): string[] | undefined {
-  const known = ids?.filter((id) => standardTypes.some((t) => t.id === id));
-  return known?.length ? known : undefined;
-}
-
-/** What the Preferences window shows: the preferences, which flags override, the defaults, and whether code can run. */
-async function preferencesView(): Promise<PreferencesView> {
-  const run = runOptions();
-  const environments = await Promise.all(shippedEnvironments().map(async (e) => {
-    try {
-      return { id: e.id, label: e.label, ...(await e.check(run.options?.[e.id])) };
-    } catch (err) {
-      return { id: e.id, label: e.label, available: false, message: (err as Error).message };
-    }
-  }));
-  return {
-    preferences,
-    fromFlags: setByFlags(),
-    defaultWorkspaces: defaultWorkspaces(),
-    defaultDataDir: defaultDataDir(),
-    defaults: {
-      memory: DEFAULT_POLICY.memory, cpus: DEFAULT_POLICY.cpus, disk: DEFAULT_POLICY.disk,
-      saveSeconds: DEFAULT_TIMINGS.flushMs / 1000, versionSeconds: DEFAULT_TIMINGS.idleCommitMs / 1000,
-    },
-    environments,
-    formats: standardTypes.map((t) => ({ id: t.id, label: t.label })),
-  };
-}
-
-/**
- * This computer now acts for a person (made, imported, or a key revoked): each
- * workspace that syncs says so to its other devices now, not at its next save.
- */
-async function personChanged(): Promise<void> {
-  for (const w of hub?.hub.list() ?? []) await hub?.hub.hostOf(w.id)?.host.peers?.node.signingKey().catch(() => undefined);
-}
-
-/** Run a change to this computer's person; an error message for the window, or null. */
-async function personDo(fn: () => Promise<unknown>): Promise<string | null> {
-  try {
-    await fn();
-  } catch (e) {
-    return (e as Error).message;
-  }
-  void personChanged();
-  return null;
-}
-
-/** Save the preferences; if they changed, restart this app's hub (which commits first) so they apply. */
-async function savePreferences(v: unknown): Promise<void> {
-  // Strict: a value that is wrong is refused with what is wrong, shown in the window, which stays open.
-  const next = preferencesFrom(v, true);
-  const changed = JSON.stringify(next) !== JSON.stringify(preferences);
-  preferences = next;
-  await writePreferences(PREFERENCES_FILE, next);
-  preferencesWindow?.close();
-  if (!changed || !hub) return;
-  await stopHub();
-  try {
+/** Preferences: the client's dialog, in the page (this app's own workspaces opened first, from the launcher). */
+async function showPreferences(): Promise<void> {
+  if (!window) return;
+  if (!config) {
     await showWorkspaces();
-  } catch (e) {
-    dialog.showErrorBox(D.errors.workspaces, (e as Error).message);
-    await showLauncher();
   }
+  window.webContents.send('kuraa:preferences');
 }
 
 /** Ask the page to show its Markdown and shortcuts sheet (the client, if it is loaded). */
@@ -357,8 +262,8 @@ function buildMenu(): void {
   const isMac = process.platform === 'darwin';
   // Not "Settings", which in the client are the person's own (name, email, colour). ⌘, is the
   // page's own (its menu, which holds your settings), so Preferences takes ⌥⌘, (decision 0044);
-  // the in-app menu also opens it (App preferences…).
-  const preferencesItem = { label: D.menu.preferences, accelerator: 'CmdOrCtrl+Alt+,', click: () => showPreferences() };
+  // the in-app menu also opens it (Preferences…). Both open the client's dialog.
+  const preferencesItem = { label: D.menu.preferences, accelerator: 'CmdOrCtrl+Alt+,', click: () => void showPreferences().catch((e: Error) => dialog.showErrorBox(D.errors.workspaces, e.message)) };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(isMac ? [{
       label: app.name,
@@ -405,55 +310,12 @@ ipcMain.on('kuraa:config', (e) => {
 ipcMain.handle('kuraa:open-folder', (e) => (fromOwnPage(e) ? pickFolder() : undefined));
 ipcMain.handle('kuraa:leave', (e) => (fromOwnPage(e) ? leave() : undefined));
 ipcMain.handle('kuraa:home', (e) => (fromOwnPage(e) ? showWorkspaces() : undefined));
-ipcMain.handle('kuraa:preferences', (e) => (fromOwnPage(e) ? preferencesView() : null));
-ipcMain.handle('kuraa:show-preferences', (e) => {
-  if (fromOwnPage(e)) showPreferences();
-});
-ipcMain.handle('kuraa:save-preferences', (e, v: unknown) => (fromOwnPage(e) ? savePreferences(v) : undefined));
+// A folder the person picks (to open as a workspace, for new workspaces, or for packages and tools), or null.
 ipcMain.handle('kuraa:choose-folder', async (e, purpose: unknown) => {
-  if (!fromOwnPage(e) || !preferencesWindow) return null;
-  const message = purpose === 'data' ? D.folder.whereData : D.folder.whereNew;
-  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openDirectory', 'createDirectory'], message });
+  if (!fromOwnPage(e) || !window) return null;
+  const message = purpose === 'data' ? D.folder.whereData : purpose === 'workspaces' ? D.folder.whereNew : D.folder.choose;
+  const r = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'], message });
   return r.canceled ? null : (r.filePaths[0] ?? null);
-});
-ipcMain.handle('kuraa:choose-file', async (e) => {
-  if (!fromOwnPage(e) || !preferencesWindow) return null;
-  const r = await dialog.showOpenDialog(preferencesWindow, { properties: ['openFile', 'treatPackageAsDirectory'], message: D.folder.whichPodman });
-  return r.canceled ? null : (r.filePaths[0] ?? null);
-});
-// This computer's person's key, for the menu's You section (packages/client/src/PersonKey.vue).
-ipcMain.handle('kuraa:person', async (e) => {
-  if (!fromOwnPage(e)) return null;
-  const keys = await personKeys();
-  const person = await keys.readPerson();
-  // Your keys the workspaces know of (vouched for by your identity), from each one open here.
-  const known: string[] = [];
-  for (const w of hub?.hub.list() ?? []) {
-    const ids = hub?.hub.hostOf(w.id)?.host.peers?.node.identity;
-    const mine = person && ids ? (await ids.people()).find((p) => p.key === person.publicKey.toString('hex')) : undefined;
-    if (mine) known.push(...mine.keys);
-  }
-  return keys.personInfo(known);
-});
-ipcMain.handle('kuraa:revoke-key', async (e, key: unknown) => {
-  if (!fromOwnPage(e)) return D.errors.notAllowed;
-  return personDo(async () => (await personKeys()).revokeKey(String(key ?? '')));
-});
-ipcMain.handle('kuraa:create-person', async (e, name: unknown) => {
-  if (!fromOwnPage(e)) return D.errors.notAllowed;
-  return personDo(async () => (await personKeys()).createPerson(String(name ?? '')));
-});
-ipcMain.handle('kuraa:import-person', async (e, line: unknown) => {
-  if (!fromOwnPage(e)) return D.errors.notAllowed;
-  return personDo(async () => (await personKeys()).importPerson(String(line ?? '')));
-});
-ipcMain.handle('kuraa:copy-person', async (e) => {
-  if (!fromOwnPage(e)) return false;
-  const keys = await personKeys();
-  const person = await keys.readPerson();
-  if (!person) return false;
-  clipboard.writeText(keys.exportPerson(person));
-  return true;
 });
 ipcMain.handle('kuraa:join', async (e, url: string, token: string) => {
   if (!fromOwnPage(e)) return D.errors.notAllowed;

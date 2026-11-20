@@ -6,7 +6,7 @@
 //                 behind Vite's proxy at this page's own origin
 //   web           a host or hub serves this page; a link may carry ?token=… (and
 //                 ?host=…, and on a hub ?w=<workspace>), remembered for this tab so reloads work
-import { webShell, type Settings, type Shell, type ShellBridge } from '@kuraa/client';
+import { webShell, type FolderPurpose, type Settings, type Shell, type ShellBridge } from '@kuraa/client';
 
 export interface ResolvedShell {
   shell: Shell;
@@ -26,23 +26,14 @@ export function resolveShell(): ResolvedShell {
       shell: {
         managesHost: config?.managesHost ?? false,
         workspace: config?.workspace,
-        openFolder: () => void bridge.openFolder(),
         leave: () => void bridge.leave(),
         // Its own workspaces again, with the hub's current address and access code.
         ...(config?.managesHost ? { reconnect: () => void bridge.home() } : {}),
-        ...(bridge.preferences ? { preferences: () => void bridge.preferences!() } : {}),
+        // The app's own folder dialog, and its menu's Preferences, Open Folder and Help.
+        ...(bridge.chooseFolder ? { chooseFolder: (purpose: FolderPurpose) => bridge.chooseFolder!(purpose) } : {}),
+        ...(bridge.onPreferences ? { onPreferences: (show: () => void) => bridge.onPreferences!(show) } : {}),
+        ...(bridge.onOpenFolder ? { onOpenFolder: (show: () => void) => bridge.onOpenFolder!(show) } : {}),
         ...(bridge.onHelp ? { onHelp: (show: () => void) => bridge.onHelp!(show) } : {}),
-        // The key of this computer, which runs the host: only on the app's own workspaces.
-        ...(config?.managesHost && bridge.person && bridge.createPerson && bridge.importPerson && bridge.copyPerson && bridge.revokeKey ? {
-          person: {
-            afterChange: 'Your workspaces restart, and it vouches for this computer\'s key.',
-            get: () => bridge.person!(),
-            create: (name: string) => bridge.createPerson!(name),
-            import: (line: string) => bridge.importPerson!(line),
-            copy: () => bridge.copyPerson!(),
-            revoke: (key: string) => bridge.revokeKey!(key),
-          },
-        } : {}),
       },
       overrides: config ? { hostUrl: config.hostUrl, token: config.token } : {},
       defaults: config ? { name: config.name, email: config.email } : {},

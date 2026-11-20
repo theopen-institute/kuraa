@@ -26,6 +26,7 @@ export function clientHelp(): HelpGroup[] {
         { group: h.app, keys: [APP_KEYS.undo], does: h.undo },
         { group: h.app, keys: [APP_KEYS.redo], does: h.redo },
         { group: h.app, keys: [APP_KEYS.menu], does: h.menu },
+        { group: h.app, keys: [APP_KEYS.preferences], does: h.preferences },
         { group: h.app, keys: [APP_KEYS.help], does: h.help },
       ],
     },

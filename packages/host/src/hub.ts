@@ -42,7 +42,7 @@ import { initWorkspace, inspectFolder } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
 import { startHost, joinWorkspace, type RunningHost } from './index.js';
 import { loadRunComponents } from './components.js';
-import { defaultDataDir, type RunOptions } from './runner.js';
+import type { RunOptions } from './runner.js';
 import { fromSettings, type SettingsStore, type SettingsView } from './settings.js';
 
 export interface HubOptions {
@@ -499,7 +499,7 @@ export class Hub {
         saveSeconds: DEFAULT_TIMINGS.flushMs / 1000, versionSeconds: DEFAULT_TIMINGS.idleCommitMs / 1000,
       },
       defaultWorkspaces: resolve(this.o.defaultRoot ?? join(homedir(), 'Documents', 'kuraa')),
-      defaultDataDir: store.defaultDataDir ?? defaultDataDir(),
+      defaultDataDir: store.defaultDataDir,
       environments,
       formats: (this.o.hosts?.types ?? standardTypes).map((t) => ({ id: t.id, label: t.label })),
       canAdd: this.canAdd,

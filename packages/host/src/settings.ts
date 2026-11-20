@@ -13,7 +13,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseSize } from '@kuraa/run-kit';
 import { HttpError } from './errors.js';
 import type { HostTimings } from './host.js';
-import type { RunOptions } from './runner.js';
+import { defaultDataDir as hostDataDir, type RunOptions } from './runner.js';
 
 export interface Settings {
   /** Sync every workspace with the other computers it is on (--peer). Workspaces shared by an invite link always do. */
@@ -217,7 +217,7 @@ export class SettingsStore {
     /** Those set by flags at start: they win, and the app says so. */
     readonly flags: Partial<Settings> = {},
     /** Where packages and tools are kept when no folder is chosen (accepted without the marker). */
-    readonly defaultDataDir?: string,
+    readonly defaultDataDir: string = hostDataDir(),
   ) {
     this.stored = readSettings(file);
   }
@@ -239,7 +239,7 @@ export class SettingsStore {
   /** Check and keep new settings; whether what applies changed. A wrong value is refused (HttpError 400) and nothing is kept. */
   async save(v: unknown): Promise<boolean> {
     const next = settingsFrom(v, true);
-    if (next.dataDir && next.dataDir !== this.stored.dataDir && this.defaultDataDir) await checkDataDir(next.dataDir, this.defaultDataDir);
+    if (next.dataDir && next.dataDir !== this.stored.dataDir) await checkDataDir(next.dataDir, this.defaultDataDir);
     const before = JSON.stringify(this.current);
     await writeSettings(this.file, next);
     this.stored = next;

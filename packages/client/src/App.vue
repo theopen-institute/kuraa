@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
-import type { CommitInfo, HubWorkspace, TreeFile, WorkspaceInfo } from './api.js';
+import type { CommitInfo, HubWorkspace, NotRepository, TreeFile, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { askConfirm, askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -28,6 +28,8 @@ import ComponentsDialog from './ComponentsDialog.vue';
 import PastVersion from './PastVersion.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
+import FolderPicker from './FolderPicker.vue';
+import PreferencesDialog from './PreferencesDialog.vue';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
 import RenderPanel from './RenderPanel.vue';
@@ -56,7 +58,7 @@ const fail = (e: unknown) => {
 };
 
 // The server's workspaces, and the one open (see workspaces.ts).
-const { hubApi, workspaces: hub, canAdd, canInvite, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
+const { hubApi, workspaces: hub, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
   settings,
   active: () => !editingSettings.value,
   preferred: () => props.shell.workspace,
@@ -66,7 +68,7 @@ const { hubApi, workspaces: hub, canAdd, canInvite, known: hubKnown, chosen, rea
 // You on this computer: an identity made for you from your name, the first time there is one (0038).
 watch(() => [settings.value.name, ready.value] as const, ([name, isReady]) => {
   if (!isReady || !name.trim()) return;
-  void personShellFor(props.shell, api.value).then((p) => p && ensureIdentity(p, name)).catch(() => undefined);
+  void personShellFor(api.value).then((p) => p && ensureIdentity(p, name)).catch(() => undefined);
 }, { immediate: true });
 
 // The open workspace: what the host says of it, its files, and the file open.
@@ -209,6 +211,62 @@ async function switchWorkspace(id: string) {
   chosen.value = id;
 }
 
+/** Preferences (the server's owner's settings, decision 0047). */
+const preferencesOpen = ref(false);
+function openPreferences() {
+  if (canChangeSettings.value) {
+    menuOpen.value = false;
+    preferencesOpen.value = true;
+  } else {
+    notice.value = { kind: 'warn', text: ownerOff.value ?? S.preferences.notHere };
+  }
+}
+/** Saved: the server has reopened every workspace with them; the page starts again with them too. */
+function preferencesSaved() {
+  location.reload();
+}
+
+/** Choosing a folder to open, in the page (where the shell has no folder dialog of its own). */
+const pickingFolder = shallowRef<((path: string | null) => void) | null>(null);
+function pickFolder(): Promise<string | null> {
+  if (props.shell.chooseFolder) return props.shell.chooseFolder('open');
+  return new Promise((resolve) => {
+    pickingFolder.value = (path) => {
+      pickingFolder.value = null;
+      resolve(path);
+    };
+  });
+}
+
+/**
+ * Open a folder…: any folder on the server's computer, as a workspace. One that
+ * is not yet a repository is made one once the person agrees, in the words the
+ * desktop app always used.
+ */
+async function openFolder() {
+  if (!canOpenFolder.value) {
+    notice.value = { kind: 'warn', text: ownerOff.value ?? S.app.cannotOpenFolder };
+    return;
+  }
+  const path = await pickFolder();
+  if (!path) return;
+  try {
+    let answer = await hubApi.value.openFolder(path);
+    if ('notRepository' in answer) {
+      const n: NotRepository = answer.notRepository;
+      if (!(await askConfirm(`${S.openFolder.useAsk(n.name)} ${S.openFolder.useDetail(n.entries)}`, S.openFolder.use))) return;
+      answer = await hubApi.value.openFolder(n.path, true);
+      if ('notRepository' in answer) return;
+    }
+    const w = answer.workspace;
+    leaveWorkspace();
+    await loadHub(w.id);
+    notice.value = { kind: 'info', text: S.openFolder.opened(w.name) };
+  } catch (e) {
+    fail(e);
+  }
+}
+
 async function workspaceAdded(w: HubWorkspace) {
   addingWorkspace.value = false;
   leaveWorkspace();
@@ -262,6 +320,9 @@ const onKey = (e: KeyboardEvent) => {
     toggleHelp();
   } else if (dialogOpen()) {
     // Keys for the page wait while a dialog is open.
+  } else if (k(APP_KEYS.preferences)) {
+    e.preventDefault();
+    openPreferences();
   } else if (k(APP_KEYS.search)) {
     e.preventDefault();
     openSearch();
@@ -275,6 +336,11 @@ onMounted(() => {
   props.shell.onHelp?.(() => {
     if (!helpOpen.value) toggleHelp();
   });
+  // The desktop app's own menu: Preferences (⌥⌘,) and Open Folder (⌘O) are the page's, as in a browser.
+  props.shell.onPreferences?.(() => {
+    if (!preferencesOpen.value) openPreferences();
+  });
+  props.shell.onOpenFolder?.(() => void openFolder());
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
@@ -485,10 +551,10 @@ function useSettings(s: Settings) {
             :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
             :can-add="canAdd"
             :can-invite="canInvite"
-            :can-open-folder="!!shell.openFolder"
+            :can-open-folder="canOpenFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
-            @open-folder="shell.openFolder?.()"
+            @open-folder="openFolder"
             @remove="removeWorkspace"
             @invite="invite"
           />
@@ -506,10 +572,10 @@ function useSettings(s: Settings) {
             :name="S.app.workspaces"
             :can-add="canAdd"
             :can-invite="canInvite"
-            :can-open-folder="!!shell.openFolder"
+            :can-open-folder="canOpenFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
-            @open-folder="shell.openFolder?.()"
+            @open-folder="openFolder"
             @remove="removeWorkspace"
           />
         </div>
@@ -525,7 +591,7 @@ function useSettings(s: Settings) {
             <p v-else>{{ S.app.noneOpen }}</p>
             <div v-if="canAdd" class="actions">
               <button type="button" class="primary" data-testid="add-workspace-button" @click="addingWorkspace = true">{{ S.app.addWorkspace }}</button>
-              <button v-if="shell.openFolder" type="button" @click="shell.openFolder()">{{ S.app.openFolder }}</button>
+              <button v-if="canOpenFolder" type="button" data-testid="open-folder-button" @click="openFolder">{{ S.app.openFolder }}</button>
             </div>
           </div>
         </div>
@@ -627,6 +693,8 @@ function useSettings(s: Settings) {
       :shell="shell"
       :api="api"
       :conflicts="file?.conflicts ?? 0"
+      :can-change-settings="canChangeSettings"
+      :owner-off="ownerOff"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @header="headerOpen = true"
@@ -643,6 +711,7 @@ function useSettings(s: Settings) {
       @preview="preview"
       @search="openSearch"
       @help="toggleHelp"
+      @preferences="openPreferences"
       @close="menuOpen = false"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
@@ -656,6 +725,8 @@ function useSettings(s: Settings) {
       @editors-off="setEditorsOff"
       @close="componentsOpen = false"
     />
+    <PreferencesDialog v-if="preferencesOpen" :hub="hubApi" :shell="shell" @saved="preferencesSaved" @close="preferencesOpen = false" />
+    <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />
 
     <SettingsDialog

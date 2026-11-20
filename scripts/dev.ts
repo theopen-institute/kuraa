@@ -13,9 +13,11 @@
 // Scratch workspace holding a sample file. --dir serves one folder instead, as
 // `kuraa-host --dir` does.
 //
-// R chunks run in Podman containers, as everywhere (never on this computer
-// itself). --allow-write and --allow-network let the workspace ask for those in
-// .kuraa/run.json.
+// Its Preferences (the hub's settings, decision 0047) are kept in
+// .dev-workspaces/settings.json, or beside --workspaces; the page changes them as
+// in the desktop app. R chunks run in Podman containers, as everywhere (never on
+// this computer itself). --allow-write and --allow-network let the workspace ask
+// for those in .kuraa/run.json (as flags, they win over the Preferences).
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -92,12 +94,13 @@ const token = randomBytes(18).toString('base64url');
 const who = await gitIdentity(dir);
 const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 
+// Never the app's own settings: the developer's are kept with the workspaces they develop with.
+const settings = values.workspaces ? join(dir, '.kuraa-settings.json') : join(ROOT, '.dev-workspaces', 'settings.json');
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
-  flag, dir, '--port', String(hostPort), '--host', '127.0.0.1',
-  '--engine', 'r', '--allow-installs',
-  // Your own computer: the browser may manage your keys (person.ts) and online copies, as the desktop app's menu does.
-  '--manage-person', '--manage-online',
+  flag, dir, '--port', String(hostPort), '--host', '127.0.0.1', '--settings', settings,
+  // Listening only on this computer: the page has Preferences, Open a folder…, your identity
+  // and the online copy, as the desktop app has (decision 0047).
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });

@@ -11,6 +11,7 @@ export const isMac = (): boolean =>
 /** The keys the client itself handles, by what they do. */
 export const APP_KEYS = {
   menu: 'Mod-,',
+  preferences: 'Mod-Alt-,',
   help: 'Mod-/',
   search: 'Mod-Shift-f',
   preview: 'Mod-Shift-r',

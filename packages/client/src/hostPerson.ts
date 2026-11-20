@@ -1,6 +1,7 @@
-// This computer's person's key through the host, where the one running it lets
-// the app manage it (`pnpm dev`: --manage-person). Null where it does not (a
-// shared server: its key is its operator's).
+// You on this computer, through the host: where it listens only on this
+// computer, whoever has its access code is its owner (decision 0047), in a
+// browser as in the desktop app. Null where it does not (a server open to the
+// network: its key is its owner's).
 import { ApiError, type HostApi } from './api.js';
 import type { PersonShell } from './shell.js';
 import { S } from './strings.js';
@@ -47,7 +48,7 @@ export async function ensureIdentity(person: PersonShell, name: string): Promise
   await person.create(name.trim());
 }
 
-/** You on this computer: the shell's (the desktop app), else the host's where it allows (`pnpm dev`); null if neither. */
-export async function personShellFor(shell: { person?: PersonShell }, api: HostApi): Promise<PersonShell | null> {
-  return shell.person ?? (await hostPerson(api).catch(() => null));
+/** You on this computer, through the host where it allows; null where it does not. */
+export async function personShellFor(api: HostApi): Promise<PersonShell | null> {
+  return hostPerson(api).catch(() => null);
 }

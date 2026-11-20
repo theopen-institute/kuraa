@@ -2,9 +2,11 @@
 //
 // The client only ever talks to a host, over HTTP and a WebSocket. A shell is
 // whatever starts the page and tells it which host to use: a host serving the
-// built client, the dev server, or the desktop app. Native shells can also do a
-// few things a web page cannot (pick a folder); those are optional here, and the
-// client shows them only when the shell provides them.
+// built client, the dev server, or the desktop app. Everything the app does it
+// does through the host, in a browser as in the desktop app (decision 0047):
+// Preferences, Open a folder…, your identity. A native shell may do a few things
+// better (its own folder dialog, its menus); those are optional here, and the
+// client falls back to its own where the shell has none.
 
 /** What the client needs to know about its shell. A plain web page has none of the optional parts. */
 export interface Shell {
@@ -13,8 +15,6 @@ export interface Shell {
    * does not offer to change them.
    */
   managesHost: boolean;
-  /** Open a different folder (native shells). */
-  openFolder?(): void;
   /** Leave this workspace and go back to the shell's start screen (native shells). */
   leave?(): void;
   /** On a hub, the workspace to open first (the shell opened or added it). */
@@ -24,18 +24,18 @@ export interface Shell {
    * that runs the host knows them): after the host turned the access code down.
    */
   reconnect?(): void;
-  /** The shell's own preferences (the desktop app's window). */
-  preferences?(): void;
+  /** A folder the person picks with the shell's own dialog, or null; without it, the client's FolderPicker. */
+  chooseFolder?(purpose: FolderPurpose): Promise<string | null>;
+  /** Be told when the shell's own menu asks for Preferences (the desktop app's ⌥⌘,). */
+  onPreferences?(show: () => void): void;
+  /** Be told when the shell's own menu asks to open a folder (the desktop app's ⌘O). */
+  onOpenFolder?(show: () => void): void;
   /** Be told when the shell's own menu asks for the Markdown and shortcuts sheet (the desktop app's Help menu). */
   onHelp?(show: () => void): void;
-  /**
-   * The person's key of the computer the shell runs its host on (the desktop app,
-   * on its own workspaces): whose its commits are, so rules can name people
-   * (0034). In a browser, the host offers it where its operator allows
-   * (Menu.vue, hostPerson); on a shared server it does not: its key is its operator's.
-   */
-  person?: PersonShell;
 }
+
+/** What a folder is being chosen for: to open as a workspace, for new workspaces, or for packages and tools. */
+export type FolderPurpose = 'open' | 'workspaces' | 'data';
 
 /** You on this computer (the host's peers/person.ts, 0035). */
 export interface PersonInfo {
@@ -47,7 +47,7 @@ export interface PersonInfo {
   keys: { key: string; thisComputer: boolean }[];
 }
 
-/** You on this computer: kept by the shell (the desktop app), or by the host where it allows (`pnpm dev`). */
+/** You on this computer: kept by the host, where it listens only on this computer (hostPerson.ts). */
 export interface PersonShell {
   /** What happens once your identity is made or imported. */
   afterChange: string;
@@ -83,20 +83,19 @@ export interface ShellConfig {
 export interface ShellBridge {
   /** The current connection, read when the page starts, so a reload keeps it. Null on the start screen. */
   config(): ShellConfig | null;
+  /** Open a folder from the start screen (the launcher), with the app's own workspaces. */
   openFolder(): Promise<void>;
   /** Resolves to an error message, or null once the client is loading. */
   join(url: string, token: string): Promise<string | null>;
   leave(): Promise<void>;
   /** Back to this app's own workspaces (from the launcher); also how the client reconnects. */
   home(): Promise<void>;
-  /** The app's Preferences window. */
-  preferences?(): Promise<void>;
+  /** A folder picked with the app's own dialog, or null. */
+  chooseFolder?(purpose: FolderPurpose): Promise<string | null>;
+  /** Called when the app's menu asks for Preferences. */
+  onPreferences?(show: () => void): void;
+  /** Called when the app's menu asks to open a folder. */
+  onOpenFolder?(show: () => void): void;
   /** Called when the app's Help menu asks for the Markdown and shortcuts sheet. */
   onHelp?(show: () => void): void;
-  /** You on this computer (PersonShell): only where the shell runs the host. */
-  person?(): Promise<PersonInfo>;
-  createPerson?(name: string): Promise<string | null>;
-  importPerson?(line: string): Promise<string | null>;
-  copyPerson?(): Promise<boolean>;
-  revokeKey?(key: string): Promise<string | null>;
 }

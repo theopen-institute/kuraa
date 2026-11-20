@@ -671,3 +671,34 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* Code that cannot run here now: why, beside a Run that cannot be pressed. */
 .chunk-unavailable { color: var(--warn); font: 11.5px var(--font); padding: 0 6px; max-width: 32em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-unavailable { color: var(--warn); }
+
+/* Choosing a folder on the server's computer (FolderPicker.vue). */
+.modal.folder-picker { width: min(520px, 94vw); }
+.folder-picker-bar { display: flex; gap: 6px; align-items: center; }
+.folder-picker-path { flex: 1; min-width: 0; }
+.folder-picker-list { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--border); border-radius: 6px; height: min(300px, 45vh); overflow: auto; background: var(--bg); }
+.folder-picker-list li > button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; border-radius: 4px; color: var(--text); font: inherit; cursor: pointer; }
+.folder-picker-list li > button:hover, .folder-picker-list li > button:focus-visible { background: var(--surface); }
+.folder-picker-list li.muted { padding: 4px 8px; }
+.folder-picker-hidden { font-size: 12.5px; color: var(--muted); }
+
+/* Preferences (PreferencesDialog.vue). */
+.modal.preferences { width: min(600px, 94vw); max-height: 90vh; overflow: auto; }
+.pref-group { border: 0; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; min-width: 0; }
+.pref-group legend { font-weight: 600; padding: 0; margin-bottom: 4px; float: left; width: 100%; }
+.pref-check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; }
+.pref-check > input { margin: 3px 0 0; }
+.pref-hint { color: var(--muted); grid-column: 2; font-size: 12.5px; }
+.pref-hint.flag, .pref-hint.warn, .pref-status.no { color: var(--warn); }
+.pref-status { grid-column: 2; font-size: 12.5px; }
+.pref-status.ok { color: var(--accent); }
+.pref-note { color: var(--muted); font-size: 12.5px; margin: 0; }
+.pref-row { display: flex; gap: 6px; align-items: center; }
+.pref-row input { flex: 1; min-width: 0; }
+.pref-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pref-timing { display: grid; grid-template-columns: 1fr 6em; gap: 6px 10px; align-items: center; font-size: 13px; }
+.preferences input[type='text'], .preferences input[type='number'], .preferences textarea, .preferences select { font: 13px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; box-sizing: border-box; }
+.preferences textarea { min-height: 3.2em; resize: vertical; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.preferences details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.preferences details[open] > summary { margin-bottom: 8px; }
+.preferences details > div { display: grid; gap: 10px; }

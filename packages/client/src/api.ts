@@ -108,7 +108,8 @@ export interface SearchFile { path: string; type: string | null; title?: string 
 export interface SearchResult { files: SearchFile[]; truncated: boolean }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  /** `body`: the whole answer, where it says more than its message. */
+  constructor(readonly status: number, message: string, readonly body?: unknown) { super(message); }
 }
 
 export class HostApi {
@@ -130,11 +131,13 @@ export class HostApi {
     }
     if (!res.ok) {
       let msg = res.statusText;
+      let body: unknown;
       try {
-        const body = (await res.json()) as { error?: string; message?: string };
-        msg = body.error ?? body.message ?? msg;
+        body = await res.json();
+        const b = body as { error?: string; message?: string };
+        msg = b.error ?? b.message ?? msg;
       } catch { /* not JSON */ }
-      throw new ApiError(res.status, msg);
+      throw new ApiError(res.status, msg, body);
     }
     return res;
   }
@@ -231,6 +234,61 @@ export interface HubList {
   canAdd: boolean;
   /** People may invite others to its workspaces. */
   canInvite: boolean;
+  /** Any folder on the server's computer may be opened as a workspace. */
+  canOpenFolder?: boolean;
+  /** The Preferences may be changed here. */
+  canChangeSettings?: boolean;
+  /** Why Preferences, opening folders and your identity are not available here, if they are not. */
+  ownerOff?: string;
+}
+
+/** The owner's settings (the host's settings.ts), as the Preferences dialog edits them. */
+export interface HubSettings {
+  syncDevices: boolean;
+  bootstrap: string[];
+  runCode: boolean;
+  environment: string | null;
+  rImages: string[];
+  memory: string | null;
+  cpus: number | null;
+  disk: string | null;
+  allowWrite: boolean;
+  allowNetwork: boolean;
+  allowInstalls: boolean;
+  dataDir: string | null;
+  formats: string[] | null;
+  saveSeconds: number | null;
+  versionSeconds: number | null;
+  workspaces: string | null;
+}
+
+/** What the Preferences dialog shows. */
+export interface SettingsView {
+  settings: HubSettings;
+  /** Those set by flags, which win over the settings. */
+  fromFlags: (keyof HubSettings)[];
+  defaults: { memory: string; cpus: number; disk: string; saveSeconds: number; versionSeconds: number };
+  defaultWorkspaces: string;
+  defaultDataDir: string;
+  environments: { id: string; label: string; available: boolean; message: string }[];
+  formats: { id: string; label: string }[];
+  /** New workspaces can be added (where they go is a setting). */
+  canAdd: boolean;
+}
+
+/** The folders in one of the server's computer's folders, to choose one. */
+export interface FolderListing {
+  path: string;
+  parent: string | null;
+  home: string;
+  folders: { name: string; path: string }[];
+}
+
+/** Opening a folder that is not yet a git repository: what to ask before making it one. */
+export interface NotRepository {
+  name: string;
+  path: string;
+  entries: number;
 }
 
 /** A hub's own API: its workspaces, and adding them. Each workspace is a host at `<hub>/w/<id>`. */
@@ -257,6 +315,30 @@ export class HubApi extends HostApi {
   async join(invitation: string, name: string): Promise<HubWorkspace> {
     return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name }) })).workspace;
   }
+
+  /**
+   * Open a folder of the server's computer as a workspace. One that is not yet a
+   * repository is made one only with `init`; without, the answer is what to ask first.
+   */
+  async openFolder(path: string, init = false): Promise<{ workspace: HubWorkspace } | { notRepository: NotRepository }> {
+    try {
+      return await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces/open', { method: 'POST', body: JSON.stringify({ path, init }) });
+    } catch (e) {
+      const notRepository = e instanceof ApiError && e.status === 409 ? (e.body as { notRepository?: NotRepository } | undefined)?.notRepository : undefined;
+      if (notRepository) return { notRepository };
+      throw e;
+    }
+  }
+
+  /** The folders in a folder of the server's computer (from home, if none is given). */
+  folders(path: string | null, hidden = false) {
+    return this.json<FolderListing>(`/hub/api/folders?${new URLSearchParams({ ...(path ? { path } : {}), ...(hidden ? { hidden: '1' } : {}) })}`);
+  }
+
+  /** The owner's settings, for Preferences. */
+  settings() { return this.json<SettingsView>('/hub/api/settings'); }
+  /** Save the settings; answers once every workspace has reopened with them. */
+  saveSettings(s: HubSettings) { return this.json<SettingsView>('/hub/api/settings', { method: 'PUT', body: JSON.stringify(s) }); }
 
   /** Take a workspace off the list (its folder stays). */
   remove(id: string) {

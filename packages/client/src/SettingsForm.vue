@@ -52,9 +52,8 @@ function submit() {
         <input v-model="s.token" name="token" type="password" autocomplete="off" required>
       </label>
     </template>
-    <div v-if="part !== 'connection' && (shell.openFolder || shell.leave)" class="modal-shell">
-      <button v-if="shell.openFolder" type="button" @click="shell.openFolder()">{{ S.settings.openAnother }}</button>
-      <button v-if="shell.leave" type="button" @click="shell.leave()">{{ S.settings.join }}</button>
+    <div v-if="part !== 'connection' && shell.leave" class="modal-shell">
+      <button type="button" @click="shell.leave()">{{ S.settings.join }}</button>
     </div>
     <div class="modal-actions">
       <button v-if="cancellable" type="button" @click="emit('cancel')">{{ S.common.cancel }}</button>

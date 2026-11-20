@@ -36,6 +36,12 @@ export function useWorkspaces(options: {
   const canAdd = ref(false);
   /** People may invite others to its workspaces. */
   const canInvite = ref(false);
+  /** Any folder on the server's computer may be opened (its owner, decision 0047). */
+  const canOpenFolder = ref(false);
+  /** Preferences may be changed here. */
+  const canChangeSettings = ref(false);
+  /** Why the owner's features are not available here, if they are not. */
+  const ownerOff = ref<string | null>(null);
   /** The address is a host itself, not a hub. */
   const direct = ref(false);
   /** The address has answered. */
@@ -54,12 +60,18 @@ export function useWorkspaces(options: {
         workspaces.value = [{ id: DIRECT, name: '', path: '', peers: false }];
         canAdd.value = false;
         canInvite.value = false; // the menu asks the workspace itself
+        canOpenFolder.value = false;
+        canChangeSettings.value = false;
+        ownerOff.value = null;
         chosen.value = DIRECT;
       } else {
         const list = answer.workspaces;
         workspaces.value = list;
         canAdd.value = answer.canAdd;
         canInvite.value = answer.canInvite;
+        canOpenFolder.value = !!answer.canOpenFolder;
+        canChangeSettings.value = !!answer.canChangeSettings;
+        ownerOff.value = answer.ownerOff ?? null;
         let stored: string | null = null;
         try { stored = localStorage.getItem(chosenKey()); } catch { /* storage unavailable */ }
         const ok = (id: string | null | undefined) => !!id && list.some((w) => w.id === id && !w.error);
@@ -90,5 +102,5 @@ export function useWorkspaces(options: {
   const ready = computed(() => known.value && chosen.value !== null);
   const api = computed(() => markRaw(direct.value || chosen.value === null ? new HostApi(hostUrl.value, token.value) : hubApi.value.workspaceApi(chosen.value)));
 
-  return { hubApi, workspaces, canAdd, canInvite, known, chosen, ready, api, load };
+  return { hubApi, workspaces, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, known, chosen, ready, api, load };
 }

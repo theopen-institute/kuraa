@@ -516,6 +516,9 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .invite-links button.danger { color: var(--warn); font-size: 12px; padding: 1px 8px; }
 
 .person-key { display: grid; gap: 6px; }
+.person-advanced { display: grid; gap: 6px; font-size: 13px; }
+.person-advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.person-advanced[open] { gap: 6px; }
 .menu-panel-head { display: flex; align-items: center; gap: 12px; padding: 10px 0 4px; }
 .modal .menu-panel-head h2 { margin: 0; font-size: 15px; }
 .menu-back { padding: 2px 8px; }

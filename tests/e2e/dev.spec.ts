@@ -89,26 +89,23 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
     expect(existsSync(join(root, 'field-notes', '.git'))).toBe(true);
 
-    // Your key, in the browser too: pnpm dev runs the host on your own computer, and lets the app manage it.
+    // You on this computer, in the browser too: pnpm dev runs the host on your own computer, and lets the app
+    // manage it. Your identity is made for you from your name; the keys are under Advanced.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
     const key = page.getByTestId('person-key');
-    await expect(key).toContainText('You have no identity on this computer');
+    await expect(key.getByTestId('you-here')).toContainText('You on this computer:');
+    await expect.poll(() => existsSync(person), { timeout: 10_000 }).toBe(true);
+    await expect(key.getByTestId('signing-key')).toBeHidden();
+    await key.getByText('Advanced').click();
     await expect(key.getByTestId('signing-key')).toHaveText(/^[0-9a-f]{8}…$/);
-    await key.getByTestId('person-name').fill('Dev Person');
-    await key.getByTestId('person-create').click();
-    await expect(page.getByTestId('person-status')).toContainText('Made your identity');
-    await expect(key.getByTestId('identity')).toContainText('You are Dev Person');
-    expect(JSON.parse(readFileSync(person, 'utf8')).name).toBe('Dev Person');
 
-    // A backup, added from the menu (back from the panel): a plain git repository the workspace is pushed to.
-    await page.getByTestId('menu-back').click();
-    const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-backup-'));
+    // An online copy, added from the menu: a plain git repository each save is pushed to.
+    const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
-    const backups = page.getByTestId('backups');
-    await backups.getByTestId('backup-target').fill(bare);
-    await backups.getByTestId('backup-add').click();
-    await expect(backups).toContainText('backed up', { timeout: 15_000 });
+    const online = page.getByTestId('online-copy');
+    await online.getByTestId('online-target').fill(bare);
+    await online.getByTestId('online-add').click();
+    await expect(online).toContainText('up to date', { timeout: 15_000 });
     expect(execFileSync('git', ['log', '--all', '--format=%s'], { cwd: bare, encoding: 'utf8' })).toContain('Initialise workspace');
   } finally {
     process.kill(-dev.pid!, 'SIGINT');

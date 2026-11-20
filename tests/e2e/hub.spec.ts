@@ -1,5 +1,5 @@
 // A hub in the browser: no workspaces at first; one made from the app, another
-// joined from a subscription link; switching between them.
+// joined from an invite link; switching between them.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -26,7 +26,7 @@ test('workspaces are added from the app: a new folder, or one joined from a link
   git(theirs, 'add', '-A');
   git(theirs, 'commit', '-q', '-m', 'Initial');
   const other = await startHost({ dir: theirs, timings: TIMINGS, peers });
-  const link = await other.host.peers!.subscriptionLink(1);
+  const link = await other.host.peers!.inviteLink({ hours: 1, once: true });
 
   const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-hub-'));
   const hub = await startHub({ root, staticDir: STATIC, hosts: { timings: TIMINGS }, peers });
@@ -83,7 +83,7 @@ test('workspaces are added from the app: a new folder, or one joined from a link
   }
 });
 
-test('people are invited from the app: a link, joined elsewhere, then revoked', async ({ page }) => {
+test('people are invited from the app: a link for anyone, joined elsewhere, then revoked', async ({ page }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const peers = { bootstrap: testnet.bootstrap as never };
@@ -98,14 +98,16 @@ test('people are invited from the app: a link, joined elsewhere, then revoked', 
 
     // On this device only, so far: the menu offers to invite people.
     await page.getByTestId('menu-button').click();
-    await expect(page.getByTestId('devices')).toContainText('on this device only');
+    await expect(page.getByTestId('devices')).toContainText('on this computer only');
     await page.getByTestId('invite-button').click();
     const dialog = page.getByTestId('invite');
     await expect(dialog).toContainText('Making one turns on syncing');
-    await dialog.getByTestId('invite-expiry').selectOption({ label: 'a day' });
+    await expect(dialog).toContainText('the same say as you');
+    await dialog.getByTestId('invite-anyone').click();
+    await dialog.getByTestId('invite-expiry').selectOption({ label: 'in a day' });
     await dialog.getByTestId('invite-create').click();
     const code = await dialog.getByTestId('invite-code').inputValue();
-    expect(code).toMatch(/^kuraa-link:/);
+    expect(code).toMatch(/^kuraa-invite:/);
     await expect(dialog.getByTestId('invite-links').locator('li')).toHaveCount(1);
 
     // Someone joins with it, on their own hub.
@@ -121,7 +123,7 @@ test('people are invited from the app: a link, joined elsewhere, then revoked', 
 
     // The menu now shows the device that joined.
     await page.getByTestId('menu-button').click();
-    await expect(page.getByTestId('devices')).toContainText('1 of 1 other device connected');
+    await expect(page.getByTestId('devices')).toContainText('1 of 1 other device online');
   } finally {
     await theirs.close();
     await mine.close();

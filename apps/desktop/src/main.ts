@@ -272,18 +272,11 @@ async function preferencesView(): Promise<PreferencesView> {
 }
 
 /**
- * This computer now acts for a person (made or imported): restart the workspaces,
- * so each says so to its other devices as it starts syncing (and commits first).
+ * This computer now acts for a person (made, imported, or a key revoked): each
+ * workspace that syncs says so to its other devices now, not at its next save.
  */
 async function personChanged(): Promise<void> {
-  if (!hub) return;
-  await stopHub();
-  try {
-    await showWorkspaces();
-  } catch (e) {
-    dialog.showErrorBox('Could not open your workspaces', (e as Error).message);
-    await showLauncher();
-  }
+  for (const w of hub?.hub.list() ?? []) await hub?.hub.hostOf(w.id)?.host.peers?.node.signingKey().catch(() => undefined);
 }
 
 /** Run a change to this computer's person; an error message for the window, or null. */

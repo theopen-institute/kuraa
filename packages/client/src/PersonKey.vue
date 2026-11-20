@@ -72,7 +72,8 @@ const short = (k: string) => `${k.slice(0, 8)}…`;
         <p class="menu-facts">To use another computer as you, copy your identity here and import it there. Keep a copy somewhere safe: a lost one cannot be recovered.</p>
         <div class="menu-actions"><button type="button" data-testid="person-copy" @click="copy">Copy identity</button></div>
       </template>
-      <form v-else class="person-row" @submit.prevent="importIdentity">
+      <p class="menu-facts">On a second computer: paste the identity copied on your first, so both count as you. It replaces the one made here.</p>
+      <form class="person-row" @submit.prevent="importIdentity">
         <input v-model="line" placeholder="kuraa-id:… (Copy identity on your other computer)" spellcheck="false" aria-label="Your identity, from another computer" data-testid="person-line">
         <button type="submit" data-testid="person-import">Import</button>
       </form>

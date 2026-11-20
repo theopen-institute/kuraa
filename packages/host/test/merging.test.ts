@@ -119,7 +119,7 @@ describe('Sync', () => {
     running = await startHost({ dir, port: 0 });
     const api = (p: string, init: RequestInit = {}) => fetch(running!.url + p, { ...init, headers: { authorization: `Bearer ${running!.token}` } });
     const sync = (await (await api('/api/sync', { method: 'POST' })).json()) as { ok: boolean; message: string };
-    expect(sync).toEqual({ ok: true, message: 'Synced with origin/main; 1 conflict kept in notes.md, to choose between in the document', head: expect.any(String) });
+    expect(sync).toEqual({ ok: true, message: 'Synced with origin/main; 1 conflict kept in notes.md, to choose between in the document', head: expect.any(String), brought: expect.any(Number), conflicts: 1 });
     expect(readFileSync(join(dir, 'notes.md'), 'utf8')).toContain(':::: {.conflict}');
     expect(git(dir, 'status', '--porcelain')).toBe('');
     // Pushed: the remote has the merge.

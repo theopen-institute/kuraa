@@ -297,6 +297,6 @@ describe('invite links from the app', () => {
     expect(await (await api('/api/peers')).json()).toEqual({ enabled: false, canInvite: false });
     const r = await api('/api/peers/links', { method: 'POST', body: JSON.stringify({ hours: 24 }) });
     expect(r.status).toBe(403);
-    expect(((await r.json()) as { error: string }).error).toContain('--allow-invites');
+    expect(((await r.json()) as { error: string }).error).toContain('turned off on this server');
   });
 });

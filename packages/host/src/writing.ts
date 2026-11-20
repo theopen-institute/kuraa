@@ -7,7 +7,7 @@
 // symbolic link, and never in .git (host.resolvePath).
 import type { IncomingMessage } from 'node:http';
 import { createHash } from 'node:crypto';
-import { createReadStream, lstatSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, lstatSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 import type { Host } from './host.js';
@@ -31,25 +31,20 @@ const send = (c: Context, status: number, body: unknown) => {
 };
 
 /**
- * A workspace path's file, refusing one reached through a symbolic link at any
- * step (a link could lead outside the workspace) and anything but a plain file.
+ * A workspace path's file: resolvePath refuses one reached through a symbolic
+ * link at any step (a link could lead outside the workspace), and here anything
+ * but a plain file is refused too.
  */
 export function workspaceFile(host: Host, path: string): { abs: string; rel: string } {
-  const abs = host.resolvePath(host.relPath(path));
-  const rel = relative(host.dir, abs);
-  let at = host.dir;
-  for (const part of rel.split(sep)) {
-    at = `${at}${sep}${part}`;
-    let st;
-    try {
-      st = lstatSync(at);
-    } catch {
-      throw new HttpError(404, 'No such file');
-    }
-    if (st.isSymbolicLink()) throw new HttpError(403, 'Not shown: it is a symbolic link');
+  const abs = host.resolvePath(path);
+  let st;
+  try {
+    st = lstatSync(abs);
+  } catch {
+    throw new HttpError(404, 'No such file');
   }
-  if (!statSync(abs).isFile()) throw new HttpError(404, 'No such file');
-  return { abs, rel: rel.split(sep).join('/') };
+  if (!st.isFile()) throw new HttpError(st.isSymbolicLink() ? 403 : 404, 'No such file');
+  return { abs, rel: relative(host.dir, abs).split(sep).join('/') };
 }
 
 /** The image type its bytes say it is (by extension), or null. SVG must at least look like SVG. */
@@ -103,22 +98,18 @@ export async function addImage(host: Host, doc: string, name: string, bytes: Buf
   const stem = base.slice(0, -(ext.length + 1));
   const hash = createHash('sha256').update(bytes).digest('hex');
   return host.serial(async () => {
+    // Not while git is busy outside the app (a rebase, a merge): 409 until it is done.
+    await host.requireWritable();
     let path: string;
     for (let n = 1; ; n++) {
       path = `${folder}/${n === 1 ? stem : `${stem}-${n}`}.${ext}`;
+      // resolvePath refuses the folder or file if it is (or goes through) a link.
       const abs = host.resolvePath(path);
       let existing: Buffer | null = null;
       try {
-        const st = lstatSync(abs);
-        existing = st.isFile() ? readFileSync(abs) : Buffer.alloc(0);
+        existing = lstatSync(abs).isFile() ? readFileSync(abs) : Buffer.alloc(0);
       } catch { /* free */ }
       if (existing === null) {
-        // The folder must not lead elsewhere through a link either.
-        try {
-          if (lstatSync(host.resolvePath(folder)).isSymbolicLink()) throw new HttpError(403, `${folder} is a symbolic link`);
-        } catch (e) {
-          if (e instanceof HttpError) throw e;
-        }
         await mkdir(host.resolvePath(folder), { recursive: true });
         await writeFile(abs, bytes, { flag: 'wx' });
         await host.commitPaths([path], `Add image ${path}`, by && by.email ? [by] : []);

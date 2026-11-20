@@ -18,7 +18,7 @@ export function workspaceFiles(api: HostApi, doc: string, by: () => { name: stri
   const commits = new Map<string, Promise<{ author: string; date: string } | null>>();
   let disposed = false;
   const missing = (e: unknown) => {
-    if (e instanceof ApiError && (e.status === 404 || e.status === 400 || e.status === 403)) return null;
+    if (e instanceof ApiError && (e.status === 404 || e.status === 400 || e.status === 403 || e.status === 415)) return null;
     throw e;
   };
   return {

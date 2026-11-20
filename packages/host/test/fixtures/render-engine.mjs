@@ -6,6 +6,7 @@
 // where its output should be, as code in a document could.
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout, clearTimeout } from 'node:timers';
 
 const sleep = (ms, signal) => new Promise((resolve) => {
   const t = setTimeout(resolve, ms);

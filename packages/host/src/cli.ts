@@ -29,7 +29,7 @@ import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { defaultDataDir, lastResort, SettingsStore, startHub, type Settings } from './index.js';
+import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
@@ -156,6 +156,7 @@ const close = () => hub.close();
 if (!values.dir) console.log(`[kuraa] workspaces: ${hub.hub.root}`);
 else console.log(`[kuraa] workspace: ${hub.hub.root}`);
 console.log(`[kuraa] settings:  ${settingsFile}`);
+if (!hub.hub.owner) console.log(`[kuraa] ${OWNER_OFF}`);
 console.log(`[kuraa] url:       ${hub.url}`);
 console.log(`[kuraa] token:     ${hub.token}`);
 if (values.static) console.log(`[kuraa] open:      ${hub.url}/?token=${hub.token}`);

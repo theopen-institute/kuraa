@@ -5,7 +5,7 @@
 //   vouches for their signing keys, and revokes them. It may be on one computer
 //   only; taken to another (export, import), that one can vouch for its own key.
 // - Their signing key on each computer (below): what signs their commits there.
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -49,7 +49,12 @@ export function exportPerson(p: Person): string {
   return `kuraa-id:${Buffer.from(JSON.stringify({ name: p.name, secretKey: p.secretKey.toString('hex') })).toString('base64url')}`;
 }
 
-/** Keep a person's key exported on another computer here. */
+/**
+ * Keep a person's key exported on another computer here. One already here (made
+ * for this computer on its own, 0038) is replaced, kept beside it as
+ * person.json.replaced-<time>, and so is this computer's signing key, which
+ * the old identity vouched for: a new one is made, for the new identity.
+ */
 export async function importPerson(code: string, file = personFile()): Promise<Person> {
   const m = /^kuraa-id:([A-Za-z0-9_-]+)$/.exec(code.trim());
   if (!m) throw new Error('Not an identity (it starts with kuraa-id:)');
@@ -63,7 +68,10 @@ export async function importPerson(code: string, file = personFile()): Promise<P
   if (typeof v.name !== 'string' || !k) throw new Error('This person\'s key is damaged');
   const p = { name: v.name, ...k };
   const now = await readPerson(file);
-  if (now && !now.publicKey.equals(p.publicKey)) throw new Error(`There is another person's key here already: ${file}`);
+  if (now && !now.publicKey.equals(p.publicKey)) {
+    await copyFile(file, `${file}.replaced-${Date.now()}`);
+    await rm(signingFile(file), { force: true });
+  }
   await write(file, p);
   return p;
 }
@@ -76,8 +84,8 @@ export async function importPerson(code: string, file = personFile()): Promise<P
 // counts as theirs from each of their computers, and a lost one can be revoked.
 
 /** Where this computer keeps this person's signing key: beside their person's key. */
-export function signingFile(): string {
-  return join(dirname(personFile()), 'signing.json');
+export function signingFile(person = personFile()): string {
+  return join(dirname(person), 'signing.json');
 }
 
 /** This computer's signing key, made the first time it is asked for (keys.ts). */

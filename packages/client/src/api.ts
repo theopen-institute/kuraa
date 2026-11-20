@@ -33,51 +33,43 @@ export interface TreeFile {
   /** Conflicts a merge kept in it, to choose between: absent if none. */
   conflicts?: number;
 }
-/** The workspace's devices, as the host reports them (pairing is done with kuraa-host, not here). */
+/** The workspace's devices, as the host reports them: every member has the same say. */
 export type PeersInfo =
   | { enabled: false; canInvite: boolean }
   | {
       enabled: true;
-      /** People may make invitations and links here (the operator allows it). */
+      /** People here may make invite links, remove devices and rename this one (the operator allows it). */
       canInvite: boolean;
-      device: { name: string; key: string };
+      /** This device, and whose it is (null if no identity says). */
+      device: { name: string; key: string; person: string | null };
       workspace: { id: string; forkedFrom: string | null };
-      /** The sync remote: the ordinary git remote Sync uses (GitHub, say), if any. */
-      remote: string | null;
-      /** Where this device accepts only some devices' or people's work on its own ('' the whole branch, 'dir/' a folder, else a file), and whose. */
-      rules: { branch: string; path: string; from: string[] }[];
-      /** Files where another device's version differs and this device keeps its own. */
-      declined: { device: string; branch: string; path: string }[];
-      /** Whose changes to the members it takes; null: every member's. */
-      membership: string[] | null;
-      devices: { name: string; key: string; online: boolean; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean }[];
-      proposals: { device: string; branch: string; commits: number; subject: string }[];
+      devices: { name: string; key: string; person: string | null; online: boolean; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean }[];
     };
 
-/** A git server this workspace is pushed to (the host's backups.ts). */
-export interface BackupInfo {
+/** A git server this workspace keeps a copy on and syncs with (the host's backups.ts). */
+export interface OnlineCopyInfo {
   name: string;
   /** Where, with any password left out. */
   url: string;
-  lastPush: string | null;
+  lastSync: string | null;
   error: string | null;
-  pushing: boolean;
+  busy: boolean;
 }
 
-/** A subscription link this device made. */
-export interface SubscriptionLinkInfo {
+/** An invite link this device made. */
+export interface InviteLinkInfo {
   id: string;
   created: number;
   /** When it stops working (ms since 1970); 0: never. */
   expires: number;
-  state: 'active' | 'expired' | 'revoked';
+  /** For one person: the first device it lets in uses it up. */
+  once: boolean;
+  state: 'active' | 'expired' | 'revoked' | 'used';
 }
 
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;
-  /** Devices or people that would not take edits made here to it, by their rules. */
-  declinedBy: string[];
 }
 export interface CommitInfo {
   hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[];
@@ -137,26 +129,23 @@ export class HostApi {
   async textAt(commit: string, path: string) { return (await this.req(`/api/history/${commit}?path=${encodeURIComponent(path)}`)).text(); }
   components() { return this.json<ComponentsInfo>('/api/components'); }
   peers() { return this.json<PeersInfo>('/api/peers'); }
-  peerLinks() { return this.json<{ links: SubscriptionLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
-  /** A subscription link lasting `hours` (null: no expiry). Turns syncing on if it is not. */
-  createLink(hours: number | null) { return this.json<SubscriptionLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify({ hours }) }); }
-  /** A one-time invitation, good for a day. Turns syncing on if it is not. */
-  createInvitation() { return this.json<{ invitation: string }>('/api/peers/invitations', { method: 'POST' }).then((r) => r.invitation); }
+  peerLinks() { return this.json<{ links: InviteLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
+  /** An invite link: for one person (`once`) or anyone, lasting `hours` (null: no expiry). Turns syncing on if it is not. */
+  createLink(o: { hours: number | null; once: boolean }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
-  /** Git servers this workspace is pushed to (backups), and whether people here may add and remove them. */
-  backups() { return this.json<{ canManage: boolean; backups: BackupInfo[] }>('/api/backups'); }
-  addBackup(target: string) { return this.json<{ backups: BackupInfo[] }>('/api/backups', { method: 'POST', body: JSON.stringify({ target }) }).then((r) => r.backups); }
-  removeBackup(name: string) { return this.json<{ backups: BackupInfo[] }>(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.backups); }
-  backUpNow() { return this.json<{ backups: BackupInfo[] }>('/api/backups/now', { method: 'POST' }).then((r) => r.backups); }
+  /** Remove a device from the workspace, for good (it keeps its copy). */
+  removeDevice(key: string) { return this.json(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
+  renameDevice(name: string) { return this.json<{ name: string }>('/api/peers/name', { method: 'POST', body: JSON.stringify({ name }) }); }
+  /** The online copies, and whether people here may add and remove them. */
+  online() { return this.json<{ canManage: boolean; copies: OnlineCopyInfo[] }>('/api/online'); }
+  addOnline(target: string) { return this.json<{ copies: OnlineCopyInfo[] }>('/api/online', { method: 'POST', body: JSON.stringify({ target }) }).then((r) => r.copies); }
+  removeOnline(name: string) { return this.json<{ copies: OnlineCopyInfo[] }>(`/api/online/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.copies); }
   /** You on this computer (keys), where the host lets people using the app manage them (else a 404). */
   person() { return this.json<{ person: PersonInfo }>('/api/person').then((r) => r.person); }
   revokeKey(key: string) { return this.json('/api/person/revoke', { method: 'POST', body: JSON.stringify({ key }) }); }
   createPerson(name: string) { return this.json('/api/person', { method: 'POST', body: JSON.stringify({ name }) }); }
   importPerson(line: string) { return this.json('/api/person/import', { method: 'POST', body: JSON.stringify({ line }) }); }
   exportPerson() { return this.json<{ line: string }>('/api/person/export').then((r) => r.line); }
-  /** Take another device's version of a file this device keeps its own of. */
-  takeVersion(device: string, branch: string, path: string) { return this.json('/api/peers/take', { method: 'POST', body: JSON.stringify({ device, branch, path }) }); }
-  acceptProposal(device: string, branch: string) { return this.json('/api/peers/accept', { method: 'POST', body: JSON.stringify({ device, branch }) }); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }
@@ -209,7 +198,7 @@ export class HubApi extends HostApi {
     return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name }) })).workspace;
   }
 
-  /** A workspace joined from an invitation or subscription link. */
+  /** A workspace joined from an invite link. */
   async join(invitation: string, name: string): Promise<HubWorkspace> {
     return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name }) })).workspace;
   }

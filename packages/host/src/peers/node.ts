@@ -78,9 +78,8 @@ export class PeerNode {
   // Kept for the firewall, which must answer at once.
   private removedKeys = new Set<string>();
   private closing = false;
-  /** This computer's person's key as last read (from its file, unless given), and the key this device last said it signs with. */
+  /** This computer's person's key as last read (from its file, unless given). */
   private personRead: { stamp: string; person: Person | null } | null = null;
-  private signing: KeyPair | null = null;
   /** What this device last said in this workspace about its signing key and its person (syncPerson). */
   private saidFor: string | null = null;
 
@@ -145,10 +144,9 @@ export class PeerNode {
     return this.personRead.person;
   }
 
-  /** This computer's signing key, for its person (person.ts: made on first use, never copied). Tests give theirs. */
-  private async signingKeyNow(): Promise<KeyPair> {
-    this.signing ??= this.o.signing ?? await signingKey();
-    return this.signing;
+  /** This computer's signing key, for its person (person.ts: made on first use, never copied; read each time, as importing an identity replaces it). Tests give theirs. */
+  private signingKeyNow(): Promise<KeyPair> {
+    return this.o.signing ? Promise.resolve(this.o.signing) : signingKey();
   }
 
   /**

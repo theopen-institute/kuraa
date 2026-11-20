@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Adding a workspace to a hub: a new one (a folder of its own, made a git
-// repository), or one shared from another device, joined with the invitation
-// or subscription link someone gave (kuraa-invite:… or kuraa-link:…).
+// repository), or one someone shared, joined with the invite link they gave
+// (kuraa-invite:…).
 import { computed, ref } from 'vue';
 import type { HubApi, HubWorkspace } from './api.js';
 import { onEscape, vFocus } from './vue.js';
@@ -15,10 +15,7 @@ const invitation = ref('');
 const busy = ref(false);
 const error = ref<string | null>(null);
 
-const kind = computed(() => {
-  const t = invitation.value.trim();
-  return t.startsWith('kuraa-link:') ? 'link' : t.startsWith('kuraa-invite:') ? 'invitation' : null;
-});
+const isLink = computed(() => invitation.value.trim().startsWith('kuraa-invite:'));
 
 onEscape(() => {
   if (!busy.value) emit('cancel');
@@ -30,8 +27,8 @@ async function submit() {
     error.value = 'Give the workspace a name.';
     return;
   }
-  if (mode.value === 'join' && !kind.value) {
-    error.value = 'Paste an invitation (kuraa-invite:…) or a subscription link (kuraa-link:…).';
+  if (mode.value === 'join' && !isLink.value) {
+    error.value = 'Paste the invite link someone gave you (it starts with kuraa-invite:).';
     return;
   }
   busy.value = true;
@@ -52,21 +49,21 @@ async function submit() {
       <h2>Add a workspace</h2>
       <div class="segmented" aria-label="How">
         <button type="button" :class="{ active: mode === 'new' }" :aria-pressed="mode === 'new'" data-testid="add-workspace-new" :disabled="busy" @click="mode = 'new'; error = null">A new folder</button>
-        <button type="button" :class="{ active: mode === 'join' }" :aria-pressed="mode === 'join'" data-testid="add-workspace-join" :disabled="busy" @click="mode = 'join'; error = null">Join from an invitation</button>
+        <button type="button" :class="{ active: mode === 'join' }" :aria-pressed="mode === 'join'" data-testid="add-workspace-join" :disabled="busy" @click="mode = 'join'; error = null">Join from an invite link</button>
       </div>
       <p class="naming-hint">
         <template v-if="mode === 'new'">A folder of its own, kept with git. Files you make in it are committed as you work.</template>
-        <template v-else>Paste the invitation or subscription link someone gave you. This copy syncs with their devices: what you do reaches them, and what they do reaches you.</template>
+        <template v-else>Paste the invite link someone gave you. Your copy syncs with everyone else’s: what you do reaches them, and what they do reaches you.</template>
       </p>
       <label v-if="mode === 'join'" class="field">
-        <span>Invitation or link</span>
+        <span>Invite link</span>
         <textarea
           v-model="invitation"
           v-focus
           name="invitation"
           rows="3"
           spellcheck="false"
-          placeholder="kuraa-link:…"
+          placeholder="kuraa-invite:…"
           data-testid="add-workspace-invitation"
           :disabled="busy"
           @input="error = null"

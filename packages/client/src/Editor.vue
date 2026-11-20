@@ -52,14 +52,6 @@ const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 const view = shallowRef<EditorView | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
-/**
- * Devices or people that would not take edits made here to this document (their
- * rules say so: 0033). Not a lock: the files are this device's own. The editor
- * starts read-only and says who, until the person chooses to edit anyway.
- */
-const declinedBy = ref<string[]>([]);
-const editAnyway = ref(false);
-const locked = computed(() => declinedBy.value.length > 0 && !editAnyway.value);
 /** Goes up with every change to the document while the Header dialog is open. */
 const docVersion = ref(0);
 let source: SourceEditor | null = null;
@@ -170,8 +162,6 @@ function open(): () => void {
   (async () => {
     const room = await api.room(path);
     if (cancelled) return;
-    declinedBy.value = room.declinedBy;
-    editAnyway.value = false;
     update({ room, lastFlushAt: room.lastFlushAt, lastCommitAt: room.lastCommitAt, lastCommit: room.lastCommit });
     const conn = connectRoom({
       url: api.collabUrl,
@@ -218,7 +208,6 @@ function open(): () => void {
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins] });
     pmView = new EditorView(mount.value!, {
       state,
-      editable: () => !locked.value,
       nodeViews: nodeViewsFor(type, ctx, formatEditor, { runner }),
       attributes: layout
         ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
@@ -285,20 +274,18 @@ onBeforeUnmount(() => {
 });
 
 watch(user, (u) => connection?.setUser(u));
-// ProseMirror reads `editable` when it updates: have it look again.
-watch(locked, () => view.value?.setProps({}));
 
 // The editable Source view, while it is shown. It starts from the file as it is
 // on disk, so blocks nobody has touched show exactly as written.
-watch([() => props.showSource, view, locked], ([showSource, v, isLocked], _prev, onCleanup) => {
+watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
   if (!showSource || !v) return;
   const { api, path, type } = props;
   let cancelled = false;
   api.fileText(path).catch(() => '').then((onDisk) => {
     if (cancelled || !sourceMount.value || v.isDestroyed) return;
     const initial = type.serialize(v.state.doc, onDisk ? type.parse(onDisk) : undefined);
-    source = new SourceEditor(sourceMount.value, v, type, initial, isLocked);
-    if (!isLocked) source.focus();
+    source = new SourceEditor(sourceMount.value, v, type, initial);
+    source.focus();
   });
   onCleanup(() => {
     cancelled = true;
@@ -311,14 +298,6 @@ watch([() => props.showSource, view, locked], ([showSource, v, isLocked], _prev,
 <template>
   <div class="editor-pane">
     <div v-if="error" class="banner warn">Could not open {{ path }}: {{ error }}</div>
-    <div v-if="declinedBy.length && !error" class="banner info" data-testid="declined-banner">
-      <template v-if="locked">
-        {{ declinedBy.join(', ') }} {{ declinedBy.length === 1 ? 'does' : 'do' }} not take changes made here to this document, so it opens read-only.
-        Your edits would stay on this device (and in a fork).
-        <button type="button" data-testid="edit-anyway" @click="editAnyway = true">Edit anyway</button>
-      </template>
-      <template v-else>Editing anyway: {{ declinedBy.join(', ') }} will not take these changes.</template>
-    </div>
     <div v-if="loading && !error" class="loading">Opening {{ path }}…</div>
     <div v-show="!showSource" class="editor-scroll" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />

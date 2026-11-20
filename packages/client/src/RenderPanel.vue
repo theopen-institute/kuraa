@@ -36,6 +36,7 @@ watch(onSave, (v) => {
 });
 
 let asked = 0;
+let opened = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 onBeforeUnmount(() => clearTimeout(timer));
 
@@ -71,7 +72,7 @@ async function refresh(first = false) {
       }
       if (shown.value?.format === r.format) shown.value = r;
     }
-    if (first) shown.value = next.renders.find((r) => r.format === 'html') ?? null;
+    if (first && !shown.value) shown.value = next.renders.find((r) => r.format === 'html') ?? null;
     if (next.renders.some((r) => r.state === 'rendering')) timer = setTimeout(() => void refresh(), 700);
   } catch (e) {
     if (n === asked) error.value = (e as Error).message;
@@ -104,10 +105,13 @@ watch(() => props.path, () => {
   html.value = null;
   shown.value = null;
   toSave.clear();
-  void refresh(true);
+  const opening = !opened;
+  opened = true;
+  // Opened by asking for a render (the menu, ⇧⌘R): render now, once what is there is known.
+  void refresh(true).then(() => {
+    if (opening && props.trigger) void render('html');
+  });
 }, { immediate: true });
-// Opened by asking for a render (the menu, ⇧⌘R): render now.
-if (props.trigger) void render('html');
 watch(() => props.trigger, () => void render('html'));
 watch(() => props.writtenAt, (at, before) => {
   if (onSave.value && at && at !== before && !busy.value) void render('html');

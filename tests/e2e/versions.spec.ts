@@ -48,7 +48,8 @@ test('a past version is compared with now, and restored as an edit everyone sees
   await past.getByTestId('compare-now').click();
   const changed = past.getByTestId('compare-changed');
   await expect(changed).toHaveCount(1);
-  await expect(changed.locator('ins')).toHaveText(' Clearer by noon.');
+  await expect(changed.locator('ins')).toContainText('Clearer by noon');
+  await expect(changed).toContainText('Light rain all morning.');
   await past.getByTestId('compare-now').click();
   await expect(past.getByTestId('compare')).toHaveCount(0);
 

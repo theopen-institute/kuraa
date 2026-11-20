@@ -13,7 +13,8 @@ changes the live document in the editor, as the person's own edit (`replaceWithT
 `packages/client/src/docActions.ts`: only the blocks between the first and last difference are
 replaced, so everyone's cursors elsewhere stay put). So collaborators see it at once, ⌘Z undoes it,
 and it is written, committed and credited like any edit. Nothing changes on the host: restoring is
-an edit, not a git operation, and history is never rewritten. A document open read-only (another
+an edit, not a git operation (while git is busy outside the app and saving is paused, the app
+says so and does not restore), and history is never rewritten. A document open read-only (another
 device's rules, [0033](0033-document-rules-and-people.md)) is not changed. The restored blocks are
 written as the format writes them; blocks equal to the current ones keep their text exactly.
 
@@ -31,6 +32,8 @@ people, the file written, undo).
 
 The desktop app had no context menu. Right-clicking now offers spelling suggestions for a misspelled
 word (`replaceMisspelling`) and **Add to Dictionary**, **Look Up** for a selection on a Mac, and
-**Cut**, **Copy**, **Paste** and **Select All** as the place allows. ⌘F is left to the page (the
+**Cut**, **Copy**, **Paste** and **Select All** as the place allows. Where the page answers a
+right-click with a menu of its own (a table's rows and columns, the file list), the preload tells the
+main process that the page handled it, and no native menu is shown. ⌘F is left to the page (the
 editor's own find); the app adds no find of Electron's, and its Edit menu (the standard roles)
 takes no ⌘F.

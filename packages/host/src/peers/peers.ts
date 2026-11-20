@@ -212,8 +212,10 @@ export class Peers {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
     await this.node.identity.removeMember(key);
-    this.node.links.get(key)?.close();
+    // Told first, with the others (it stops syncing once it takes the record); then let go of, in any case.
+    const link = this.node.links.get(key);
     await this.node.membersChanged();
+    if (link) setTimeout(() => link.close(), 1000).unref();
   }
 
   /** What this device is called, to people and to the devices that pair with it from now on. */

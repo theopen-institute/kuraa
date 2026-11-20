@@ -17,8 +17,10 @@
   "devDependencies": {
     "@electron/fuses": "1.8.0",
     "@kuraa/client": "workspace:*",
+    "@kuraa/formats": "workspace:*",
     "@kuraa/host": "workspace:*",
     "@kuraa/run-components": "workspace:*",
+    "@kuraa/run-kit": "workspace:*",
     "electron": "45.3.2",
     "electron-builder": "26.18.1",
     "hypercore-crypto": "^3.7.0",

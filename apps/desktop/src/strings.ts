@@ -15,6 +15,8 @@ export const D = {
   folder: {
     choose: 'Choose a workspace folder',
     whereNew: 'Where new workspaces go',
+    whereData: 'Where packages and tools are kept',
+    whichPodman: 'The Podman program',
     useAsk: (name: string) => `Use “${name}” as a workspace?`,
     useDetail: (items: number) =>
       `kuraa keeps every version of the files in it${items ? `, starting with the ${items === 1 ? 'item' : `${items} items`} already there` : ''}. The history is kept inside the folder (as git does), and the folder stays usable by other programs.`,

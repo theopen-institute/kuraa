@@ -39,31 +39,35 @@ menu, and cannot add others; `--workspaces` instead serves a folder of workspace
 (see below). Either way it is the same kind of server, a hub
 ([decision 0030](docs/decisions/0030-one-kind-of-server.md)). Useful options:
 
-| Option | Default | Notes |
-| --- | --- | --- |
-| `--port` | `4321` | — |
-| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect |
-| `--token` | random | Or set `KURAA_TOKEN` |
-| `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below |
-| `--peer` | off | Sync with this workspace's other devices, directly. See below |
-| `--allow-invites` | off | Let people make invite links, remove devices and rename this one from the app (`--workspaces` always does) |
-| `--manage-online` | off | Let people using the app add and remove the online copy (desktop app and `pnpm dev`: on). See below |
-| `--manage-person` | off | Let people using the app see and import this computer's identity (your own computer only; `pnpm dev`: on) |
-| `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network |
-| `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle |
-| `--engine` | off | Turn on running code: `--engine r`. See below |
-| `--env` | the only one loaded | Where code runs, by environment: `--env podman` |
-| `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) |
-| `--memory` | `4g` | The most memory a code session's container may use |
-| `--cpus` | `2` | How many CPUs a code session's container may use (fractions allowed: `0.5`) |
-| `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped |
-| `--podman` | found on the `PATH` or where the installers put it | The Podman program to run containers with; or set `KURAA_PODMAN` |
-| `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) |
-| `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` |
-| `--component` | none | Load a run component (engine or environment) by path or package name |
-| `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
-| `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
-| `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
+The desktop app sets the same things in **Preferences…**, so nobody double-clicking it needs a flag;
+the last column says where. What stays on the command line, and why, is in
+[decision 0046](docs/decisions/0046-desktop-preferences.md).
+
+| Option | Default | Notes | Desktop app |
+| --- | --- | --- | --- |
+| `--port` | `4321` | — | Command line only: its server is private to the app |
+| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect | Command line only (as `--port`) |
+| `--token` | random | Or set `KURAA_TOKEN` | Command line only (as `--port`) |
+| `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below | Preferences: New workspaces |
+| `--peer` | off | Sync with this workspace's other devices, directly. See below | Preferences: Other computers |
+| `--allow-invites` | off | Let people make invite links, remove devices and rename this one from the app (`--workspaces` always does) | Always on |
+| `--manage-online` | off | Let people using the app add and remove the online copy (desktop app and `pnpm dev`: on). See below | Always on |
+| `--manage-person` | off | Let people using the app see and import this computer's identity (your own computer only; `pnpm dev`: on) | Always on |
+| `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Preferences: Other computers › Advanced |
+| `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Preferences: Saving › Advanced (in seconds) |
+| `--engine` | off | Turn on running code: `--engine r`. See below | Preferences: Run R code (on) |
+| `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Preferences: Where code runs (shown when there is a choice) |
+| `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) | Command line only |
+| `--memory` | `4g` | The most memory a code session's container may use | Preferences: Running code › Advanced |
+| `--cpus` | `2` | How many CPUs a code session's container may use (fractions allowed: `0.5`) | Preferences: Running code › Advanced |
+| `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Preferences: Running code › Advanced |
+| `--podman` | found on the `PATH` or where the installers put it | The Podman program to run containers with; or set `KURAA_PODMAN` | Preferences: Running code › Advanced |
+| `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Preferences: Running code › Advanced |
+| `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Preferences: Kinds of documents |
+| `--component` | none | Load a run component (engine or environment) by path or package name | Command line only |
+| `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Preferences: Running code › Advanced |
+| `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) | Preferences: Running code (on) |
+| `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces | Preferences: Running code › Advanced |
 
 Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
@@ -316,10 +320,16 @@ changes appear in the editor. Quitting writes and commits any pending edits.
 Joining a shared host or hub runs none of the app's own; the launcher leads back to your workspaces.
 
 **Preferences…** (in the app menu on a Mac, ⌥⌘,; in File elsewhere, Ctrl+Alt+,; or **App preferences…** in
-the in-app menu, which keeps ⌘, for itself) sets what the flags would: syncing with other
-devices, running R code (and whether Podman is ready for it), base images R may use, and where new
-workspaces go. Saving restarts your workspaces, committing pending edits first. A flag given on the
-command line wins over its preference.
+the in-app menu, which keeps ⌘, for itself) sets what a host's flags would (the table under
+[Run a shared host](#run-a-shared-host-on-a-folder) says which). In view: syncing with other
+computers, the kinds of documents that are on, running R code (and whether Podman is ready for it),
+whether documents may install packages and download tools, and where new workspaces go. Under
+**Advanced**: the servers used to find other computers on a private network, the limits on each
+document's code (memory, CPUs, disk), what a workspace may ask for (writing to its own folder, the
+network), base images R may use, the Podman program, where packages and tools are kept, and how soon
+edits are written and versions saved. Saving restarts your workspaces, committing pending edits first;
+a value that is wrong is refused, saying what. A flag given on the command line (`--engine`, `--env`,
+`--format`, `--r-image`, `--peer`, `--workspaces`) wins over its preference, and the window says so.
 
 ## Package the desktop app
 

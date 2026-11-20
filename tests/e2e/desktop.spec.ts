@@ -316,13 +316,28 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
     await prefs.getByTestId('pref-run').uncheck();
     await prefs.getByTestId('pref-sync').check();
+    // What a host takes as flags is here too (decision 0046): a value that is wrong is refused, saying what.
+    await prefs.getByTestId('pref-run-advanced').locator('summary').click();
+    await prefs.getByTestId('pref-memory').fill('lots');
+    await prefs.getByTestId('pref-save').click();
+    await expect(prefs.getByTestId('pref-error')).toContainText('memory limit should be a size');
+    await prefs.getByTestId('pref-memory').fill('3g');
+    await prefs.getByTestId('pref-format-rmarkdown').uncheck();
     // The workspaces restart with them (writing and committing first), and the window reloads.
     const reloaded = page.waitForEvent('load', { timeout: 15_000 });
     await prefs.getByTestId('pref-save').click();
     await reloaded;
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(false);
-    expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({ syncDevices: true, runCode: false });
+    expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({
+      syncDevices: true, runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
+    });
+    // R Markdown is off now: the Components panel says so.
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
+    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'R Markdown' })).not.toBeChecked();
+    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'Pandoc markdown' })).toBeChecked();
+    await page.keyboard.press('Escape');
 
     // Syncing is on: git reaches other devices through git-remote-kuraa, which runs the app as Node.
     const helper = join(dir, '.git', 'kuraa', 'bin');
@@ -345,6 +360,8 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     const prefs = await openPreferences(app);
     await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
     await expect(prefs.getByTestId('pref-sync')).toBeChecked();
+    await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');
+    await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
   } finally {
     await app.close();
   }

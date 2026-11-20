@@ -492,6 +492,7 @@ function useSettings(s: Settings) {
         :by="{ name: settings.name, email: settings.email, color: settings.color }"
         :trigger="renderAsked"
         :written-at="status?.lastFlushAt ?? null"
+        :unsynced="status?.unsynced ?? 0"
         @close="sidePanel = null"
       />
       <SearchPanel v-else-if="sidePanel === 'search'" :api="api" :focus-key="searchAsked" @open="openMatch" @close="sidePanel = null" />

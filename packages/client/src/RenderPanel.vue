@@ -16,6 +16,8 @@ const props = defineProps<{
   trigger: number;
   /** When the document was last written to its file: with "update on save", a render follows. */
   writtenAt: string | null;
+  /** Edits made here that have not reached the host yet: a render waits for them (briefly). */
+  unsynced: number;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -79,9 +81,27 @@ async function refresh(first = false) {
   }
 }
 
+/** Until what was typed here has reached the host (at most a few seconds): it renders the document as the host has it. */
+function synced(ms = 3000): Promise<void> {
+  if (!props.unsynced) return Promise.resolve();
+  return new Promise((resolve) => {
+    const stop = watch(() => props.unsynced, (n) => {
+      if (n) return;
+      stop();
+      clearTimeout(t);
+      resolve();
+    });
+    const t = setTimeout(() => {
+      stop();
+      resolve();
+    }, ms);
+  });
+}
+
 async function render(format: RenderFormat, thenSave = false) {
   if (thenSave) toSave.add(format);
   try {
+    await synced();
     const state = await props.api.render(props.path, format, props.by);
     shown.value = state;
     if (state.state === 'failed') toSave.delete(format);

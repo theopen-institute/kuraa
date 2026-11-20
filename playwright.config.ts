@@ -1,5 +1,11 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
 import { E2E } from './tests/e2e/env.js';
+
+// Never the keys of whoever runs the tests (packages/host/src/peers/person.ts): a folder of their own.
+process.env.KURAA_PERSON = join(mkdtempSync(join(tmpdir(), 'kuraa-test-keys-')), 'person.json');
 
 export default defineConfig({
   testDir: 'tests/e2e',

@@ -2,21 +2,27 @@
   "name": "@kuraa/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Edit folders of Pandoc markdown and R Markdown files, alone or live with others.",
+  "author": "kuraa",
   "type": "module",
   "main": "build/main.cjs",
   "scripts": {
     "build": "pnpm --filter @kuraa/web build && node build.mjs",
-    "start": "pnpm run build && node start.mjs"
+    "start": "pnpm run build && node start.mjs",
+    "fetch-git": "node scripts/fetch-git.mjs",
+    "dist:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && electron-builder --config electron-builder.config.cjs --mac",
+    "dist:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && electron-builder --config electron-builder.config.cjs --win",
+    "dist:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 && electron-builder --config electron-builder.config.cjs --linux"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@electron/fuses": "1.8.0",
     "@kuraa/client": "workspace:*",
     "@kuraa/host": "workspace:*",
     "@kuraa/run-components": "workspace:*",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.1",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.36.0",
     "hyperswarm": "^4.17.2"
-  },
-  "devDependencies": {
-    "electron": "45.3.2"
   }
 }

@@ -14,6 +14,9 @@ import { podmanWorks } from '../../packages/env-podman/src/index.js';
 const DESKTOP = resolve(import.meta.dirname, '../../apps/desktop');
 const MAIN = join(DESKTOP, 'build/main.cjs');
 const ELECTRON = createRequire(join(DESKTOP, 'package.json'))('electron') as unknown as string;
+// KURAA_DESKTOP_APP=<the packaged app's executable> runs these against it instead,
+// with no git on its PATH: it must use the git it ships.
+const PACKAGED = process.env.KURAA_DESKTOP_APP;
 const MAC = process.platform === 'darwin';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -33,10 +36,17 @@ async function launch(args: string[], timings: object, extraEnv: Record<string, 
   // Each launch keeps its workspaces (and their list) in a folder of its own, never in Documents.
   const workspaces = mkdtempSync(join(tmpdir(), 'kuraa-desktop-workspaces-'));
   const app = await electron.launch({
-    executablePath: ELECTRON,
-    args: [MAIN, '--workspaces', workspaces, ...args],
+    executablePath: PACKAGED ?? ELECTRON,
+    args: [...(PACKAGED ? [] : [MAIN]), '--workspaces', workspaces, ...args],
     // VS Code's terminal sets ELECTRON_RUN_AS_NODE, which would start Electron as plain Node.
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')) as Record<string, string>, KURAA_TIMINGS: JSON.stringify(timings),
+      // Its preferences and list of workspaces, apart from the person's.
+      KURAA_USER_DATA: mkdtempSync(join(tmpdir(), 'kuraa-desktop-data-')),
+      // A person's key of its own (none yet), never that of whoever runs the tests.
+      KURAA_PERSON: join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json'),
+      // Out of sight, so the tests do not take the screen; KURAA_SHOW_WINDOWS=1 to watch them.
+      ...(process.env.KURAA_SHOW_WINDOWS ? {} : { KURAA_HIDDEN_WINDOWS: '1' }),
+      ...(PACKAGED ? { PATH: '/bin:/usr/sbin:/sbin' } : {}),
       ...extraEnv },
   });
   const page = await app.firstWindow();
@@ -205,8 +215,9 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
     await openNotes(page);
     await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
 
-    // Joined, not managed: Settings shows the host and token.
+    // Joined, not managed: Identity and access shows the host and token.
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-access').click();
     await expect(page.getByLabel('Host URL')).toHaveValue(host.url);
   } finally {
     await app.close();
@@ -256,6 +267,9 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await expect(components.getByRole('checkbox', { name: 'Pandoc markdown', exact: true })).toBeChecked();
     await page.keyboard.press('Escape');
 
+    // Out of sight while testing: no window was shown.
+    if (!process.env.KURAA_SHOW_WINDOWS) expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isVisible()))).toEqual([false]);
+
     // A page cannot take the window elsewhere, or open another.
     const home = page.url();
     await page.evaluate(() => {
@@ -265,6 +279,132 @@ test('flags set what runs and which formats are on; the window shows only the ap
     expect(page.url()).toBe(home);
     expect(await page.evaluate(() => window.open('file:///etc/hosts') === null)).toBe(true);
     expect(app.windows()).toHaveLength(1);
+  } finally {
+    await app.close();
+  }
+});
+
+/** Open the Preferences window from the app's menu. */
+async function openPreferences(app: ElectronApplication): Promise<Page> {
+  const opened = app.waitForEvent('window');
+  await app.evaluate(({ Menu }) => {
+    const items = Menu.getApplicationMenu()!.items.flatMap((i) => i.submenu?.items ?? []);
+    items.find((i) => i.label === 'Preferences…')!.click();
+  });
+  const prefs = await opened;
+  await expect(prefs.getByTestId('pref-workspaces')).not.toHaveValue('');
+  return prefs;
+}
+
+test('preferences set what runs and syncing, apply at once, and are kept', async () => {
+  const dir = makeRepo();
+  const data = mkdtempSync(join(tmpdir(), 'kuraa-desktop-data-'));
+  const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
+  const rOn = async (page: Page) => {
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
+    const on = await page.getByTestId('components').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
+    await page.keyboard.press('Escape');
+    return on;
+  };
+  let { app, page } = await launch(['--open', dir], timings, { KURAA_USER_DATA: data });
+  try {
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    expect(await rOn(page)).toBe(true);
+    const prefs = await openPreferences(app);
+    // Whether code can run here is said up front (Podman installed and running, or not).
+    await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
+    await prefs.getByTestId('pref-run').uncheck();
+    await prefs.getByTestId('pref-sync').check();
+    // The workspaces restart with them (writing and committing first), and the window reloads.
+    const reloaded = page.waitForEvent('load', { timeout: 15_000 });
+    await prefs.getByTestId('pref-save').click();
+    await reloaded;
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    expect(await rOn(page)).toBe(false);
+    expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({ syncDevices: true, runCode: false });
+
+    // Syncing is on: git reaches other devices through git-remote-kuraa, which runs the app as Node.
+    const helper = join(dir, '.git', 'kuraa', 'bin');
+    await expect.poll(() => existsSync(join(helper, 'git-remote-kuraa'))).toBe(true);
+    let answer = '';
+    try {
+      execFileSync('git', ['ls-remote', `kuraa://${'ab'.repeat(32)}`], { cwd: dir, env: { ...process.env, PATH: `${helper}:${process.env.PATH}`, ELECTRON_RUN_AS_NODE: '' }, stdio: 'pipe' });
+    } catch (e) {
+      answer = String((e as { stderr: Buffer }).stderr);
+    }
+    expect(answer).toContain('kuraa: the device abababab… is not connected');
+  } finally {
+    await app.close();
+  }
+  // Kept for next time.
+  ({ app, page } = await launch(['--open', dir], timings, { KURAA_USER_DATA: data }));
+  try {
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    expect(await rOn(page)).toBe(false);
+    const prefs = await openPreferences(app);
+    await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
+    await expect(prefs.getByTestId('pref-sync')).toBeChecked();
+  } finally {
+    await app.close();
+  }
+});
+
+test('your key: made in the menu’s Identity and access panel, said in each workspace that syncs, and taken to another computer', async () => {
+  const dir = makeRepo();
+  const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
+  const person = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
+  let { app, page } = await launch(['--open', dir, '--peer'], timings, { KURAA_PERSON: person });
+  let line: string;
+  try {
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-access').click();
+    const key = page.getByTestId('person-key');
+    await expect(key).toContainText('You have no identity on this computer');
+    // Filled in with the display name; changed here.
+    await key.getByTestId('person-name').fill('Ada Lovelace');
+    const reloaded = page.waitForEvent('load', { timeout: 15_000 });
+    await key.getByTestId('person-create').click();
+    // The workspaces restart (the page with them), each saying to its other devices that this computer's key is Ada's.
+    await reloaded;
+    expect(JSON.parse(readFileSync(person, 'utf8')).name).toBe('Ada Lovelace');
+    const said = () => {
+      try {
+        return (JSON.parse(readFileSync(join(dir, '.git', 'kuraa', 'records.json'), 'utf8')) as { kind: string; name?: string }[]).some((r) => r.kind === 'vouch' && r.name === 'Ada Lovelace');
+      } catch {
+        return false;
+      }
+    };
+    await expect.poll(said, { timeout: 15_000 }).toBe(true);
+    // Copy key: one line, to take to another computer.
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-access').click();
+    await expect(page.getByTestId('identity')).toContainText('You are Ada Lovelace');
+    await page.getByTestId('person-copy').click();
+    await expect(page.getByTestId('person-status')).toContainText('Copied');
+    line = await app.evaluate(({ clipboard }) => clipboard.readText());
+    expect(line).toMatch(/^kuraa-id:/);
+  } finally {
+    await app.close();
+  }
+  // Another computer (another key file): imported, the same person.
+  const elsewhere = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
+  ({ app, page } = await launch(['--open', makeRepo()], timings, { KURAA_PERSON: elsewhere }));
+  try {
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-access').click();
+    await page.getByTestId('person-line').fill(line);
+    const reloaded = page.waitForEvent('load', { timeout: 15_000 });
+    await page.getByTestId('person-import').click();
+    await reloaded;
+    expect(JSON.parse(readFileSync(elsewhere, 'utf8')).publicKey).toBe(JSON.parse(readFileSync(person, 'utf8')).publicKey);
+    await expect(page.getByTestId('file:notes.md')).toBeVisible();
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-access').click();
+    await expect(page.getByTestId('identity')).toContainText('You are Ada Lovelace');
   } finally {
     await app.close();
   }

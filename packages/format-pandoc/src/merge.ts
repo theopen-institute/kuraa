@@ -62,6 +62,14 @@ function mergeYaml(base: string, a: string, b: string, sides: [MergeSide, MergeS
   return { text: out.join('\n'), conflicts };
 }
 
+/** Whether a text ends with a newline, then perhaps spaces and tabs, then a newline. */
+function endsWithBlankLine(text: string): boolean {
+  let i = text.length - 1;
+  if (text[i] !== '\n') return false;
+  while (--i >= 0 && (text[i] === ' ' || text[i] === '\t'));
+  return i >= 0 && text[i] === '\n';
+}
+
 export function createMerge(parse: (text: string) => ParsedDocument) {
   const read = (text: string): { leading: string; blocks: Block[] } => {
     const p = parse(text);
@@ -84,7 +92,7 @@ export function createMerge(parse: (text: string) => ParsedDocument) {
     const joined = (blocks: readonly Block[]) => blocks.map((x) => x.key).join('\n\n');
     for (const chunk of diff3(base.blocks, a.blocks, b.blocks, (x, y) => x.key === y.key)) {
       if ('ok' in chunk) {
-        pieces.push(...chunk.ok.map((x) => x.text));
+        for (const x of chunk.ok) pieces.push(x.text);
         continue;
       }
       const { base: o, a: x, b: y } = chunk.conflict;
@@ -117,10 +125,11 @@ export function createMerge(parse: (text: string) => ParsedDocument) {
     }
     let out = a.leading;
     for (const p of pieces) {
-      if (out && !/\n[ \t]*\n$/.test(out)) out = `${out.replace(/\s*$/, '')}\n\n`;
+      // Looking only at the end: a pattern anchored there would rescan the whole text for each piece.
+      if (out && !endsWithBlankLine(out)) out = `${out.trimEnd()}\n\n`;
       out += p;
     }
-    if (/\n$/.test(aText) || /\n$/.test(bText)) out = `${out.replace(/\s*$/, '')}\n`;
+    if (aText.endsWith('\n') || bText.endsWith('\n')) out = `${out.trimEnd()}\n`;
     return { text: out, conflicts: countConflicts(out) + yamlConflicts };
   };
 }

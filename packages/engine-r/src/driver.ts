@@ -168,7 +168,8 @@ local({
     if (!length(line)) break
     if (is.na(line) || !nzchar(line)) next
     req <- tryCatch(jsonlite::fromJSON(line, simplifyVector = FALSE), error = function(e) NULL)
-    if (is.null(req)) next
+    # An answer to install.packages() that came after its chunk was interrupted.
+    if (!is.list(req) || identical(req$type, "done")) next
     reply <- tryCatch(run(req),
       interrupt = function(e) list(interrupted = TRUE, outputs = list()),
       error = function(e) list(outputs = list(list(type = "error", text = paste("The runner failed:", conditionMessage(e))))))

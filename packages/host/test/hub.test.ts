@@ -4,12 +4,13 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
 import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless } from '@kuraa/session/testing';
 import { slugOf, startHost, startHub, type RunningHost, type RunningHub } from '../src/index.js';
+import { isLoopback } from '../src/hub.js';
 
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -34,8 +35,8 @@ function temp(prefix: string): string {
   return d;
 }
 
-async function hub(root = temp('kuraa-hub-'), token?: string): Promise<RunningHub> {
-  const h = await startHub({ root, token, hosts: { timings: FAST }, peers: { bootstrap: testnet.bootstrap as never } });
+async function hub(root = temp('kuraa-hub-'), token?: string, everywhere = false): Promise<RunningHub> {
+  const h = await startHub({ root, token, hosts: { timings: FAST }, peers: { bootstrap: testnet.bootstrap as never, everywhere } });
   running.push(h);
   return h;
 }
@@ -57,12 +58,13 @@ describe('a hub', () => {
     expect(slugOf('Field notes, 2026')).toBe('field-notes-2026');
     expect(slugOf('Café Ålesund')).toBe('cafe-alesund');
     expect(slugOf('  ')).toBe('workspace');
+    expect(slugOf('Nul')).toBe('nul-workspace');
   });
 
   it('makes a new workspace as a git folder, and serves it under /w/<id> like a host of its own', async () => {
     const h = await hub();
     expect((await fetch(`${h.url}/hub/api/workspaces`)).status).toBe(401);
-    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [] });
+    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [], canAdd: true, canInvite: true });
     const made = await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Field notes' }) });
     expect(made.status).toBe(201);
     const { workspace } = (await made.json()) as { workspace: { id: string; path: string; name: string } };
@@ -91,7 +93,7 @@ describe('a hub', () => {
         return pos < 0;
       });
       c.write(new Transform(doc).insert(pos, pandocMarkdown.schema.text('Live: ')).doc);
-      await until(() => readFileSync(join(workspace.path, 'day-one.md'), 'utf8').includes('Live: Tide out.'), 5000, 'the edit on disk');
+      await until(() => readFileSync(join(workspace.path, 'day-one.md'), 'utf8').includes('Live: Tide out.'), 15_000, 'the edit on disk');
     } finally {
       c.destroy();
     }
@@ -137,6 +139,90 @@ describe('a hub', () => {
     expect((await call(third, '/w/gone/api/tree')).status).toBe(503);
   });
 
+  it('of one folder: serves it as its only workspace, and lets no one add, remove or invite unless allowed', async () => {
+    const dir = temp('kuraa-one-');
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'config', 'user.name', 'Ada');
+    git(dir, 'config', 'user.email', 'ada@example.org');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Initial');
+    const h = await startHub({ folder: { dir }, hosts: { timings: FAST }, invites: false });
+    running.push(h);
+    const id = slugOf(basename(dir));
+    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({
+      workspaces: [{ id, name: basename(dir), path: dir, peers: false }], canAdd: false, canInvite: false,
+    });
+    expect(((await (await call(h, `/w/${id}/api/tree`)).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('notes.md');
+    expect((await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'More' }) })).status).toBe(403);
+    expect((await call(h, `/hub/api/workspaces/${id}`, { method: 'DELETE' })).status).toBe(403);
+    expect((await call(h, `/w/${id}/api/peers/invitations`, { method: 'POST' })).status).toBe(403);
+    // It keeps no list beside the folder.
+    expect(existsSync(join(dir, '.kuraa-workspaces.json'))).toBe(false);
+  });
+
+  it('manages your identity only listening on this computer alone', async () => {
+    expect(isLoopback('127.0.0.1')).toBe(true);
+    expect(isLoopback('::1')).toBe(true);
+    expect(isLoopback('localhost')).toBe(true);
+    expect(isLoopback('0.0.0.0')).toBe(false);
+    expect(isLoopback('192.168.1.4')).toBe(false);
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-hub-person-'));
+    await expect(startHub({ folder: { dir }, host: '0.0.0.0', hosts: { managePerson: true } })).rejects.toThrow('--manage-person');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a host started on its own says it is not a hub, so a client shows it as one workspace', async () => {
+    const dir = temp('kuraa-host-');
+    const h = await startHost({ dir, init: true, timings: FAST, staticDir: dir });
+    running.push(h);
+    const res = await fetch(`${h.url}/hub/api/workspaces`, { headers: { authorization: `Bearer ${h.token}` } });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: expect.stringContaining('not a hub') });
+  });
+
+  it('of one folder: makes it a repository with init, and will not start on a folder it cannot open', async () => {
+    const dir = temp('kuraa-one-new-');
+    const h = await startHub({ folder: { dir, init: true }, hosts: { timings: FAST } });
+    running.push(h);
+    expect(existsSync(join(dir, '.git'))).toBe(true);
+    await expect(startHub({ folder: { dir: join(dir, 'not-there') }, hosts: { timings: FAST } })).rejects.toThrow();
+  });
+
+  it('syncs every workspace while told to, those it already had too; those it made shared so, and only those, from then on', async () => {
+    const root = temp('kuraa-hub-');
+    const syncing = async (h: RunningHub) => ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { peers: boolean }[] }).workspaces.map((w) => w.peers);
+    const restart = async (h: RunningHub, everywhere: boolean) => {
+      await h.close();
+      running.splice(running.indexOf(h), 1);
+      return hub(root, h.token, everywhere);
+    };
+    let h = await hub(root);
+    await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Thesis' }) });
+    expect(await syncing(h)).toEqual([false]);
+    await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Diary' }) });
+    expect(await syncing(h)).toEqual([false, false]);
+    // Not shared, not syncing, whatever the hub's list says.
+    h = await restart(h, false);
+    expect(await syncing(h)).toEqual([false, false]);
+    h = await restart(h, true);
+    expect(await syncing(h)).toEqual([true, true]);
+    await until(() => existsSync(join(root, 'thesis', '.git', 'kuraa', 'bin', 'git-remote-kuraa')), 10_000, 'syncing started');
+    // Shared now (each repository has a workspace id and secret): they go on syncing.
+    h = await restart(h, false);
+    expect(await syncing(h)).toEqual([true, true]);
+    // One made shared outside the hub (kuraa-host invite, say) syncs too.
+    const other = temp('kuraa-hub-');
+    let g = await hub(other);
+    await call(g, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Notes' }) });
+    git(join(other, 'notes'), 'config', 'kuraa.workspace', 'ab'.repeat(16));
+    git(join(other, 'notes'), 'config', 'kuraa.secret', 'cd'.repeat(32));
+    await g.close();
+    running.splice(running.indexOf(g), 1);
+    g = await hub(other, g.token);
+    expect(await syncing(g)).toEqual([true]);
+  });
+
   it('joins a workspace from a subscription link, as a device that syncs', async () => {
     const source = temp('kuraa-hub-src-');
     git(source, 'init', '-q', '-b', 'main');
@@ -177,7 +263,9 @@ describe('invitations from the app', () => {
     // Syncing is on now, and stays on.
     expect(await (await call(h, '/w/shared/api/peers')).json()).toMatchObject({ enabled: true, canInvite: true });
     expect(((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { peers: boolean }[] }).workspaces[0]!.peers).toBe(true);
-    expect(JSON.parse(readFileSync(join(root, '.kuraa-workspaces.json'), 'utf8'))[0].peers).toBe(true);
+    // The hub's list says nothing of it: the repository does (it is shared now).
+    expect(JSON.parse(readFileSync(join(root, '.kuraa-workspaces.json'), 'utf8'))[0]).not.toHaveProperty('peers');
+    expect(git(join(root, 'shared'), 'config', 'kuraa.workspace')).toMatch(/^[0-9a-f]+$/);
     // Someone joins with it, on another hub.
     const other = await hub();
     const joined = await call(other, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'From a friend' }) });

@@ -1,4 +1,4 @@
-// pnpm dev [--dir <folder>] [--port 5173] [--allow-write] [--allow-network]
+// pnpm dev [--workspaces <folder> | --dir <folder>] [--port 5173] [--allow-write] [--allow-network]
 //
 // The web client against a live host, for development, in one command:
 //   - the host runs under `tsx watch`, so it restarts when host, session, kernel
@@ -8,8 +8,10 @@
 //     /collab to the host, so page and host share one origin;
 //   - the token reaches the page through Vite's environment, so there is
 //     nothing to paste.
-// Without --dir it uses .dev-workspace/ in this repository (git-ignored),
-// creating it with a sample file the first time.
+// It serves a folder of workspaces, as the desktop app does: .dev-workspaces/ in
+// this repository (git-ignored), or --workspaces. The first time, it starts with a
+// Scratch workspace holding a sample file. --dir serves one folder instead, as
+// `kuraa-host --dir` does.
 //
 // R chunks run in Podman containers, as everywhere (never on this computer
 // itself). --allow-write and --allow-network let the workspace ask for those in
@@ -20,7 +22,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { gitIdentity, initWorkspace } from '../packages/host/src/index.js';
+import { gitIdentity, startHub } from '../packages/host/src/index.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({
@@ -28,6 +30,7 @@ const { values } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== '--'),
   options: {
     dir: { type: 'string' },
+    workspaces: { type: 'string' },
     port: { type: 'string', default: '5173' },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
@@ -46,16 +49,22 @@ A workspace for trying the editor. Type markdown: **bold**, *italic*, \`code\`, 
 - of things
 `;
 
-async function workspace(): Promise<string> {
-  if (values.dir) return resolve(values.dir);
-  const dir = join(ROOT, '.dev-workspace');
-  // Its own repository, not a folder of this one.
-  if (!existsSync(join(dir, '.git'))) {
-    mkdirSync(dir, { recursive: true });
-    if (!existsSync(join(dir, 'scratch.md'))) writeFileSync(join(dir, 'scratch.md'), SAMPLE);
-    await initWorkspace(dir);
+/** What the host serves: one folder (--dir), or a folder of workspaces, made with one the first time. */
+async function served(): Promise<{ flag: '--dir' | '--workspaces'; dir: string }> {
+  if (values.dir) return { flag: '--dir', dir: resolve(values.dir) };
+  const root = resolve(values.workspaces ?? join(ROOT, '.dev-workspaces'));
+  if (!existsSync(join(root, '.kuraa-workspaces.json'))) {
+    const hub = await startHub({ root, log: (m) => console.log(`[dev] ${m}`) });
+    try {
+      const scratch = join(root, 'scratch');
+      mkdirSync(scratch, { recursive: true });
+      if (!existsSync(join(scratch, 'scratch.md'))) writeFileSync(join(scratch, 'scratch.md'), SAMPLE);
+      await hub.hub.addFolder(scratch, true, 'Scratch');
+    } finally {
+      await hub.close();
+    }
   }
-  return dir;
+  return { flag: '--workspaces', dir: root };
 }
 
 function freePort(): Promise<number> {
@@ -77,7 +86,7 @@ function run(name: string, command: string, args: string[], env: NodeJS.ProcessE
   return child;
 }
 
-const dir = await workspace();
+const { flag, dir } = await served();
 const hostPort = await freePort();
 const token = randomBytes(18).toString('base64url');
 const who = await gitIdentity(dir);
@@ -85,8 +94,10 @@ const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
-  '--dir', dir, '--port', String(hostPort), '--host', '127.0.0.1',
+  flag, dir, '--port', String(hostPort), '--host', '127.0.0.1',
   '--engine', 'r', '--allow-installs',
+  // Your own computer: the browser may manage your keys (person.ts) and backups, as the desktop app's menu does.
+  '--manage-person', '--manage-backups',
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });
@@ -98,7 +109,7 @@ const web = run('web', bin('vite'), ['--port', values.port!, '--strictPort', '--
   VITE_KURAA_DEV_EMAIL: who.email,
 }, join(ROOT, 'apps', 'web'));
 
-console.log(`[dev] workspace ${dir}`);
+console.log(`[dev] ${flag === '--dir' ? 'workspace ' : 'workspaces'} ${dir}`);
 console.log(`[dev] open      http://127.0.0.1:${values.port}/`);
 
 // The host writes and commits pending edits before it exits. Ctrl+C reaches every

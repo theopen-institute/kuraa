@@ -40,6 +40,12 @@ test('the first run asks for settings; the menu changes them', async ({ page }) 
 
   // A new name, from the menu, reaches the others at once (and is kept).
   await page.getByTestId('menu-button').click();
+  // The host and its token are in Identity and access, not beside the name.
+  await expect(page.getByTestId('menu').getByLabel('Host URL')).toHaveCount(0);
+  await page.getByTestId('menu-access').click();
+  await expect(page.getByTestId('menu-connection').getByLabel('Host URL')).toHaveValue(E2E.url);
+  await expect(page.getByTestId('menu-connection').getByLabel('Access token')).toHaveValue(E2E.token);
+  await page.keyboard.press('Escape');
   await expect(page.getByTestId('menu').getByLabel('Display name')).toHaveValue('First Run');
   await page.getByTestId('menu').getByLabel('Display name').fill('Renamed');
   await page.getByTestId('menu').getByRole('button', { name: 'Save settings' }).click();

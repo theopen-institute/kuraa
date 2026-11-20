@@ -13,11 +13,10 @@ const emit = defineEmits<{ view: [commit: CommitInfo | null] }>();
 const commits = shallowRef<CommitInfo[]>([]);
 const error = ref<string | null>(null);
 
-watch([() => props.api, () => props.path, () => props.refreshKey], ([api, path], _prev, onCleanup) => {
-  if (!path) {
-    commits.value = [];
-    return;
-  }
+watch([() => props.api, () => props.path, () => props.refreshKey], ([api, path], prev, onCleanup) => {
+  // Another file's commits are not offered while this one's load: choosing one would show that file.
+  if (!path || api !== prev?.[0] || path !== prev?.[1]) commits.value = [];
+  if (!path) return;
   let cancelled = false;
   onCleanup(() => {
     cancelled = true;

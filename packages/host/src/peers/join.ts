@@ -1,6 +1,6 @@
 // Joining a workspace on a device that does not have it yet (CLI: kuraa-host
 // join <invitation or link>): make the folder a repository of the workspace,
-// find a device of it, be let in, learn the other members and the upstream,
+// find a device of it, be let in, learn the other members,
 // fetch, and check out the branch.
 //
 // An invitation is good once, with the device that made it. A subscription link
@@ -11,6 +11,7 @@ import { mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Git } from '../git.js';
 import { decodeInvitation, decodeLink, type Member, type WorkspaceIdentity } from './identity.js';
+import type { AcceptRules } from './accept.js';
 import { PeerNode } from './node.js';
 import type { PeerOptions } from './peers.js';
 
@@ -28,18 +29,18 @@ export interface JoinOptions {
 }
 
 type Ticket =
-  | { kind: 'invite'; workspace: WorkspaceIdentity; from: Member; token: string }
-  | { kind: 'link'; workspace: WorkspaceIdentity; from: Member; link: string; expires: number };
+  | { kind: 'invite'; workspace: WorkspaceIdentity; from: Member; token: string; rules: AcceptRules }
+  | { kind: 'link'; workspace: WorkspaceIdentity; from: Member; link: string; expires: number; rules: AcceptRules };
 
 function readTicket(code: string): Ticket {
   const text = code.trim();
   if (text.startsWith('kuraa-link:')) {
     const l = decodeLink(text);
     if (l.expires !== 0 && l.expires < Date.now()) throw new Error('This subscription link has expired');
-    return { kind: 'link', workspace: l.workspace, from: l.issuer, link: text, expires: l.expires };
+    return { kind: 'link', workspace: l.workspace, from: l.issuer, link: text, expires: l.expires, rules: l.rules };
   }
   const inv = decodeInvitation(text);
-  return { kind: 'invite', workspace: inv.workspace, from: inv.inviter, token: inv.token };
+  return { kind: 'invite', workspace: inv.workspace, from: inv.inviter, token: inv.token, rules: inv.rules };
 }
 
 export async function joinWorkspace(o: JoinOptions): Promise<{ dir: string; branch: string; inviter: string }> {
@@ -59,6 +60,10 @@ export async function joinWorkspace(o: JoinOptions): Promise<{ dir: string; bran
   if (o.name) await node.identity.setDeviceName(o.name);
   // The device that made the invitation or link is the first to look for.
   await node.identity.addMember(ticket.from.key, ticket.from.name);
+  // This device starts out accepting work as the device that made the invitation or link does (its own
+  // to change), as the invitation or link says: not as whatever device lets it in says.
+  // (Older invitations and links do not say: then it accepts every member's work.)
+  await node.identity.setRules(ticket.rules);
   const welcomed = new Promise<{ branch: string; remote: string; from: string }>((resolveWelcome, reject) => {
     const timer = setTimeout(() => reject(new Error(ticket.kind === 'invite'
       ? `Could not reach ${ticket.from.name}: is its host running, with --peer?`
@@ -84,10 +89,6 @@ export async function joinWorkspace(o: JoinOptions): Promise<{ dir: string; bran
       clearTimeout(refusal);
       void (async () => {
         for (const member of m.members) await node.identity.addMember(member.key, member.name);
-        if (m.upstream) {
-          const up = (await node.identity.members()).find((x) => x.key === m.upstream)?.name;
-          if (up) await node.identity.setUpstream(up);
-        }
         await node.refresh();
         resolveWelcome({ branch: m.branch, remote: link.remote!, from: m.name });
       })().catch(reject);

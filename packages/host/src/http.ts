@@ -1,25 +1,42 @@
 // The host's HTTP surface. Every /api and /git request needs the workspace token.
+//
+// The API is a table of routes, grouped by what they are about (the workspace,
+// running code, files, history, devices). A route is a method, a path (exact, or
+// a pattern whose groups the handler reads), and a handler given the request in
+// a context.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync, statSync, createReadStream } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
 import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
-import { HttpError } from './host.js';
+import { HttpError } from './errors.js';
+import { renameOver, unportablePath } from './files.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
 };
 
-function send(res: ServerResponse, status: number, body: unknown): void {
+/** The most a JSON request body may be. Files are made with their content in one, so it is generous. */
+const MAX_BODY = 64 * 1024 * 1024;
+
+export function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let size = 0;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > MAX_BODY) throw new HttpError(413, 'Request too large');
+    chunks.push(c as Buffer);
+  }
   const text = Buffer.concat(chunks).toString('utf8');
   if (!text) return {};
   try {
@@ -27,6 +44,12 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   } catch {
     throw new HttpError(400, 'Invalid JSON');
   }
+}
+
+/** The URL to reach a server listening at an address, from this computer. */
+export function localUrl(addr: AddressInfo): string {
+  const hostname = addr.address.includes(':') ? `[${addr.address}]` : addr.address;
+  return `http://${hostname === '0.0.0.0' ? '127.0.0.1' : hostname}:${addr.port}`;
 }
 
 export function tokenOf(req: IncomingMessage): string | null {
@@ -40,157 +63,176 @@ export function tokenOf(req: IncomingMessage): string | null {
   return null;
 }
 
+/** Whether a token given matches, in time that does not depend on where they differ. */
+export function sameToken(given: string | null | undefined, token: string): boolean {
+  if (typeof given !== 'string') return false;
+  const digest = (s: string) => createHash('sha256').update(s).digest();
+  return timingSafeEqual(digest(given), digest(token));
+}
+
+/** Refuse a new name that some computer the workspace goes to could not hold (files.ts). */
+function checkPortable(path: string): void {
+  const why = unportablePath(path);
+  if (why) throw new HttpError(400, why);
+}
+
 function str(v: unknown, name: string): string {
   if (typeof v !== 'string' || !v) throw new HttpError(400, `Missing ${name}`);
   return v;
 }
 
-export function createRequestHandler(host: Host) {
-  return async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const path = url.pathname;
-    const isApi = path.startsWith('/api/');
-    const isGit = path === '/git' || path.startsWith('/git/');
-
-    // Allow a web client served from another origin (e.g. the Vite dev server).
-    res.setHeader('access-control-allow-origin', '*');
-    res.setHeader('access-control-allow-headers', 'authorization, content-type');
-    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return true;
-    }
-
-    if (!isApi && !isGit) return serveStatic(host, path, res);
-
-    if (tokenOf(req) !== host.token) {
-      if (isGit) res.setHeader('www-authenticate', 'Basic realm="kuraa"');
-      send(res, 401, { error: 'Unauthorized' });
-      return true;
-    }
-
-    try {
-      if (isGit) {
-        await gitBackend(host, req, res, url);
-        return true;
-      }
-      await api(host, req, res, url);
-    } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
-      if (status === 500) host.log(`error: ${(err as Error).stack ?? err}`);
-      if (!res.headersSent) send(res, status, { error: (err as Error).message });
-      else res.end();
-    }
-    return true;
-  };
+/** Who asked, as the client says: a name, an email (for credit) and a colour. Null without a name, unless `anonymous` stands in. */
+function personOf(v: unknown, anonymous?: string): PresenceUser | null {
+  const by = (v && typeof v === 'object' ? v : {}) as { name?: unknown; email?: unknown; color?: unknown };
+  const name = typeof by.name === 'string' ? by.name : anonymous;
+  if (name === undefined) return null;
+  return { name, email: typeof by.email === 'string' ? by.email : '', color: typeof by.color === 'string' ? by.color : '#888888' };
 }
 
-async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-  const route = `${req.method} ${url.pathname}`;
-  const q = url.searchParams;
+/** A chunk a request names, to clear its outputs; absent (or null) for every chunk. Anything else is refused. */
+function chunkRefOf(v: unknown): ChunkRef | undefined {
+  if (v === undefined || v === null) return undefined;
+  const c = v as { label?: unknown; index?: unknown; codeHash?: unknown };
+  if (typeof c !== 'object' || typeof c.index !== 'number' || typeof c.codeHash !== 'string' || (c.label !== null && typeof c.label !== 'string')) throw new HttpError(400, 'Not a chunk');
+  return { label: c.label, index: c.index, codeHash: c.codeHash };
+}
 
-  if (route === 'GET /api/workspace') {
-    return send(res, 200, {
-      name: host.options.label ?? host.workspace,
-      branch: await host.git.branch(),
-      head: await host.git.head(),
-      types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
-      run: await host.runner.describe(),
-    });
-  }
+// ---------------------------------------------------------------------------
+// Routes
+
+interface Context {
+  host: Host;
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  q: URLSearchParams;
+  /** The groups of a pattern path. */
+  params: string[];
+}
+
+interface Route {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  path: string | RegExp;
+  handle(c: Context): Promise<void> | void;
+}
+
+const route = (method: Route['method'], path: Route['path'], handle: Route['handle']): Route => ({ method, path, handle });
+
+function requireRunning(host: Host, hint = ''): void {
+  if (!host.runner.enabled) throw new HttpError(403, `Running code is turned off on this host.${hint}`);
+}
+
+const workspaceRoutes: Route[] = [
+  route('GET', '/api/workspace', async ({ host, res }) => send(res, 200, {
+    name: host.options.label ?? host.workspace,
+    branch: await host.git.branch(),
+    head: await host.git.head(),
+    types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
+    run: await host.runner.describe(),
+  })),
 
   // Components: which engines and formats are on. Set by the host's flags; the app only shows them.
-  if (route === 'GET /api/components') return send(res, 200, await host.components());
+  route('GET', '/api/components', async ({ host, res }) => send(res, 200, await host.components())),
 
-  // Packages for an engine (R): declared per workspace, stored once per host.
-  if (route === 'GET /api/packages') {
-    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host.');
-    return send(res, 200, { packages: await host.runner.listPackages(str(q.get('engine'), 'engine')) });
-  }
-  if (route === 'POST /api/packages/install' || route === 'POST /api/packages/remove') {
-    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host.');
+  route('GET', '/api/rooms', async ({ host, res, q }) => {
+    const rec = await host.room(str(q.get('path'), 'path'));
+    // Who would not take edits made here to it (peers.ts, declinedBy): the editor says so.
+    send(res, 200, { ...host.describe(rec), declinedBy: host.peers ? await host.peers.declinedBy(rec.branch, rec.path) : [] });
+  }),
+
+  route('POST', '/api/versions', async ({ host, req, res }) => {
+    const body = await readBody(req);
+    const message = typeof body.message === 'string' && body.message.trim() ? body.message.trim() : undefined;
+    if (typeof body.path === 'string' && body.path) {
+      const rec = await host.room(body.path);
+      return send(res, 200, { commit: await host.commitRoom(rec, message) });
+    }
+    await host.serial(() => host.commitAll(message));
+    send(res, 200, { commit: await host.git.head() });
+  }),
+
+  route('POST', '/api/sync', async ({ host, res }) => {
+    const result = await host.syncNow();
+    send(res, result.ok ? 200 : 409, result);
+  }),
+];
+
+// Running chunks (see runner.ts): progress and outputs reach clients as room
+// messages. Packages for an engine (R): declared per workspace, stored once per host.
+const runRoutes: Route[] = [
+  route('GET', '/api/packages', async ({ host, res, q }) => {
+    requireRunning(host);
+    send(res, 200, { packages: await host.runner.listPackages(str(q.get('engine'), 'engine')) });
+  }),
+
+  ...(['install', 'remove'] as const).map((op) => route('POST', `/api/packages/${op}`, async ({ host, req, res }) => {
+    requireRunning(host);
     const body = await readBody(req);
     const engine = str(body.engine, 'engine');
     const list = Array.isArray(body.refs) ? body.refs : Array.isArray(body.names) ? body.names : [];
     const names = list.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 200);
-    const by = (body.by ?? null) as { name?: unknown; email?: unknown; color?: unknown } | null;
-    const user = by && typeof by.name === 'string' ? { name: by.name, email: typeof by.email === 'string' ? by.email : '', color: typeof by.color === 'string' ? by.color : '#888888' } : null;
-    const result = route.endsWith('/install')
-      ? await host.runner.installPackages(engine, names, user)
-      : await host.runner.removePackages(engine, names, user);
-    return send(res, result.ok ? 200 : 422, result);
-  }
+    const user = personOf(body.by);
+    const result = op === 'install' ? await host.runner.installPackages(engine, names, user) : await host.runner.removePackages(engine, names, user);
+    send(res, result.ok ? 200 : 422, result);
+  })),
 
-  // Running chunks: see runner.ts. Progress and outputs reach clients as room messages.
-  if (route === 'GET /api/runs') {
+  route('GET', '/api/runs', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
-    return send(res, 200, { runs: await host.runner.outputs(path), pending: host.runner.pending(path), session: host.runner.session(path) });
-  }
+    send(res, 200, { runs: await host.runner.outputs(path), pending: host.runner.pending(path), session: host.runner.session(path) });
+  }),
 
-  if (route.startsWith('POST /api/runs')) {
-    if (!host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host. Start it with --engine to turn it on.');
+  route('POST', '/api/runs', async ({ host, req, res }) => {
+    requireRunning(host, ' Start it with --engine to turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
-    if (route === 'POST /api/runs') {
-      const engine = host.runner.engineFor(String(body.engine ?? ''));
-      if (!engine) throw new HttpError(400, `Nothing on this host runs ${String(body.engine)} chunks.`);
-      const { environment } = await host.runner.describe();
-      if (!environment?.available) throw new HttpError(503, environment?.message ?? 'No environment to run code in.');
-      const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
-      if (!chunk || typeof chunk.index !== 'number' || typeof chunk.codeHash !== 'string') throw new HttpError(400, 'Missing chunk');
-      const by = (body.by ?? {}) as { name?: unknown; email?: unknown; color?: unknown };
-      const record = host.runner.run(path, {
-        engine,
-        code: typeof body.code === 'string' ? body.code : '',
-        header: typeof body.header === 'string' ? body.header : 'r',
-        chunk: { label: typeof chunk.label === 'string' ? chunk.label : null, index: chunk.index, codeHash: chunk.codeHash, partial: chunk.partial === true },
-        by: { name: typeof by.name === 'string' ? by.name : 'Anonymous', email: typeof by.email === 'string' ? by.email : '', color: typeof by.color === 'string' ? by.color : '#888888' },
-      });
-      return send(res, 202, record);
-    }
-    if (route === 'POST /api/runs/interrupt') {
-      host.runner.interrupt(path);
-      return send(res, 200, { ok: true });
-    }
-    if (route === 'POST /api/runs/restart') {
-      await host.runner.restart(path);
-      return send(res, 200, { ok: true });
-    }
-    if (route === 'POST /api/runs/clear') {
-      await host.runner.clear(path, body.chunk as never);
-      return send(res, 200, { ok: true });
-    }
-  }
+    const engine = host.runner.engineFor(String(body.engine ?? ''));
+    if (!engine) throw new HttpError(400, `Nothing on this host runs ${String(body.engine)} chunks.`);
+    const { environment } = await host.runner.describe();
+    if (!environment?.available) throw new HttpError(503, environment?.message ?? 'No environment to run code in.');
+    const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
+    if (!chunk || typeof chunk.index !== 'number' || typeof chunk.codeHash !== 'string') throw new HttpError(400, 'Missing chunk');
+    const record = host.runner.run(path, {
+      engine,
+      code: typeof body.code === 'string' ? body.code : '',
+      header: typeof body.header === 'string' ? body.header : 'r',
+      chunk: { label: typeof chunk.label === 'string' ? chunk.label : null, index: chunk.index, codeHash: chunk.codeHash, partial: chunk.partial === true },
+      by: personOf(body.by, 'Anonymous')!,
+    });
+    send(res, 202, record);
+  }),
 
-  if (route === 'GET /api/tree') {
+  ...(['interrupt', 'restart', 'clear'] as const).map((op) => route('POST', `/api/runs/${op}`, async ({ host, req, res }) => {
+    requireRunning(host, ' Start it with --engine to turn it on.');
+    const body = await readBody(req);
+    const path = host.relPath(str(body.path, 'path'));
+    if (op === 'interrupt') host.runner.interrupt(path);
+    else if (op === 'restart') await host.runner.restart(path);
+    else await host.runner.clear(path, chunkRefOf(body.chunk));
+    send(res, 200, { ok: true });
+  })),
+];
+
+const fileRoutes: Route[] = [
+  route('GET', '/api/tree', async ({ host, res }) => {
     const out = await host.git.out(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
     const branch = await host.git.branch();
-    const paths = [...new Set(out.split('\0').filter(Boolean))].filter((p) => existsSync(join(host.dir, p))).sort();
+    const paths = [...new Set(out.split('\0').filter(Boolean))].sort();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
-    const files = await Promise.all(paths.map(async (p) => {
-      const type = host.typeFor(p);
-      const file: { path: string; type: string | null; title?: string | null; conflicts?: number } = { path: p, type: type?.id ?? null };
-      if (type?.title) file.title = await host.titleOf(p, branch);
-      const conflicts = type ? await host.conflictsOf(p, branch) : 0;
-      if (conflicts) file.conflicts = conflicts;
-      return file;
-    }));
-    return send(res, 200, { files });
-  }
+    const files = (await Promise.all(paths.map((p) => host.treeEntry(p, branch)))).filter((f) => f !== null);
+    send(res, 200, { files });
+  }),
 
-  if (route === 'GET /api/files') {
-    const path = host.relPath(str(q.get('path'), 'path'));
-    const abs = host.resolvePath(path);
+  route('GET', '/api/files', ({ host, res, q }) => {
+    const abs = host.resolvePath(host.relPath(str(q.get('path'), 'path')));
     if (!existsSync(abs)) throw new HttpError(404, 'No such file');
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     createReadStream(abs).pipe(res);
-    return;
-  }
+  }),
 
-  if (route === 'POST /api/files') {
+  route('POST', '/api/files', async ({ host, req, res }) => {
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
+    checkPortable(path);
     const abs = host.resolvePath(path);
     if (existsSync(abs)) throw new HttpError(409, 'File exists');
     const content = typeof body.content === 'string' ? body.content : '';
@@ -199,29 +241,29 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       await writeFile(abs, content);
       return host.commitPaths([path], `Create ${path}`);
     });
-    return send(res, 201, { path, commit });
-  }
+    send(res, 201, { path, commit });
+  }),
 
   // A folder. git keeps no empty folders, so it gets a .gitkeep (which clients
   // hide) and is committed, so collaborators and other clones have it too.
-  if (route === 'POST /api/folders') {
+  route('POST', '/api/folders', async ({ host, req, res }) => {
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path')).replace(/\/+$/, '');
     if (!path) throw new HttpError(400, 'Missing path');
+    checkPortable(path);
     const abs = host.resolvePath(path);
     if (existsSync(abs)) throw new HttpError(409, 'A file or folder with that name exists');
-    const keep = `${path}/.gitkeep`;
     const commit = await host.serial(async () => {
       await mkdir(abs, { recursive: true });
       await writeFile(join(abs, '.gitkeep'), '');
-      return host.commitPaths([keep], `Create folder ${path}`);
+      return host.commitPaths([`${path}/.gitkeep`], `Create folder ${path}`);
     });
-    return send(res, 201, { path, commit });
-  }
+    send(res, 201, { path, commit });
+  }),
 
   // Rename or move a file or folder; for a document, optionally give it a new
   // title too (with `to` the same as `from`, only that).
-  if (route === 'PATCH /api/files') {
+  route('PATCH', '/api/files', async ({ host, req, res }) => {
     const body = await readBody(req);
     const from = host.relPath(str(body.from, 'from'));
     const to = host.relPath(str(body.to, 'to'));
@@ -241,53 +283,40 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       });
       return send(res, 200, { from, to, commit });
     }
+    checkPortable(to);
     if (existsSync(absTo)) throw new HttpError(409, `${to} already exists`);
     // A folder moves with everything in it, but never into itself.
     const isFolder = statSync(absFrom).isDirectory();
-    if (isFolder && (to === from || to.startsWith(`${from}/`))) throw new HttpError(400, 'A folder cannot move into itself');
+    if (isFolder && to.startsWith(`${from}/`)) throw new HttpError(400, 'A folder cannot move into itself');
     // Only the folder changed: a move. Otherwise (the name changed too) a rename.
     const moveOnly = dirname(from) !== dirname(to) && basename(from) === basename(to);
     const commit = await host.serial(async () => {
       if (isFolder) await host.dropRoomsUnder(from);
       else await host.dropRoom(from);
       await mkdir(dirname(absTo), { recursive: true });
-      await rename(absFrom, absTo);
+      await renameOver(absFrom, absTo);
       if (title !== undefined && !isFolder) await host.setTitle(to, title);
       return host.commitPaths([from, to], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
-    return send(res, 200, { from, to, commit });
-  }
+    send(res, 200, { from, to, commit });
+  }),
 
-  if (route === 'DELETE /api/files') {
+  route('DELETE', '/api/files', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
     const abs = host.resolvePath(path);
     if (!existsSync(abs)) throw new HttpError(404, 'No such file');
     const commit = await host.serial(async () => {
       await host.dropRoom(path);
-      await rm(abs, { recursive: true });
+      // Retried while Windows says busy (another program has a file open, for a moment).
+      await rm(abs, { recursive: true, maxRetries: 5 });
       return host.commitPaths([path], `Delete ${path}`);
     });
-    return send(res, 200, { path, commit });
-  }
+    send(res, 200, { path, commit });
+  }),
+];
 
-  if (route === 'GET /api/rooms') {
-    const rec = await host.room(str(q.get('path'), 'path'));
-    return send(res, 200, host.describe(rec));
-  }
-
-  if (route === 'POST /api/versions') {
-    const body = await readBody(req);
-    const message = typeof body.message === 'string' && body.message.trim() ? body.message.trim() : undefined;
-    if (typeof body.path === 'string' && body.path) {
-      const rec = await host.room(body.path);
-      const commit = await host.commitRoom(rec, message);
-      return send(res, 200, { commit });
-    }
-    await host.serial(() => host.commitAll(message));
-    return send(res, 200, { commit: await host.git.head() });
-  }
-
-  if (route === 'GET /api/history') {
+const historyRoutes: Route[] = [
+  route('GET', '/api/history', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
     // --follow crosses renames, so each entry also gives the path the file had in that commit
     // (from --name-only, which git prints after the formatted header).
@@ -304,55 +333,152 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
       const kind = email === MERGE_AUTHOR.email ? 'merge' : /^Kuraa-Kind:\s*autosave\s*$/im.test(body) ? 'autosave' : 'commit';
       return { hash, author, email, date, subject, coAuthors, path: pathThen, kind };
     });
-    return send(res, 200, { commits });
-  }
+    send(res, 200, { commits });
+  }),
 
-  const historyAt = /^\/api\/history\/([0-9a-f]{4,40})$/.exec(url.pathname);
-  if (req.method === 'GET' && historyAt) {
+  route('GET', /^\/api\/history\/([0-9a-f]{4,40})$/, async ({ host, res, q, params }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
-    const r = await host.git.run(['show', `${historyAt[1]}:${path}`], { allowFail: true });
+    const r = await host.git.run(['show', `${params[0]}:${path}`], { allowFail: true });
     if (r.code !== 0) throw new HttpError(404, 'Not found at that commit');
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
     res.end(r.stdout);
-    return;
-  }
+  }),
+];
 
-  // The workspace's devices, as the app shows them: who this device is, which are paired and
-  // connected, the upstream, and work waiting to be accepted. Pairing is the operator's (CLI).
-  if (route === 'GET /api/peers') {
+// The workspace's devices, as the app shows them: who this device is, which are
+// paired and connected, the sync remote, and work waiting to be accepted. Pairing is
+// the operator's (CLI); invitations and subscription links are made from the app
+// where the operator allows it.
+// You on this computer (peers/person.ts, 0035), where the one running the host allows it
+// (managePerson): this computer's signing key, your identity if it is here, and your keys
+// the workspace knows of.
+const personKeys = () => import('./peers/person.js');
+const hostPerson = async (host: Host) => {
+  if (!host.options.managePerson) throw new HttpError(404, 'This host\'s keys are its operator\'s to manage');
+  const keys = await personKeys();
+  const p = await keys.readPerson();
+  const known = p && host.peers ? (await host.peers.node.identity.people()).find((x) => x.key === p.publicKey.toString('hex'))?.keys ?? [] : [];
+  return keys.personInfo(known);
+};
+/** Made, imported or revoked: said in this workspace now (the others say it at their next save). */
+const personChanged = async (host: Host) => {
+  await host.peers?.node.signingKey();
+};
+const keysDo = async (fn: () => Promise<unknown>) => {
+  try {
+    await fn();
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
+};
+
+const personRoutes: Route[] = [
+  route('GET', '/api/person', async ({ host, res }) => send(res, 200, { person: await hostPerson(host) })),
+  route('POST', '/api/person', async ({ host, req, res }) => {
+    await hostPerson(host);
+    const name = str((await readBody(req)).name, 'name');
+    await keysDo(async () => (await personKeys()).createPerson(name));
+    await personChanged(host);
+    send(res, 201, { person: await hostPerson(host) });
+  }),
+  route('POST', '/api/person/import', async ({ host, req, res }) => {
+    await hostPerson(host);
+    const line = str((await readBody(req)).line, 'line');
+    await keysDo(async () => (await personKeys()).importPerson(line));
+    await personChanged(host);
+    send(res, 200, { person: await hostPerson(host) });
+  }),
+  route('POST', '/api/person/revoke', async ({ host, req, res }) => {
+    await hostPerson(host);
+    const key = str((await readBody(req)).key, 'key');
+    await keysDo(async () => (await personKeys()).revokeKey(key));
+    await personChanged(host);
+    send(res, 200, { person: await hostPerson(host) });
+  }),
+  route('GET', '/api/person/export', async ({ host, res }) => {
+    await hostPerson(host);
+    const keys = await personKeys();
+    const p = await keys.readPerson();
+    if (!p) throw new HttpError(404, 'Your identity is not on this computer');
+    send(res, 200, { line: keys.exportPerson(p) });
+  }),
+];
+
+// Backups (backups.ts): git servers this workspace is pushed to. Everyone sees them and may ask for a push;
+// adding and removing them is for the one running the host (manageBackups).
+const mayManageBackups = (host: Host) => {
+  if (!host.options.manageBackups) throw new HttpError(403, 'Backups here are set up by whoever runs this host');
+};
+const backupRoutes: Route[] = [
+  route('GET', '/api/backups', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageBackups, backups: await host.backups.list() })),
+  route('POST', '/api/backups', async ({ host, req, res }) => {
+    mayManageBackups(host);
+    const target = str((await readBody(req)).target, 'target');
+    try {
+      await host.backups.add(target);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    send(res, 201, { backups: await host.backups.list() });
+  }),
+  route('DELETE', /^\/api\/backups\/([A-Za-z0-9._-]+)$/, async ({ host, res, params }) => {
+    mayManageBackups(host);
+    try {
+      await host.backups.remove(params[0]!);
+    } catch (e) {
+      throw new HttpError(404, (e as Error).message);
+    }
+    send(res, 200, { backups: await host.backups.list() });
+  }),
+  route('POST', '/api/backups/now', async ({ host, res }) => send(res, 200, { backups: await host.backups.pushAll() })),
+];
+
+const peerRoutes: Route[] = [
+  route('GET', '/api/peers', async ({ host, res }) => {
     const canInvite = !!host.options.invites;
-    return send(res, 200, host.peers ? { enabled: true, canInvite, ...(await host.peers.status()) } : { enabled: false, canInvite });
-  }
+    send(res, 200, host.peers ? { enabled: true, canInvite, ...(await host.peers.status()) } : { enabled: false, canInvite });
+  }),
 
-  // Invitations and subscription links, made from the app where the operator allows it.
-  if (route === 'GET /api/peers/links') {
+  route('GET', '/api/peers/links', async ({ host, res }) => {
     if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this host');
-    if (!host.peers) return send(res, 200, { links: [] });
-    return send(res, 200, { links: await host.peers.links() });
-  }
+    send(res, 200, { links: host.peers ? await host.peers.links() : [] });
+  }),
 
-  if (route === 'POST /api/peers/links') {
+  route('POST', '/api/peers/links', async ({ host, req, res }) => {
     const body = await readBody(req);
     const hours = body.hours === null ? null : Number(body.hours);
     if (hours !== null && !(hours > 0 && hours <= 24 * 366)) throw new HttpError(400, 'A link lasts some hours (up to a year), or has no expiry (null)');
     const peers = await host.peersForInvites();
     const link = await peers.subscriptionLink(hours);
-    return send(res, 201, { link, ...(await peers.links()).at(-1)! });
-  }
+    send(res, 201, { link, ...(await peers.links()).at(-1)! });
+  }),
 
-  if (route === 'POST /api/peers/invitations') {
+  route('POST', '/api/peers/invitations', async ({ host, res }) => {
     const peers = await host.peersForInvites();
-    return send(res, 201, { invitation: await peers.invitation(24) });
-  }
+    send(res, 201, { invitation: await peers.invitation(24) });
+  }),
 
-  const linkAt = /^\/api\/peers\/links\/([0-9a-f]{16})$/.exec(url.pathname);
-  if (req.method === 'DELETE' && linkAt) {
+  route('DELETE', /^\/api\/peers\/links\/([0-9a-f]{16})$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
-    await peers.revokeLink(linkAt[1]!);
-    return send(res, 200, { ok: true });
-  }
+    await peers.revokeLink(params[0]!);
+    send(res, 200, { ok: true });
+  }),
 
-  if (route === 'POST /api/peers/accept') {
+  // Another device's version of a file this device's rules keep its own of (a declined file): take it.
+  route('POST', '/api/peers/take', async ({ host, req, res }) => {
+    if (!host.peers) throw new HttpError(404, 'This host does not sync with other devices');
+    const body = await readBody(req);
+    const device = str(body.device, 'device');
+    const branch = str(body.branch, 'branch');
+    const path = str(body.path, 'path');
+    host.resolvePath(path);
+    const status = await host.peers.status();
+    if (!status.declined.some((d) => d.device === device && d.branch === branch && d.path === path)) throw new HttpError(404, `${device}'s version of ${path} is not one this device keeps its own of`);
+    await host.peers.takeVersion(device, branch, path);
+    send(res, 200, { ok: true });
+  }),
+
+  route('POST', '/api/peers/accept', async ({ host, req, res }) => {
     if (!host.peers) throw new HttpError(404, 'This host does not sync with other devices');
     const body = await readBody(req);
     const device = str(body.device, 'device');
@@ -360,15 +486,72 @@ async function api(host: Host, req: IncomingMessage, res: ServerResponse, url: U
     const status = await host.peers.status();
     if (!status.proposals.some((p) => p.device === device && p.branch === branch)) throw new HttpError(404, `Nothing from ${device} on ${branch} waits to be accepted`);
     await host.peers.accept(device, branch);
-    return send(res, 200, { ok: true });
-  }
+    send(res, 200, { ok: true });
+  }),
+];
 
-  if (route === 'POST /api/sync') {
-    const result = await host.syncNow();
-    return send(res, result.ok ? 200 : 409, result);
-  }
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes];
 
-  throw new HttpError(404, `No route: ${route}`);
+/** The route for a request, and the groups of its path. */
+function findRoute(method: string, path: string): { route: Route; params: string[] } | null {
+  for (const r of ROUTES) {
+    if (r.method !== method) continue;
+    if (typeof r.path === 'string') {
+      if (r.path === path) return { route: r, params: [] };
+      continue;
+    }
+    const m = r.path.exec(path);
+    if (m) return { route: r, params: m.slice(1) };
+  }
+  return null;
+}
+
+export function createRequestHandler(host: Host) {
+  return async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const path = url.pathname;
+    const isApi = path.startsWith('/api/');
+    const isGit = path === '/git' || path.startsWith('/git/');
+
+    // Allow a web client served from another origin (e.g. the Vite dev server).
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-headers', 'authorization, content-type');
+    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    // A host is not a hub (hub.ts): asked for a hub's API, it says so rather than serving the page.
+    if (path === '/hub' || path.startsWith('/hub/')) {
+      send(res, 404, { error: 'This is a host of one workspace, not a hub' });
+      return true;
+    }
+    if (!isApi && !isGit) return serveStaticFrom(host.options.staticDir, path, res);
+
+    if (!sameToken(tokenOf(req), host.token)) {
+      if (isGit) res.setHeader('www-authenticate', 'Basic realm="kuraa"');
+      send(res, 401, { error: 'Unauthorized' });
+      return true;
+    }
+
+    try {
+      if (isGit) {
+        await gitBackend(host, req, res, url);
+        return true;
+      }
+      const found = findRoute(req.method ?? 'GET', path);
+      if (!found) throw new HttpError(404, `No route: ${req.method} ${path}`);
+      await found.route.handle({ host, req, res, url, q: url.searchParams, params: found.params });
+    } catch (err) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (status === 500) host.log(`error: ${(err as Error).stack ?? err}`);
+      if (!res.headersSent) send(res, status, { error: (err as Error).message });
+      else res.end();
+    }
+    return true;
+  };
 }
 
 /** The repository over git's smart HTTP protocol, through `git http-backend`. */
@@ -396,7 +579,11 @@ async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse,
   let buf = Buffer.alloc(0);
   child.stdout.on('data', (chunk: Buffer) => {
     if (headerDone) {
-      res.write(chunk);
+      // Wait for the client when it reads slower than git writes (a large clone).
+      if (!res.write(chunk)) {
+        child.stdout.pause();
+        res.once('drain', () => child.stdout.resume());
+      }
       return;
     }
     buf = Buffer.concat([buf, chunk]);
@@ -434,10 +621,6 @@ async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse,
   }
 }
 
-function serveStatic(host: Host, path: string, res: ServerResponse): boolean {
-  return serveStaticFrom(host.options.staticDir, path, res);
-}
-
 /** A file of the built web client (index.html for any path that is not one). */
 export function serveStaticFrom(root: string | undefined, path: string, res: ServerResponse): boolean {
   if (!root) {
@@ -446,7 +629,15 @@ export function serveStaticFrom(root: string | undefined, path: string, res: Ser
     return true;
   }
   const base = resolve(root);
-  let file = resolve(base, '.' + decodeURIComponent(path));
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    res.writeHead(400);
+    res.end('Bad path');
+    return true;
+  }
+  let file = resolve(base, '.' + decoded);
   if (file !== base && !file.startsWith(base + sep)) {
     res.writeHead(403);
     res.end();

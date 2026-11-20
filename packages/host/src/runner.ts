@@ -1,12 +1,15 @@
-// Running code chunks, through run components (see @kuraa/run-kit and components.ts).
+// Running code chunks, through run components.
 //
 // The runner knows no language and no place to run code: engines and
-// environments come from components (see @kuraa/run-kit and components.ts). For each
-// document and engine it opens a session in the environment, runs requests one
-// at a time, broadcasts
-// each run's progress and outputs to everyone with the document open, and
-// caches the latest output of each chunk in .git/kuraa/outputs (never in the
-// document).
+// environments come from components (see @kuraa/run-kit and components.ts). For
+// each document and engine it opens a session in the environment, runs requests
+// one at a time, broadcasts each run's progress and outputs to everyone with the
+// document open, and caches the latest output of each chunk in
+// .git/kuraa/outputs (never in the document).
+//
+// A session may be interrupted, restarted or left idle at any point, also while
+// it is still starting (restoring packages, building an image): a run waiting
+// for it is then cancelled, and a session dropped before it opened never opens.
 //
 // Who decides what: the operator (host options, from flags) loads components,
 // turns engines on, chooses the environment and sets the limits; an environment
@@ -15,12 +18,17 @@
 // access (writing the workspace, the network); it gets more access only where
 // the operator allows it. If the environment is unavailable, nothing runs.
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { DEFAULT_POLICY, type ChunkOutput, type Engine, type EngineSession, type Environment, type EnvironmentStatus, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunComponent } from '@kuraa/run-kit';
+import {
+  DEFAULT_POLICY, parseSize,
+  type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
+  type PackageContext, type PackageInfo, type PackageResult, type Policy, type RunComponent,
+} from '@kuraa/run-kit';
 import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
 import type { RunComponents } from './components.js';
+import { renameOver } from './files.js';
 
 export interface RunOptions {
   /** Engines to turn on, by id: ['r']. None: running is off. */
@@ -43,6 +51,8 @@ export interface RunOptions {
   /** Limits for each session. */
   memory?: string;
   cpus?: number;
+  /** The most each process may write (scratch, its temporary files), e.g. '2g'. */
+  disk?: string;
   /**
    * Let people install packages (install.packages() in a chunk, the Packages
    * panel). Installs run apart from the workspace, with the network.
@@ -76,17 +86,45 @@ export interface RunDescription {
 }
 
 const MAX_TEXT = 200_000;
+/** The most outputs a run keeps (a loop that draws ten thousand plots, say). */
+const MAX_OUTPUTS = 1000;
 /** The most steps a session's history keeps (the oldest go first). */
 const MAX_STEPS = 1000;
 
-interface Job { record: RunRecord; engine: Engine; code: string; header: string }
+/** A run waiting for its turn, or running. */
+interface Job {
+  record: RunRecord;
+  engine: Engine;
+  code: string;
+  header: string;
+  /** Interrupt was asked for: a run still waiting for its session to start then never runs. */
+  cancel(): void;
+  cancelled: Promise<typeof CANCELLED>;
+}
+
+const CANCELLED = Symbol('cancelled');
 
 /**
  * A document's session with an engine. Its history is what it has run, in order,
  * so that clients can tell which outputs were computed from code that has since
- * changed (see decision 0024).
+ * changed (see decision 0024). It is listed as soon as it starts opening (to
+ * show progress), so `session` is null until the engine has opened it.
  */
-interface Session { id: string; engine: Engine; environment: Environment; session: EngineSession; info: RunSessionInfo; ready: boolean; history: RunStep[] }
+interface Session {
+  key: string;
+  path: string;
+  id: string;
+  engine: Engine;
+  environment: Environment;
+  /** The engine's session, once opened. */
+  session: EngineSession | null;
+  opened: Promise<EngineSession>;
+  /** Restarted, stopped or ended: no longer the document's session, and not to be opened. */
+  dropped: boolean;
+  info: RunSessionInfo;
+  ready: boolean;
+  history: RunStep[];
+}
 
 const NO_SESSION = (path: string, message: string | null = null): RunSessionInfo => ({ path, engine: null, environment: null, state: 'none', message, id: null, steps: [] });
 
@@ -129,7 +167,15 @@ export class Runner {
     for (const id of o.options?.engines ?? []) if (!o.components.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.components.engines.keys()].join(', ') || 'none'}.`);
     this.on = [...(o.options?.engines ?? [])];
     this.env = this.chooseEnvironment();
+    if (o.options?.disk !== undefined && parseSize(o.options.disk) === null) throw new Error(`--disk takes a size such as 2g, not "${o.options.disk}".`);
+    this.dataDir = o.options?.dataDir ?? defaultDataDir();
+    this.workspaceKey = createHash('sha1').update(resolve(o.root)).digest('hex').slice(0, 16);
   }
+
+  /** Where engines keep what every workspace shares. */
+  private readonly dataDir: string;
+  /** A stable short id for the workspace, for what engines keep for it in dataDir. */
+  private readonly workspaceKey: string;
 
   /** Where code runs: the one the operator named, else the only one loaded. */
   private readonly env: Environment | null;
@@ -232,26 +278,16 @@ export class Runner {
       network: wantsNetwork && opts.allowNetwork === true,
       memory: opts.memory ?? DEFAULT_POLICY.memory,
       cpus: opts.cpus ?? DEFAULT_POLICY.cpus,
+      disk: opts.disk ?? DEFAULT_POLICY.disk,
     };
-  }
-
-  private get dataDir(): string {
-    return this.o.options?.dataDir ?? defaultDataDir();
-  }
-
-  private get workspaceKey(): string {
-    return createHash('sha1').update(resolve(this.o.root)).digest('hex').slice(0, 16);
   }
 
   private installs: Promise<unknown> = Promise.resolve();
   private recorded = new Set<string>();
 
-  /** What a package manager works with, for this workspace, crediting `by`. */
-  private async packageContext(engine: Engine, by: PresenceUser | null): Promise<PackageContext> {
-    const config = await this.config();
+  /** What an engine's sessions and its package manager both get, for this workspace. */
+  private context(engine: Engine, config: WorkspaceRunConfig): ComponentContext {
     const environment = this.env!;
-    const status = await this.status(environment);
-    if (!status.available) throw new Error(status.message);
     return {
       environment,
       environmentOptions: this.o.options?.options?.[environment.id],
@@ -262,8 +298,24 @@ export class Runner {
       policy: this.policy(config),
       requirements: config[engine.id],
       options: this.o.options?.options?.[engine.id],
-      log: (m) => this.o.log(`${engine.id} packages: ${m}`),
+      log: (m) => this.o.log(`${engine.id}: ${m}`),
       status: (m) => this.o.broadcastAll({ type: 'packages', engine: engine.id, message: m }),
+    };
+  }
+
+  /** The environment, if it can run processes now; else why not. */
+  private async available(): Promise<Environment> {
+    const status = await this.status(this.env!);
+    if (!status.available) throw new Error(status.message);
+    return this.env!;
+  }
+
+  /** What a package manager works with, for this workspace, crediting `by`. */
+  private async packageContext(engine: Engine, by: PresenceUser | null): Promise<PackageContext> {
+    await this.available();
+    return {
+      ...this.context(engine, await this.config()),
+      log: (m) => this.o.log(`${engine.id} packages: ${m}`),
       commit: (paths, message) => this.o.commit(paths, message, by),
     };
   }
@@ -315,9 +367,37 @@ export class Runner {
     }
   }
 
+  private readonly cacheChanges = new Map<string, Promise<unknown>>();
+
+  /**
+   * Change a document's cached runs. One change at a time per document (a run
+   * finishing and a clear would otherwise each write over the other), each
+   * written whole, so a reader never finds half a file and loses every output.
+   */
+  private changeCache(path: string, change: (runs: RunRecord[]) => RunRecord[]): Promise<void> {
+    const next = (this.cacheChanges.get(path) ?? Promise.resolve()).then(async () => {
+      const runs = change(await this.outputs(path));
+      const file = this.cacheFile(path);
+      if (!runs.length) return rm(file, { force: true });
+      await mkdir(dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify({ path, runs }));
+      await renameOver(tmp, file);
+    });
+    const settled = next.catch(() => undefined);
+    this.cacheChanges.set(path, settled);
+    void settled.then(() => {
+      if (this.cacheChanges.get(path) === settled) this.cacheChanges.delete(path);
+    });
+    return next;
+  }
+
+  private sessionsOf(path: string): Session[] {
+    return [...this.sessions.values()].filter((s) => s.path === path);
+  }
+
   session(path: string): RunSessionInfo {
-    const s = [...this.sessions.entries()].find(([k]) => k.startsWith(`${path}\0`))?.[1];
-    return s?.info ?? NO_SESSION(path);
+    return this.sessionsOf(path)[0]?.info ?? NO_SESSION(path);
   }
 
   /** Runs for a document that have not finished, in order. */
@@ -334,73 +414,102 @@ export class Runner {
       by: { name: req.by.name, color: req.by.color },
       queuedAt: new Date().toISOString(), finishedAt: null, ms: null,
     };
+    let cancel!: () => void;
+    const cancelled = new Promise<typeof CANCELLED>((resolve) => (cancel = () => resolve(CANCELLED)));
     const queue = this.queues.get(path) ?? [];
-    queue.push({ record, engine: req.engine, code: req.code, header: req.header });
+    queue.push({ record, engine: req.engine, code: req.code, header: req.header, cancel, cancelled });
     this.queues.set(path, queue);
     this.o.broadcast(path, { type: 'run', run: record });
     void this.pump(path);
     return record;
   }
 
-  private setInfo(path: string, s: Session, state: RunSessionInfo['state'], message: string | null = s.info.message): void {
-    const live = state !== 'stopped' && state !== 'failed';
-    s.info = { path, engine: s.engine.id, environment: s.environment.id, state, message, id: live ? s.id : null, steps: live ? [...s.history] : [] };
-    this.o.broadcast(path, { type: 'run-session', session: s.info });
+  /** Tell everyone how a live session is doing; nothing once it has been dropped. */
+  private setInfo(s: Session, state: 'starting' | 'ready' | 'busy', message: string | null = s.info.message): void {
+    if (this.sessions.get(s.key) !== s) return;
+    s.info = { path: s.path, engine: s.engine.id, environment: s.environment.id, state, message, id: s.id, steps: [...s.history] };
+    this.o.broadcast(s.path, { type: 'run-session', session: s.info });
   }
 
-  /** The document's session for an engine, opened if needed. */
-  private async sessionFor(path: string, engine: Engine): Promise<Session> {
+  /** Drop a session that is still the document's, telling everyone why. Its process is stopped by whoever drops it, if it is not already gone. */
+  private forget(s: Session, state: 'stopped' | 'failed', why: string | null): boolean {
+    if (this.sessions.get(s.key) !== s) return false;
+    this.sessions.delete(s.key);
+    s.dropped = true;
+    s.info = { path: s.path, engine: s.engine.id, environment: s.environment.id, state, message: why, id: null, steps: [] };
+    this.o.broadcast(s.path, { type: 'run-session', session: s.info });
+    return true;
+  }
+
+  /** Stop a session's process, even one still opening (it then never starts). */
+  private stopSession(s: Session): Promise<void> {
+    s.dropped = true;
+    return s.session ? s.session.stop().catch((e: Error) => this.o.log(`could not stop ${s.engine.id} (${s.path}): ${e.message}`)) : Promise.resolve();
+  }
+
+  /** The document's session for an engine, opening it if needed. */
+  private sessionFor(path: string, engine: Engine): Session {
     const key = `${path}\0${engine.id}`;
     const existing = this.sessions.get(key);
     if (existing) return existing;
-    const config = await this.config();
-    const environment = this.env!;
-    const status = await this.status(environment);
-    if (!status.available) throw new Error(status.message);
-    const pathHash = createHash('sha1').update(path).digest('hex').slice(0, 12);
-    const s: Session = { id: randomBytes(6).toString('hex'), engine, environment, ready: false, history: [], info: NO_SESSION(path), session: null! };
+    const s: Session = {
+      key, path, id: randomBytes(6).toString('hex'), engine, environment: this.env!,
+      session: null, opened: null!, dropped: false, ready: false, history: [], info: NO_SESSION(path),
+    };
     this.sessions.set(key, s);
-    this.setInfo(path, s, 'starting', null);
+    this.setInfo(s, 'starting', null);
+    s.opened = this.open(s);
+    s.opened.catch((e: Error) => this.forget(s, 'failed', e.message));
+    return s;
+  }
+
+  private async open(s: Session): Promise<EngineSession> {
+    const { engine, path } = s;
+    await this.available();
+    const config = await this.config();
     // A fresh clone, or another machine: install what the workspace's manifest lists.
     if (engine.packages && this.o.options?.allowInstalls) {
       const pkgs = engine.packages;
       const restored = await this.queueInstall(async () => {
         const pctx = await this.packageContext(engine, null);
-        return pkgs.restore({ ...pctx, status: (m) => this.setInfo(path, s, 'starting', m) });
+        return pkgs.restore({ ...pctx, status: (m) => this.setInfo(s, 'starting', m) });
       }).catch((e: Error) => ({ ok: false, message: e.message, log: '', restart: false }));
       if (restored && !restored.ok) this.o.log(`${engine.id} (${path}): restoring packages failed: ${restored.message}\n${restored.log}`);
     }
+    // Restarted (or the host closed) while the packages were restored: open nothing.
+    if (s.dropped) throw new Error('The session was stopped before it started.');
     const byNow = () => this.active.get(path)?.record.by ? { ...this.active.get(path)!.record.by, email: '' } : null;
-    s.session = engine.open({
-      environment,
-      dataDir: join(this.dataDir, 'engines', engine.id),
-      workspaceKey: this.workspaceKey,
+    // Scratch of its own, emptied: what an earlier session left (all it was allowed to write, say) is not this one's.
+    const scratch = join(this.o.stateDir, 'run', 'scratch', `${createHash('sha1').update(path).digest('hex').slice(0, 12)}-${engine.id}`);
+    await mkdir(scratch, { recursive: true });
+    await emptyDir(scratch);
+    if (s.dropped) throw new Error('The session was stopped before it started.');
+    const session = engine.open({
+      ...this.context(engine, config),
+      scratch,
       install: (refs) => this.installPackages(engine.id, refs, byNow()),
       remove: (names) => this.removePackages(engine.id, names, byNow()),
-      usedFromEnvironment: (pkgs) => {
-        const fresh = pkgs.filter((p) => !this.recorded.has(`${engine.id}:${p.name}@${p.version}`));
+      usedFromEnvironment: (used) => {
+        const fresh = used.filter((p) => !this.recorded.has(`${engine.id}:${p.name}@${p.version}`));
         if (!fresh.length || !engine.packages) return;
         for (const p of fresh) this.recorded.add(`${engine.id}:${p.name}@${p.version}`);
         const by = byNow();
         void this.queueInstall(async () => engine.packages!.recordUsed(await this.packageContext(engine, by), fresh))
           .catch((e: Error) => this.o.log(`could not record packages: ${e.message}`));
       },
-      environmentOptions: this.o.options?.options?.[environment.id],
-      workspace: this.o.root,
-      scratch: join(this.o.stateDir, 'run', 'scratch', pathHash),
-      files: join(this.o.stateDir, 'run', 'engines', engine.id),
-      policy: this.policy(config),
-      requirements: config[engine.id],
-      options: this.o.options?.options?.[engine.id],
       log: (m) => this.o.log(`${engine.id} (${path}): ${m}`),
-      status: (m) => this.setInfo(path, s, s.ready ? s.info.state : 'starting', m),
+      status: (m) => this.setInfo(s, s.ready ? (s.info.state as 'ready' | 'busy') : 'starting', m),
     });
-    void s.session.ended.then((why) => {
-      if (this.sessions.get(key) !== s) return;
-      this.sessions.delete(key);
-      this.setInfo(path, s, s.ready ? 'stopped' : 'failed', why);
-    });
-    return s;
+    s.session = session;
+    void session.ended.then((why) => this.forget(s, s.ready ? 'stopped' : 'failed', why));
+    return session;
+  }
+
+  /** `p`, unless the job is interrupted first. */
+  private async unlessCancelled<T>(job: Job, p: Promise<T>): Promise<T> {
+    const r = await Promise.race([p, job.cancelled]);
+    if (r === CANCELLED) throw CANCELLED;
+    return r as T;
   }
 
   private async pump(path: string): Promise<void> {
@@ -417,27 +526,14 @@ export class Runner {
     this.o.broadcast(path, { type: 'run', run: record });
     const started = Date.now();
     try {
-      const s = await this.sessionFor(path, job.engine);
-      const version = await s.session.ready;
-      if (!s.ready) {
-        s.ready = true;
-        this.setInfo(path, s, 'ready', version);
-      }
-      record.basis = { session: s.id, steps: [...s.history] };
-      this.setInfo(path, s, 'busy');
-      try {
-        const result = await s.session.run({ id: record.id, code: job.code, header: job.header, dir: dirname(resolve(this.o.root, path)) });
-        record.outputs = tidy(result.outputs);
-        record.state = result.interrupted ? 'interrupted' : record.outputs.some((o) => o.type === 'error') ? 'failed' : 'done';
-        if (result.interrupted) record.outputs.push({ type: 'note', text: 'Interrupted.' });
-      } finally {
-        const { label, index, codeHash, partial } = record.chunk;
-        addStep(s.history, { label, index, codeHash, complete: !partial && record.state === 'done' }, !!partial);
-        if (this.sessions.get(`${path}\0${job.engine.id}`) === s) this.setInfo(path, s, 'ready');
-      }
+      await this.execute(path, job);
     } catch (e) {
-      record.state = 'failed';
-      record.outputs.push({ type: 'error', text: (e as Error).message });
+      // Interrupted before the session could run it: it never ran, as if it had still been queued.
+      if (e === CANCELLED) record.state = 'cancelled';
+      else {
+        record.state = 'failed';
+        record.outputs.push({ type: 'error', text: (e as Error).message });
+      }
     }
     record.ms = Date.now() - started;
     record.finishedAt = new Date().toISOString();
@@ -445,6 +541,29 @@ export class Runner {
     this.o.broadcast(path, { type: 'run', run: record });
     await this.remember(record).catch((e) => this.o.log(`could not cache outputs: ${e}`));
     void this.pump(path);
+  }
+
+  private async execute(path: string, job: Job): Promise<void> {
+    const { record } = job;
+    const s = this.sessionFor(path, job.engine);
+    const session = await this.unlessCancelled(job, s.opened);
+    const version = await this.unlessCancelled(job, session.ready);
+    if (!s.ready) {
+      s.ready = true;
+      this.setInfo(s, 'ready', version);
+    }
+    record.basis = { session: s.id, steps: [...s.history] };
+    this.setInfo(s, 'busy');
+    try {
+      const result = await session.run({ id: record.id, code: job.code, header: job.header, dir: dirname(resolve(this.o.root, path)) });
+      record.outputs = tidy(result.outputs);
+      record.state = result.interrupted ? 'interrupted' : record.outputs.some((o) => o.type === 'error') ? 'failed' : 'done';
+      if (result.interrupted) record.outputs.push({ type: 'note', text: 'Interrupted.' });
+    } finally {
+      const { label, index, codeHash, partial } = record.chunk;
+      addStep(s.history, { label, index, codeHash, complete: !partial && record.state === 'done' }, !!partial);
+      this.setInfo(s, 'ready');
+    }
   }
 
   /** Keep the latest run of each chunk: same label, or same position among unlabelled chunks, or same code. */
@@ -455,26 +574,14 @@ export class Runner {
       (c.label !== null && r.chunk.label === c.label) ||
       (c.label === null && r.chunk.label === null && r.chunk.index === c.index) ||
       r.chunk.codeHash === c.codeHash;
-    const runs = [...(await this.outputs(record.path)).filter((r) => !same(r)), record];
-    const file = this.cacheFile(record.path);
-    await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify({ path: record.path, runs }));
-    await rename(tmp, file);
+    await this.changeCache(record.path, (runs) => [...runs.filter((r) => !same(r)), record]);
   }
 
   /** Forget one chunk's output, or all of a document's. */
   async clear(path: string, chunk?: ChunkRef): Promise<void> {
-    const runs = chunk
-      ? (await this.outputs(path)).filter((r) => !(r.chunk.index === chunk.index && r.chunk.label === chunk.label && r.chunk.codeHash === chunk.codeHash))
-      : [];
-    const file = this.cacheFile(path);
-    if (!runs.length) await rm(file, { force: true });
-    else await writeFile(file, JSON.stringify({ path, runs }));
-  }
-
-  private sessionsOf(path: string): [string, Session][] {
-    return [...this.sessions.entries()].filter(([k]) => k.startsWith(`${path}\0`));
+    await this.changeCache(path, (runs) => chunk
+      ? runs.filter((r) => !(r.chunk.index === chunk.index && r.chunk.label === chunk.label && r.chunk.codeHash === chunk.codeHash))
+      : []);
   }
 
   /** Stop what is running for a document, and drop what is queued. */
@@ -484,15 +591,16 @@ export class Runner {
       job.record.finishedAt = new Date().toISOString();
       this.o.broadcast(path, { type: 'run', run: job.record });
     }
-    for (const [, s] of this.sessionsOf(path)) s.session.interrupt();
+    this.active.get(path)?.cancel();
+    for (const s of this.sessionsOf(path)) s.session?.interrupt();
   }
 
   /** Fresh sessions for a document: everything defined so far is gone. */
   async restart(path: string): Promise<void> {
     this.interrupt(path);
     const sessions = this.sessionsOf(path);
-    for (const [k] of sessions) this.sessions.delete(k);
-    await Promise.all(sessions.map(([, s]) => s.session.stop()));
+    for (const s of sessions) this.sessions.delete(s.key);
+    await Promise.all(sessions.map((s) => this.stopSession(s)));
     this.o.broadcast(path, { type: 'run-session', session: NO_SESSION(path, 'Restarted.') });
   }
 
@@ -500,10 +608,12 @@ export class Runner {
   private scheduleIdle(path: string): void {
     clearTimeout(this.idle.get(path));
     this.idle.set(path, setTimeout(() => {
-      if (this.active.has(path)) return;
-      for (const [k, s] of this.sessionsOf(path)) {
-        this.sessions.delete(k);
-        void s.session.stop().then(() => this.o.log(`stopped idle ${s.engine.id} session for ${path}`));
+      this.idle.delete(path);
+      if (this.active.has(path) || this.queues.get(path)?.length) return;
+      for (const s of this.sessionsOf(path)) {
+        // Its history goes with it: everyone must see that nothing has run now (decision 0024).
+        this.forget(s, 'stopped', 'Stopped after a while without runs. The next run starts afresh.');
+        void this.stopSession(s).then(() => this.o.log(`stopped idle ${s.engine.id} session for ${path}`));
       }
     }, this.o.idleMs ?? 60 * 60 * 1000).unref());
   }
@@ -511,13 +621,15 @@ export class Runner {
   async close(): Promise<void> {
     this.closed = true;
     for (const t of this.idle.values()) clearTimeout(t);
-    for (const path of this.queues.keys()) this.interrupt(path);
-    await Promise.all([...this.sessions.values()].map((s) => s.session.stop().catch(() => undefined)));
+    this.idle.clear();
+    for (const path of new Set([...this.queues.keys(), ...this.active.keys()])) this.interrupt(path);
+    const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    await Promise.all(sessions.map((s) => this.stopSession(s)));
   }
 }
 
-/** Merge adjacent text, and cap its size. */
+/** Merge adjacent text, and cap its size and the number of outputs. */
 function tidy(outputs: ChunkOutput[]): ChunkOutput[] {
   const out: ChunkOutput[] = [];
   for (const o of outputs) {
@@ -528,5 +640,12 @@ function tidy(outputs: ChunkOutput[]): ChunkOutput[] {
   for (const o of out) {
     if ('text' in o && o.text.length > MAX_TEXT) o.text = `${o.text.slice(0, MAX_TEXT)}\n… (${o.text.length - MAX_TEXT} more characters not shown)`;
   }
+  if (out.length > MAX_OUTPUTS) out.splice(MAX_OUTPUTS, Infinity, { type: 'note', text: `${out.length - MAX_OUTPUTS} more outputs not shown.` });
   return out;
+}
+
+/** Remove what is in a folder, keeping the folder (Podman on a Mac can see one removed and made again as missing). */
+async function emptyDir(dir: string): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[]);
+  await Promise.all(names.map((n) => rm(join(dir, n), { recursive: true, force: true })));
 }

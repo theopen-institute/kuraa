@@ -3,12 +3,13 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
-import { HostApi, HubApi, type CommitInfo, type HubWorkspace, type TreeFile, type WorkspaceInfo } from './api.js';
+import type { CommitInfo, HubWorkspace, TreeFile, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
-import { askText } from './ask.js';
+import { askConfirm, askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
 import { loadEditorsOff, saveEditorsOff } from './editor-choices.js';
 import { webShell } from './shell.js';
+import { useWorkspaces } from './workspaces.js';
 import type { AppProps, EditorStatus, Notice } from './types.js';
 import Editor from './Editor.vue';
 import FileTree from './FileTree.vue';
@@ -18,13 +19,11 @@ import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
 import ComponentsDialog from './ComponentsDialog.vue';
-import ReadOnlyCode from './ReadOnlyCode.vue';
-import ReadOnlyDoc from './ReadOnlyDoc.vue';
+import PastVersion from './PastVersion.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
-import { askConfirm } from './ask.js';
 
 const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}) });
 
@@ -40,18 +39,56 @@ const registry = computed(() => {
 
 const settings = shallowRef<Settings>(loadSettings(props.overrides, props.defaults));
 const editingSettings = ref(!isComplete(settings.value));
+const error = ref<string | null>(null);
+const notice = shallowRef<Notice | null>(null);
+const fail = (e: unknown) => {
+  error.value = (e as Error).message;
+};
 
-// A hub (a server holding many workspaces) or a host of one. On a hub, the
-// workspace open is one of its workspaces, at <hub>/w/<id>.
-const hubApi = computed(() => markRaw(new HubApi(settings.value.hostUrl, settings.value.token)));
-/** The hub's workspaces; null for a host of one workspace, or before the address has been asked. */
-const hub = shallowRef<HubWorkspace[] | null>(null);
-const hubKnown = ref(false);
-const chosenKey = () => `kuraa:workspace:${settings.value.hostUrl}`;
-const chosen = ref<string | null>(null);
+// The server's workspaces, and the one open (see workspaces.ts).
+const { hubApi, workspaces: hub, canAdd, canInvite, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
+  settings,
+  active: () => !editingSettings.value,
+  preferred: () => props.shell.workspace,
+  onError: (message) => (error.value = message),
+});
+
+// The open workspace: what the host says of it, its files, and the file open.
+const workspace = shallowRef<WorkspaceInfo | null>(null);
+const files = shallowRef<TreeFile[]>([]);
+const path = ref<string | null>(null);
+const status = shallowRef<EditorStatus | null>(null);
+const historyKey = ref(0);
+const viewing = shallowRef<{ commit: CommitInfo; text: string } | null>(null);
+let viewAsked = 0;
+const syncing = ref(false);
+const historyOpen = ref(false);
+const showSource = ref(false);
+const menuOpen = ref(false);
+const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
+const componentsOpen = ref(false);
 const addingWorkspace = ref(false);
 /** Inviting people: whether the workspace already syncs with devices. */
 const inviting = shallowRef<{ syncing: boolean } | null>(null);
+/** The open document's title as it is being edited, ahead of the host's list. */
+const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
+/** The open document's conflicts as it is being edited, likewise. */
+const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
+/** The files, with the open document's live title and conflicts. */
+const shownFiles = computed(() => {
+  const live = liveTitle.value;
+  const c = liveConflicts.value;
+  if (!live && !c) return files.value;
+  return files.value.map((f) => {
+    let out = f;
+    if (live && f.path === live.path && 'title' in f && f.title !== live.title) out = { ...out, title: live.title };
+    if (c && f.path === c.path && (f.conflicts ?? 0) !== c.count) out = { ...out, conflicts: c.count || undefined };
+    return out;
+  });
+});
+/** The Header dialog is open for the open file. */
+const headerOpen = ref(false);
+
 async function invite() {
   let syncing = false;
   try {
@@ -60,51 +97,38 @@ async function invite() {
   inviting.value = { syncing };
 }
 
-async function loadHub(prefer?: string | null) {
-  try {
-    const list = await hubApi.value.workspaces();
-    hub.value = list;
-    if (list) {
-      let stored: string | null = null;
-      try { stored = localStorage.getItem(chosenKey()); } catch { /* storage unavailable */ }
-      const ok = (id: string | null | undefined) => !!id && list.some((w) => w.id === id && !w.error);
-      chosen.value = [prefer, chosen.value, props.shell.workspace, stored, list.find((w) => !w.error)?.id].find(ok) ?? null;
-    }
-    error.value = null;
-  } catch (e) {
-    error.value = (e as Error).message;
-  } finally {
-    hubKnown.value = true;
-  }
-}
-watch([hubApi, editingSettings], () => {
-  if (!editingSettings.value) void loadHub();
-}, { immediate: true });
-watch(chosen, (id) => {
-  try { if (id) localStorage.setItem(chosenKey(), id); } catch { /* storage unavailable */ }
-});
-/** The address answers, and (on a hub) a workspace is open. */
-const ready = computed(() => hubKnown.value && (!hub.value || !!chosen.value));
-const api = computed(() => markRaw(hub.value && chosen.value ? hubApi.value.workspaceApi(chosen.value) : new HostApi(settings.value.hostUrl, settings.value.token)));
-
-function switchWorkspace(id: string) {
-  if (id === chosen.value) return;
-  const w = hub.value?.find((x) => x.id === id);
-  if (w?.error) {
-    error.value = `${w.name} cannot be opened: ${w.error}`;
-    return;
-  }
+/** Close the open workspace's file and forget its files, before another is opened. */
+function leaveWorkspace() {
   select(null);
   workspace.value = null;
   files.value = [];
+}
+
+async function switchWorkspace(id: string) {
+  if (id === chosen.value) return;
+  const w = hub.value?.find((x) => x.id === id);
+  if (w?.error) {
+    // It cannot be chosen, so this is the place to take it off the list (where the server allows it).
+    if (!canAdd.value) {
+      error.value = `${w.name} cannot be opened: ${w.error}`;
+      return;
+    }
+    if (!(await askConfirm(`“${w.name}” cannot be opened: ${w.error}. Remove it from this list?`, 'Remove', true))) return;
+    try {
+      await hubApi.value.remove(id);
+      await loadHub();
+    } catch (e) {
+      fail(e);
+    }
+    return;
+  }
+  leaveWorkspace();
   chosen.value = id;
 }
 
 async function workspaceAdded(w: HubWorkspace) {
   addingWorkspace.value = false;
-  select(null);
-  workspace.value = null;
-  files.value = [];
+  leaveWorkspace();
   await loadHub(w.id);
   notice.value = { kind: 'info', text: w.peers ? `Joined “${w.name}”.` : `Made “${w.name}”.` };
 }
@@ -115,49 +139,14 @@ async function removeWorkspace(id: string) {
   try {
     await hubApi.value.remove(id);
     if (chosen.value === id) {
-      select(null);
+      leaveWorkspace();
       chosen.value = null;
-      workspace.value = null;
-      files.value = [];
     }
     await loadHub();
   } catch (e) {
-    error.value = (e as Error).message;
+    fail(e);
   }
 }
-
-const workspace = shallowRef<WorkspaceInfo | null>(null);
-const files = shallowRef<TreeFile[]>([]);
-const error = ref<string | null>(null);
-const path = ref<string | null>(null);
-const status = shallowRef<EditorStatus | null>(null);
-const historyKey = ref(0);
-const viewing = shallowRef<{ commit: CommitInfo; text: string } | null>(null);
-const viewSource = ref(false);
-const syncing = ref(false);
-const historyOpen = ref(false);
-const showSource = ref(false);
-const notice = shallowRef<Notice | null>(null);
-const menuOpen = ref(false);
-const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
-const componentsOpen = ref(false);
-/** The open document's title as it is being edited, ahead of the host's list. */
-const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
-/** The open document's conflicts as it is being edited, likewise. */
-const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
-/** The files, with the open document's live title and conflicts. */
-const shownFiles = computed(() => {
-  const live = liveTitle.value;
-  const c = liveConflicts.value;
-  return files.value.map((f) => {
-    let out = f;
-    if (live && f.path === live.path && 'title' in f && f.title !== live.title) out = { ...out, title: live.title };
-    if (c && f.path === c.path && (f.conflicts ?? 0) !== c.count) out = { ...out, conflicts: c.count || undefined };
-    return out;
-  });
-});
-/** The Header dialog is open for the open file. */
-const headerOpen = ref(false);
 
 // Each format's editor module, unless this person turned it off (Components).
 const editorsOff = ref(loadEditorsOff());
@@ -184,7 +173,7 @@ function select(next: string | null) {
   headerOpen.value = false;
   liveTitle.value = null;
   liveConflicts.value = null;
-  viewing.value = null;
+  view(null);
   status.value = null;
   notice.value = null;
   showSource.value = false;
@@ -194,19 +183,30 @@ function select(next: string | null) {
 /** Open a file (if it is not open) and its Header dialog. */
 function openHeader(next: string) {
   select(next);
-  viewing.value = null;
+  view(null);
   headerOpen.value = true;
 }
 
+// Refreshes overlap (a file made here, work arriving from another device): an
+// answer is shown only if no later one has been, and only for the workspace
+// still open.
+let treeAsked = 0;
+let treeShown = 0;
 async function refreshTree(selectPath?: string | null) {
+  const asked = api.value;
+  const n = ++treeAsked;
   try {
-    const [ws, tree] = await Promise.all([api.value.workspace(), api.value.tree()]);
-    workspace.value = ws;
-    files.value = tree;
-    error.value = null;
+    const [ws, tree] = await Promise.all([asked.workspace(), asked.tree()]);
+    if (asked !== api.value) return;
+    if (n > treeShown) {
+      treeShown = n;
+      workspace.value = ws;
+      files.value = tree;
+      error.value = null;
+    }
     if (selectPath !== undefined) select(selectPath);
   } catch (e) {
-    error.value = (e as Error).message;
+    if (asked === api.value) fail(e);
   }
 }
 
@@ -246,24 +246,29 @@ const hostRegistry = computed(() => {
 });
 const shownNotice = computed(() => notice.value ?? status.value?.notice ?? null);
 
+/** Show a past version of the open file (null: back to the live one). The last asked wins, and only for the file still open. */
 async function view(commit: CommitInfo | null) {
-  if (!commit || !path.value) {
+  const n = ++viewAsked;
+  const p = path.value;
+  if (!commit || !p) {
     viewing.value = null;
     return;
   }
   try {
-    viewing.value = { commit, text: await api.value.textAt(commit.hash, commit.path || path.value) };
+    const text = await api.value.textAt(commit.hash, commit.path || p);
+    if (n === viewAsked && p === path.value) viewing.value = { commit, text };
   } catch (e) {
-    error.value = (e as Error).message;
+    if (n === viewAsked) fail(e);
   }
 }
 
 async function saveVersion() {
-  if (!path.value) return;
-  const message = (await askText('Name this version', `Update ${path.value}`, 'Save version'))?.trim();
+  const p = path.value;
+  if (!p) return;
+  const message = (await askText('Name this version', `Update ${p}`, 'Save version'))?.trim();
   if (!message) return;
   try {
-    await api.value.version(path.value, message);
+    await api.value.version(p, message);
     notice.value = { kind: 'info', text: `Saved version “${message}”.` };
     historyKey.value++;
   } catch (e) {
@@ -280,7 +285,7 @@ async function sync() {
     await refreshTree();
     historyKey.value++;
   } catch (e) {
-    error.value = (e as Error).message;
+    fail(e);
   } finally {
     syncing.value = false;
   }
@@ -314,7 +319,9 @@ function useSettings(s: Settings) {
           <WorkspaceSwitcher
             :workspaces="hub"
             :current="chosen"
-            :name="workspace?.name ?? hub.find((w) => w.id === chosen)?.name ?? 'Workspace'"
+            :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || 'Workspace'"
+            :can-add="canAdd"
+            :can-invite="canInvite"
             :can-open-folder="!!shell.openFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
@@ -334,6 +341,8 @@ function useSettings(s: Settings) {
             :workspaces="hub"
             :current="null"
             name="Workspaces"
+            :can-add="canAdd"
+            :can-invite="canInvite"
             :can-open-folder="!!shell.openFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
@@ -346,11 +355,12 @@ function useSettings(s: Settings) {
       </nav>
 
       <main class="pane pane-centre">
-        <div v-if="hub && !chosen && hubKnown" class="empty">
+        <div v-if="hub && chosen === null && hubKnown" class="empty">
           <div class="no-workspace" data-testid="no-workspace">
             <h2>{{ hub.length ? 'Choose a workspace' : 'No workspaces yet' }}</h2>
-            <p>A workspace is a folder of documents, kept with git. Make a new one, or join one someone shared with you with their invitation or link.</p>
-            <div class="actions">
+            <p v-if="canAdd">A workspace is a folder of documents, kept with git. Make a new one, or join one someone shared with you with their invitation or link.</p>
+            <p v-else>None of this server’s workspaces can be opened now.</p>
+            <div v-if="canAdd" class="actions">
               <button type="button" class="primary" data-testid="add-workspace-button" @click="addingWorkspace = true">Add a workspace…</button>
               <button v-if="shell.openFolder" type="button" @click="shell.openFolder()">Open a folder…</button>
             </div>
@@ -381,20 +391,15 @@ function useSettings(s: Settings) {
               @committed="historyKey++"
             />
           </div>
-          <div v-if="viewing" class="editor-pane past-version" data-testid="past-version">
-            <div class="toolbar">
-              <span>
-                Version <code>{{ viewing.commit.hash.slice(0, 7) }}</code>, “{{ viewing.commit.subject }}” ({{ new Date(viewing.commit.date).toLocaleString() }}). Read only.
-              </span>
-              <div class="toolbar-spacer" />
-              <button v-if="!type.editor?.layout" type="button" :class="{ active: viewSource }" @click="viewSource = !viewSource">{{ viewSource ? 'Rendered' : 'Source' }}</button>
-              <button type="button" class="primary" @click="viewing = null">Back to live</button>
-            </div>
-            <div class="editor-scroll">
-              <ReadOnlyCode v-if="viewSource && !type.editor?.layout" :text="viewing.text" />
-              <ReadOnlyDoc v-else :text="viewing.text" :type="type" :path="viewing.commit.path || path" :format-editor="editorFor(type.id)" />
-            </div>
-          </div>
+          <PastVersion
+            v-if="viewing"
+            :commit="viewing.commit"
+            :text="viewing.text"
+            :type="type"
+            :path="viewing.commit.path || path"
+            :format-editor="editorFor(type.id)"
+            @back="view(null)"
+          />
         </div>
       </main>
 
@@ -438,7 +443,7 @@ function useSettings(s: Settings) {
       @invite="invite"
       @close="menuOpen = false"
     />
-    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? 'this workspace'" :syncing="inviting.syncing" @close="inviting = null; if (hub) void loadHub()" />
+    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? 'this workspace'" :syncing="inviting.syncing" @close="inviting = null; void loadHub()" />
     <AddWorkspaceDialog v-if="addingWorkspace" :hub="hubApi" @added="workspaceAdded" @cancel="addingWorkspace = false" />
     <ComponentsDialog
       v-if="componentsOpen"

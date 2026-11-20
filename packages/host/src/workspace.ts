@@ -19,7 +19,8 @@ export async function inspectFolder(dir: string): Promise<FolderInfo> {
   dir = resolve(dir);
   const entries = (await readdir(dir)).filter((f) => !f.startsWith('.')).length;
   const top = await new Git(dir).run(['rev-parse', '--show-toplevel'], { allowFail: true });
-  return { dir, repoRoot: top.code === 0 ? top.stdout.trim() : null, entries };
+  // Resolved: git gives C:/Users/… on Windows, which compares unequal to C:\Users\….
+  return { dir, repoRoot: top.code === 0 ? resolve(top.stdout.trim()) : null, entries };
 }
 
 /** The git identity configured for a folder (repository, global or system); empty when unset. */

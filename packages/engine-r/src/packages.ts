@@ -21,6 +21,7 @@ import type { Mount, PackageContext, PackageInfo, PackageManager, PackageResult 
 import { R_INSTALLER } from './install-script.js';
 import { imageRecipe } from './recipe.js';
 import { REPLY_PREFIX } from './driver.js';
+import { emptyDir, splitLines, writeIfChanged } from './lines.js';
 
 export const MANIFEST = '.kuraa/r-packages.json';
 
@@ -33,13 +34,30 @@ export interface Manifest {
 
 const empty = (): Manifest => ({ requested: [], packages: {}, environment: {}, system: [] });
 
+/**
+ * The workspace's manifest, with each field of the shape it should have (it is
+ * a file anyone editing the workspace can change). Whether the names and refs
+ * in it are ones to install is checked where they are used.
+ */
 export function readManifest(workspace: string): Manifest {
+  let m: Record<string, unknown>;
   try {
-    const m = JSON.parse(readFileSync(join(workspace, MANIFEST), 'utf8')) as Partial<Manifest>;
-    return { ...empty(), ...m, requested: m.requested ?? [], packages: m.packages ?? {}, environment: m.environment ?? {}, system: m.system ?? [] };
+    m = JSON.parse(readFileSync(join(workspace, MANIFEST), 'utf8')) as Record<string, unknown>;
   } catch {
     return empty();
   }
+  if (!m || typeof m !== 'object') return empty();
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const record = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>) : []);
+  return {
+    requested: strings(m.requested),
+    packages: Object.fromEntries(record(m.packages).flatMap(([name, p]) => {
+      const { version, ref } = (p ?? {}) as { version?: unknown; ref?: unknown };
+      return typeof version === 'string' && typeof ref === 'string' ? [[name, { version, ref }]] : [];
+    })),
+    environment: Object.fromEntries(record(m.environment).filter((e): e is [string, string] => typeof e[1] === 'string')),
+    system: strings(m.system),
+  };
 }
 
 /** Sorted keys and a trailing newline, so diffs stay small. */
@@ -56,9 +74,14 @@ const REF = [
   /^(github::)?[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+(@[A-Za-z0-9._\/-]+)?$/,
 ];
 
+const isRef = (r: string) => REF.some((re) => re.test(r));
+/** An R package name, as R allows them. */
+const NAME = /^[A-Za-z][A-Za-z0-9.]*$/;
+const VERSION = /^[0-9][0-9.-]*$/;
+
 export function checkRefs(refs: string[]): string | null {
   if (!refs.length) return 'Name at least one package.';
-  const bad = refs.filter((r) => !REF.some((re) => re.test(r)));
+  const bad = refs.filter((r) => !isRef(r));
   return bad.length
     ? `Not a package name this host installs: ${bad.join(', ')}. Use a CRAN name (dplyr, dplyr@1.1.4), bioc::name, or owner/repo for GitHub.`
     : null;
@@ -102,17 +125,25 @@ interface InstallerResult {
   environment?: { name: string; version: string }[];
 }
 
+/** The longest an install may take (a package's build script that never ends, say). */
+const INSTALL_MS = 30 * 60_000;
+/** The end of the installer's output kept for people to read when something went wrong. */
+const MAX_LOG = 200_000;
+
 /** Run the installer: the network, no workspace, the library and cache writable. */
 async function runInstaller(ctx: PackageContext, request: { refs: string[]; environment?: { name: string; version: string }[] }): Promise<{ result: InstallerResult; log: string }> {
   const where = layout(ctx);
-  await Promise.all([where.lib, where.cache, where.downloads, ctx.files, join(ctx.dataDir, 'tmp')].map((d) => mkdir(d, { recursive: true })));
-  await writeFile(join(ctx.files, 'install.R'), R_INSTALLER);
+  // Its own scratch, per workspace (installs for one workspace run one at a time), emptied first.
+  const scratch = join(ctx.dataDir, 'tmp', ctx.workspaceKey);
+  await Promise.all([where.lib, where.cache, where.downloads, ctx.files, scratch].map((d) => mkdir(d, { recursive: true })));
+  await emptyDir(scratch);
+  await writeIfChanged(join(ctx.files, 'install.R'), R_INSTALLER);
   const proc = await ctx.environment.start({
     name: 'r-install',
-    workspace: ctx.workspace, scratch: join(ctx.dataDir, 'tmp'), files: ctx.files,
+    workspace: ctx.workspace, scratch, files: ctx.files,
     mounts: where.mounts('read-write'),
     policy: { ...ctx.policy, workspace: 'none', network: true },
-    image: imageRecipe(ctx.requirements, ctx.workspace),
+    image: imageRecipe(ctx.requirements, ctx.workspace, ctx.options),
     command: (view) => ({
       argv: ['Rscript', '--no-save', '--no-restore', `${view.files}/install.R`],
       cwd: view.inside(where.lib),
@@ -124,22 +155,45 @@ async function runInstaller(ctx: PackageContext, request: { refs: string[]; envi
     log: ctx.log,
     status: ctx.status,
   }, ctx.environmentOptions);
-  let out = '';
+  // The result is the last prefixed line: packages' build scripts run before it, and could print one.
+  let reply: string | null = null;
   let log = '';
+  const keep = (text: string) => (log = (log + text).slice(-MAX_LOG));
+  let shown = 0;
   proc.stdout.setEncoding('utf8');
   proc.stderr.setEncoding('utf8');
-  proc.stdout.on('data', (d: string) => (out += d));
+  proc.stdout.on('data', splitLines((line) => {
+    const at = line.indexOf(REPLY_PREFIX);
+    if (at >= 0) reply = line.slice(at + REPLY_PREFIX.length);
+    else keep(`${line}\n`);
+  }, (partial) => keep(`${partial.slice(0, 1000)}…\n`)));
   proc.stderr.on('data', (d: string) => {
-    log += d;
+    keep(d);
     const last = d.trim().split('\n').pop();
-    if (last) ctx.status(`Installing: ${last.slice(0, 120)}`);
+    // Progress for everyone with the workspace open, a few times a second at most.
+    if (last && Date.now() - shown > 250) {
+      shown = Date.now();
+      ctx.status(`Installing: ${last.slice(0, 120)}`);
+    }
   });
+  proc.stdin.on('error', () => undefined);
   proc.stdin.end();
-  await proc.exited;
-  const line = out.split('\n').find((l) => l.includes(REPLY_PREFIX));
-  log = (out.split('\n').filter((l) => !l.includes(REPLY_PREFIX)).join('\n') + '\n' + log).trim();
-  if (!line) return { result: { ok: false, message: 'The installer stopped without saying why.' }, log };
-  return { result: JSON.parse(line.slice(line.indexOf(REPLY_PREFIX) + REPLY_PREFIX.length)) as InstallerResult, log };
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, INSTALL_MS);
+  const { reason } = await proc.exited;
+  clearTimeout(timer);
+  log = log.trim();
+  if (reason) return { result: { ok: false, message: `The install was stopped. ${reason}` }, log };
+  if (timedOut) return { result: { ok: false, message: `The install was stopped after ${INSTALL_MS / 60_000} minutes.` }, log };
+  if (reply === null) return { result: { ok: false, message: 'The installer stopped without saying why.' }, log };
+  try {
+    return { result: JSON.parse(reply) as InstallerResult, log };
+  } catch {
+    return { result: { ok: false, message: 'The installer gave an answer that could not be read.' }, log };
+  }
 }
 
 async function saveManifest(ctx: PackageContext, m: Manifest, message: string): Promise<void> {
@@ -189,6 +243,9 @@ export const rPackages: PackageManager = {
   },
 
   async remove(ctx, names) {
+    // Names become paths: only package names, never `../` to a link elsewhere on this computer.
+    const bad = names.filter((n) => !NAME.test(n));
+    if (bad.length) return { ok: false, message: `Not a package name: ${bad.join(', ')}.`, log: '', restart: false };
     const { lib } = layout(ctx);
     const gone: string[] = [];
     for (const name of names) {
@@ -212,8 +269,12 @@ export const rPackages: PackageManager = {
   async restore(ctx) {
     const m = readManifest(ctx.workspace);
     const lib = libraryNow(layout(ctx).lib);
-    const missing = Object.entries(m.packages).filter(([name, p]) => lib[name] !== p.version).map(([, p]) => p.ref);
-    const env = Object.entries(m.environment).filter(([name]) => !lib[name]).map(([name, version]) => ({ name, version }));
+    // The manifest is a file in the workspace: only refs the host would install if asked for them.
+    const wanted = Object.entries(m.packages).filter(([name, p]) => lib[name] !== p.version).map(([, p]) => p.ref);
+    const missing = wanted.filter(isRef);
+    const env = Object.entries(m.environment).filter(([name, version]) => !lib[name] && NAME.test(name) && VERSION.test(version)).map(([name, version]) => ({ name, version }));
+    const skipped = [...wanted.filter((r) => !isRef(r)), ...Object.keys(m.environment).filter((n) => !lib[n] && !env.some((e) => e.name === n))];
+    if (skipped.length) ctx.log(`${MANIFEST} lists what this host does not install: ${skipped.join(', ')}`);
     if (!missing.length && !env.length) return null;
     // Environment entries need a look inside the image; do that once per manifest.
     const mark = fingerprint(ctx);
@@ -240,8 +301,10 @@ async function recordInstall(ctx: PackageContext, refs: string[], result: Instal
   const m = readManifest(ctx.workspace);
   m.requested = [...new Set([...m.requested, ...refs])];
   // The installer always reports the whole library; without a report, keep what is recorded.
-  if (result.packages) m.packages = Object.fromEntries(result.packages.map((p) => [p.name, { version: p.version, ref: p.ref }]));
-  for (const p of result.environment ?? []) m.environment[p.name] = p.version;
+  // Packages' own build scripts ran in it, so only entries the host would install go in.
+  const fit = (p: { name?: unknown; version?: unknown }) => typeof p?.name === 'string' && NAME.test(p.name) && typeof p.version === 'string' && VERSION.test(p.version);
+  if (Array.isArray(result.packages)) m.packages = Object.fromEntries(result.packages.filter((p) => fit(p) && typeof p.ref === 'string' && isRef(p.ref)).map((p) => [p.name, { version: p.version, ref: p.ref }]));
+  for (const p of Array.isArray(result.environment) ? result.environment : []) if (fit(p)) m.environment[p.name] = p.version;
   await saveManifest(ctx, m, `R packages: install ${refs.join(', ')}`);
 }
 

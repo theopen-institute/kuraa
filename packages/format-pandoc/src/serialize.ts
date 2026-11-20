@@ -1,5 +1,5 @@
 import type { Mark, Node as PMNode } from 'prosemirror-model';
-import type { ParsedDocument } from '@kuraa/kernel';
+import { matches, type ParsedDocument } from '@kuraa/kernel';
 
 export interface SerializeContext {
   /** Canonical markdown for a block, without a trailing newline. */
@@ -132,32 +132,46 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
   // Inline content
 
   function inlinesToMd(parent: PMNode, inTable: boolean, oneLine = false): string {
-    let out = '';
+    // Pieces of the output, joined at the end: only the tail is ever looked at
+    // again, so a long paragraph is not rescanned at every closing mark.
+    const out: string[] = [];
     let active: Mark[] = [];
     const nodes: PMNode[] = [];
     parent.forEach((c) => nodes.push(c));
 
     const closeTo = (keep: number) => {
-      // Whitespace never sits just inside a closing delimiter.
-      const trailing = /[ \t]+$/.exec(out)?.[0] ?? '';
-      if (active.length > keep && trailing) out = out.slice(0, out.length - trailing.length);
-      for (let i = active.length - 1; i >= keep; i--) out += markClose(active[i]!, isAuto(active[i]!));
-      if (active.length > keep) out += trailing;
+      if (active.length > keep) {
+        // Whitespace never sits just inside a closing delimiter.
+        let trailing = '';
+        while (out.length) {
+          const last = out[out.length - 1]!;
+          let k = last.length;
+          while (k > 0 && (last[k - 1] === ' ' || last[k - 1] === '\t')) k--;
+          trailing = last.slice(k) + trailing;
+          if (k > 0) {
+            out[out.length - 1] = last.slice(0, k);
+            break;
+          }
+          out.pop();
+        }
+        for (let i = active.length - 1; i >= keep; i--) out.push(markClose(active[i]!, isAuto(active[i]!)));
+        out.push(trailing);
+      }
       active = active.slice(0, keep);
     };
 
     // An autolink is written as <href> only while its text still equals the href.
-    const autoOk = new Set<Mark>();
+    const autoOk: Mark[] = [];
     nodes.forEach((node, idx) => {
       for (const m of node.marks) {
         if (m.type.name !== 'link' || !m.attrs.auto || (idx > 0 && m.isInSet(nodes[idx - 1]!.marks))) continue;
         let t = '';
         for (let k = idx; k < nodes.length && m.isInSet(nodes[k]!.marks); k++) t += nodes[k]!.isText && nodes[k]!.marks.length === 1 ? nodes[k]!.text : '\u0000';
         const href = String(m.attrs.href);
-        if (t === href || `mailto:${t}` === href) autoOk.add(m);
+        if (t === href || `mailto:${t}` === href) autoOk.push(m);
       }
     });
-    const isAuto = (m: Mark) => [...autoOk].some((a) => a.eq(m));
+    const isAuto = (m: Mark) => autoOk.some((a) => a.eq(m));
 
     for (const node of nodes) {
       const code = node.marks.find((m) => m.type.spec.code);
@@ -168,15 +182,15 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
       let content = oneLine && node.type.name === 'hard_break' ? ' ' : inlineContent(node, code, inTable);
       if (marks.length > keep) {
         const leading = /^[ \t]+/.exec(content)?.[0] ?? '';
-        out += leading;
+        out.push(leading);
         content = content.slice(leading.length);
-        for (let i = keep; i < marks.length; i++) out += markOpen(marks[i]!, isAuto(marks[i]!));
+        for (let i = keep; i < marks.length; i++) out.push(markOpen(marks[i]!, isAuto(marks[i]!)));
         active = [...marks];
       }
-      out += content;
+      out.push(content);
     }
     closeTo(0);
-    return out;
+    return out.join('');
   }
 
   function inlineContent(node: PMNode, code: Mark | undefined, inTable: boolean): string {
@@ -234,7 +248,8 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
  */
 export function preserve(nodes: PMNode[], previous: ParsedDocument, generate: (node: PMNode) => string): string {
   const prev = children(previous.doc);
-  const match = align(nodes, prev);
+  // New index -> previous index, for blocks equal to a previous one (a longest common subsequence).
+  const match = matches(nodes, prev, (x, y) => x.eq(y)).map((j) => (j < 0 ? undefined : j));
   // Pair unmatched blocks positionally inside gaps of equal size: replacements.
   const replaces = new Map<number, number>();
   let i = 0;
@@ -292,35 +307,6 @@ export function preserve(nodes: PMNode[], previous: ParsedDocument, generate: (n
   });
   if (lastPrev !== prev.length - 1) out = out.replace(/\n+$/, '\n');
   return out;
-}
-
-/** Longest common subsequence of equal blocks. Returns new index -> previous index. */
-function align(a: PMNode[], b: PMNode[]): (number | undefined)[] {
-  const result: (number | undefined)[] = new Array(a.length).fill(undefined);
-  // Trim the common prefix and suffix first; most edits touch few blocks.
-  let lo = 0;
-  while (lo < a.length && lo < b.length && a[lo]!.eq(b[lo]!)) { result[lo] = lo; lo++; }
-  let ha = a.length;
-  let hb = b.length;
-  while (ha > lo && hb > lo && a[ha - 1]!.eq(b[hb - 1]!)) { ha--; hb--; result[ha] = hb; }
-  const n = ha - lo;
-  const m = hb - lo;
-  if (n === 0 || m === 0) return result;
-  if (n * m > 4_000_000) return result; // Pathological: regenerate the middle.
-  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
-  for (let x = n - 1; x >= 0; x--) {
-    for (let y = m - 1; y >= 0; y--) {
-      dp[x]![y] = a[lo + x]!.eq(b[lo + y]!) ? dp[x + 1]![y + 1]! + 1 : Math.max(dp[x + 1]![y]!, dp[x]![y + 1]!);
-    }
-  }
-  let x = 0;
-  let y = 0;
-  while (x < n && y < m) {
-    if (a[lo + x]!.eq(b[lo + y]!)) { result[lo + x] = lo + y; x++; y++; }
-    else if (dp[x + 1]![y]! >= dp[x]![y + 1]!) x++;
-    else y++;
-  }
-  return result;
 }
 
 // ---------------------------------------------------------------------------

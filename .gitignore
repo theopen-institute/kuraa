@@ -5,4 +5,5 @@ test-results/
 playwright-report/
 .DS_Store
 apps/desktop/build/
-.dev-workspace/
+apps/desktop/vendor/
+.dev-workspaces/

@@ -28,6 +28,17 @@ export function resolveShell(): ResolvedShell {
         workspace: config?.workspace,
         openFolder: () => void bridge.openFolder(),
         leave: () => void bridge.leave(),
+        // The key of this computer, which runs the host: only on the app's own workspaces.
+        ...(config?.managesHost && bridge.person && bridge.createPerson && bridge.importPerson && bridge.copyPerson && bridge.revokeKey ? {
+          person: {
+            afterChange: 'Your workspaces restart, and it vouches for this computer\'s key.',
+            get: () => bridge.person!(),
+            create: (name: string) => bridge.createPerson!(name),
+            import: (line: string) => bridge.importPerson!(line),
+            copy: () => bridge.copyPerson!(),
+            revoke: (key: string) => bridge.revokeKey!(key),
+          },
+        } : {}),
       },
       overrides: config ? { hostUrl: config.hostUrl, token: config.token } : {},
       defaults: config ? { name: config.name, email: config.email } : {},

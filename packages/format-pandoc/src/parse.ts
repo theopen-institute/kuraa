@@ -44,13 +44,12 @@ export interface ParseHooks {
 
 const micromarkExts = [gfmTable(), gfmStrikethrough({ singleTilde: false }), gfmTaskListItem(), gfmFootnote(), math()];
 const mdastExts = [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown(), gfmTaskListItemFromMarkdown(), gfmFootnoteFromMarkdown(), mathFromMarkdown()];
+const body = { extensions: micromarkExts, mdastExtensions: mdastExts };
+const withHeader = { extensions: [...micromarkExts, frontmatter(['yaml'])], mdastExtensions: [...mdastExts, frontmatterFromMarkdown(['yaml'])] };
 
 /** Parse a fragment of the source, shifting every offset by `offset`. */
 export function parseFragment(text: string, offset: number, withFrontMatter = false): MdNode {
-  const root = fromMarkdown(text, {
-    extensions: withFrontMatter ? [...micromarkExts, frontmatter(['yaml'])] : micromarkExts,
-    mdastExtensions: withFrontMatter ? [...mdastExts, frontmatterFromMarkdown(['yaml'])] : mdastExts,
-  }) as unknown as MdNode;
+  const root = fromMarkdown(text, withFrontMatter ? withHeader : body) as unknown as MdNode;
   if (offset) shift(root, offset);
   return root;
 }
@@ -446,7 +445,7 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
     for (const c of children) {
       const s = start(c);
       const e = end(c);
-      const inside = specials.find((sp) => s >= sp.from && e <= sp.to);
+      const inside = containing(specials, s, e);
       if (inside && c.type !== 'text') {
         emitSpecial(inside, marks, out);
         continue;
@@ -467,7 +466,14 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
   }
 
   /** Map each character of a text node's value to its source offset, or null. */
+  const alignments = new Map<MdNode, number[] | null>();
   function alignText(node: MdNode): number[] | null {
+    let map = alignments.get(node);
+    if (map === undefined) alignments.set(node, (map = alignUncached(node)));
+    return map;
+  }
+
+  function alignUncached(node: MdNode): number[] | null {
     const value = String(node.value ?? '');
     const e = end(node);
     const map: number[] = new Array(value.length);
@@ -492,14 +498,20 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
     const escaped = (i: number) => source[(map[i] ?? 0) - 1] === '\\';
     const s = start(node);
     const e = end(node);
-    const hits = specials.filter((sp) => sp.to > s && sp.from < e).sort((a, b) => a.from - b.from);
+    // The first value index at or after a source offset (the map only grows).
     const indexOf = (pos: number) => {
-      let i = 0;
-      while (i < map.length && map[i]! < pos) i++;
-      return i;
+      let lo = 0;
+      let hi = map.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (map[mid]! < pos) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
     };
     let v = 0;
-    for (const sp of hits) {
+    for (let h = firstEndingAfter(specials, s); h < specials.length && specials[h]!.from < e; h++) {
+      const sp = specials[h]!;
       const v1 = indexOf(sp.from);
       if (v1 > v) out.push(...patterns(value.slice(v, v1), v, escaped, marks));
       emitSpecial(sp, marks, out);
@@ -577,14 +589,6 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
     const from = start(parent);
     const src = slice(parent);
     const found: Special[] = [];
-    const blockers: MdNode[] = [];
-    collect(parent);
-    function collect(node: MdNode): void {
-      for (const c of node.children ?? []) {
-        if (c.type !== 'text') blockers.push(c);
-        collect(c);
-      }
-    }
     for (let i = 0; i < src.length; i++) {
       const ch = src[i];
       if (ch !== '[' || src[i - 1] === '\\') continue;
@@ -632,33 +636,41 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
       }
       if (!sp) continue;
       const cand = sp;
-      const blocked = blockers.some((b) => {
+      // Another construct that only partly overlaps it, or encloses it and is
+      // not emphasis, wins; text nodes that overlap must be alignable with the source.
+      const ok = everyOverlapping(parent, cand.from, cand.to, (b) => {
+        if (b.type === 'text') return alignText(b) !== null;
         const bs = start(b);
         const be = end(b);
-        const overlaps = be > cand.from && bs < cand.to;
         const contained = bs >= cand.from && be <= cand.to;
         const encloses = bs <= cand.from && be >= cand.to;
-        return overlaps && (encloses ? b.type !== 'emphasis' && b.type !== 'strong' && b.type !== 'delete' : !contained);
+        return encloses ? b.type === 'emphasis' || b.type === 'strong' || b.type === 'delete' : contained;
       });
-      if (blocked) continue;
-      // Text nodes that intersect must be alignable with the source.
-      if (!textAlignable(parent, cand)) continue;
+      if (!ok) continue;
       found.push(cand);
       i = cand.to - from - 1;
     }
     return found;
   }
 
-  function textAlignable(parent: MdNode, sp: Special): boolean {
-    let ok = true;
-    const visit = (node: MdNode) => {
-      for (const c of node.children ?? []) {
-        if (c.type === 'text' && end(c) > sp.from && start(c) < sp.to && !alignText(c)) ok = false;
-        visit(c);
-      }
-    };
-    visit(parent);
-    return ok;
+  /**
+   * Whether `test` holds for every descendant of `node` whose source overlaps
+   * [from, to). Children lie in order and apart, inside their parent, so each
+   * level is searched by halves and only overlapping nodes are descended into.
+   */
+  function everyOverlapping(node: MdNode, from: number, to: number, test: (n: MdNode) => boolean): boolean {
+    const kids = node.children ?? [];
+    let lo = 0;
+    let hi = kids.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (end(kids[mid]!) <= from) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let k = lo; k < kids.length && start(kids[k]!) < to; k++) {
+      if (!test(kids[k]!) || !everyOverlapping(kids[k]!, from, to, test)) return false;
+    }
+    return true;
   }
 
   /** Source text with container prefixes (`> `, list indentation) removed after line breaks. */
@@ -782,6 +794,24 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
   }));
   const doc = schema.topNodeType.create(null, items.map((x) => x.node));
   return { text: source, doc, blocks };
+}
+
+/** The index of the first special that ends after `pos`; specials lie in order and apart. */
+function firstEndingAfter(specials: readonly { to: number }[], pos: number): number {
+  let lo = 0;
+  let hi = specials.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (specials[mid]!.to <= pos) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The first special that contains [from, to), if any. */
+function containing<S extends { from: number; to: number }>(specials: readonly S[], from: number, to: number): S | undefined {
+  const sp = specials[firstEndingAfter(specials, to - 1)];
+  return sp && from >= sp.from && to <= sp.to ? sp : undefined;
 }
 
 function withRange(node: MdNode, value: string, from: number, to: number): MdNode {

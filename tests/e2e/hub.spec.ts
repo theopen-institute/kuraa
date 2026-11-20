@@ -2,7 +2,7 @@
 // joined from a subscription link; switching between them.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -126,5 +126,30 @@ test('people are invited from the app: a link, joined elsewhere, then revoked', 
     await theirs.close();
     await mine.close();
     await testnet.destroy();
+  }
+});
+
+test('a workspace whose folder is gone is listed as such, and taken off the list from it', async ({ page }) => {
+  const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-gone-'));
+  const first = await startHub({ root, hosts: { timings: TIMINGS } });
+  const add = (name: string) => fetch(`${first.url}/hub/api/workspaces`, {
+    method: 'POST', headers: { authorization: `Bearer ${first.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'new', name }),
+  });
+  expect((await add('Kept')).status).toBe(201);
+  expect((await add('Gone')).status).toBe(201);
+  await first.close();
+  rmSync(join(root, 'gone'), { recursive: true, force: true });
+  const hub = await startHub({ root, token: first.token, staticDir: STATIC, hosts: { timings: TIMINGS } });
+  try {
+    await page.goto(`${hub.url}/?token=${hub.token}&name=Ada`);
+    await page.getByTestId('workspace-switcher').click();
+    await page.getByTestId('workspace:gone').click();
+    await page.getByRole('button', { name: 'Remove' }).click();
+    await page.getByTestId('workspace-switcher').click();
+    await expect(page.getByTestId('workspace:kept')).toBeVisible();
+    await expect(page.getByTestId('workspace:gone')).toHaveCount(0);
+    expect(JSON.parse(readFileSync(join(root, '.kuraa-workspaces.json'), 'utf8')).map((w: { id: string }) => w.id)).toEqual(['kept']);
+  } finally {
+    await hub.close();
   }
 });

@@ -6,7 +6,7 @@
 // in an earlier pass is not offered to later ones, so a chunk inserted above
 // another does not take over its output.
 import { hashText, type NodeViewHint } from '@kuraa/kernel';
-import type { ChunkOutput, ChunkRef, RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/model';
+import type { ChunkOutput, ChunkRef, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/model';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { HostApi, RunInfo } from './api.js';
 import { behind, type Behind } from './upstream.js';
@@ -34,12 +34,20 @@ export function parseHeader(header: string): { engine: string; label: string | n
   return { engine: engine.toLowerCase(), label: label || null };
 }
 
-export function chunkOf(node: PMNode, hint: RunHint, pos: number, index: number): Chunk {
+/** A runnable block's header, engine and label, without reading (or hashing) its code. */
+function headerOf(node: PMNode, hint: RunHint): { header: string; engine: string; label: string | null } {
   const header = hint.header ? String(node.attrs[hint.header.attr] ?? '') : '';
   const parsed = parseHeader(header);
   const engine = parsed.engine || String(node.attrs[hint.run!.engineAttr] ?? '').toLowerCase();
+  return { header: header || engine, engine, label: parsed.label };
+}
+
+/** The engine a runnable block names (`r`), cheaply: for deciding whether it can run. */
+export const engineOf = (node: PMNode, hint: RunHint): string => headerOf(node, hint).engine;
+
+export function chunkOf(node: PMNode, hint: RunHint, pos: number, index: number): Chunk {
   const code = node.textContent;
-  return { pos, index, engine, label: parsed.label, header: header || engine, code, codeHash: hashText(code) };
+  return { pos, index, ...headerOf(node, hint), code, codeHash: hashText(code) };
 }
 
 /** Every runnable block in a document, in order. */
@@ -79,7 +87,10 @@ export interface Rebuild extends Behind<Chunk> {
 export class ChunkRunner {
   private readonly runs = new Map<string, RunRecord>();
   private chunks: Chunk[] = [];
+  private byPos = new Map<number, Chunk>();
   private states = new Map<number, ChunkState>();
+  /** The steps a session of each engine has run or has queued; worked out once per change, not once per chunk. */
+  private stepsCache = new Map<string, RunStep[]>();
   private readonly listeners = new Set<() => void>();
   session: RunSessionInfo;
   /** The latest news about packages (an install's progress or result), and a counter that changes with it. */
@@ -132,6 +143,7 @@ export class ChunkRunner {
   }
 
   private emit(): void {
+    this.stepsCache.clear();
     this.assign();
     this.version++;
     for (const fn of this.listeners) fn();
@@ -160,11 +172,12 @@ export class ChunkRunner {
 
   setChunks(chunks: Chunk[]): void {
     this.chunks = chunks;
+    this.byPos = new Map(chunks.map((c) => [c.pos, c]));
     this.emit();
   }
 
   chunkAt(pos: number): Chunk | undefined {
-    return this.chunks.find((c) => c.pos === pos);
+    return this.byPos.get(pos);
   }
 
   state(pos: number): ChunkState {
@@ -180,7 +193,9 @@ export class ChunkRunner {
         for (const r of runs) {
           if (claimed.has(r.id) || !match(c, r)) continue;
           claimed.add(r.id);
-          mine.set(c.pos, [...(mine.get(c.pos) ?? []), r]);
+          const list = mine.get(c.pos);
+          if (list) list.push(r);
+          else mine.set(c.pos, [r]);
         }
       }
     };
@@ -223,14 +238,24 @@ export class ChunkRunner {
     if (!c || !engine) return null;
     // The session known here is another engine's (a document with R and Python chunks): no way to tell.
     if (this.session.id && this.session.engine !== engine) return null;
-    const queued = [...this.runs.values()]
-      .filter((r) => PENDING.has(r.state) && r.engine === engine)
-      .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))
-      .map((r) => ({ label: r.chunk.label, index: r.chunk.index, codeHash: r.chunk.codeHash, complete: !r.chunk.partial }));
-    const steps = [...this.session.steps, ...queued];
+    const steps = this.stepsOf(engine);
     const above = this.above(c, engine);
     const b = behind(above, steps);
     return b && { ...b, chunks: above.slice(above.indexOf(b.chunk)), fresh: steps.length === 0 };
+  }
+
+  /** What the engine's session will have run once the runs queued for it are done. */
+  private stepsOf(engine: string): RunStep[] {
+    let steps = this.stepsCache.get(engine);
+    if (!steps) {
+      const queued = [...this.runs.values()]
+        .filter((r) => PENDING.has(r.state) && r.engine === engine)
+        .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))
+        .map((r) => ({ label: r.chunk.label, index: r.chunk.index, codeHash: r.chunk.codeHash, complete: !r.chunk.partial }));
+      steps = [...this.session.steps, ...queued];
+      this.stepsCache.set(engine, steps);
+    }
+    return steps;
   }
 
   /** Run the chunks above `pos` again, from the first the session does not have as it now reads. */

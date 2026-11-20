@@ -85,6 +85,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .banner { padding: 7px 12px; border-bottom: 1px solid var(--border); }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner.info { background: var(--accent-soft); }
 .banner button { margin-left: 8px; }
 
 .panes { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
@@ -102,7 +103,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .pane-header button { text-transform: none; letter-spacing: 0; font-size: 12px; }
 .pane-left .pane-header { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); gap: 8px; }
 .workspace-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pane-header-actions { display: flex; gap: 2px; flex: none; }
+/* The workspace's name fills the header; its actions sit at the right. */
+.pane-left .pane-header > .workspace-name, .pane-left .pane-header > .workspace-switcher { flex: 1; }
+.pane-header-actions { display: flex; gap: 2px; flex: none; margin-left: auto; }
 .pane-header-actions button { padding: 1px 7px; font-size: 14px; line-height: 1.2; border-color: transparent; background: none; color: var(--muted); }
 .pane-header-actions button:hover { color: var(--text); background: var(--selected); }
 
@@ -511,3 +514,13 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .invite-links li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .invite-links .revoked, .invite-links .expired { color: var(--muted); }
 .invite-links button.danger { color: var(--warn); font-size: 12px; padding: 1px 8px; }
+
+.person-key { display: grid; gap: 6px; }
+.menu-panel-head { display: flex; align-items: center; gap: 12px; padding: 10px 0 4px; }
+.modal .menu-panel-head h2 { margin: 0; font-size: 15px; }
+.menu-back { padding: 2px 8px; }
+.person-row { display: flex; gap: 8px; }
+.person-row input { flex: 1; min-width: 0; }
+.person-error { color: var(--warn); }
+.person-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.person-keys li { display: flex; gap: 8px; align-items: center; }

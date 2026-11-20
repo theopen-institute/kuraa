@@ -116,7 +116,11 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
 
   // A new folder: committed (with a placeholder git keeps), shown, and a place for new files.
   const folder = `runs/folder-${Date.now().toString(36)}`;
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  // Not in the header (only a new file is): right-click the space below the files.
+  await expect(page.getByRole('button', { name: 'New folder', exact: true })).toHaveCount(0);
+  const tree = (await page.locator('ul.tree').boundingBox())!;
+  await page.mouse.click(tree.x + 20, tree.y + tree.height - 10, { button: 'right' });
+  await page.getByTestId('context:new-folder').click();
   await page.getByTestId('ask').locator('input').fill(folder);
   await page.getByTestId('ask').getByRole('button', { name: 'Create' }).click();
   const row = page.locator('.tree-dir-row', { hasText: folder.split('/')[1]! });

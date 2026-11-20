@@ -204,6 +204,40 @@ describe.skipIf(!PODMAN_OK)('the sandbox', () => {
   }, 15 * 60_000);
 });
 
+describe.skipIf(!PODMAN_OK)('limits', () => {
+  it('stops R when it writes more than the host allows, and uses only images the host allows', async () => {
+    const dir = makeRepo();
+    const running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents, disk: '20m' } });
+    try {
+      const api = (path: string, body?: object) => fetch(running.url + path, {
+        method: body ? 'POST' : 'GET',
+        headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      }).then((r) => r.json() as Promise<Record<string, unknown>>);
+      const run = async (code: string): Promise<string> => {
+        const { id } = await api('/api/runs', { path: DOC, engine: 'r', code, chunk: { label: null, index: 0, codeHash: hashText(code) } });
+        for (let i = 0; i < 9000; i++) {
+          const r = ((await api(`/api/runs?path=${encodeURIComponent(DOC)}`)).runs as RunRecord[]).find((x) => x.id === id);
+          if (r) return r.outputs.map((o) => ('text' in o ? o.text : `[${o.type}]`)).join('');
+          await new Promise((res) => setTimeout(res, 100));
+        }
+        throw new Error('timed out');
+      };
+      expect(await run('writeBin(raw(50e6), "/scratch/big"); Sys.sleep(20); "kept going"')).toContain('R was stopped. It wrote more than 20m of files, the most this host allows.');
+      // A fresh session, with its scratch emptied.
+      expect(await run('1 + 1')).toBe('[1] 2\n');
+
+      mkdirSync(join(dir, '.kuraa'), { recursive: true });
+      writeFileSync(join(dir, '.kuraa/run.json'), JSON.stringify({ r: { image: 'docker.io/library/alpine:3' } }));
+      await api('/api/runs/restart', { path: DOC });
+      expect(await run('1')).toContain('asks for the image docker.io/library/alpine:3, which this host does not allow');
+    } finally {
+      await running.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 5 * 60_000);
+});
+
 describe.skipIf(!PODMAN_OK)('R packages in Podman', () => {
   it('installs through a separate container, and sessions see the library read-only', async () => {
     const dir = makeRepo();

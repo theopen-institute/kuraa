@@ -35,13 +35,37 @@ export function latestStep(c: ChunkKey, steps: readonly RunStep[]): RunStep | un
 }
 
 /**
+ * Each chunk's latest step, looked up without scanning the steps again for every
+ * chunk: the last step by label, and for unlabelled steps the last by position
+ * and the last by code (the later of the two is the chunk's latest).
+ */
+function latestSteps(steps: readonly RunStep[]): (c: ChunkKey) => RunStep | undefined {
+  const byLabel = new Map<string, number>();
+  const byIndex = new Map<number, number>();
+  const byHash = new Map<string, number>();
+  steps.forEach((s, i) => {
+    if (s.label !== null) byLabel.set(s.label, i);
+    else {
+      byIndex.set(s.index, i);
+      byHash.set(s.codeHash, i);
+    }
+  });
+  return (c) => {
+    const i = c.label !== null ? byLabel.get(c.label) ?? -1 : Math.max(byIndex.get(c.index) ?? -1, byHash.get(c.codeHash) ?? -1);
+    return i < 0 ? undefined : steps[i];
+  };
+}
+
+/**
  * The first of `above` (in document order) that the steps do not have as it is
  * now: never run, run in another version, or run only in part (a line, or
  * stopped by an error or an interrupt). Null if they hold every one.
  */
 export function behind<C extends ChunkKey>(above: readonly C[], steps: readonly RunStep[]): Behind<C> | null {
+  if (!above.length) return null;
+  const latest = latestSteps(steps);
   for (const chunk of above) {
-    const step = latestStep(chunk, steps);
+    const step = latest(chunk);
     if (!step) return { chunk, why: 'not-run' };
     if (step.codeHash !== chunk.codeHash) return { chunk, why: 'changed' };
     if (!step.complete) return { chunk, why: 'incomplete' };

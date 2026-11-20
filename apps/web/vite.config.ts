@@ -11,11 +11,11 @@ export default defineConfig({
   build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 2000 },
   server: {
     port: 5173,
+    // The server is a hub: its list of workspaces, and each workspace (HTTP and its rooms' WebSockets).
     proxy: devHost
       ? {
-          '/api': devHost,
-          '/git': devHost,
-          '/collab': { target: devHost.replace(/^http/, 'ws'), ws: true },
+          '/hub': devHost,
+          '/w': { target: devHost, ws: true },
         }
       : undefined,
   },

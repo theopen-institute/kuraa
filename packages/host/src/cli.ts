@@ -1,10 +1,13 @@
-// kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--upstream origin]
-// kuraa-host --workspaces <folder> [...]   a hub: many workspaces, added from the app (new folders
-//                                          in <folder>, or joined by invitation or link); see hub.ts
+// kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir]
+//                                          one folder; nothing is added from the app
+// kuraa-host --workspaces <folder> [...]   many workspaces, added from the app (new folders
+//                                          in <folder>, or joined by invitation or link)
+// Either way the server is a hub (hub.ts): each workspace at /w/<id>, its list at /hub/api.
 //   formats:      [--format pandoc-markdown --format text ...]   (default: all)
 //   running code: --engine r [--env podman] [--component <path or package>]...
 //                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
-//                 [--memory 4g] [--cpus 2] [--podman path] [--allow-unsandboxed]
+//                 [--memory 4g] [--cpus 2] [--disk 2g] [--podman path] [--allow-unsandboxed]
+//                 [--r-image <image>]...   base images a workspace may name for R (besides the default)
 //
 // The run components that ship (@kuraa/run-components: R, and Podman containers) are
 // always loaded; --component adds more. --env picks the environment code runs in;
@@ -13,11 +16,16 @@
 // Everything that configures the host is a flag: people using the app can see
 // what is on, but change nothing about the host.
 //   devices:      --peer [--bootstrap host:port]...   sync with paired devices (see peers/cli.ts
-//                 for invite, join, devices, upstream, fork); --allow-invites lets people make
+//                 for invite, join, devices, sync-remote, fork); --allow-invites lets people make
 //                 invitations and links from the app (a hub always does, for its workspaces)
+//   people:       --manage-person   let people using the app see, make and import this computer's
+//                 person's key (for one's own computer, as pnpm dev; refused unless --host is
+//                 this computer alone, 127.0.0.1; never on a shared server)
+//   backups:      --manage-backups  let people using the app add and remove backups (git servers
+//                 pushed to with this computer's credentials); kuraa-host backup … from the command line
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
-import { startHost, startHub } from './index.js';
+import { startHub } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
@@ -34,7 +42,6 @@ const { values } = parseArgs({
   options: {
     dir: { type: 'string', default: '.' },
     workspaces: { type: 'string' },
-    'device-name': { type: 'string' },
     init: { type: 'boolean', default: false },
     format: { type: 'string', multiple: true },
     engine: { type: 'string', multiple: true },
@@ -47,19 +54,36 @@ const { values } = parseArgs({
     'data-dir': { type: 'string' },
     memory: { type: 'string' },
     cpus: { type: 'string' },
+    disk: { type: 'string' },
+    'r-image': { type: 'string', multiple: true },
     podman: { type: 'string' },
     port: { type: 'string', default: '4321' },
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
     static: { type: 'string' },
-    upstream: { type: 'string' },
     peer: { type: 'boolean', default: false },
     'allow-invites': { type: 'boolean', default: false },
+    'manage-person': { type: 'boolean', default: false },
+    'manage-backups': { type: 'boolean', default: false },
     bootstrap: { type: 'string', multiple: true },
     'flush-ms': { type: 'string' },
     'commit-ms': { type: 'string' },
   },
 });
+
+/** A number flag, if given: refused at once rather than failing later as NaN. */
+function numberFlag(flag: string, value: string | undefined, o: { min: number; whole: boolean }): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < o.min || (o.whole && !Number.isInteger(n))) {
+    console.error(`[kuraa] --${flag} takes ${o.whole ? 'a whole number' : 'a number'} of at least ${o.min}, not "${value}"`);
+    process.exit(2);
+  }
+  return n;
+}
+const port = numberFlag('port', values.port, { min: 0, whole: true })!;
+const flushMs = numberFlag('flush-ms', values['flush-ms'], { min: 1, whole: true });
+const commitMs = numberFlag('commit-ms', values['commit-ms'], { min: 1, whole: true });
 
 const runOptions = {
   engines: values.engine ?? [],
@@ -71,55 +95,39 @@ const runOptions = {
   allowInstalls: values['allow-installs'],
   dataDir: values['data-dir'],
   memory: values.memory,
-  cpus: values.cpus ? Number(values.cpus) : undefined,
-  options: { podman: { podman: values.podman } },
+  cpus: numberFlag('cpus', values.cpus, { min: 0.1, whole: false }),
+  disk: values.disk,
+  options: { podman: { podman: values.podman }, r: { images: values['r-image'] ?? [] } },
 };
 const timings = {
-  ...(values['flush-ms'] ? { flushMs: Number(values['flush-ms']) } : {}),
-  ...(values['commit-ms'] ? { idleCommitMs: Number(values['commit-ms']) } : {}),
+  ...(flushMs ? { flushMs } : {}),
+  ...(commitMs ? { idleCommitMs: commitMs } : {}),
 };
 
-let close: () => Promise<void>;
-if (values.workspaces) {
-  const hub = await startHub({
-    root: values.workspaces,
-    port: Number(values.port),
-    host: values.host!,
-    token: values.token ?? process.env.KURAA_TOKEN,
-    staticDir: values.static,
-    hosts: { formats: values.format, run: runOptions, upstream: values.upstream, timings },
-    peers: { bootstrap: values.bootstrap, everywhere: values.peer },
-    deviceName: values['device-name'],
-    log: (m) => console.log(`[kuraa] ${m}`),
-  });
-  console.log(`[kuraa] workspaces: ${hub.hub.root}`);
-  console.log(`[kuraa] url:        ${hub.url}`);
-  console.log(`[kuraa] token:      ${hub.token}`);
-  if (values.static) console.log(`[kuraa] open:       ${hub.url}/?token=${hub.token}`);
-  close = () => hub.close();
-} else {
-  const running = await startHost({
-    dir: values.dir!,
-    init: values.init,
-    formats: values.format,
-    // Nothing runs unless an engine is on.
-    run: runOptions,
-    port: Number(values.port),
-    host: values.host!,
-    token: values.token ?? process.env.KURAA_TOKEN,
-    staticDir: values.static,
-    upstream: values.upstream,
-    peers: values.peer ? { bootstrap: values.bootstrap } : undefined,
-    invites: values['allow-invites'] ? { peers: { bootstrap: values.bootstrap } } : undefined,
-    timings,
-    log: (m) => console.log(`[kuraa] ${m}`),
-  });
-  console.log(`[kuraa] workspace: ${running.host.dir}`);
-  console.log(`[kuraa] url:       ${running.url}`);
-  console.log(`[kuraa] token:     ${running.token}`);
-  if (values.static) console.log(`[kuraa] open:      ${running.url}/?token=${running.token}`);
-  console.log(`[kuraa] git clone: git clone http://kuraa:${running.token}@${running.url.replace(/^https?:\/\//, '')}/git ${running.host.workspace}`);
-  close = () => running.close();
+// Every server is a hub (docs/decisions/0030-one-kind-of-server.md): of a folder
+// of workspaces people may add to (--workspaces), or of one folder (--dir).
+const hub = await startHub({
+  ...(values.workspaces ? { root: values.workspaces } : { folder: { dir: values.dir!, init: values.init } }),
+  port,
+  host: values.host!,
+  token: values.token ?? process.env.KURAA_TOKEN,
+  staticDir: values.static,
+  // Nothing runs unless an engine is on.
+  hosts: { formats: values.format, run: runOptions, timings, managePerson: values['manage-person'], manageBackups: values['manage-backups'] },
+  peers: { bootstrap: values.bootstrap, everywhere: values.peer },
+  // A hub of many lets people invite others to its workspaces; for one folder, the operator says (--allow-invites).
+  invites: !!values.workspaces || values['allow-invites'],
+  log: (m) => console.log(`[kuraa] ${m}`),
+});
+const close = () => hub.close();
+if (values.workspaces) console.log(`[kuraa] workspaces: ${hub.hub.root}`);
+else console.log(`[kuraa] workspace: ${hub.hub.root}`);
+console.log(`[kuraa] url:       ${hub.url}`);
+console.log(`[kuraa] token:     ${hub.token}`);
+if (values.static) console.log(`[kuraa] open:      ${hub.url}/?token=${hub.token}`);
+if (!values.workspaces) {
+  const [w] = hub.hub.list();
+  console.log(`[kuraa] git clone: git clone http://kuraa:${hub.token}@${hub.url.replace(/^https?:\/\//, '')}/w/${w!.id}/git ${w!.id}`);
 }
 
 // Write and commit pending edits, then exit. A signal often arrives twice at once

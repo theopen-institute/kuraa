@@ -11,7 +11,8 @@
 // image the container is built from):
 //   { "image": "docker.io/rocker/r-ver:4.5", "packages": ["dplyr"],
 //     "system": ["libxml2-dev"], "renv": true }
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   defineRunComponent,
@@ -20,21 +21,33 @@ import {
 import { R_DRIVER, REPLY_PREFIX } from './driver.js';
 import { imageRecipe } from './recipe.js';
 import { layout, rPackages } from './packages.js';
+import { Capped, splitLines, writeIfChanged } from './lines.js';
 
-export { DEFAULT_IMAGE, imageRecipe } from './recipe.js';
+export { DEFAULT_IMAGE, imageRecipe, type ROptions } from './recipe.js';
 export { checkRefs, formatManifest, readManifest, MANIFEST, type Manifest } from './packages.js';
 
-type DriverOutput = Exclude<ChunkOutput, { type: 'image' }> | { type: 'image'; file: string; width: number; height: number };
-interface Reply { type: 'result'; id: string; outputs: DriverOutput[]; interrupted?: boolean; fromEnvironment?: { name: string; version: string }[] }
+/** How long R has to say it is ready, once its process has started. */
+const START_MS = 60_000;
+/** Output that did not come through evaluate, kept for one run (more is counted, not kept). */
+const MAX_STRAY = 200_000;
+/** Plots read from one run, and the largest read. */
+const MAX_PLOTS = 100;
+const MAX_PLOT_BYTES = 50 * 1024 * 1024;
+/** A plot the driver wrote: its name only, in scratch itself. */
+const PLOT = /^[A-Za-z0-9._-]+\.png$/;
+
+interface Reply { type: 'result'; id: string; outputs?: unknown; interrupted?: boolean; fromEnvironment?: unknown }
 
 class RSession implements EngineSession {
   ready: Promise<string>;
   ended: Promise<string>;
   private proc: SandboxProcess | null = null;
-  private buffer = '';
-  private stray = '';
+  private started = false;
+  private stopped = false;
+  private readonly stray = new Capped(MAX_STRAY);
   private waiting: { id: string; resolve: (r: Reply) => void; reject: (e: Error) => void } | null = null;
   private failure: string | null = null;
+  private pendingLog = '';
   private endedWith!: (why: string) => void;
   private readyWith!: { resolve: (v: string) => void; reject: (e: Error) => void };
 
@@ -51,117 +64,188 @@ class RSession implements EngineSession {
 
   private async boot(): Promise<void> {
     const { ctx } = this;
-    await mkdir(ctx.files, { recursive: true });
-    await writeFile(join(ctx.files, 'driver.R'), R_DRIVER);
-    await mkdir(join(ctx.scratch, 'plots'), { recursive: true });
-    const recipe = imageRecipe(ctx.requirements, ctx.workspace);
-    if (recipe.context?.['renv.lock'] === '') recipe.context['renv.lock'] = await readFile(join(ctx.workspace, 'renv.lock'), 'utf8');
     const where = layout(ctx);
-    await Promise.all([where.lib, where.cache].map((d) => mkdir(d, { recursive: true })));
+    await Promise.all([ctx.files, ctx.scratch, where.lib, where.cache].map((d) => mkdir(d, { recursive: true })));
+    await writeIfChanged(join(ctx.files, 'driver.R'), R_DRIVER);
+    if (this.stopped) throw new Error('Stopped before R started.');
     const proc = await ctx.environment.start({
       name: 'r',
       workspace: ctx.workspace, scratch: ctx.scratch, files: ctx.files, policy: ctx.policy,
       mounts: where.mounts('read-only'),
-      image: recipe,
+      image: imageRecipe(ctx.requirements, ctx.workspace, ctx.options),
       // In the workspace root, so a project's .Rprofile (renv, for instance) applies.
       command: (view) => ({ argv: ['Rscript', '--no-save', '--no-restore', `${view.files}/driver.R`], cwd: view.workspace, env: { R_KURAA: '1', KURAA_R_LIB: view.inside(where.lib) } }),
       log: ctx.log,
       status: ctx.status,
     }, ctx.environmentOptions);
+    // Stopped while the environment was starting it (building an image, say): it is not wanted.
+    if (this.stopped) {
+      proc.stdin.end();
+      proc.kill();
+      throw new Error('Stopped before R started.');
+    }
     this.proc = proc;
+    proc.stdin.on('error', (e) => ctx.log(`R's input: ${e.message}`));
 
-    const timer = setTimeout(() => this.readyWith.reject(new Error('R did not start within 60 seconds.')), 60_000);
+    // R that never says it is ready is ended, so the session does not hang on it.
+    const timer = setTimeout(() => {
+      this.failure = `R did not start within ${START_MS / 1000} seconds.`;
+      proc.kill();
+    }, START_MS);
     proc.stdout.setEncoding('utf8');
-    proc.stdout.on('data', (chunk: string) => this.onStdout(chunk, timer));
+    proc.stdout.on('data', splitLines((line) => this.onLine(line, proc, timer), (partial) => this.onOverflow(partial)));
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', (chunk: string) => this.strayOutput(chunk));
-    void proc.exited.then(({ code, signal }) => {
+    void proc.exited.then(({ code, signal, reason }) => {
       clearTimeout(timer);
-      const why = this.failure ?? `R exited (${signal ?? `status ${code}`}).`;
+      const why = this.failure ?? (reason ? `R was stopped. ${reason}` : `R exited (${signal ?? `status ${code}`}).`);
+      const detail = this.stray.empty ? why : `${why}\n${this.stray.toString().trim()}`;
       this.proc = null;
-      this.readyWith.reject(new Error(this.stray.trim() ? `${why}\n${this.stray.trim()}` : why));
+      this.readyWith.reject(new Error(detail));
       const w = this.waiting;
       this.waiting = null;
-      w?.reject(new Error(this.stray.trim() ? `${why}\n${this.stray.trim()}` : why));
+      w?.reject(new Error(detail));
       this.endedWith(why);
     });
   }
 
-  private onStdout(chunk: string, timer: ReturnType<typeof setTimeout>): void {
-    this.buffer += chunk;
-    let nl: number;
-    while ((nl = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, nl);
-      this.buffer = this.buffer.slice(nl + 1);
-      const at = line.indexOf(REPLY_PREFIX);
-      if (at < 0) {
-        this.strayOutput(line + '\n');
-        continue;
-      }
-      if (at > 0) this.strayOutput(line.slice(0, at));
-      let msg: { type: string; [k: string]: unknown };
-      try {
-        msg = JSON.parse(line.slice(at + REPLY_PREFIX.length)) as typeof msg;
-      } catch {
-        continue;
-      }
-      if (msg.type === 'ready') {
-        clearTimeout(timer);
-        this.readyWith.resolve(String(msg.r ?? 'R'));
-      } else if (msg.type === 'fatal') {
-        this.failure = String(msg.message ?? 'R failed to start.');
-        this.readyWith.reject(new Error(this.failure));
-      } else if ((msg.type === 'install' || msg.type === 'remove') && this.proc) {
-        // install.packages() / remove.packages() in a chunk: the host does it; the chunk waits.
-        const proc = this.proc;
-        const names = (msg.refs as string[] | undefined) ?? [];
-        void (msg.type === 'install' ? this.ctx.install(names) : this.ctx.remove(names))
-          .catch((e: Error) => ({ ok: false, message: e.message, log: '', restart: false }))
-          .then((r) => proc.stdin.write(JSON.stringify({ type: 'done', ok: r.ok, message: r.message }) + '\n'));
-      } else if (msg.type === 'result' && this.waiting?.id === msg.id) {
-        const w = this.waiting!;
-        this.waiting = null;
-        w.resolve(msg as unknown as Reply);
-      }
+  private onLine(line: string, proc: SandboxProcess, timer: ReturnType<typeof setTimeout>): void {
+    const at = line.indexOf(REPLY_PREFIX);
+    if (at < 0) return this.strayOutput(line + '\n');
+    if (at > 0) this.strayOutput(line.slice(0, at));
+    let msg: { type?: unknown; [k: string]: unknown };
+    try {
+      msg = JSON.parse(line.slice(at + REPLY_PREFIX.length)) as typeof msg;
+    } catch {
+      return;
+    }
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'ready' && !this.started) {
+      clearTimeout(timer);
+      this.started = true;
+      // What R said while starting (a project's .Rprofile, say) is for the log, not the first run.
+      if (!this.stray.empty) this.ctx.log(`R: ${this.stray.toString().trim()}`);
+      this.stray.clear();
+      this.readyWith.resolve(String(msg.r ?? 'R'));
+    } else if (msg.type === 'fatal' && !this.started) {
+      this.failure = String(msg.message ?? 'R failed to start.');
+      this.readyWith.reject(new Error(this.failure));
+    } else if (msg.type === 'install' || msg.type === 'remove') {
+      // install.packages() / remove.packages() in a chunk: the host does it; the chunk waits.
+      const names = Array.isArray(msg.refs) ? msg.refs.filter((r): r is string => typeof r === 'string') : [];
+      void (msg.type === 'install' ? this.ctx.install(names) : this.ctx.remove(names))
+        .catch((e: Error) => ({ ok: false, message: e.message }))
+        .then((r) => this.send(proc, { type: 'done', ok: r.ok, message: r.message }));
+    } else if (msg.type === 'result' && this.waiting && this.waiting.id === msg.id) {
+      const w = this.waiting;
+      this.waiting = null;
+      w.resolve(msg as unknown as Reply);
     }
   }
 
-  /** Output that did not come through evaluate: startup messages, output from system(), crashes. */
+  /** A line too long to hold: if it was the reply, the run fails rather than wait for it forever. */
+  private onOverflow(partial: string): void {
+    if (partial.includes(REPLY_PREFIX) && this.waiting) {
+      const w = this.waiting;
+      this.waiting = null;
+      w.reject(new Error(`The chunk's output was too large to show (over ${Math.round(partial.length / 1024 / 1024)} MB).`));
+    } else {
+      this.strayOutput(`${partial.slice(0, 1000)}… (a line too long to show)\n`);
+    }
+  }
+
+  /** To R, if it is still the process this session runs; once R has gone, nothing is listening. */
+  private send(proc: SandboxProcess, message: object): void {
+    if (this.proc === proc && proc.stdin.writable) proc.stdin.write(JSON.stringify(message) + '\n');
+  }
+
+  /**
+   * Output that did not come through evaluate: startup messages, output from
+   * system(), crashes. Kept for the run (or the start) it belongs to; between
+   * runs (a process left running in the background, say) it goes to the log,
+   * a little at a time, so a flood of it cannot flood the log.
+   */
   private strayOutput(text: string): void {
-    if (this.waiting) this.stray += text;
-    else if (text.trim()) this.ctx.log(`R: ${text.trim()}`);
+    if (this.waiting || !this.started) return this.stray.add(text);
+    if (!text.trim()) return;
+    if (!this.pendingLog) {
+      setTimeout(() => {
+        this.ctx.log(`R: ${this.pendingLog.trim()}`);
+        this.pendingLog = '';
+      }, 200).unref?.();
+    }
+    if (this.pendingLog.length < 2000) this.pendingLog += text.slice(0, 2000);
   }
 
   async run(req: RunRequest): Promise<RunResult> {
     await this.ready;
     const proc = this.proc;
     if (!proc) throw new Error(this.failure ?? 'R is not running.');
-    this.stray = '';
+    this.stray.clear();
     // knitr's options are everything after the engine name: `r label, fig.width = 6`.
     const options = req.header.replace(/^\s*[A-Za-z][\w-]*\s*,?\s*/, '');
+    const request = { id: req.id, code: req.code, options, dir: proc.view.inside(req.dir), out: proc.view.scratch };
     const reply = await new Promise<Reply>((resolve, reject) => {
       this.waiting = { id: req.id, resolve, reject };
-      proc.stdin.write(JSON.stringify({
-        id: req.id, code: req.code, options, dir: proc.view.inside(req.dir), out: `${proc.view.scratch}/plots`,
-      }) + '\n');
+      this.send(proc, request);
     });
+    // The reply comes from a process running people's code, which can write one
+    // of its own: only outputs of known kinds go on, as the client expects them.
     const outputs: ChunkOutput[] = [];
-    for (const o of reply.outputs ?? []) {
-      if (o.type === 'image' && 'file' in o) {
-        const file = proc.view.outside(o.file);
-        try {
-          outputs.push({ type: 'image', mime: 'image/png', data: (await readFile(file)).toString('base64'), width: o.width, height: o.height });
-        } catch {
-          outputs.push({ type: 'error', text: 'A plot could not be read.' });
-        }
-        await rm(file, { force: true });
+    let plots = 0;
+    for (const o of Array.isArray(reply.outputs) ? (reply.outputs as unknown[]) : []) {
+      const x = (o ?? {}) as Record<string, unknown>;
+      if (x.type === 'image') {
+        if (++plots <= MAX_PLOTS) outputs.push(await this.plot(proc, x));
+        else await this.dropPlot(proc, x);
       } else {
-        outputs.push(o as ChunkOutput);
+        const out = checked(x);
+        if (out) outputs.push(out);
       }
     }
-    if (this.stray.trim()) outputs.push({ type: 'message', text: this.stray });
-    if (reply.fromEnvironment?.length) this.ctx.usedFromEnvironment(reply.fromEnvironment);
+    if (plots > MAX_PLOTS) outputs.push({ type: 'note', text: `${plots - MAX_PLOTS} more plots not shown.` });
+    if (!this.stray.empty) outputs.push({ type: 'message', text: this.stray.toString() });
+    const used = Array.isArray(reply.fromEnvironment) ? (reply.fromEnvironment as { name?: unknown; version?: unknown }[]) : [];
+    const fromEnvironment = used.filter((p) => typeof p?.name === 'string' && typeof p.version === 'string') as { name: string; version: string }[];
+    if (fromEnvironment.length) this.ctx.usedFromEnvironment(fromEnvironment);
     return { outputs, interrupted: reply.interrupted === true };
+  }
+
+  /** The host file of a plot the driver says it wrote: only a plain name in scratch itself. */
+  private plotFile(proc: SandboxProcess, o: Record<string, unknown>): string | null {
+    const file = typeof o.file === 'string' ? o.file : '';
+    const name = file.slice(proc.view.scratch.length + 1);
+    return file === `${proc.view.scratch}/${name}` && PLOT.test(name) ? proc.view.outside(file) : null;
+  }
+
+  private async plot(proc: SandboxProcess, o: Record<string, unknown>): Promise<ChunkOutput> {
+    const file = this.plotFile(proc, o);
+    const unread: ChunkOutput = { type: 'error', text: 'A plot could not be read.' };
+    if (!file) return unread;
+    try {
+      // Scratch is the process's to write: it may have left a link to anywhere on
+      // this computer, or a pipe that never ends, where the plot should be.
+      // Windows has no O_NOFOLLOW: look at the name itself first.
+      if (process.platform === 'win32' && !(await lstat(file)).isFile()) return unread;
+      const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > MAX_PLOT_BYTES) return unread;
+        const data = (await handle.readFile()).toString('base64');
+        return { type: 'image', mime: 'image/png', data, width: Number(o.width) || 0, height: Number(o.height) || 0 };
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return unread;
+    } finally {
+      await rm(file, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async dropPlot(proc: SandboxProcess, o: Record<string, unknown>): Promise<void> {
+    const file = this.plotFile(proc, o);
+    if (file) await rm(file, { force: true }).catch(() => undefined);
   }
 
   interrupt(): void {
@@ -169,6 +253,7 @@ class RSession implements EngineSession {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     const proc = this.proc;
     if (!proc) return;
     proc.stdin.end();
@@ -176,6 +261,25 @@ class RSession implements EngineSession {
     if (this.waiting) proc.interrupt();
     await proc.exited;
     clearTimeout(kill);
+  }
+}
+
+/** An output of a kind the client knows, with fields of the types it expects; null for anything else. */
+function checked(x: Record<string, unknown>): ChunkOutput | null {
+  const str = (v: unknown) => (typeof v === 'string' ? v : v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const strs = (v: unknown) => (Array.isArray(v) ? v.map(str) : []);
+  switch (x.type) {
+    case 'text': case 'message': case 'warning': case 'error': case 'note':
+      return { type: x.type, text: str(x.text) };
+    case 'table':
+      return {
+        type: 'table', columns: strs(x.columns), types: strs(x.types),
+        data: Array.isArray(x.data) ? x.data.map(strs) : [],
+        rownames: Array.isArray(x.rownames) ? strs(x.rownames) : null,
+        nrow: Number(x.nrow) || 0, ncol: Number(x.ncol) || 0,
+      };
+    default:
+      return null;
   }
 }
 

@@ -44,7 +44,8 @@ process.stdin.on('data', (d) => {
     else { process.stderr.write('kuraa: unsupported: ' + line + '\n'); process.exit(1); }
   }
 });
-process.stdin.on('end', () => { if (piping) piping.end(); });
+// Git is done with the connection (or went away): close it, and be done.
+process.stdin.on('end', () => { if (piping) piping.end(); else process.exit(0); });
 function start(service) {
   const sock = connect(peer.port, '127.0.0.1');
   let head = Buffer.alloc(0);
@@ -64,7 +65,9 @@ function start(service) {
     piping = sock;
     if (buf.length) sock.write(buf);
   });
-  sock.on('end', () => process.stdout.end());
+  // The other end is done (or the host stopped): pass on what came, then exit. Ending stdout alone
+  // would not close it, and git would wait for more for ever.
+  sock.on('close', () => process.stdout.write('', () => process.exit(open ? 0 : 1)));
   sock.on('error', (e) => { process.stderr.write('kuraa: ' + e.message + '\n'); process.exit(1); });
 }
 `;
@@ -81,6 +84,8 @@ export interface BridgeOptions {
 
 export class GitBridge {
   private server: Server | null = null;
+  /** Connections from git's helper, closed when the host stops, so no fetch is left waiting. */
+  private readonly sockets = new Set<Socket>();
   private readonly token = randomBytes(24).toString('hex');
 
   constructor(private readonly o: BridgeOptions) {}
@@ -94,10 +99,16 @@ export class GitBridge {
     await mkdir(this.binDir, { recursive: true });
     await writeFile(join(this.binDir, 'git-remote-kuraa.mjs'), HELPER);
     // Electron runs as Node with ELECTRON_RUN_AS_NODE; plain Node ignores it.
-    const launcher = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${process.execPath}" "$(dirname "$0")/git-remote-kuraa.mjs" "$@"\n`;
+    // On Windows, Git for Windows runs the script with its own sh, which takes C:/… paths.
+    const self = process.platform === 'win32' ? process.execPath.replace(/\\/g, '/') : process.execPath;
+    const launcher = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${self}" "$(dirname "$0")/git-remote-kuraa.mjs" "$@"\n`;
     await writeFile(join(this.binDir, 'git-remote-kuraa'), launcher);
     await chmod(join(this.binDir, 'git-remote-kuraa'), 0o755);
-    this.server = createServer((sock) => this.serve(sock));
+    this.server = createServer((sock) => {
+      this.sockets.add(sock);
+      sock.on('close', () => this.sockets.delete(sock));
+      this.serve(sock);
+    });
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
       this.server!.listen(0, '127.0.0.1', () => resolve());
@@ -156,7 +167,9 @@ export class GitBridge {
   }
 
   async close(): Promise<void> {
-    await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
+    const closed = new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
+    for (const sock of this.sockets) sock.destroy();
+    await closed;
     await rm(join(this.o.stateDir, 'peer.json'), { force: true });
   }
 }

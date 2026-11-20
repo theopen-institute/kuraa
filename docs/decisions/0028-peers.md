@@ -26,7 +26,8 @@ Nothing about devices is committed, so copies, forks and merges never carry it:
 - **paired devices** are git remotes whose URL is `kuraa://<device key>`, so `git fetch laptop`
   and `laptop/main` work as for any remote;
 - **removed devices**: `kuraa.removed`, never accepted again;
-- the **upstream** and **gated branches**: `kuraa.upstream`, `kuraa.gated`.
+- whose work it accepts on its own, by branch, and whose membership changes: `.git/kuraa/accept.json`
+  (0032; this replaced an upstream device and gated branches).
 
 The first device to use `--peer` or `kuraa-host invite` makes the repository a shared workspace.
 **Forking** (`kuraa-host fork`) gives the copy a new id and secret and records the original
@@ -51,8 +52,9 @@ control messages, rooms, and git streams.
     it (only a hash of it is kept there), which must be running when the other joins.
   - **A subscription link** (`kuraa-host link [--hours 168 | --forever]`): good for anyone, any
     number of times, until it expires or is revoked. The device that made it signs it (its id,
-    expiry and the workspace, with its key), so any member can check it and let someone in; the
-    device that made it need not be there. With an upstream device, only links it made count.
+    expiry, the workspace, its rules, and the devices it came into the workspace through, with its
+    key), so any member can check it and let someone in; the device that made it need not be
+    there. (Before 0032, with an upstream device, only links it made counted.)
     `kuraa-host links` lists a device's links; `kuraa-host revoke-link <id>` revokes one, and the
     revocation spreads like a removal (`kuraa.revokedlinks`). Devices that joined by it stay. A
     link carries the workspace's secret, as an invitation does: anyone who has it can find the
@@ -60,17 +62,25 @@ control messages, rooms, and git streams.
 
   Either way, on the other device **Add a workspace… → Join from an invitation** (0029), or
   `kuraa-host join <invitation or link> --dir <new folder>`, finds
-  a device that lets it in, learns the members and the upstream from it, fetches, and checks out
-  the branch. A device turned away (a revoked or expired link, an invitation used up) says why
+  a device that lets it in, learns the members from it, fetches, and checks out
+  the branch. It joins only through a device it can trust: by an invitation, the inviting device;
+  by a link, the link's maker or a device its pairing records (signed `add`s, 0031) trace back to
+  the maker or the devices the maker came in through, each record signed by a device already
+  traced. Anyone else who knows the workspace's secret (from an expired or revoked link, say) can
+  find the joining device, but is not the one it joins through. (Before, a joining device paired
+  with any device of the workspace that answered. A removed device whose removal the joining
+  device has not heard of can still be traced: the joining device drops it once a member tells
+  it, as every device does.) A device turned away (a revoked or expired link, an invitation used up) says why
   within seconds, unless another device lets it in meanwhile. A device that joined by a link keeps it (`.git/kuraa/joined-link`) and shows it to
   devices it meets that do not know it yet, so they pair with it too.
 - **Who is let in:** a paired device that has not been removed, or a device presenting an
   invitation this device made or a good subscription link. Anyone else is turned away after its
-  hello; removed devices before it.
+  hello; removed devices before it. A device's hello carries the membership records only to
+  devices it is paired with: one it does not know learns nothing from it.
 - **Membership spreads:** a device a member vouches for (in its hello) is paired by the others,
-  and so is a removal; with an upstream device, only its word counts. Devices announce changes to
+  and so is a removal (before 0032, with an upstream device, only its word counted; since, each device chooses whose membership changes it takes). Devices announce changes to
   the members as they happen, and dial newly paired devices directly.
-- `kuraa-host devices`, `name`, `remove-device`, `upstream` and `fork` manage the rest.
+- `kuraa-host devices`, `name`, `remove-device`, `accept`, `sync-remote` and `fork` manage the rest.
 
 ## Git between devices
 
@@ -86,7 +96,10 @@ control messages, rooms, and git streams.
   moves through the working tree (open rooms take the change); other branches move by their ref.
   A branch only another device has is created here.
 
-## The upstream, by convention
+## The upstream, by convention (replaced by 0032)
+
+*Since 0032 a device is never an upstream: each device decides whose work it accepts, by branch.
+What follows is how it was.*
 
 `kuraa-host upstream <device|self|remote|none> [--gate <branch>]`:
 
@@ -111,7 +124,8 @@ started from (0027). Devices tell each other which rooms they have open.
   ways from where the two meet (the file at the merge base of the commits each room started from,
   fetched first if need be). People on it are moved to the new room. Every device in the end shares
   the lowest seed, and nothing is lost. Git waits for this before bringing that device's work in.
-- **One device commits a shared room:** the upstream if it is in the room, else the device with
+- **One device commits a shared room** (since 0032: the lowest key among those whose work every
+  other device there accepts on its branch); before, the upstream if it is in the room, else the device with
   the lowest key. Edits made on other devices are credited (co-authors). The others write the file
   but do not commit it.
 - **Only the device that commits a shared room brings changes from git into it.** The others
@@ -123,12 +137,12 @@ started from (0027). Devices tell each other which rooms they have open.
 
 ## Not yet
 
-- The git remote helper is a shell script: not on Windows yet.
 - The DHT's bootstrap nodes are Hyperswarm's public ones unless `--bootstrap host:port` names
   others. They see that a device looks for a topic (a hash), not what the workspace holds.
 - Run outputs stay on each device. Branch deletions are not passed on.
 - Membership without an upstream is a convention every device follows: a removal reaches a device
-  only through devices that know of it, and so does a revoked link.
+  only through devices that know of it, and so does a revoked link. Since 0031 every change is a
+  signed record, so who made it is known and any device can pass it on.
 - A subscription link has no limit on how many times it is used: the devices that check it do not
   count uses together. Expiry and revocation are what limit it.
 - Every device that joins is a full device: there are no read-only roles yet.

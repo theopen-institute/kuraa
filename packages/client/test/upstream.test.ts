@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { hashText } from '@kuraa/kernel';
 import type { RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/model';
-import { behind, describeBehind } from '../src/upstream.js';
+import { behind, describeBehind, latestStep } from '../src/upstream.js';
 import { ChunkRunner, type Chunk } from '../src/runs.js';
 import type { HostApi, RunInfo } from '../src/api.js';
 
@@ -40,6 +40,28 @@ describe('behind', () => {
     expect(behind([{ ...a, label: 'init' }], [step(a)])).toMatchObject({ why: 'not-run' });
     // An unlabelled chunk moved down by one inserted above it is still found by its code.
     expect(behind([{ ...b, index: 4 }], [step(b)])).toBeNull();
+  });
+
+  it('finds the same chunk as scanning the steps for each one', () => {
+    // An unlabelled chunk's latest step is the later of the last by place and the last by code.
+    let seed = 7;
+    const pick = (n: number) => (seed = (seed * 1103515245 + 12345) % 2 ** 31) % n;
+    const codes = ['a', 'b', 'c'].map(hashText);
+    const key = () => ({ label: pick(3) === 0 ? `l${pick(2)}` : null, index: pick(4), codeHash: codes[pick(3)]! });
+    for (let round = 0; round < 500; round++) {
+      const above = Array.from({ length: pick(5) }, key);
+      const steps: RunStep[] = Array.from({ length: pick(8) }, () => ({ ...key(), complete: pick(4) > 0 }));
+      let expected: { chunk: unknown; why: string } | null = null;
+      for (const chunk of above) {
+        const s = latestStep(chunk, steps);
+        const why = !s ? 'not-run' : s.codeHash !== chunk.codeHash ? 'changed' : !s.complete ? 'incomplete' : null;
+        if (why) {
+          expected = { chunk, why };
+          break;
+        }
+      }
+      expect(behind(above, steps)).toEqual(expected);
+    }
   });
 
   it('says why in a few words', () => {

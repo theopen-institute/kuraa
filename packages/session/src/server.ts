@@ -20,9 +20,9 @@ export interface RelayHooks {
   authenticate(token: string, params: URLSearchParams, room: string): PresenceUser | Promise<PresenceUser>;
   /** Only the host creates room content. Return null to refuse an unknown or stale room. */
   load(room: string): RoomSeed | null | Promise<RoomSeed | null>;
-  /** A client, or another device, changed the room. Not called for changes the host applies. */
-  changed(room: string, user: PresenceUser | null): void;
-  /** A client opened the room: it is loaded. */
+  /** A client, or another device, changed the room (`local`: a client here). Not called for changes the host applies. */
+  changed(room: string, user: PresenceUser | null, local: boolean): void;
+  /** A client opened the room: it is loaded, and the relay holds it (read, state and the rest work). */
   loaded?(room: string): void;
   /** Encoded room state, for the host's cache. */
   store(room: string, state: Uint8Array): void | Promise<void>;
@@ -101,10 +101,13 @@ export class Relay {
           : { from: 'client', user: (context as { user?: PresenceUser } | undefined)?.user ?? null };
         for (const fn of this.updateListeners) fn(documentName, update, source);
         if (source.from === 'host') return;
-        this.hooks.changed(documentName, source.user);
+        this.hooks.changed(documentName, source.user, source.from === 'client');
       },
       afterLoadDocument: async ({ documentName }) => {
-        this.hooks.loaded?.(documentName);
+        // Hocuspocus registers the document only once this hook has returned: say it is loaded after that.
+        setImmediate(() => {
+          if (this.isOpen(documentName)) this.hooks.loaded?.(documentName);
+        });
       },
       onAwarenessUpdate: async ({ documentName, added, updated, removed, transactionOrigin, awareness }) => {
         const changed = [...added, ...updated, ...removed];

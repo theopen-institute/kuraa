@@ -21,7 +21,7 @@
 // merged as text against the source they both started from, and the user's edit
 // reaches the document just after (not inside y-prosemirror's handling of the
 // incoming change, which would ignore it).
-import type { DocumentType } from '@kuraa/kernel';
+import type { DocumentType, ParsedDocument } from '@kuraa/kernel';
 import { DELIBERATE_EDIT } from '@kuraa/editor-kit';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Transaction as PMTransaction } from 'prosemirror-state';
@@ -89,8 +89,11 @@ export class SourceEditor {
   /** Inside fromDocument: local input read there waits until it is done. */
   private incoming = false;
   private pendingLocal = false;
+  /** The last text parsed, and its parse: each keystroke parses the source before and after, and the next one's before is this one's after. */
+  private parsed: { text: string; result: ParsedDocument } | null = null;
 
-  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string) {
+  /** `readOnly`: shown, not edited (no one would take edits made here: Editor.vue). */
+  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string, readOnly = false) {
     this.base = initial;
     this.cm = new EditorView({
       parent,
@@ -104,6 +107,8 @@ export class SourceEditor {
           markdown(),
           syntaxHighlighting(highlighter),
           EditorView.lineWrapping,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           EditorView.contentAttributes.of({ 'data-testid': 'source-editor', spellcheck: 'true' }),
           EditorView.updateListener.of((u) => {
             if (!u.docChanged || u.transactions.every((t) => t.annotation(fromDocument))) return;
@@ -113,6 +118,11 @@ export class SourceEditor {
         ],
       }),
     });
+  }
+
+  private parse(text: string): ParsedDocument {
+    if (this.parsed?.text !== text) this.parsed = { text, result: this.type.parse(text) };
+    return this.parsed.result;
   }
 
   get text(): string {
@@ -136,8 +146,8 @@ export class SourceEditor {
     let before: PMNode;
     let parsed: PMNode;
     try {
-      before = this.type.parse(this.base).doc;
-      parsed = this.type.parse(this.text).doc;
+      before = this.parse(this.base).doc;
+      parsed = this.parse(this.text).doc;
     } catch {
       return; // formats do not throw, but a half-typed construct must never break editing
     }
@@ -182,7 +192,7 @@ export class SourceEditor {
       const current = this.text;
       // The document's new text, against the source it last matched; then the
       // user's unsynced edit (if any) on top.
-      const theirs = this.type.serialize(this.view.state.doc, this.type.parse(this.base));
+      const theirs = this.type.serialize(this.view.state.doc, this.parse(this.base));
       const merged = merge3(this.base, current, theirs);
       this.base = theirs;
       const change = textChange(current, merged);

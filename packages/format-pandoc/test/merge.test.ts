@@ -18,6 +18,17 @@ describe('diff3', () => {
     expect(mergeLines('a\nb\nc\n', 'A\nb\nc\n', 'a\nb\nC\n', sides)).toEqual({ text: 'A\nb\nC\n', conflicts: 0 });
     expect(mergeLines('a\n', 'x\n', 'y\n', sides)).toEqual({ text: '<<<<<<< Ada (3f2c1e0)\nx\n=======\ny\n>>>>>>> Bo (9a41d7b)\n', conflicts: 1 });
   });
+
+  it('merges long files quickly, changed far apart on both sides', () => {
+    // Too long for the table of common subsequences (it would need gigabytes), and
+    // long unchanged runs once overflowed the stack.
+    const lines = Array.from({ length: 300_000 }, (_, i) => `${i},value ${i}\n`);
+    const a = ['first\n', ...lines.slice(1, -1), 'last\n'].join('');
+    const b = [...lines.slice(0, 150_000), 'middle\n', ...lines.slice(150_000)].join('');
+    const merged = mergeLines(lines.join(''), a, b, sides);
+    expect(merged.conflicts).toBe(0);
+    expect(merged.text).toBe(['first\n', ...lines.slice(1, 150_000), 'middle\n', ...lines.slice(150_000, -1), 'last\n'].join(''));
+  });
 });
 
 describe('merging documents', () => {

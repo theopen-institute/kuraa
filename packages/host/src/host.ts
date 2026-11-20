@@ -1,19 +1,23 @@
 // The host: relay, bridge, committer and git peer for one workspace.
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { TypeRegistry, hashText, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
-import { mergeLines } from '@kuraa/kernel';
 import { Git } from './git.js';
+import { HttpError } from './errors.js';
+import { renameOver } from './files.js';
+import { commitSigned } from './signing.js';
+import { Backups } from './backups.js';
+import { serialQueue } from './serial.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
 import { loadRunComponents } from './components.js';
-import { createRequestHandler } from './http.js';
-import { conflictsIn, mergeCommits, type MergeOutcome } from './merging.js';
+import { createRequestHandler, sameToken } from './http.js';
+import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
 
@@ -26,6 +30,8 @@ export interface HostTimings {
   maxCommitMs: number;
   /** Drop an empty room after this long. */
   dropMs: number;
+  /** Push to backups this long after the last commit (backups.ts). */
+  backupMs: number;
 }
 
 export interface HostOptions {
@@ -37,8 +43,6 @@ export interface HostOptions {
   port?: number;
   /** Directory of a built web client to serve at `/`. */
   staticDir?: string;
-  /** Remote to fetch from and push to. Defaults to `origin` when it exists. */
-  upstream?: string;
   identity?: { name: string; email: string };
   /** Document types this host has. Clients must load the same ones. Default: `standardTypes` from @kuraa/formats. */
   types?: DocumentType[];
@@ -66,12 +70,26 @@ export interface HostOptions {
    * workspaces). Making one starts syncing with devices if it is not on, with
    * these options.
    */
-  invites?: { peers?: PeerOptions; onPeersOn?: () => void | Promise<void> };
+  invites?: { peers?: PeerOptions };
+  /**
+   * People using the app may see, make and import this computer's person's key
+   * (person.ts), whose this host's commits are (0034). Only where the one who runs
+   * the host is the one using it (`pnpm dev`; --manage-person): on a shared
+   * server, its key is its operator's.
+   */
+  managePerson?: boolean;
+  /**
+   * People using the app may add and remove backups (backups.ts): git servers
+   * pushed to with this computer's credentials. Only where the one running the
+   * host is the one using it (the desktop app, `pnpm dev`; --manage-backups).
+   * Everyone sees them, and may ask for a push.
+   */
+  manageBackups?: boolean;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }
 
-export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000 };
+export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, backupMs: 30_000 };
 
 interface RoomRecord {
   key: string;
@@ -97,6 +115,8 @@ interface RoomRecord {
   /** Flushed but not committed. */
   uncommitted: boolean;
   contributors: Map<string, PresenceUser>;
+  /** Edited by someone on this device (not another device's edits) since its last commit. */
+  localEdits: boolean;
   editingSince: number | null;
   lastFlushAt: string | null;
   lastCommitAt: string | null;
@@ -125,10 +145,20 @@ export class Host {
   readonly registry = new TypeRegistry();
   /** Every document type this host has, on or off. */
   private readonly allTypes: DocumentType[];
+  /**
+   * The same, to merge by: merges read files with every type the host has,
+   * whether or not it is on here, so that turning a format off (--format) does
+   * not change how this device merges.
+   */
+  private readonly mergeTypes = new TypeRegistry();
+  /** How this device merges, for other devices to compare (merging.ts). */
+  readonly mergeSignature: string;
   readonly git: Git;
   readonly dir: string;
   readonly token: string;
   readonly timings: HostTimings;
+  /** Git servers this workspace is pushed to, and nothing more (backups.ts). */
+  readonly backups: Backups;
   readonly workspace: string;
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
@@ -136,12 +166,9 @@ export class Host {
   runner!: Runner;
   private watcher: FSWatcher | null = null;
   private cacheDir = '';
-  private queue: Promise<unknown> = Promise.resolve();
   private watchTimers = new Map<string, NodeJS.Timeout>();
-  /** Titles read from files, by path, with the file's size and time when read. */
-  private titleCache = new Map<string, { stamp: string; title: string | null }>();
-  /** Conflicts counted in files, likewise. */
-  private conflictCache = new Map<string, { stamp: string; count: number }>();
+  /** What the file list shows of files not open in a room, by path, with the file's size and time when read. */
+  private readonly factsCache = new Map<string, { stamp: string; title: string | null; conflicts: number }>();
   /** Told when a branch moves (a commit, a merge): the peer layer tells other devices. */
   private readonly refsListeners = new Set<() => void>();
   /** The workspace's other devices, when this host is one of them (see peers/). */
@@ -159,10 +186,13 @@ export class Host {
       GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,
       GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email,
     } : {});
+    this.backups = new Backups(this.git, { delayMs: this.timings.backupMs, log: (m) => this.log(m), serial: (fn) => this.serial(fn) });
     this.allTypes = options.types ?? standardTypes;
     const known = this.allTypes.map((t) => t.id);
     for (const id of options.formats ?? []) if (!known.includes(id)) throw new Error(`Unknown format "${id}". Known: ${known.join(', ')}.`);
     for (const t of this.allTypes) if (!options.formats || options.formats.includes(t.id)) this.registry.register(t);
+    for (const t of this.allTypes) this.mergeTypes.register(t);
+    this.mergeSignature = mergeSignature(this.allTypes);
   }
 
   log(msg: string): void {
@@ -180,11 +210,7 @@ export class Host {
   }
 
   /** Run state-changing work one step at a time. */
-  serial<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
-    this.queue = run.catch(() => undefined);
-    return run;
-  }
+  readonly serial = serialQueue();
 
   async start(): Promise<AddressInfo> {
     if (!(await this.git.isRepo())) {
@@ -193,6 +219,9 @@ export class Host {
       this.log(`initialised a git repository in ${this.dir}`);
     }
     this.cacheDir = join(await this.git.gitDir(), 'kuraa', 'rooms');
+    // Backups take what was committed, a while after; and, at start, whatever was committed while the host was away.
+    this.onRefsChanged(() => this.backups.changed());
+    this.backups.changed();
     const run = this.options.run;
     this.runner = new Runner({
       root: this.dir,
@@ -220,7 +249,7 @@ export class Host {
     const handler = createRequestHandler(this);
     this.relay = new Relay({
       authenticate: (token, params) => {
-        if (token !== this.token) throw new Error('Invalid token');
+        if (!sameToken(token, this.token)) throw new Error('Invalid token');
         return {
           name: params.get('name') || 'Anonymous',
           email: params.get('email') || '',
@@ -229,7 +258,7 @@ export class Host {
       },
       load: (room) => this.loadRoom(room),
       loaded: (room) => this.peers?.rooms.opened(room),
-      changed: (room, user) => this.onClientChange(room, user),
+      changed: (room, user, local) => this.onClientChange(room, user, local),
       store: (room, state) => {
         const rec = this.byRoom.get(room);
         if (rec) {
@@ -250,6 +279,7 @@ export class Host {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.backups.close();
     this.watcher?.close();
     for (const t of this.watchTimers.values()) clearTimeout(t);
     await this.serial(async () => {
@@ -283,8 +313,13 @@ export class Host {
     const clean = path.replace(/\\/g, '/').replace(/^\/+/, '');
     const abs = resolve(this.dir, clean);
     if (abs !== this.dir && !abs.startsWith(this.dir + sep)) throw new HttpError(400, 'Path outside workspace');
+    // On Windows a colon names a file's hidden stream (.git::$INDEX_ALLOCATION is .git).
+    if (process.platform === 'win32' && clean.includes(':')) throw new HttpError(400, 'Path outside workspace');
     const rel = relative(this.dir, abs).split(sep).join('/');
-    if (rel === '.git' || rel.startsWith('.git/')) throw new HttpError(400, 'Path inside .git');
+    // .git however it is written where names ignore case (macOS, Windows), or end in dots
+    // and spaces Windows drops, or by its short name on Windows (GIT~1).
+    const top = rel.split('/')[0]!.toLowerCase().replace(/[. ]+$/, '');
+    if (top === '.git' || (process.platform === 'win32' && /^git~\d+$/.test(top))) throw new HttpError(400, 'Path inside .git');
     return abs;
   }
 
@@ -376,6 +411,7 @@ export class Host {
       dirty: false,
       uncommitted: false,
       contributors: new Map(),
+      localEdits: false,
       editingSince: null,
       lastFlushAt: null,
       lastCommitAt: null,
@@ -412,10 +448,11 @@ export class Host {
     return { state: rec.state };
   }
 
-  private onClientChange(room: string, user: PresenceUser | null): void {
+  private onClientChange(room: string, user: PresenceUser | null, local = true): void {
     const rec = this.byRoom.get(room);
     if (!rec) return;
     rec.dirty = true;
+    if (local) rec.localEdits = true;
     if (user) rec.contributors.set(user.email || user.name, user);
     const t = rec.timers;
     if (t.flush) clearTimeout(t.flush);
@@ -466,7 +503,12 @@ export class Host {
   private async writeAtomic(abs: string, text: string): Promise<void> {
     const tmp = join(dirname(abs), `.${basename(abs)}.kuraa-tmp-${randomBytes(4).toString('hex')}`);
     await writeFile(tmp, text);
-    await rename(tmp, abs);
+    try {
+      await renameOver(tmp, abs);
+    } catch (e) {
+      await rm(tmp, { force: true });
+      throw e;
+    }
   }
 
   /** Serialize the room to its file if the text changed. */
@@ -480,8 +522,14 @@ export class Host {
     const live = this.relay.state(rec.room);
     if (live) rec.state = live;
     if (text !== rec.previous.text) {
+      try {
+        await this.writeAtomic(this.resolvePath(rec.path), text);
+      } catch (e) {
+        // Not written (on Windows another program may hold the file): the edits wait for the next flush.
+        rec.dirty = true;
+        throw e;
+      }
       rec.lastHash = hashText(text);
-      await this.writeAtomic(this.resolvePath(rec.path), text);
       rec.previous = rec.type.parse(text);
       rec.uncommitted = true;
       rec.lastFlushAt = new Date().toISOString();
@@ -517,6 +565,7 @@ export class Host {
     rec.uncommitted = false;
     if (!committed) return null;
     rec.contributors.clear();
+    rec.localEdits = false;
     rec.baseCommit = committed;
     rec.lastCommit = committed;
     rec.lastCommitAt = new Date().toISOString();
@@ -527,6 +576,10 @@ export class Host {
 
   /** Stage and commit the given paths. Returns the commit, or null if nothing changed. */
   async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = [], extra: string[] = []): Promise<string | null> {
+    // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
+    const known = new Set((await this.git.out(['ls-files', '-z', '--', ...paths])).split('\0').filter(Boolean));
+    paths = paths.filter((p) => known.has(p) || existsSync(this.resolvePath(p)));
+    if (!paths.length) return null;
     await this.git.run(['add', '-A', '--', ...paths]);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
     if (diff.code === 0) return null;
@@ -535,7 +588,10 @@ export class Host {
       .map((u) => `Co-authored-by: ${u.name.replace(/[<>\n]/g, '')} <${u.email.replace(/[<>\n\s]/g, '')}>`);
     const unique = [...new Set([...trailers, ...extra])];
     const full = unique.length ? `${message}\n\n${unique.join('\n')}` : message;
-    await this.git.run(['commit', '-q', '-F', '-', '--', ...paths], { input: full });
+    // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
+    // Signed with this host's person's key if it keeps one, else its device's (0034).
+    if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
+    else await this.git.run(['commit', '-q', '-F', '-', '--', ...paths], { input: full });
     const head = await this.git.head();
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
@@ -581,6 +637,8 @@ export class Host {
   }
 
   async checkPath(path: string): Promise<void> {
+    // Most changes are to files no one has open (a build, an install): don't ask git which branch this is for those.
+    if (![...this.records.values()].some((r) => r.path === path)) return;
     const branch = await this.git.branch();
     const rec = this.records.get(`${branch}:${path}`);
     if (!rec) return;
@@ -699,7 +757,6 @@ export class Host {
     if (this.peers) return this.peers;
     const peers = await this.startPeers(allowed.peers ?? {});
     this.log('syncing with other devices is now on, for an invitation');
-    await allowed.onPeersOn?.();
     return peers;
   }
 
@@ -712,8 +769,8 @@ export class Host {
    * Merge commits as every device does (see merging.ts), reading files with
    * this host's document types.
    */
-  merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
-    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.registry.resolve(path, head), override, tmpDir: this.tmpDir });
+  merge(x: string, y: string, override?: (path: string) => string | undefined, keep?: (path: string) => boolean): Promise<MergeOutcome> {
+    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, keep, tmpDir: this.tmpDir });
   }
 
   /**
@@ -721,11 +778,11 @@ export class Host {
    * every device makes it. Open rooms are committed first, and take the result
    * as an outside change. Call inside serial().
    */
-  async integrate(ref: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+  async integrate(ref: string, override?: (path: string) => string | undefined, keep?: (path: string) => boolean): Promise<MergeOutcome> {
     await this.commitAll();
     const theirs = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
     const head = await this.git.head();
-    const outcome = head ? await this.merge(head, theirs, override) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
+    const outcome = head ? await this.merge(head, theirs, override, keep) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
     if (outcome.commit !== head) {
       // Rooms another device commits (shared rooms, peers/rooms.ts) are left to it:
       // only the device that commits a shared room brings changes from git into
@@ -733,8 +790,10 @@ export class Host {
       // there. Here, such a room's file is put back as committed for the move, and
       // the room written out again after it. A room with uncommitted edits is
       // handled the same way, its edits being in the room.
+      // A room shared with the device whose work this is, too: it holds both sides' edits already, and the
+      // merge took its text, so git brings nothing into it (or it would get the other side's edits twice).
       const branch = await this.git.branch();
-      const held = [...this.records.values()].filter((r) => r.branch === branch && (r.uncommitted || (this.peers && !this.peers.rooms.commits(r.room))));
+      const held = [...this.records.values()].filter((r) => r.branch === branch && (r.uncommitted || (this.peers && !this.peers.rooms.commits(r.room)) || override?.(r.path) !== undefined));
       for (const rec of held) {
         const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
         if (before.code === 0) await this.writeAtomic(this.resolvePath(rec.path), before.stdout);
@@ -787,6 +846,12 @@ export class Host {
     return [...this.records.values()].filter((r) => this.relay.isOpen(r.room)).map((r) => this.roomView(r.room)!);
   }
 
+  /** The room someone has open here with this key among devices, if any. */
+  liveRoom(key: string): RoomView | undefined {
+    for (const r of this.records.values()) if (this.roomKey(r) === key && this.relay.isOpen(r.room)) return this.roomView(r.room);
+    return undefined;
+  }
+
   /** A room's text as it is now. */
   roomText(name: string): string | undefined {
     const rec = this.byRoom.get(name);
@@ -796,6 +861,29 @@ export class Host {
   /** The commit a room's text was last based on (where it started, or its last commit or merge). */
   roomBase(name: string): string | null {
     return this.byRoom.get(name)?.baseCommit ?? null;
+  }
+
+  /** Whether someone on this device (not another device) has edited the room since its last commit. */
+  localEditsIn(name: string): boolean {
+    return this.byRoom.get(name)?.localEdits ?? false;
+  }
+
+  /**
+   * Put a file as given (null: delete it), into its open room as an outside
+   * change, and commit it. For taking another device's version of a file
+   * (peers.ts). Call inside serial().
+   */
+  async replaceFile(path: string, content: string | null, message: string): Promise<string | null> {
+    const abs = this.resolvePath(path);
+    if (content === null) await rm(abs, { force: true });
+    else {
+      await mkdir(dirname(abs), { recursive: true });
+      await this.writeAtomic(abs, content);
+    }
+    const branch = await this.git.branch();
+    const rec = this.records.get(`${branch}:${path}`);
+    if (rec) await this.checkOutside(rec);
+    return this.commitPaths([path], message);
   }
 
   /** Who has edited a room since its last commit. */
@@ -859,19 +947,24 @@ export class Host {
     });
   }
 
-  /** The ordinary git remote Sync fetches from, merges and pushes to: --upstream, else the workspace's, else origin. */
-  async gitUpstream(): Promise<string | null> {
+  /**
+   * The sync remote: the ordinary git remote (GitHub, say) Sync fetches from,
+   * merges and pushes to, two ways, like any clone of it. The
+   * workspace's choice (`kuraa.syncremote`), else origin, else the only one.
+   */
+  async syncRemoteName(): Promise<string | null> {
     const urls = await this.git.run(['config', '--get-regexp', '^remote\\..*\\.url$'], { allowFail: true });
-    const remotes = urls.stdout.split('\n').map((l) => /^remote\.(.+)\.url (.*)$/.exec(l.trim())).filter((m) => m && !m[2]!.startsWith('kuraa://')).map((m) => m![1]!);
-    if (this.options.upstream) return this.options.upstream;
-    const chosen = (await this.git.run(['config', '--get', 'kuraa.upstream'], { allowFail: true })).stdout.trim();
+    // Not devices (they sync with each other), and not backups (they only receive).
+    const backups = await this.backups.names();
+    const remotes = urls.stdout.split('\n').map((l) => /^remote\.(.+)\.url (.*)$/.exec(l.trim())).filter((m) => m && !m[2]!.startsWith('kuraa://')).map((m) => m![1]!).filter((r) => !backups.includes(r));
+    const chosen = (await this.git.run(['config', '--get', 'kuraa.syncremote'], { allowFail: true })).stdout.trim();
     if (chosen && remotes.includes(chosen)) return chosen;
     if (chosen && this.peers) return null;
     return remotes.includes('origin') ? 'origin' : (remotes[0] ?? null);
   }
 
   /** Fetch from an ordinary remote, bring its branch in (never stopping on a conflict), and push. Call inside serial(). */
-  async syncRemote(remote: string): Promise<{ ok: boolean; message: string; head?: string | null }> {
+  async syncWith(remote: string): Promise<{ ok: boolean; message: string; head?: string | null }> {
     await this.commitAll();
     const branch = await this.git.branch();
     await this.git.run(['fetch', remote]);
@@ -886,65 +979,64 @@ export class Host {
     return { ok: true, message: `Synced with ${remote}/${branch}${kept}`, head: await this.git.head() };
   }
 
-  /** Sync: with the paired devices that are connected, and with an ordinary upstream remote if there is one. */
+  /** Sync: with the paired devices that are connected, and with the sync remote if there is one. */
   async syncNow(): Promise<{ ok: boolean; message: string; head?: string | null }> {
-    const remote = await this.gitUpstream();
+    const remote = await this.syncRemoteName();
     const said: string[] = [];
     if (this.peers) said.push(await this.peers.syncAll());
     if (remote) {
-      const r = await this.serial(() => this.syncRemote(remote));
+      const r = await this.serial(() => this.syncWith(remote));
       if (!this.peers) return r;
       said.push(r.message);
     }
-    if (!said.length) return { ok: false, message: 'No upstream remote is configured' };
+    if (!said.length) return { ok: false, message: 'There is no sync remote, and no device to sync with' };
     return { ok: true, message: said.join('. '), head: await this.git.head() };
   }
 
-  /** How many conflicts a file keeps: from its open room if it has one, else from the file (read again only when it changed). */
-  async conflictsOf(path: string, branch: string): Promise<number> {
-    const type = this.typeFor(path);
-    if (!type) return 0;
-    const rec = this.records.get(`${branch}:${path}`);
-    if (rec) return conflictsIn(type.serialize(this.current(rec), rec.previous), type);
+  // -------------------------------------------------------------------------
+  // The file list
+
+  /**
+   * A file as the file list shows it: its type; for a document, its title (null
+   * if it has none); and how many conflicts it keeps, if any. From its open room
+   * if it has one (the live text), else from the file, read again only when it
+   * has changed. Null if the file is gone.
+   */
+  async treeEntry(path: string, branch: string): Promise<TreeEntry | null> {
+    const abs = join(this.dir, path);
+    let s;
     try {
-      const s = await stat(this.resolvePath(path));
-      const stamp = `${s.mtimeMs}:${s.size}:${type.id}`;
-      const hit = this.conflictCache.get(path);
-      if (hit?.stamp === stamp) return hit.count;
-      const count = conflictsIn(await readFile(this.resolvePath(path), 'utf8'), type);
-      this.conflictCache.set(path, { stamp, count });
-      return count;
+      s = await stat(abs);
     } catch {
-      return 0;
+      return null;
     }
+    const type = this.typeFor(path);
+    const entry: TreeEntry = { path, type: type?.id ?? null };
+    if (!type) return entry;
+    const facts = (text: string) => ({ title: type.title?.read(text) ?? null, conflicts: conflictsIn(text, type) });
+    let found: { title: string | null; conflicts: number };
+    const rec = this.records.get(`${branch}:${path}`);
+    if (rec) found = facts(type.serialize(this.current(rec), rec.previous));
+    else {
+      const stamp = `${s.mtimeMs}:${s.size}:${type.id}`;
+      const hit = this.factsCache.get(path);
+      if (hit?.stamp === stamp) found = hit;
+      else {
+        try {
+          found = facts(await readFile(abs, 'utf8'));
+        } catch {
+          found = { title: null, conflicts: 0 };
+        }
+        this.factsCache.set(path, { stamp, ...found });
+      }
+    }
+    if (type.title) entry.title = found.title;
+    if (found.conflicts) entry.conflicts = found.conflicts;
+    return entry;
   }
 
   // -------------------------------------------------------------------------
   // Titles
-
-  /**
-   * A document's title: from its open room if it has one (the live text), else
-   * from the file, read again only when it has changed. Null for types without
-   * titles, and documents without one.
-   */
-  async titleOf(path: string, branch: string): Promise<string | null> {
-    const type = this.typeFor(path);
-    if (!type?.title) return null;
-    const rec = this.records.get(`${branch}:${path}`);
-    if (rec) return type.title.read(type.serialize(this.current(rec), rec.previous));
-    const abs = this.resolvePath(path);
-    try {
-      const s = await stat(abs);
-      const stamp = `${s.mtimeMs}:${s.size}:${type.id}`;
-      const hit = this.titleCache.get(path);
-      if (hit?.stamp === stamp) return hit.title;
-      const title = type.title.read(await readFile(abs, 'utf8'));
-      this.titleCache.set(path, { stamp, title });
-      return title;
-    } catch {
-      return null;
-    }
-  }
 
   /**
    * Check that a document can take this title: it has titles, the title is not
@@ -1060,8 +1152,13 @@ export interface RoomView {
   branch: string;
 }
 
-export class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
+/** A file as the file list shows it (see Host.treeEntry). */
+export interface TreeEntry {
+  path: string;
+  /** Its document type, or null if no type opens it. */
+  type: string | null;
+  /** Documents only: its title, or null if it has none. */
+  title?: string | null;
+  /** How many conflicts it keeps, when it keeps any. */
+  conflicts?: number;
 }

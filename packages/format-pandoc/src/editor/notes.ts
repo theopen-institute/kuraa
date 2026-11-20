@@ -92,7 +92,15 @@ export function arrangeNotes(state: EditorState): Transaction | null {
   });
   if (!top.length) return null;
 
-  const kept = top.filter((n, i) => !top.slice(0, i).some((m) => m.label === n.label && m.node.eq(n.node)));
+  // This runs after every edit: earlier notes are looked up by label, not rescanned.
+  const byLabel = new Map<string, PMNode[]>();
+  const kept = top.filter((n) => {
+    const same = byLabel.get(n.label);
+    if (!same) byLabel.set(n.label, [n.node]);
+    else if (same.some((m) => m.eq(n.node))) return false;
+    else same.push(n.node);
+    return true;
+  });
   const unused = kept.length + rank.size;
   const order = (n: { label: string }) => rank.get(n.label) ?? unused;
   const desired = kept.map((n, i) => ({ n, i })).sort((a, b) => order(a.n) - order(b.n) || a.i - b.i).map((x) => x.n);

@@ -1,7 +1,8 @@
 // Two devices of one workspace, each with its own host and a browser on it:
 // people on the two edit one document live, the menu shows the devices, and work
-// held for the upstream is accepted there. On a local DHT, so nothing leaves this
-// machine.
+// a device does not accept on its own waits there until someone accepts it; a
+// document a device would not take another's changes to opens read-only there.
+// On a local DHT, so nothing leaves this machine.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +15,7 @@ import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
 
-test('people on two devices edit one document, and the upstream accepts held work', async ({ browser }) => {
+test('people on two devices edit one document, and held work is accepted', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-a-'));
@@ -62,9 +63,9 @@ test('people on two devices edit one document, and the upstream accepts held wor
     await expect(ada.getByTestId('device:laptop')).toContainText('connected');
     await ada.keyboard.press('Escape');
 
-    // Ada's device becomes the upstream, with main gated: Bo's new file waits for it.
-    git(dirA, 'config', 'kuraa.upstream', 'self');
-    git(dirA, 'config', 'kuraa.gated', 'main');
+    // Ada's device integrates main: on it, it accepts only its own work on its own. Bo's new file waits there.
+    await a.host.peers!.node.identity.acceptOn('main', '', [a.host.peers!.node.myKey]);
+    await a.host.peers!.node.membersChanged();
     const res = await fetch(`${b.url}/api/files`, { method: 'POST', headers: { authorization: `Bearer ${b.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ path: 'idea.md', content: '---\ntitle: An idea\n---\n' }) });
     expect(res.status).toBe(201);
     await ada.getByTestId('menu-button').click();
@@ -75,6 +76,19 @@ test('people on two devices edit one document, and the upstream accepts held wor
     await expect(proposal).toHaveCount(0);
     await ada.keyboard.press('Escape');
     await expect(ada.getByTestId('file:idea.md')).toContainText('An idea');
+
+    // Ada's device takes changes to notes.md only from itself: on Bo's device it opens read-only, saying so,
+    // until Bo chooses to edit anyway.
+    await a.host.peers!.node.identity.acceptOn('main', 'notes.md', [a.host.peers!.node.myKey]);
+    await a.host.peers!.node.membersChanged();
+    await expect.poll(async () => !!(await b.host.peers!.node.identity.rulesOf(a.host.peers!.node.myKey))?.rules.some((r) => r.path === 'notes.md'), { timeout: 20_000 }).toBe(true);
+    await bo.reload();
+    await bo.getByTestId('file:notes.md').click();
+    await expect(bo.getByTestId('declined-banner')).toContainText('does not take changes made here to this document');
+    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'false');
+    await bo.getByTestId('edit-anyway').click();
+    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'true');
+    await expect(bo.getByTestId('declined-banner')).toContainText('Editing anyway');
   } finally {
     await b.close();
     await a.close();

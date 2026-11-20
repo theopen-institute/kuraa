@@ -7,10 +7,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RunRecord, RunSessionInfo } from '@kuraa/session/model';
-import { defineRunComponent } from '@kuraa/run-kit';
+import type { RoomMessage, RunRecord, RunSessionInfo } from '@kuraa/session/model';
+import { defineRunComponent, type Engine, type EngineSession, type Environment } from '@kuraa/run-kit';
 import { standardRunComponents } from '@kuraa/run-components';
 import { startHost, type RunningHost, type RunOptions } from '../src/index.js';
+import { Runner } from '../src/runner.js';
 
 const ECHO = join(import.meta.dirname, 'fixtures/echo-engine.mjs');
 const ENVS = join(import.meta.dirname, 'fixtures/environments.mjs');
@@ -173,5 +174,88 @@ describe('formats', () => {
       expect((await api('/api/components', { method, body: JSON.stringify({ formats: { rmarkdown: true } }) })).status).toBe(404);
     }
     await expect(startHost({ dir, port: 0, formats: ['asciidoc'] })).rejects.toThrow('Unknown format "asciidoc". Known: pandoc-markdown, rmarkdown, text.');
+  });
+});
+
+describe('sessions', () => {
+  /** An engine whose sessions start when the test says, and whose packages restore when it says. */
+  function setup(idleMs?: number) {
+    const opened: { stopped: boolean; start(): void }[] = [];
+    let restored!: () => void;
+    const restoring = new Promise<null>((r) => (restored = () => r(null)));
+    const engine: Engine = {
+      id: 'slow', label: 'Slow', handles: ['slow'],
+      open() {
+        let start!: (v: string) => void;
+        const s = { stopped: false, start: () => start('slow 1') };
+        opened.push(s);
+        const session: EngineSession = {
+          ready: new Promise((r) => (start = r)),
+          ended: new Promise(() => undefined),
+          run: async (req) => ({ outputs: [{ type: 'text', text: req.code }], interrupted: false }),
+          interrupt: () => undefined,
+          stop: async () => void (s.stopped = true),
+        };
+        return session;
+      },
+      packages: {
+        list: async () => [], install: async () => ({ ok: true, message: '', log: '', restart: false }),
+        remove: async () => ({ ok: true, message: '', log: '', restart: false }),
+        restore: () => restoring, recordUsed: async () => undefined,
+      },
+    };
+    const environment: Environment = { id: 'here', label: 'here', sandboxed: true, check: async () => ({ available: true, message: '' }), start: async () => { throw new Error('unused'); } };
+    const root = mkdtempSync(join(tmpdir(), 'kuraa-sessions-'));
+    const messages: RoomMessage[] = [];
+    const runner = new Runner({
+      root, stateDir: join(root, 'state'),
+      components: { engines: new Map([['slow', engine]]), environments: new Map([['here', environment]]) },
+      options: { engines: ['slow'], allowInstalls: true },
+      broadcast: (_path, m) => messages.push(m), broadcastAll: () => undefined, commit: async () => undefined, log: () => undefined, idleMs,
+    });
+    const by = { name: 'Ada', email: '', color: '#000' };
+    const run = (code: string, index = 0) => runner.run('doc.Rmd', { engine, code, header: 'slow', chunk: { label: null, index, codeHash: code }, by });
+    const finished = async (record: RunRecord) => {
+      for (let i = 0; i < 100 && (record.state === 'queued' || record.state === 'running'); i++) await new Promise((r) => setTimeout(r, 10));
+      return record;
+    };
+    return { runner, run, finished, opened, restored, messages, root };
+  }
+
+  it('an interrupt while the session starts cancels the run, and a restart then opens nothing', async () => {
+    const t = setup();
+    const first = t.run('a');
+    await new Promise((r) => setTimeout(r, 20));
+    t.runner.interrupt('doc.Rmd'); // still restoring packages
+    expect((await t.finished(first)).state).toBe('cancelled');
+    await t.runner.restart('doc.Rmd');
+    t.restored();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(t.opened).toHaveLength(0); // the restarted session never opened
+
+    const second = t.run('b');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(t.opened).toHaveLength(1);
+    t.opened[0]!.start();
+    expect(await t.finished(second)).toMatchObject({ state: 'done', outputs: [{ type: 'text', text: 'b' }] });
+    await t.runner.close();
+    expect(t.opened[0]!.stopped).toBe(true);
+    rmSync(t.root, { recursive: true, force: true });
+  });
+
+  it('stops a session left idle, and says it has run nothing now', async () => {
+    const t = setup(50);
+    t.restored();
+    const record = t.run('a');
+    await new Promise((r) => setTimeout(r, 20));
+    t.opened[0]!.start();
+    await t.finished(record);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(t.opened[0]!.stopped).toBe(true);
+    const last = t.messages.filter((m) => m.type === 'run-session').pop() as { session: RunSessionInfo };
+    expect(last.session).toMatchObject({ state: 'stopped', id: null, steps: [] });
+    expect(t.runner.session('doc.Rmd').state).toBe('none');
+    await t.runner.close();
+    rmSync(t.root, { recursive: true, force: true });
   });
 });

@@ -11,6 +11,7 @@ import { baseKeymap } from 'prosemirror-commands';
 import { TreeFragment, type Tree } from '@lezer/common';
 import { highlightTree } from '@lezer/highlight';
 import { highlighter, language as languageNamed } from './languages.js';
+import { historyKeys } from './editing.js';
 
 type Lines = Extract<LayoutHint, { kind: 'lines' }>;
 
@@ -241,7 +242,8 @@ export function linesPlugins(schema: Schema, hint: Lines, path: string, history:
   return [
     highlightPlugin(hint, path),
     splitPlugin(schema, hint),
-    keymap({ ...lineCommands(schema, hint, path), 'Mod-z': history.undo, 'Mod-Shift-z': history.redo, 'Mod-y': history.redo }),
+    keymap(lineCommands(schema, hint, path)),
+    historyKeys(history),
     keymap(baseKeymap),
     // Copy lines as lines (the default puts a blank line between blocks).
     new Plugin({ props: { clipboardTextSerializer: (slice) => slice.content.textBetween(0, slice.content.size, '\n') } }),

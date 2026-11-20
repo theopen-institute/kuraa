@@ -1,5 +1,6 @@
-// The system git binary, called as a child process.
-import { spawn } from 'node:child_process';
+// Git, called as a child process: the one on PATH, or one a shell bundles (useGit).
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { delimiter } from 'node:path';
 
 export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
@@ -8,6 +9,50 @@ export interface GitResult { stdout: string; stderr: string; code: number; /** s
 // on that signal by finishing its git work first. (Not on Windows, where a
 // detached child would get its own console window.)
 const OWN_GROUP = process.platform !== 'win32';
+
+/** The git to run, and what it needs in its environment. */
+let program: { command: string; env: Record<string, string> } = { command: 'git', env: {} };
+
+/**
+ * Run this git instead of the one on PATH, with these environment variables
+ * (GIT_EXEC_PATH and the like). The desktop app ships its own, so every device
+ * runs the same git and nobody needs to install one. Set it before starting hosts.
+ */
+export function useGit(command: string, env: Record<string, string> = {}): void {
+  program = { command, env };
+}
+
+/** The PATH git sees, with `dir` first (where git finds `git-remote-kuraa`). */
+export function gitPath(dir: string): string {
+  return [dir, program.env.PATH ?? process.env.PATH ?? ''].join(delimiter);
+}
+
+/**
+ * An environment for git: the process's, then the git's own, then `layers`.
+ * On Windows variable names ignore case, so a PATH replaces a Path rather than sitting beside it.
+ */
+export function gitEnv(...layers: (Record<string, string> | undefined)[]): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const layer of [program.env, ...layers]) {
+    for (const [k, v] of Object.entries(layer ?? {})) {
+      if (process.platform === 'win32') for (const old of Object.keys(env)) if (old.toUpperCase() === k.toUpperCase()) delete env[old];
+      env[k] = v;
+    }
+  }
+  return env;
+}
+
+/**
+ * Files as they are in git, whatever line endings anyone's settings ask for
+ * (core.autocrlf, common on Windows): the host compares files with their blobs,
+ * and rooms are seeded from blob ids that must be the same on every device.
+ */
+const AS_STORED = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'];
+
+/** Start git with `args`, its input and output piped. */
+export function spawnGit(args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; detached?: boolean } = {}): ChildProcessWithoutNullStreams {
+  return spawn(program.command, [...AS_STORED, ...args], { detached: OWN_GROUP, ...opts });
+}
 
 export class Git {
   constructor(readonly dir: string, private env: Record<string, string> = {}) {}
@@ -18,7 +63,7 @@ export class Git {
 
   run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
     return new Promise((resolve, reject) => {
-      const child = spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...opts.env }, detached: OWN_GROUP });
+      const child = spawnGit(args, { cwd: this.dir, env: gitEnv(this.env, opts.env) });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
       child.stdout.on('data', (d: Buffer) => out.push(d));
@@ -80,6 +125,6 @@ export class Git {
 
   /** Spawn a git subcommand with streaming IO (for http-backend). */
   spawn(args: string[], env: Record<string, string>) {
-    return spawn('git', args, { cwd: this.dir, env: { ...process.env, ...this.env, ...env }, detached: OWN_GROUP });
+    return spawnGit(args, { cwd: this.dir, env: gitEnv(this.env, env) });
   }
 }

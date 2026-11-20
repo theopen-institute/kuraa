@@ -4,10 +4,15 @@
 // packages and pak, then what the workspace asks for in .kuraa/run.json and the
 // system libraries its package installs added. Names are validated so they
 // cannot smuggle in commands.
-import { existsSync } from 'node:fs';
+//
+// A workspace may name only a base image the operator allows (the engine's
+// option `images`, from --r-image; the default image always): an image is code.
+// Its ENTRYPOINT is overridden where it runs, but its ONBUILD instructions run
+// when the image is built, with the network, so allow only images you trust.
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ImageRecipe } from '@kuraa/run-kit';
-import { readManifest } from './packages.js';
+import { MANIFEST, readManifest } from './packages.js';
 
 /** The starter set: R with the tidyverse (and the system libraries most packages need). */
 export const DEFAULT_IMAGE = 'docker.io/rocker/tidyverse:4.5';
@@ -17,20 +22,30 @@ const IMAGE = /^[A-Za-z0-9./:@_-]+$/;
 
 interface Requirements { image?: unknown; packages?: unknown; system?: unknown; renv?: unknown }
 
+/** The operator's options for the R engine. */
+export interface ROptions {
+  /** Base images a workspace may name in .kuraa/run.json, besides the default. */
+  images?: string[];
+}
+
 const names = (v: unknown, what: string): string[] => {
   if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && NAME.test(x))) throw new Error(`.kuraa/run.json: r.${what} must be a list of plain package names.`);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && NAME.test(x))) throw new Error(`${what} must be a list of plain package names.`);
   return v as string[];
 };
 
 /** A container image with R, the driver's packages, and what the workspace asks for. */
-export function imageRecipe(requirements: unknown, workspace: string): ImageRecipe {
+export function imageRecipe(requirements: unknown, workspace: string, options?: unknown): ImageRecipe {
   const req = (requirements ?? {}) as Requirements;
   const image = req.image === undefined ? DEFAULT_IMAGE : String(req.image);
   if (!IMAGE.test(image)) throw new Error('.kuraa/run.json: r.image is not an image name.');
-  const packages = names(req.packages, 'packages');
+  const allowed = [DEFAULT_IMAGE, ...((options as ROptions | undefined)?.images ?? [])];
+  if (!allowed.includes(image)) {
+    throw new Error(`.kuraa/run.json asks for the image ${image}, which this host does not allow. It allows ${allowed.join(', ')}; whoever runs the host can allow more with --r-image.`);
+  }
+  const packages = names(req.packages, '.kuraa/run.json: r.packages');
   // System libraries: what the workspace asks for, and what package installs added (its manifest).
-  const system = [...new Set([...names(req.system, 'system'), ...names(readManifest(workspace).system, 'system')])];
+  const system = [...new Set([...names(req.system, '.kuraa/run.json: r.system'), ...names(readManifest(workspace).system, `${MANIFEST}: system`)])];
   // System libraries ragg needs to draw plots, then the driver's packages.
   const lines = [
     `FROM ${image}`,
@@ -44,7 +59,8 @@ export function imageRecipe(requirements: unknown, workspace: string): ImageReci
   const context: Record<string, string> = {};
   const lockfile = join(workspace, 'renv.lock');
   if (req.renv === true && existsSync(lockfile)) {
-    context['renv.lock'] = '';
+    // Its content, not a placeholder: sessions and the installer must build the same image.
+    context['renv.lock'] = readFileSync(lockfile, 'utf8');
     lines.push(
       'COPY renv.lock /tmp/renv.lock',
       `RUN R -q -e 'install.packages("renv"); renv::restore(lockfile = "/tmp/renv.lock", library = .libPaths()[1], prompt = FALSE)'`,

@@ -3,11 +3,12 @@
 // a stand-in `podman` that records its arguments. A real run is in host tests,
 // skipped where Podman is not installed.
 import { describe, expect, it } from 'vitest';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_POLICY, type StartRequest } from '@kuraa/run-kit';
-import { imageTag, podmanEnvironment, runArgs } from '../src/index.js';
+import { imageTag, OWNER, podmanEnvironment, removeOrphans, runArgs, usage } from '../src/index.js';
 
 const base = { name: 'kuraa-r-1', tag: 'localhost/kuraa-env:abc', workspace: '/Users/p/notes', scratch: '/Users/p/notes/.git/kuraa/run/scratch/x', files: '/Users/p/notes/.git/kuraa/run/engines/r', argv: ['Rscript', '/kuraa/driver.R'], cwd: '/work' };
 
@@ -21,10 +22,14 @@ describe('podman run arguments', () => {
       '--volume=/Users/p/notes/.git/kuraa/run/scratch/x:/scratch:rw',
       '--volume=/Users/p/notes/.git/kuraa/run/engines/r:/kuraa:ro',
       '--mount=type=tmpfs,destination=/work/.git,tmpfs-size=4k,tmpfs-mode=0,notmpcopyup',
+      `--tmpfs=/tmp:rw,size=${1024 ** 3},mode=1777`,
+      `--label=kuraa.owner=${process.pid}`,
     ]));
-    // Nothing else of the host is mounted, and the command comes last, after the image.
+    // Nothing else of the host is mounted, and the command comes last, after the
+    // image, its program as the entrypoint: the image's own cannot wrap it.
     expect(args.filter((a) => a.startsWith('--volume='))).toHaveLength(3);
-    expect(args.slice(-3)).toEqual(['localhost/kuraa-env:abc', 'Rscript', '/kuraa/driver.R']);
+    expect(args.slice(-3)).toEqual(['--entrypoint=["Rscript"]', 'localhost/kuraa-env:abc', '/kuraa/driver.R']);
+    expect(runArgs({ ...base, policy: { ...DEFAULT_POLICY, disk: '100m' } })).toContain(`--tmpfs=/tmp:rw,size=${100 * 1024 ** 2},mode=1777`);
   });
 
   it('open up only what the policy allows', () => {
@@ -47,13 +52,15 @@ describe('images', () => {
 });
 
 /** A stand-in podman: records each call; `image exists` fails, `info` per `infoOk`, `run` echoes stdin. */
-function fakePodman(infoOk: boolean): { bin: string; calls: () => string[] } {
+function fakePodman(infoOk: boolean): { bin: string; dir: string; calls: () => string[] } {
   const dir = mkdtempSync(join(tmpdir(), 'kuraa-fakepodman-'));
   const log = join(dir, 'calls');
   const bin = join(dir, 'podman');
   writeFileSync(bin, `#!/bin/sh
 echo "$*" >> "${log}"
 case "$1" in
+  ps) cat "${dir}/ps.json" 2>/dev/null || echo '[]' ;;
+  rm|kill) exit 0 ;;
   info) ${infoOk ? 'echo arm64; exit 0' : 'echo "Cannot connect to Podman: is the machine running?" >&2; exit 125'} ;;
   image) exit 1 ;;
   build) echo "STEP 1/2: FROM x"; exit 0 ;;
@@ -61,7 +68,7 @@ case "$1" in
 esac
 `);
   chmodSync(bin, 0o755);
-  return { bin, calls: () => readFileSync(log, 'utf8').trim().split('\n') };
+  return { bin, dir, calls: () => readFileSync(log, 'utf8').trim().split('\n').filter((c) => !c.startsWith('ps ')) };
 }
 
 describe('podman environment', () => {
@@ -104,8 +111,52 @@ describe('podman environment', () => {
     expect(exists).toMatch(/^image exists localhost\/kuraa-env:[0-9a-f]{16}$/);
     expect(build).toMatch(/^build --tag localhost\/kuraa-env:[0-9a-f]{16} --file .*Containerfile /);
     expect(run).toContain('--workdir=/work/reports');
-    expect(run).toMatch(/localhost\/kuraa-env:[0-9a-f]{16} Rscript \/kuraa\/driver\.R$/);
+    expect(run).toMatch(/--entrypoint=\["Rscript"\] localhost\/kuraa-env:[0-9a-f]{16} \/kuraa\/driver\.R$/);
     expect(statuses).toEqual(['Building the environment. The first time takes a few minutes.']);
     expect(proc.view.outside('/scratch/plots/a.png')).toBe(join(ws, 'scratch/plots/a.png'));
+  });
+});
+
+describe('limits and leftovers', () => {
+  const request = (ws: string, disk: string): StartRequest => ({
+    name: 'r', workspace: ws, scratch: join(ws, 'scratch'), files: join(ws, 'files'), policy: { ...DEFAULT_POLICY, disk },
+    image: { containerfile: 'FROM x\n' },
+    command: () => ({ argv: ['Rscript', '/kuraa/driver.R'], cwd: '/work' }),
+    log: () => undefined, status: () => undefined,
+  });
+
+  it('measures what is written, not following links, and stops counting past the limit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-usage-'));
+    mkdirSync(join(dir, 'a/b'), { recursive: true });
+    writeFileSync(join(dir, 'a/b/x'), Buffer.alloc(3000));
+    writeFileSync(join(dir, 'y'), Buffer.alloc(2000));
+    expect(await usage(dir, 1e9)).toEqual({ bytes: 5000, entries: 4 });
+    expect((await usage(dir, 1e9, 2)).entries).toBeLessThan(4);
+  });
+
+  it('ends a process that writes more than the policy allows, saying why', async () => {
+    const { bin } = fakePodman(true);
+    const ws = mkdtempSync(join(tmpdir(), 'kuraa-ws-'));
+    mkdirSync(join(ws, 'scratch'));
+    const proc = await podmanEnvironment.start(request(ws, '1m'), { podman: bin });
+    writeFileSync(join(ws, 'scratch', 'big'), Buffer.alloc(2 * 1024 * 1024));
+    const exit = await proc.exited;
+    expect(exit.reason).toBe('It wrote more than 1m of files, the most this host allows.');
+  });
+
+  it('removes containers whose host process is gone, on this computer only', async () => {
+    const { bin, dir, calls } = fakePodman(true);
+    const gone = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))']).stdout.toString();
+    const c = (id: string, labels: Record<string, string>) => ({ Id: id, Labels: { 'kuraa': 'session', ...labels } });
+    writeFileSync(join(dir, 'ps.json'), JSON.stringify([
+      c('mine', { 'kuraa.owner': OWNER.pid, 'kuraa.started': OWNER.started, 'kuraa.machine': OWNER.machine }),
+      c('crashed', { 'kuraa.owner': gone, 'kuraa.machine': OWNER.machine }),
+      c('earlier-me', { 'kuraa.owner': OWNER.pid, 'kuraa.started': String(Number(OWNER.started) - 3600), 'kuraa.machine': OWNER.machine }),
+      c('live-other-host', { 'kuraa.owner': String(process.ppid), 'kuraa.machine': OWNER.machine }),
+      c('other-computer', { 'kuraa.owner': gone, 'kuraa.machine': `${OWNER.machine}-elsewhere` }),
+      c('older-host', {}),
+    ]));
+    expect(await removeOrphans(bin)).toEqual(['crashed', 'earlier-me']);
+    expect(calls()).toContain('rm --force crashed earlier-me');
   });
 });

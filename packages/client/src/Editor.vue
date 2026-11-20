@@ -9,15 +9,14 @@ import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
-import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
+import type { FormatEditor } from '@kuraa/editor-kit';
 import type { HostApi, RunInfo } from './api.js';
 import type { Settings } from './settings.js';
 import type { EditorStatus } from './types.js';
-import { buildNodeViews } from './nodeviews.js';
+import { editorContext, historyKeys, nodeViewsFor } from './editing.js';
 import { SourceEditor } from './SourceEditor.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
-import { askConfirm, askText } from './ask.js';
 import { defaultBlock } from './blocks.js';
 import HeaderDialog from './HeaderDialog.vue';
 
@@ -53,6 +52,14 @@ const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 const view = shallowRef<EditorView | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
+/**
+ * Devices or people that would not take edits made here to this document (their
+ * rules say so: 0033). Not a lock: the files are this device's own. The editor
+ * starts read-only and says who, until the person chooses to edit anyway.
+ */
+const declinedBy = ref<string[]>([]);
+const editAnyway = ref(false);
+const locked = computed(() => declinedBy.value.length > 0 && !editAnyway.value);
 /** Goes up with every change to the document while the Header dialog is open. */
 const docVersion = ref(0);
 let source: SourceEditor | null = null;
@@ -155,10 +162,16 @@ function open(): () => void {
   const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
   const runner = runKey.value && runnable ? markRaw(new ChunkRunner(api, path, JSON.parse(runKey.value) as RunInfo, () => user.value)) : null;
   let chunkTimer: ReturnType<typeof setTimeout> | undefined;
+  // News from a connection already closed (its last status, as it goes) is not this one's.
+  const report = (patch: Partial<EditorStatus>) => {
+    if (!cancelled) update(patch);
+  };
 
   (async () => {
     const room = await api.room(path);
     if (cancelled) return;
+    declinedBy.value = room.declinedBy;
+    editAnyway.value = false;
     update({ room, lastFlushAt: room.lastFlushAt, lastCommitAt: room.lastCommitAt, lastCommit: room.lastCommit });
     const conn = connectRoom({
       url: api.collabUrl,
@@ -166,10 +179,11 @@ function open(): () => void {
       cacheKey: `${api.baseUrl}|${room.branch}|${path}`,
       token,
       user: user.value,
-      onStatus: (s) => update({ connection: s }),
-      onPeers: (peers) => update({ peers }),
-      onUnsynced: (n) => update({ unsynced: n }),
+      onStatus: (s) => report({ connection: s }),
+      onPeers: (peers) => report({ peers }),
+      onUnsynced: (n) => report({ unsynced: n }),
       onMessage: (m: RoomMessage) => {
+        if (cancelled) return;
         runner?.receive(m);
         if (m.type === 'flushed') update({ lastFlushAt: m.at });
         else if (m.type === 'committed') {
@@ -180,7 +194,10 @@ function open(): () => void {
         else if (m.type === 'reseeded') {
           // The room was replaced (joined with another device's): move to the new one.
           update({ notice: { kind: 'info', text: 'Joined the people editing this on another device.' } });
-          setTimeout(reopen, 50);
+          setTimeout(() => {
+            // Not if the editor was closed or moved on meanwhile: that would open a room nobody closes.
+            if (!cancelled) reopen();
+          }, 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
       },
     });
@@ -194,18 +211,15 @@ function open(): () => void {
     const layout = type.editor?.layout;
     // A source file gets line editing; anything else gets its format's editor
     // module (cues, keys, behaviour), then undo/redo and ProseMirror's base keys.
-    const ctx: EditorContext = { schema: type.schema, readOnly: false, history, isRemote: conn.isRemote, ui: { askText, askConfirm } };
+    const ctx = editorContext(type, { history, isRemote: conn.isRemote });
     const plugins = layout?.kind === 'lines'
       ? linesPlugins(type.schema, layout, path, history)
-      : [
-          ...(formatEditor?.plugins?.(ctx) ?? []),
-          keymap({ 'Mod-z': history.undo, 'Mod-Shift-z': history.redo, 'Mod-y': history.redo }),
-          keymap(baseKeymap),
-        ];
+      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap)];
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins] });
     pmView = new EditorView(mount.value!, {
       state,
-      nodeViews: { ...buildNodeViews(hints, { runner }), ...(formatEditor?.nodeViews?.(ctx) ?? {}) },
+      editable: () => !locked.value,
+      nodeViews: nodeViewsFor(type, ctx, formatEditor, { runner }),
       attributes: layout
         ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
         : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
@@ -230,7 +244,7 @@ function open(): () => void {
     if (runner) {
       runner.setChunks(collectChunks(pmView.state.doc, hints));
       update({ runner });
-      runner.load().catch((e: Error) => update({ notice: { kind: 'warn', text: `Could not load chunk outputs: ${e.message}` } }));
+      runner.load().catch((e: Error) => report({ notice: { kind: 'warn', text: `Could not load chunk outputs: ${e.message}` } }));
     }
     view.value = markRaw(pmView);
     loading.value = false;
@@ -246,6 +260,7 @@ function open(): () => void {
   return () => {
     cancelled = true;
     clearTimeout(chunkTimer);
+    clearTimeout(conflictTimer);
     pmView?.destroy();
     connection?.destroy();
     connection = null;
@@ -270,18 +285,20 @@ onBeforeUnmount(() => {
 });
 
 watch(user, (u) => connection?.setUser(u));
+// ProseMirror reads `editable` when it updates: have it look again.
+watch(locked, () => view.value?.setProps({}));
 
 // The editable Source view, while it is shown. It starts from the file as it is
 // on disk, so blocks nobody has touched show exactly as written.
-watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
+watch([() => props.showSource, view, locked], ([showSource, v, isLocked], _prev, onCleanup) => {
   if (!showSource || !v) return;
   const { api, path, type } = props;
   let cancelled = false;
   api.fileText(path).catch(() => '').then((onDisk) => {
     if (cancelled || !sourceMount.value || v.isDestroyed) return;
     const initial = type.serialize(v.state.doc, onDisk ? type.parse(onDisk) : undefined);
-    source = new SourceEditor(sourceMount.value, v, type, initial);
-    source.focus();
+    source = new SourceEditor(sourceMount.value, v, type, initial, isLocked);
+    if (!isLocked) source.focus();
   });
   onCleanup(() => {
     cancelled = true;
@@ -294,6 +311,14 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
 <template>
   <div class="editor-pane">
     <div v-if="error" class="banner warn">Could not open {{ path }}: {{ error }}</div>
+    <div v-if="declinedBy.length && !error" class="banner info" data-testid="declined-banner">
+      <template v-if="locked">
+        {{ declinedBy.join(', ') }} {{ declinedBy.length === 1 ? 'does' : 'do' }} not take changes made here to this document, so it opens read-only.
+        Your edits would stay on this device (and in a fork).
+        <button type="button" data-testid="edit-anyway" @click="editAnyway = true">Edit anyway</button>
+      </template>
+      <template v-else>Editing anyway: {{ declinedBy.join(', ') }} will not take these changes.</template>
+    </div>
     <div v-if="loading && !error" class="loading">Opening {{ path }}…</div>
     <div v-show="!showSource" class="editor-scroll" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />

@@ -14,7 +14,7 @@ const merge = (...rules) => {
 const noYjs = restrict(yjsFamily, 'Only @kuraa/session may import Yjs, y-prosemirror or Hocuspocus.');
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', '.dev-workspaces/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   // The client's components: Vue single-file components, their scripts in TypeScript.

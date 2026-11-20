@@ -23,7 +23,7 @@
 // `export default defineRunComponent({ name, engines, environments })`. The host
 // refuses a component whose apiVersion differs from RUN_API_VERSION.
 import { existsSync } from 'node:fs';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join, posix, win32 } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { ChunkOutput } from '@kuraa/session/model';
 
@@ -47,13 +47,21 @@ export interface Policy {
   /** Most processes it may run at once. */
   pids: number;
   /**
+   * The most it may write to the folders it writes (scratch, and any private
+   * temporary space), e.g. '2g': the computer's disk is not its to fill. Folders
+   * an engine mounts read-write for itself (a package cache) and a workspace the
+   * operator lets it write are not counted. An environment past it ends the
+   * process, saying why (SandboxProcess.exited's reason).
+   */
+  disk: string;
+  /**
    * Workspace paths it must not see at all. `.git` by default: code that could
    * write a git hook there would escape the sandbox the next time git runs.
    */
   hide: string[];
 }
 
-export const DEFAULT_POLICY: Policy = { workspace: 'read-only', network: false, memory: '4g', cpus: 2, pids: 512, hide: ['.git'] };
+export const DEFAULT_POLICY: Policy = { workspace: 'read-only', network: false, memory: '4g', cpus: 2, pids: 512, disk: '2g', hide: ['.git'] };
 
 // ---------------------------------------------------------------------------
 // Environments
@@ -120,6 +128,7 @@ export interface StartRequest {
 }
 
 export interface SandboxProcess {
+  /** May fail once the process has ended (EPIPE); an environment keeps such errors from crashing the host. */
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
@@ -128,7 +137,12 @@ export interface SandboxProcess {
   interrupt(): void;
   /** End the process. */
   kill(): void;
-  exited: Promise<{ code: number | null; signal: string | null }>;
+  /**
+   * Resolves once the process has ended and what it wrote to stdout and stderr
+   * has been read. Never rejects. `reason` says, for people, why the environment
+   * ended it, if it did (it went past a limit of the policy).
+   */
+  exited: Promise<{ code: number | null; signal: string | null; reason?: string }>;
 }
 
 export interface EnvironmentStatus {
@@ -158,32 +172,44 @@ export interface Environment {
 // ---------------------------------------------------------------------------
 // Engines
 
-export interface EngineContext {
+/** What the host gives an engine for one workspace: its sessions and its package manager both get this. */
+export interface ComponentContext {
   /** Where its processes run: start every one through this. */
   environment: Environment;
+  /** The operator's options for the environment, to pass to its start(). */
+  environmentOptions: unknown;
+  /** The workspace, on the host. */
+  workspace: string;
+  /** The engine's files for this workspace (read-only to its processes): see PathView. */
+  files: string;
   /** The engine's own folder on the host, shared by every workspace (a package cache, say). */
   dataDir: string;
   /** A stable short id for the workspace, for per-workspace things kept in dataDir. */
   workspaceKey: string;
+  /** What the workspace's processes may touch, as the operator allows. */
+  policy: Policy;
+  /**
+   * What the workspace asks of this engine (its section of .kuraa/run.json).
+   * Unvalidated, and written by people the host does not trust: check it before
+   * it reaches a command, a Containerfile or a path.
+   */
+  requirements: unknown;
+  /** The operator's options for this engine. */
+  options: unknown;
+  log(message: string): void;
+  /** Progress people should see. */
+  status(message: string): void;
+}
+
+export interface EngineContext extends ComponentContext {
+  /** The session's scratch folder on the host (writable by its processes): see PathView. */
+  scratch: string;
   /** Install packages for the workspace (the host checks it is allowed, and runs one install at a time). */
   install(refs: string[]): Promise<PackageResult>;
   /** Remove packages from the workspace's library. */
   remove(names: string[]): Promise<PackageResult>;
   /** Packages the session loaded from the environment itself (not the workspace's library), to record. */
   usedFromEnvironment(packages: { name: string; version: string }[]): void;
-  /** The operator's options for the environment, to pass to its start(). */
-  environmentOptions: unknown;
-  /** Host folders: see PathView. */
-  workspace: string;
-  scratch: string;
-  files: string;
-  policy: Policy;
-  /** What the workspace asks of this engine (its section of .kuraa/run.json). Unvalidated. */
-  requirements: unknown;
-  /** The operator's options for this engine. */
-  options: unknown;
-  log(message: string): void;
-  status(message: string): void;
 }
 
 export interface RunRequest {
@@ -200,9 +226,19 @@ export interface RunResult {
   interrupted: boolean;
 }
 
+/**
+ * A running session. The host calls run() one request at a time, and may call
+ * interrupt() or stop() at any moment, also while the session is still starting:
+ * stop() then must keep its process from starting at all. A session that cannot
+ * start rejects `ready` and resolves `ended`.
+ */
 export interface EngineSession {
   /** Resolves once the session can run code, with a description (e.g. the R version). */
   ready: Promise<string>;
+  /**
+   * Run code. What the code produced is untrusted: an engine passes on only
+   * outputs it has checked, and reads files the process names only inside scratch.
+   */
   run(req: RunRequest): Promise<RunResult>;
   interrupt(): void;
   stop(): Promise<void>;
@@ -242,23 +278,16 @@ export interface PackageResult {
   restart: boolean;
 }
 
-export interface PackageContext {
-  /** Where its processes run: start every one through this. */
-  environment: Environment;
-  environmentOptions: unknown;
-  workspace: string;
-  files: string;
-  dataDir: string;
-  workspaceKey: string;
-  policy: Policy;
-  requirements: unknown;
-  options: unknown;
-  log(message: string): void;
-  status(message: string): void;
+export interface PackageContext extends ComponentContext {
   /** Commit files the manager changed in the workspace (its manifest), crediting whoever asked. */
   commit(paths: string[], message: string): Promise<void>;
 }
 
+/**
+ * Packages for a workspace. Refs and names come from people the host does not
+ * trust (the app, code in a chunk, a manifest in the workspace): a manager
+ * checks them before they reach an installer or a path.
+ */
 export interface PackageManager {
   list(ctx: PackageContext): Promise<PackageInfo[]>;
   install(ctx: PackageContext, refs: string[]): Promise<PackageResult>;
@@ -298,20 +327,39 @@ export function findExecutable(name: string, dirs: string[] = []): string | null
   return null;
 }
 
-/** A PathView over fixed folders inside, mapping host folders (and mounts) onto them. */
-export function mappedView(host: { workspace: string; scratch: string; files: string }, inside: { workspace: string; scratch: string; files: string }, mounts: Mount[] = []): PathView {
+/**
+ * A PathView over fixed folders inside, mapping host folders (and mounts) onto
+ * them. The longest folder that holds a path wins (scratch may lie inside the
+ * workspace on the host), and a path that climbs out of every folder with `..`
+ * is refused: a process names paths for the host to read. Host paths follow the
+ * host's rules (`hostPaths`; on Windows C:\… with backslashes), paths inside
+ * are POSIX.
+ */
+export function mappedView(host: { workspace: string; scratch: string; files: string }, inside: { workspace: string; scratch: string; files: string }, mounts: Mount[] = [], hostPaths: typeof posix = process.platform === 'win32' ? win32 : posix): PathView {
+  const rules = [hostPaths, posix] as const;
   const pairs = [
-    ...mounts.map((m) => [m.host, m.inside] as const),
-    ...(['workspace', 'scratch', 'files'] as const).map((k) => [host[k], inside[k]] as const),
+    ...mounts.map((m) => [hostPaths.normalize(m.host), m.inside] as const),
+    ...(['workspace', 'scratch', 'files'] as const).map((k) => [hostPaths.normalize(host[k]), inside[k]] as const),
   ];
-  const swap = (path: string, from: 0 | 1) => {
+  const swap = (p: string, from: 0 | 1) => {
+    const { sep } = rules[from];
+    const clean = rules[from].normalize(p);
+    let best: readonly [string, string] | null = null;
     for (const pair of pairs) {
       const a = pair[from];
-      const b = pair[from === 0 ? 1 : 0];
-      if (path === a) return b;
-      if (path.startsWith(a.endsWith('/') ? a : `${a}/`)) return b + path.slice(a.length);
+      const within = clean === a || clean.startsWith(a.endsWith(sep) ? a : `${a}${sep}`);
+      if (within && (!best || a.length > best[from].length)) best = pair;
     }
-    throw new Error(`Not in a shared folder: ${path}`);
+    if (!best) throw new Error(`Not in a shared folder: ${p}`);
+    // The rest of the path, with the other side's separators.
+    return best[from === 0 ? 1 : 0] + clean.slice(best[from].length).split(sep).join(rules[from === 0 ? 1 : 0].sep);
   };
   return { ...inside, inside: (p) => swap(p, 0), outside: (p) => swap(p, 1) };
+}
+
+/** A size as policies give them ('2g', '512m', '100k', or bytes), in bytes; null if it is not one. */
+export function parseSize(size: string): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([kmgt]?)b?\s*$/i.exec(size);
+  if (!m) return null;
+  return Math.floor(Number(m[1]) * 1024 ** ' kmgt'.indexOf((m[2] || ' ').toLowerCase()));
 }

@@ -34,7 +34,7 @@ declare module 'protomux' {
   }
   export default class Protomux {
     static from(stream: Duplex): Protomux;
-    createChannel(opts: { protocol: string; id?: Buffer | null; unique?: boolean; onopen?(): void; onclose?(): void; ondestroy?(): void }): Channel | null;
+    createChannel(opts: { protocol: string; id?: Buffer | null; unique?: boolean; onopen?(): void; onclose?(): void; ondestroy?(): void; ondrain?(): void }): Channel | null;
     pair(opts: { protocol: string; id?: Buffer | null }, fn: (id: Buffer | null) => void): void;
     unpair(opts: { protocol: string; id?: Buffer | null }): void;
   }
@@ -42,7 +42,7 @@ declare module 'protomux' {
 
 declare module 'compact-encoding' {
   import type { Encoding } from 'protomux';
-  const c: { buffer: Encoding<Buffer>; string: Encoding<string>; raw: Encoding<Buffer>; json: Encoding<unknown> };
+  const c: { buffer: Encoding<Buffer>; string: Encoding<string>; raw: Encoding<Buffer>; json: Encoding<unknown>; array<T>(item: Encoding<T>): Encoding<T[]> };
   export default c;
 }
 

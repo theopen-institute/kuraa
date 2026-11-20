@@ -7,7 +7,7 @@ import { EditorView as CMView, keymap as cmKeymap, drawSelection, lineNumbers, t
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { highlighter, languageSupport } from './languages.js';
-import { chunkOf, describeRun, renderOutputs, type Chunk, type ChunkRunner, type Rebuild } from './runs.js';
+import { chunkOf, describeRun, engineOf, renderOutputs, type Chunk, type ChunkRunner, type Rebuild } from './runs.js';
 import { chunkName, describeBehind } from './upstream.js';
 import { askText } from './ask.js';
 import { defaultBlock } from './blocks.js';
@@ -97,9 +97,9 @@ class CodeView implements NodeView {
     return chunkOf(this.node, this.hint, pos, this.runner?.chunkAt(pos)?.index ?? 0);
   }
 
+  /** Whether this block can run here: asked on every change to the runs, so it reads only the header, not the code. */
   private runnable(): boolean {
-    const c = this.chunk();
-    return !!c && !!this.runner?.canRun(c.engine);
+    return !!this.hint.run && this.getPos() !== undefined && !!this.runner?.canRun(engineOf(this.node, this.hint));
   }
 
   private report(p: Promise<unknown>): void {

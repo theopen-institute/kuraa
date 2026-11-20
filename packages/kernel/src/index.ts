@@ -1,5 +1,6 @@
-// The kernel knows nothing about any file format. It holds registries for
-// document types, commands and lifecycle hooks, and runs without a DOM or Node.
+// The kernel knows nothing about any file format. It holds the contract for
+// document types and their registry, three-way merging, and lifecycle hooks, and
+// runs without a DOM or Node.
 import type { Node, Schema } from 'prosemirror-model';
 import type { MergeResult, MergeSide } from './merge.js';
 
@@ -98,6 +99,11 @@ export interface DocumentType {
    * is counted. The result depends only on the arguments, so every device
    * merging the same versions in the same order gets the same text. Without
    * it, files are merged line by line (`mergeLines`).
+   *
+   * Devices tell each other which types merge on their own, and at which
+   * version: a change to what `merge` returns for the same arguments must bump
+   * `version`, so devices that would merge differently know it (and only one of
+   * them makes the merges they share; see the host's merging.ts).
    */
   merge?(base: string, a: string, b: string, sides: [MergeSide, MergeSide]): MergeResult;
   /** How many conflicts a merge left in this text (with `merge`); without it, git's markers are counted. */
@@ -149,30 +155,6 @@ export class TypeRegistry {
   }
 }
 
-export interface Command<C = unknown> {
-  id: string;
-  title: string;
-  run: (ctx: C) => boolean | Promise<boolean>;
-}
-
-export class CommandRegistry<C = unknown> {
-  private readonly commands = new Map<string, Command<C>>();
-  register(cmd: Command<C>): () => void {
-    this.commands.set(cmd.id, cmd);
-    return () => this.commands.delete(cmd.id);
-  }
-  get(id: string): Command<C> | undefined {
-    return this.commands.get(id);
-  }
-  all(): Command<C>[] {
-    return [...this.commands.values()];
-  }
-  async run(id: string, ctx: C): Promise<boolean> {
-    const cmd = this.commands.get(id);
-    return cmd ? await cmd.run(ctx) : false;
-  }
-}
-
 export type HookEvent =
   | 'open' | 'change' | 'save' | 'commit' | 'pull' | 'merge' | 'rename' | 'delete';
 
@@ -212,12 +194,6 @@ export class HookBus {
   async after<P>(event: HookEvent, payload: P): Promise<void> {
     for (const h of this.handlers.get(event) ?? []) await h.after?.(payload);
   }
-}
-
-/** Equality of top-level block source text, used by serializers. */
-export function sliceBlock(parsed: ParsedDocument, index: number): string {
-  const b = parsed.blocks[index];
-  return b ? parsed.text.slice(b.from, b.to) : '';
 }
 
 /** A stable short hash (FNV-1a, 32 bit) usable in any runtime. */

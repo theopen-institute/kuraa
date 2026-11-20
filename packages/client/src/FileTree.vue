@@ -2,7 +2,7 @@
 // The sidebar: the workspace's name, its files and folders, new files and
 // folders, renaming, deleting, and moving by dragging. Right-click a file or
 // folder for what can be done with it (a document's header, among others).
-import { computed, provide, ref, shallowRef, toRef } from 'vue';
+import { computed, onBeforeUnmount, provide, ref, shallowRef, toRef } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
 import { askConfirm, askText } from './ask.js';
@@ -156,9 +156,16 @@ function dragStart(e: DragEvent, path: string) {
   dragging.value = path;
 }
 
+function stopOpening() {
+  if (opening) clearTimeout(opening.timer);
+  opening = null;
+}
+onBeforeUnmount(stopOpening);
+
 function dragEnd() {
   dragging.value = null;
   over.value = null;
+  stopOpening();
 }
 
 function dragOver(e: DragEvent, folder: string) {
@@ -168,9 +175,16 @@ function dragOver(e: DragEvent, folder: string) {
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   over.value = folder;
   // Hovering a closed folder opens it after a moment.
+  // Once it has opened, it may open again (closed and hovered in another drag).
   if (folder && collapsed.value.has(folder) && opening?.folder !== folder) {
-    if (opening) clearTimeout(opening.timer);
-    opening = { folder, timer: setTimeout(() => expand(folder), 600) };
+    stopOpening();
+    opening = {
+      folder,
+      timer: setTimeout(() => {
+        opening = null;
+        expand(folder);
+      }, 600),
+    };
   }
 }
 
@@ -243,7 +257,6 @@ provide(TREE, {
       <slot name="title"><span class="workspace-name" :title="workspaceName" data-testid="workspace-name">{{ workspaceName }}</span></slot>
       <span class="pane-header-actions">
         <button type="button" title="New file" aria-label="New file" @click="create()">＋</button>
-        <button type="button" title="New folder" aria-label="New folder" @click="newFolder()">⊞</button>
       </span>
     </div>
     <ul

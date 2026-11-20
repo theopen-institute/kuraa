@@ -1,5 +1,6 @@
 // The host's HTTP API. Client and host meet only over HTTP and WebSocket.
 import type { ChunkRef, RunRecord, RunSessionInfo } from '@kuraa/session/model';
+import type { PersonInfo } from './shell.js';
 
 export interface WorkspaceInfo {
   name: string; branch: string; head: string | null; types: { id: string; label: string; version: number }[];
@@ -41,11 +42,27 @@ export type PeersInfo =
       canInvite: boolean;
       device: { name: string; key: string };
       workspace: { id: string; forkedFrom: string | null };
-      upstream: { name: string; kind: 'self' | 'device' | 'remote' } | null;
-      gated: string[];
-      devices: { name: string; key: string; online: boolean; upstream: boolean; related: boolean }[];
+      /** The sync remote: the ordinary git remote Sync uses (GitHub, say), if any. */
+      remote: string | null;
+      /** Where this device accepts only some devices' or people's work on its own ('' the whole branch, 'dir/' a folder, else a file), and whose. */
+      rules: { branch: string; path: string; from: string[] }[];
+      /** Files where another device's version differs and this device keeps its own. */
+      declined: { device: string; branch: string; path: string }[];
+      /** Whose changes to the members it takes; null: every member's. */
+      membership: string[] | null;
+      devices: { name: string; key: string; online: boolean; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean }[];
       proposals: { device: string; branch: string; commits: number; subject: string }[];
     };
+
+/** A git server this workspace is pushed to (the host's backups.ts). */
+export interface BackupInfo {
+  name: string;
+  /** Where, with any password left out. */
+  url: string;
+  lastPush: string | null;
+  error: string | null;
+  pushing: boolean;
+}
 
 /** A subscription link this device made. */
 export interface SubscriptionLinkInfo {
@@ -59,6 +76,8 @@ export interface SubscriptionLinkInfo {
 export interface RoomInfo {
   room: string; path: string; branch: string; type: string; generation: string; baseCommit: string | null;
   lastFlushAt: string | null; lastCommitAt: string | null; lastCommit: string | null; dirty: boolean; uncommitted: boolean;
+  /** Devices or people that would not take edits made here to it, by their rules. */
+  declinedBy: string[];
 }
 export interface CommitInfo {
   hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[];
@@ -124,6 +143,19 @@ export class HostApi {
   /** A one-time invitation, good for a day. Turns syncing on if it is not. */
   createInvitation() { return this.json<{ invitation: string }>('/api/peers/invitations', { method: 'POST' }).then((r) => r.invitation); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
+  /** Git servers this workspace is pushed to (backups), and whether people here may add and remove them. */
+  backups() { return this.json<{ canManage: boolean; backups: BackupInfo[] }>('/api/backups'); }
+  addBackup(target: string) { return this.json<{ backups: BackupInfo[] }>('/api/backups', { method: 'POST', body: JSON.stringify({ target }) }).then((r) => r.backups); }
+  removeBackup(name: string) { return this.json<{ backups: BackupInfo[] }>(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.backups); }
+  backUpNow() { return this.json<{ backups: BackupInfo[] }>('/api/backups/now', { method: 'POST' }).then((r) => r.backups); }
+  /** You on this computer (keys), where the host lets people using the app manage them (else a 404). */
+  person() { return this.json<{ person: PersonInfo }>('/api/person').then((r) => r.person); }
+  revokeKey(key: string) { return this.json('/api/person/revoke', { method: 'POST', body: JSON.stringify({ key }) }); }
+  createPerson(name: string) { return this.json('/api/person', { method: 'POST', body: JSON.stringify({ name }) }); }
+  importPerson(line: string) { return this.json('/api/person/import', { method: 'POST', body: JSON.stringify({ line }) }); }
+  exportPerson() { return this.json<{ line: string }>('/api/person/export').then((r) => r.line); }
+  /** Take another device's version of a file this device keeps its own of. */
+  takeVersion(device: string, branch: string, path: string) { return this.json('/api/peers/take', { method: 'POST', body: JSON.stringify({ device, branch, path }) }); }
   acceptProposal(device: string, branch: string) { return this.json('/api/peers/accept', { method: 'POST', body: JSON.stringify({ device, branch }) }); }
   sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
@@ -148,12 +180,24 @@ export interface HubWorkspace {
   error?: string;
 }
 
+/** A hub's workspaces, and what people may do with them. */
+export interface HubList {
+  workspaces: HubWorkspace[];
+  /** People may add workspaces, and take them off the list. */
+  canAdd: boolean;
+  /** People may invite others to its workspaces. */
+  canInvite: boolean;
+}
+
 /** A hub's own API: its workspaces, and adding them. Each workspace is a host at `<hub>/w/<id>`. */
 export class HubApi extends HostApi {
-  /** The hub's workspaces; null if the address is a host of one workspace, not a hub. */
-  async workspaces(): Promise<HubWorkspace[] | null> {
+  /**
+   * The hub's workspaces; null if the address is a host started on its own,
+   * not a hub.
+   */
+  async workspaces(): Promise<HubList | null> {
     try {
-      return (await this.json<{ workspaces: HubWorkspace[] }>('/hub/api/workspaces')).workspaces;
+      return await this.json<HubList>('/hub/api/workspaces');
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null;
       throw e;

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+  <title>Preferences</title>
+  <style>
+    :root { --bg: #fbfaf8; --surface: #fff; --text: #1d1c1a; --muted: #6b675f; --border: #e2ded6; --accent: #2f6f5e; --warn: #9a3412; --ok: #2f6f5e; color-scheme: light; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #171716; --surface: #222220; --text: #e8e6e1; --muted: #9b978e; --border: #34332f; --accent: #7cc4ad; --warn: #fdba8c; --ok: #7cc4ad; color-scheme: dark; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 system-ui, -apple-system, sans-serif; }
+    form { padding: 18px 22px; display: grid; gap: 16px; }
+    fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+    legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
+    .check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; }
+    .check input { margin: 3px 0 0; }
+    .hint { color: var(--muted); grid-column: 2; }
+    .hint.flag { color: var(--warn); }
+    .status { grid-column: 2; }
+    .status.ok { color: var(--ok); }
+    .status.no { color: var(--warn); }
+    .row { display: flex; gap: 8px; align-items: center; }
+    input[type=text], textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
+    textarea { min-height: 3.2em; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+    button { font: inherit; border-radius: 6px; padding: 5px 12px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); white-space: nowrap; }
+    button.primary { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .note { color: var(--muted); margin: 0; }
+    .error { color: var(--warn); }
+    .error:empty { display: none; }
+  </style>
+</head>
+<body>
+  <form id="form">
+    <fieldset>
+      <legend>Other devices</legend>
+      <label class="check"><input id="syncDevices" type="checkbox" data-testid="pref-sync" /> Sync every workspace with its paired devices
+        <span class="hint">Edits and history go directly between your devices. Workspaces joined from an invitation or link always sync.</span>
+        <span class="hint flag" data-flag="syncDevices" hidden>Set by --peer on the command line.</span>
+      </label>
+    </fieldset>
+    <fieldset>
+      <legend>Running code</legend>
+      <label class="check"><input id="runCode" type="checkbox" data-testid="pref-run" /> Run R code in documents
+        <span class="status" id="environments" data-testid="pref-environments"></span>
+        <span class="hint flag" data-flag="runCode" hidden>Set by --engine on the command line.</span>
+      </label>
+      <label for="rImages" class="note">Other base images a workspace may use for R, one per line (the default needs none)</label>
+      <textarea id="rImages" data-testid="pref-images" spellcheck="false" placeholder="docker.io/rocker/r-ver:4.4.2"></textarea>
+      <span class="hint flag" data-flag="rImages" hidden>Set by --r-image on the command line.</span>
+    </fieldset>
+    <fieldset>
+      <legend>New workspaces</legend>
+      <div class="row">
+        <input id="workspaces" type="text" readonly data-testid="pref-workspaces" />
+        <button type="button" id="choose">Choose…</button>
+        <button type="button" id="reset">Default</button>
+      </div>
+      <span class="hint flag" data-flag="workspaces" hidden>Set by --workspaces on the command line.</span>
+    </fieldset>
+    <p class="note">Saving restarts your workspaces, which writes and commits any pending edits first.</p>
+    <div class="error" id="error" role="alert" data-testid="pref-error"></div>
+    <div class="actions">
+      <button type="button" id="cancel">Cancel</button>
+      <button type="submit" class="primary" data-testid="pref-save" id="save" disabled>Save</button>
+    </div>
+  </form>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let defaultFolder = '';
+    let folder = null;
+    const showFolder = () => { $('workspaces').value = folder ?? defaultFolder; };
+
+    window.kuraaApp.preferences().then(({ preferences: p, fromFlags, defaultWorkspaces, environments }) => {
+      $('syncDevices').checked = p.syncDevices;
+      $('runCode').checked = p.runCode;
+      $('rImages').value = p.rImages.join('\n');
+      defaultFolder = defaultWorkspaces;
+      folder = p.workspaces;
+      showFolder();
+      for (const key of fromFlags) for (const el of document.querySelectorAll(`[data-flag="${key}"]`)) el.hidden = false;
+      const env = $('environments');
+      if (!environments.length) env.textContent = 'No environment to run code in is loaded.';
+      for (const e of environments) {
+        env.textContent = e.available ? `Code runs ${e.label}.` : e.message;
+        env.className = `status ${e.available ? 'ok' : 'no'}`;
+      }
+      $('save').disabled = false;
+    });
+    $('choose').addEventListener('click', async () => {
+      const picked = await window.kuraaApp.chooseFolder();
+      if (picked) { folder = picked; showFolder(); }
+    });
+    $('reset').addEventListener('click', () => { folder = null; showFolder(); });
+    $('cancel').addEventListener('click', () => window.close());
+    $('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      $('error').textContent = '';
+      window.kuraaApp.savePreferences({
+        syncDevices: $('syncDevices').checked,
+        runCode: $('runCode').checked,
+        rImages: $('rImages').value.split('\n').map((s) => s.trim()).filter(Boolean),
+        workspaces: folder,
+      }).catch((err) => { $('error').textContent = `Could not save: ${err.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`; });
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.close(); });
+  </script>
+</body>
+</html>

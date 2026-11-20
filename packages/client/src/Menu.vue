@@ -2,19 +2,23 @@
 // The menu: everything that is not the document. Opened from the bottom of the
 // sidebar (or ⌘,). Sections: this document (views, versions, saving), code (the
 // session, packages), the workspace (sync, connection, who is here), and you
-// (your settings, and the shell's own actions).
-import { computed } from 'vue';
+// (your settings, and the shell's own actions). Identity and access (your keys,
+// and the host and its token) is a panel of its own, opened from You.
+import { computed, onMounted, ref, shallowRef } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
-import type { Shell } from './shell.js';
+import type { PersonShell, Shell } from './shell.js';
+import { hostPerson } from './hostPerson.js';
 import type { EditorStatus } from './types.js';
 import { CONNECTION, time } from './labels.js';
 import { onEscape } from './vue.js';
 import CodeSection from './CodeSection.vue';
 import DevicesSection from './DevicesSection.vue';
+import BackupsSection from './BackupsSection.vue';
 import SettingsForm from './SettingsForm.vue';
+import PersonKey from './PersonKey.vue';
 
 const props = defineProps<{
   path: string | null;
@@ -50,16 +54,48 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-onEscape(() => emit('close'));
+/** The menu itself, or its Identity and access panel. */
+const panel = ref<'menu' | 'access'>('menu');
+onEscape(() => {
+  if (panel.value === 'access') panel.value = 'menu';
+  else emit('close');
+});
 
 const doc = computed(() => !!props.path && !!props.type && !props.viewing);
+
+// This computer's person's key: the shell's (desktop app), else the host's where it allows (`pnpm dev`).
+const personShell = shallowRef<PersonShell | null>(props.shell.person ?? null);
+onMounted(async () => {
+  if (personShell.value) return;
+  try {
+    personShell.value = await hostPerson(props.api);
+  } catch { /* not offered */ }
+});
 const runner = computed(() => props.status?.runner ?? null);
+/** Anything for the Identity and access panel: your keys, or the host and token (when the shell does not run the host). */
+const hasAccess = computed(() => !!personShell.value || !props.shell.managesHost);
 
 </script>
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('close')">
-    <div class="modal menu" role="dialog" aria-label="Menu" data-testid="menu">
+    <div v-if="panel === 'access'" class="modal menu" role="dialog" aria-label="Identity and access" data-testid="menu">
+      <div class="menu-panel-head">
+        <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">‹ Menu</button>
+        <h2>Identity and access</h2>
+      </div>
+      <section v-if="personShell" class="menu-section" data-testid="menu-identity">
+        <h3>Your identity and keys</h3>
+        <PersonKey :person="personShell" :display-name="settings.name" />
+      </section>
+      <section v-if="!shell.managesHost" class="menu-section" data-testid="menu-connection">
+        <h3>Host</h3>
+        <p class="menu-facts">The host this app works with, and the token it lets you in by.</p>
+        <SettingsForm :initial="settings" :shell="shell" part="connection" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
+      </section>
+      <div class="modal-actions"><button type="button" @click="emit('close')">Close</button></div>
+    </div>
+    <div v-else class="modal menu" role="dialog" aria-label="Menu" data-testid="menu">
       <section v-if="path" class="menu-section">
         <h3>{{ name }}</h3>
         <div v-if="doc" class="menu-actions">
@@ -104,13 +140,14 @@ const runner = computed(() => props.status?.runner ?? null);
           </li>
         </ul>
         <div class="menu-actions">
-          <button type="button" :disabled="syncing || !workspace" title="Commit; bring in the work of connected devices; fetch, merge and push against the upstream remote, if there is one" @click="emit('sync'); emit('close')">
+          <button type="button" :disabled="syncing || !workspace" title="Commit; bring in the work of connected devices; fetch, merge and push against the sync remote, if there is one" @click="emit('sync'); emit('close')">
             {{ syncing ? 'Syncing…' : 'Sync' }}
           </button>
         </div>
       </section>
 
       <DevicesSection :api="api" @accepted="emit('accepted')" @invite="emit('invite'); emit('close')" />
+      <BackupsSection :api="api" />
 
       <section class="menu-section">
         <h3>Components</h3>
@@ -122,7 +159,10 @@ const runner = computed(() => props.status?.runner ?? null);
 
       <section class="menu-section">
         <h3>You</h3>
-        <SettingsForm :initial="settings" :shell="shell" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
+        <SettingsForm :initial="settings" :shell="shell" part="profile" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
+        <div v-if="hasAccess" class="menu-actions">
+          <button type="button" data-testid="menu-access" @click="panel = 'access'">Identity and access…</button>
+        </div>
       </section>
 
       <div class="modal-actions"><button type="button" @click="emit('close')">Close</button></div>

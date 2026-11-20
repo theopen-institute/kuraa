@@ -14,8 +14,7 @@ changes the live document in the editor, as the person's own edit (`replaceWithT
 replaced, so everyone's cursors elsewhere stay put). So collaborators see it at once, ⌘Z undoes it,
 and it is written, committed and credited like any edit. Nothing changes on the host: restoring is
 an edit, not a git operation (while git is busy outside the app and saving is paused, the app
-says so and does not restore), and history is never rewritten. A document open read-only (another
-device's rules, [0033](0033-document-rules-and-people.md)) is not changed. The restored blocks are
+says so and does not restore), and history is never rewritten. The restored blocks are
 written as the format writes them; blocks equal to the current ones keep their text exactly.
 
 **Compare with now** shows the past version against the live document (`compare.ts`): top-level

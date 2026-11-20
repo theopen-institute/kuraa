@@ -29,7 +29,7 @@
 // The window shows only the app's own pages: it does not navigate elsewhere or
 // open other windows (web links open in the browser), and the bridge answers
 // only the app's own pages.
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, type ContextMenuParams, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -338,8 +338,17 @@ function buildMenu(): void {
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },
+    // Edit's standard items (undo, cut, copy, paste, select all…). Find (⌘F) is the page's own, so no item takes its key.
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    // The standard View menu, less Force Reload, whose ⇧⌘R renders the document in the page.
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' as const }, { role: 'toggleDevTools' as const }, { type: 'separator' as const },
+        { role: 'resetZoom' as const }, { role: 'zoomIn' as const }, { role: 'zoomOut' as const }, { type: 'separator' as const },
+        { role: 'togglefullscreen' as const },
+      ],
+    },
     { role: 'windowMenu' },
   ]));
 }
@@ -425,7 +434,46 @@ app.on('web-contents-created', (_e, contents) => {
     if (!isOwnPage(url)) event.preventDefault();
   });
   contents.on('will-attach-webview', (event) => event.preventDefault());
+  // A link followed inside a frame (the Preview panel's rendered document) does not load
+  // another site in the window: a web link opens in the browser instead.
+  contents.on('will-frame-navigate', (event) => {
+    const { url, isMainFrame } = event;
+    if (isMainFrame || isOwnPage(url) || /^about:(srcdoc|blank)/.test(url)) return;
+    event.preventDefault();
+    openOutside(url);
+  });
+  contents.on('context-menu', (_event, params) => showContextMenu(contents, params));
 });
+
+/**
+ * The right-click menu: spelling suggestions and Add to Dictionary for a
+ * misspelled word, Look Up on a Mac, then Cut, Copy, Paste and Select All, as
+ * the place allows.
+ */
+function showContextMenu(contents: WebContents, params: ContextMenuParams): void {
+  const items: MenuItemConstructorOptions[] = [];
+  const word = params.misspelledWord;
+  if (word) {
+    for (const suggestion of params.dictionarySuggestions.slice(0, 6)) {
+      items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) });
+    }
+    if (!params.dictionarySuggestions.length) items.push({ label: 'No suggestions', enabled: false });
+    items.push({ label: 'Add to Dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(word) });
+    items.push({ type: 'separator' });
+  }
+  const selected = params.selectionText.trim();
+  if (process.platform === 'darwin' && selected) {
+    items.push({ label: `Look Up “${selected.length > 24 ? `${selected.slice(0, 24)}…` : selected}”`, click: () => contents.showDefinitionForSelection() });
+    items.push({ type: 'separator' });
+  }
+  const { editFlags } = params;
+  if (params.isEditable) items.push({ role: 'cut', enabled: editFlags.canCut });
+  if (params.isEditable || selected) items.push({ role: 'copy', enabled: editFlags.canCopy });
+  if (params.isEditable) items.push({ role: 'paste', enabled: editFlags.canPaste });
+  if (items.length && items[items.length - 1]!.type !== 'separator') items.push({ type: 'separator' });
+  items.push({ role: 'selectAll', enabled: editFlags.canSelectAll });
+  Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined });
+}
 
 app.whenReady().then(async () => {
   buildMenu();

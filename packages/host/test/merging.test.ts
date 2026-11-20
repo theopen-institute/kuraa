@@ -55,32 +55,6 @@ const opts = (dir: string) => ({ typeFor: (p: string, h: string) => registry.res
 const show = (dir: string, rev: string) => git(dir, 'show', rev);
 
 describe('mergeCommits', () => {
-  it('keeps this side’s version of files whose other-side changes it declines, and still takes their history', async () => {
-    const dir = repo();
-    const ada = branch(dir, 'ada', 'Ada', { 'notes.md': '# Notes\n\nThe tide was far out.\n\nWe counted crabs.\n\nIt rained.\n' });
-    const bo = branch(dir, 'bo', 'Bo', { 'notes.md': '# Notes\n\nThe tide was out.\n\nWe counted crabs.\n\nIt poured.\n', 'new.md': 'Bo’s new file\n', 'gone.md': null });
-    const keep = (p: string) => p === 'notes.md' || p === 'new.md' || p === 'gone.md';
-    // Work done apart: a merge, with Ada's notes as they are, and none of Bo's other changes.
-    const merged = await mergeCommits(new Git(dir), ada, bo, { ...opts(dir), keep });
-    expect(merged.kind).toBe('merge');
-    expect(merged.kept?.sort()).toEqual(['gone.md', 'new.md', 'notes.md']);
-    expect(show(dir, `${merged.commit}:notes.md`)).toContain('far out');
-    expect(show(dir, `${merged.commit}:notes.md`)).not.toContain('poured');
-    expect(git(dir, 'ls-tree', '--name-only', merged.commit).split('\n').sort()).toEqual(['gone.md', 'notes.md', 'plot.png']);
-    // Bo's history is in it: merging Bo's work again changes nothing.
-    expect(git(dir, 'merge-base', '--is-ancestor', bo, merged.commit)).toBe('');
-    expect((await mergeCommits(new Git(dir), merged.commit, bo, { ...opts(dir), keep })).kind).toBe('same');
-    expect(git(dir, 'log', '-1', '--format=%B', merged.commit)).toContain('Kept this version of notes.md');
-    // Work that would fast-forward: a merge instead, so what is kept stays.
-    const base = git(dir, 'rev-parse', 'main');
-    const ahead = await mergeCommits(new Git(dir), base, bo, { ...opts(dir), keep });
-    expect(ahead.kind).toBe('merge');
-    expect(show(dir, `${ahead.commit}:notes.md`)).not.toContain('poured');
-    expect(git(dir, 'merge-base', '--is-ancestor', bo, ahead.commit)).toBe('');
-    // Nothing declined: as before.
-    expect((await mergeCommits(new Git(dir), base, bo, { ...opts(dir), keep: () => false })).kind).toBe('fast-forward');
-  });
-
   it('merges documents by words, keeps a clash as a conflict block, and makes the same commit either way round', async () => {
     const dir = repo();
     const ada = branch(dir, 'ada', 'Ada', { 'notes.md': '# Notes\n\nThe tide was far out.\n\nWe counted 40 crabs.\n\nIt rained.\n' });
@@ -134,6 +108,7 @@ describe('Sync', () => {
     dirs.push(remote, work);
     execFileSync('git', ['clone', '-q', '--bare', dir, remote]);
     git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'config', '--add', 'kuraa.online', 'origin');
     execFileSync('git', ['clone', '-q', remote, work]);
     writeFileSync(join(work, 'notes.md'), readFileSync(join(work, 'notes.md'), 'utf8').replace('It rained.', 'It rained all day.'));
     git(work, '-c', 'user.name=Bo', '-c', 'user.email=bo@example.org', 'commit', '-q', '-am', 'Edit elsewhere');

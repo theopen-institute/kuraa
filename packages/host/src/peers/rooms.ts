@@ -10,20 +10,15 @@
 // every device in the end shares the lowest seed among them, and nothing is
 // lost (Host.adoptRoom).
 //
-// A device takes another's live edits to a document only if it would accept
-// that device's commits to it (accept.ts): otherwise the room would be a way
-// round its rules. It sends its own edits to every device with the room open;
-// each takes them or not by its own rules. So devices that accept each other
-// hold the same room, and the lowest key among them commits it (Host.commitNow
-// asks `commits`); the others write the file but leave committing to it, and its
-// commit reaches them within moments. A device none of the others there accepts
-// commits only what was edited on it. Every device knows the others' rules
-// (published as records), so they agree without any setting they share.
+// Every device takes every member's live edits (0038). Of the devices with a
+// room open, the one with the lowest key commits it (Host.commitNow asks
+// `commits`); the others write the file but leave committing to it, and its
+// commit reaches them within moments. Every device sees the same devices in the
+// room, so they agree without any setting they share.
 import type { PresenceUser } from '@kuraa/session/server';
 import type { Host, RoomView } from '../host.js';
 import type { PeerLink } from './link.js';
 import type { PeerNode } from './node.js';
-import { EVERYONE, acceptsPath, commitsRoom, type AcceptRules, type AcceptRule } from './accept.js';
 
 /** Bytes: as they are on the rooms channel, base64 from a device that has only the control channel (link.ts). */
 type Bytes = Uint8Array | string;
@@ -48,14 +43,6 @@ export class Rooms {
   /** What each device has open: device key → room key → seed. */
   private readonly remote = new Map<string, Map<string, string>>();
   private readonly stops: (() => void)[] = [];
-  /**
-   * What this device knows of everyone's rules (accept.ts) and who each device is
-   * (its key, and its person's): read again when a device connects, records come
-   * in, or the rules change (refresh), so room messages are judged at once.
-   */
-  private mine: AcceptRules = EVERYONE;
-  private readonly theirs = new Map<string, AcceptRule[] | undefined>();
-  private readonly who = new Map<string, string[]>();
   /**
    * Rooms this device has sent to another to take (room key → that device's
    * key), until it opens them again from this one's seed. Meanwhile the room is
@@ -94,34 +81,8 @@ export class Rooms {
     return { type: 'room', op: 'open', key: room.key, seed: room.seed, sv: this.host.sessionRelay.stateVector(room.name) ?? EMPTY, people: this.host.roomContributors(room.name) };
   }
 
-  async refresh(): Promise<void> {
-    const id = this.node.identity;
-    this.mine = await id.rules();
-    this.who.set(this.node.myKey, await id.identitiesOf(this.node.myKey));
-    for (const link of this.node.links.values()) {
-      if (!link.accepted) continue;
-      this.theirs.set(link.key, (await id.rulesOf(link.key))?.rules);
-      this.who.set(link.key, await id.identitiesOf(link.key));
-    }
-  }
-
-  private whoIs(key: string): string[] {
-    return this.who.get(key) ?? [key];
-  }
-
-  /** Whether this device takes the device's edits to the room's document. */
-  private takesFrom(link: PeerLink, room: RoomView): boolean {
-    return acceptsPath(this.mine.rules, this.whoIs(link.key), room.branch, room.path);
-  }
-
-  /** Whether the device takes this one's edits to the room's document, as its rules say. */
-  private takenBy(link: PeerLink, room: RoomView): boolean {
-    return acceptsPath(this.theirs.get(link.key), this.whoIs(this.node.myKey), room.branch, room.path);
-  }
-
   /** A device connected: tell it which rooms are open here. */
   connected(link: PeerLink): void {
-    void this.refresh().catch((e: Error) => this.host.log(`peers: rules not read: ${e.message}`));
     if (link.hello?.workspace !== this.node.ws.id) return;
     for (const room of this.host.liveRooms()) this.send(link, this.openMessage(room));
   }
@@ -179,17 +140,16 @@ export class Rooms {
           // A room handed over is theirs now too.
           if (this.handedTo.get(room.key) === link.key) this.handedTo.delete(room.key);
           // Who edited it there since its last commit: credited by whichever device commits.
-          const takes = this.takesFrom(link, room);
-          if (takes && Array.isArray(m.people)) this.host.addContributors(room.name, m.people);
-          if (takes && m.op === 'sync') relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, null);
+          if (Array.isArray(m.people)) this.host.addContributors(room.name, m.people);
+          if (m.op === 'sync') relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, null);
           const update = relay.diff(room.name, bytesOf(m.sv));
           if (m.op === 'open') this.send(link, { type: 'room', op: 'sync', key: room.key, seed: room.seed, sv: relay.stateVector(room.name) ?? EMPTY, update: update ?? EMPTY, people: this.host.roomContributors(room.name) });
           else if (update) this.send(link, { type: 'room', op: 'update', key: room.key, update });
           const people = relay.awarenessState(room.name);
           if (people) this.send(link, { type: 'room', op: 'awareness', key: room.key, update: people });
         } else if (String(m.seed) < room.seed) {
-          // Theirs is the room to share: take it, with what this one has brought in (if this one takes their edits at all).
-          if (this.takesFrom(link, room)) this.send(link, { type: 'room', op: 'want', key: room.key });
+          // Theirs is the room to share: take it, with what this one has brought in.
+          this.send(link, { type: 'room', op: 'want', key: room.key });
         } else if (m.op === 'open') {
           // This one is: make sure they know of it, so they ask for it.
           this.send(link, this.openMessage(room));
@@ -204,7 +164,7 @@ export class Rooms {
         }
         return;
       case 'update':
-        if (room && theirs.get(m.key) === room.seed && this.takesFrom(link, room)) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, m.by ?? null);
+        if (room && theirs.get(m.key) === room.seed) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, m.by ?? null);
         return;
       case 'awareness':
         if (room && theirs.get(m.key) === room.seed) relay.applyPeerAwareness(room.name, bytesOf(m.update), link.key);
@@ -224,7 +184,7 @@ export class Rooms {
         return;
       }
       case 'state': {
-        if (!room || !(String(m.seed) < room.seed) || !this.takesFrom(link, room)) return;
+        if (!room || !(String(m.seed) < room.seed)) return;
         const base = typeof m.base === 'string' && /^[0-9a-f]{40,64}$/.test(m.base) ? m.base : null;
         void (async () => {
           // Their room's starting commit is needed to merge from where the two meet: fetch it if it is not here yet.
@@ -238,8 +198,7 @@ export class Rooms {
 
   /**
    * Rooms open both here and on the device from different seeds, where one will
-   * take the other's (the one with the higher seed, if it takes the other's
-   * edits), or handed to it and not yet taken.
+   * take the other's (the one with the higher seed), or handed to it and not yet taken.
    */
   private unsettled(link: PeerLink): boolean {
     if ([...this.handedTo.values()].includes(link.key)) return true;
@@ -247,14 +206,13 @@ export class Rooms {
     if (!theirs) return false;
     return this.host.liveRooms().some((r) => {
       const seed = theirs.get(r.key);
-      if (seed === undefined || seed === r.seed) return false;
-      return seed < r.seed ? this.takesFrom(link, r) : this.takenBy(link, r);
+      return seed !== undefined && seed !== r.seed;
     });
   }
 
-  /** Whether the room here holds the device's edits too: shared with it (or handed to it to take), and this device takes its edits. */
+  /** Whether the room here holds the device's edits too: shared with it, or handed to it to take. */
   private sharedWith(link: PeerLink, room: RoomView): boolean {
-    return (this.remote.get(link.key)?.get(room.key) === room.seed || this.handedTo.get(room.key) === link.key) && this.takesFrom(link, room);
+    return this.remote.get(link.key)?.get(room.key) === room.seed || this.handedTo.get(room.key) === link.key;
   }
 
   /**
@@ -283,15 +241,11 @@ export class Rooms {
     return this.override(link)(path) !== undefined;
   }
 
-  /** Whether this device commits the room (accept.ts, commitsRoom). */
+  /** Whether this device commits the room: it has the lowest key of the devices with it open. */
   commits(name: string): boolean {
     const room = this.host.roomView(name);
     if (!room) return true;
-    const peers = this.peersIn(room);
-    if (!peers.length) return true;
-    const me = { key: this.node.myKey, who: this.whoIs(this.node.myKey), rules: this.mine.rules };
-    const others = peers.map((l) => ({ key: l.key, who: this.whoIs(l.key), rules: this.theirs.get(l.key) }));
-    return commitsRoom(me, others, room.branch, room.path, this.host.localEditsIn(name));
+    return this.peersIn(room).every((l) => this.node.myKey < l.key);
   }
 
   close(): void {

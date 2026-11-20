@@ -10,7 +10,7 @@ export { defaultDataDir, type RunOptions, type RunDescription } from './runner.j
 export { loadRunComponents, type RunComponents } from './components.js';
 export type { JoinOptions } from './peers/join.js';
 export { Hub, startHub, slugOf, type HubOptions, type HubWorkspace, type RunningHub } from './hub.js';
-export type { PeerOptions, PeersStatus, DeviceInfo, Proposal } from './peers/peers.js';
+export type { PeerOptions, PeersStatus, DeviceInfo, LinkInfo } from './peers/peers.js';
 
 /** A person's key on this computer: make, read, export, import (peers/person.ts; loaded only when called). */
 export function personKeys() {
@@ -18,7 +18,7 @@ export function personKeys() {
 }
 export type { Person } from './peers/person.js';
 
-/** Join a workspace from an invitation (loads the peer layer, and Hyperswarm with it, only when called). */
+/** Join a workspace from an invite link (loads the peer layer, and Hyperswarm with it, only when called). */
 export async function joinWorkspace(o: import('./peers/join.js').JoinOptions) {
   return (await import('./peers/join.js')).joinWorkspace(o);
 }

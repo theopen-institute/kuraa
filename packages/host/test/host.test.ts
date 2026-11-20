@@ -229,10 +229,11 @@ describe('host', () => {
       const bad = running.url.replace('://', '://kuraa:nope@') + '/git';
       await expect(gitAsync(tmpdir(), 'ls-remote', bad)).rejects.toThrow();
 
-      // The host can also sync with a sync remote: here, the clone as a bare mirror.
+      // The host can also sync with an online copy: here, the clone as a bare mirror, an existing remote named as one.
       const syncRemote = mkdtempSync(join(tmpdir(), 'kuraa-remote-'));
       execFileSync('git', ['clone', '-q', '--bare', dir, syncRemote]);
       git(dir, 'remote', 'add', 'origin', syncRemote);
+      git(dir, 'config', '--add', 'kuraa.online', 'origin');
       const work = mkdtempSync(join(tmpdir(), 'kuraa-work-'));
       execFileSync('git', ['clone', '-q', syncRemote, work]);
       git(work, 'config', 'user.name', 'Elsewhere');
@@ -406,62 +407,74 @@ describe('this computer’s person’s key, through the host', () => {
   });
 });
 
-describe('backups: git servers pushed to, and nothing more', () => {
-  it('push each save to a backup, never take anything from it, and say when it has work this device lacks', async () => {
-    const bare = mkdtempSync(join(tmpdir(), 'kuraa-backup-'));
+describe('the online copy: a git server each save is pushed to, and work is fetched and merged from', () => {
+  it('push each save, and when another device pushed first, fetch, merge and push, never forcing', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'kuraa-online-'));
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare });
-    const dir = mkdtempSync(join(tmpdir(), 'kuraa-backed-'));
-    const own = await startHost({ dir, init: true, manageBackups: true, timings: { flushMs: 100, idleCommitMs: 300, maxCommitMs: 3000, dropMs: 300, backupMs: 200 } });
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-copied-'));
+    const own = await startHost({ dir, init: true, manageOnline: true, timings: { flushMs: 100, idleCommitMs: 300, maxCommitMs: 3000, dropMs: 300, onlineMs: 200 } });
     const shared = await startHost({ dir: mkdtempSync(join(tmpdir(), 'kuraa-shared-')), init: true });
     try {
       const call = (h: RunningHost, path: string, init: RequestInit = {}) => fetch(h.url + path, { ...init, headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' } });
-      const list = async () => ((await (await call(own, '/api/backups')).json()) as { backups: { name: string; url: string; lastPush: string | null; error: string | null }[] }).backups;
+      const list = async () => ((await (await call(own, '/api/online')).json()) as { copies: { name: string; url: string; lastSync: string | null; error: string | null }[] }).copies;
       const branch = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
-      const backedUp = () => execFileSync('git', ['log', '--format=%s', branch], { cwd: bare, encoding: 'utf8' }).trim();
+      const there = () => execFileSync('git', ['log', '--format=%s', branch], { cwd: bare, encoding: 'utf8' }).trim();
+      const here = () => execFileSync('git', ['log', '--format=%s'], { cwd: dir, encoding: 'utf8' });
 
-      // Added by its address: pushed to at once.
-      expect((await call(own, '/api/backups', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(201);
-      await until(async () => (await list())[0]?.lastPush !== null, 10_000, 'the first push');
-      expect(backedUp()).toBe('Initialise workspace');
+      // Added by its address: synced with at once.
+      expect((await call(own, '/api/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(201);
+      await until(async () => (await list())[0]?.lastSync !== null, 10_000, 'the first push');
+      expect(there()).toBe('Initialise workspace');
       // Each save follows, a moment later.
       expect((await call(own, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'notes.md', content: '# Notes\n' }) })).status).toBe(201);
-      await until(() => backedUp().startsWith('Create notes.md'), 10_000, 'the save backed up');
-      // Sync never takes a backup for its sync remote: nothing comes back from it.
-      expect(await own.host.syncRemoteName()).toBeNull();
+      await until(() => there().startsWith('Create notes.md'), 10_000, 'the save pushed');
 
-      // Work there that this device lacks (another device pushed first): the push is refused, never forced, and said.
+      // Another device pushed first: the next push is refused, so this one fetches, merges and pushes. Nothing is forced.
       const elsewhere = mkdtempSync(join(tmpdir(), 'kuraa-elsewhere-'));
       execFileSync('git', ['clone', '-q', '-b', branch, bare, elsewhere]);
-      execFileSync('git', ['-c', 'user.name=Bo', '-c', 'user.email=bo@example.org', 'commit', '-q', '--allow-empty', '-m', 'From another device'], { cwd: elsewhere });
-      execFileSync('git', ['push', '-q', 'origin', `HEAD:${branch}`], { cwd: elsewhere });
+      const commitThere = (path: string, message: string) => {
+        execFileSync('git', ['pull', '-q', '--ff-only', 'origin', branch], { cwd: elsewhere });
+        writeFileSync(join(elsewhere, path), `${message}\n`);
+        execFileSync('git', ['add', '-A'], { cwd: elsewhere });
+        execFileSync('git', ['-c', 'user.name=Bo', '-c', 'user.email=bo@example.org', 'commit', '-q', '-m', message], { cwd: elsewhere });
+        execFileSync('git', ['push', '-q', 'origin', `HEAD:${branch}`], { cwd: elsewhere });
+      };
+      commitThere('bo.md', 'From another device');
+      const theirs = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: elsewhere, encoding: 'utf8' }).trim();
       expect((await call(own, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'more.md', content: '# More\n' }) })).status).toBe(201);
-      await call(own, '/api/backups/now', { method: 'POST' });
-      expect((await list())[0]!.error).toContain('work this device does not have yet');
-      expect(backedUp()).toContain('From another device');
-      expect(existsSync(join(dir, 'more.md'))).toBe(true);
-      expect(execFileSync('git', ['log', '--format=%s'], { cwd: dir, encoding: 'utf8' })).not.toContain('From another device');
+      await until(() => there().includes('Create more.md') && existsSync(join(dir, 'bo.md')), 15_000, 'merged both ways');
+      expect(here()).toContain('From another device');
+      execFileSync('git', ['merge-base', '--is-ancestor', theirs, branch], { cwd: bare });
+      expect((await list())[0]!.error).toBeNull();
 
-      // A shared host: everyone sees backups and may ask for a push; adding and removing are its operator's.
-      expect((await call(shared, '/api/backups')).status).toBe(200);
-      expect((await call(shared, '/api/backups', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(403);
+      // Sync fetches and merges too, with no save here.
+      commitThere('bo2.md', 'More from another device');
+      const sync = (await (await call(own, '/api/sync', { method: 'POST' })).json()) as { ok: boolean; message: string };
+      expect(sync.ok).toBe(true);
+      expect(sync.message).toMatch(/^Synced with online-/);
+      expect(existsSync(join(dir, 'bo2.md'))).toBe(true);
+
+      // A shared host: everyone sees the online copy (Sync uses it); adding and removing are its operator's.
+      expect((await call(shared, '/api/online')).status).toBe(200);
+      expect((await call(shared, '/api/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(403);
 
       // Removed: the remote made for it goes; the repository there stays as it is.
       const { name } = (await list())[0]!;
-      expect((await call(own, `/api/backups/${name}`, { method: 'DELETE' })).status).toBe(200);
+      expect((await call(own, `/api/online/${name}`, { method: 'DELETE' })).status).toBe(200);
       expect(await list()).toEqual([]);
       expect(execFileSync('git', ['remote'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
-      expect(backedUp()).toContain('From another device');
+      expect(there()).toContain('From another device');
     } finally {
       await own.close();
       await shared.close();
     }
   });
 
-  it('show addresses without the passwords in them, and name backups after them', async () => {
-    const { shownUrl, backupName } = await import('../src/backups.js');
+  it('show addresses without the passwords in them, and name copies after them', async () => {
+    const { shownUrl, copyName } = await import('../src/backups.js');
     expect(shownUrl('https://ada:s3cret@github.com/ada/notes.git')).toBe('https://github.com/ada/notes.git');
     expect(shownUrl('git@github.com:ada/notes.git')).toBe('git@github.com:ada/notes.git');
-    expect(backupName('git@github.com:ada/notes.git')).toBe('backup-ada-notes');
-    expect(backupName('https://gitlab.com/team/field-notes')).toBe('backup-team-field-notes');
+    expect(copyName('git@github.com:ada/notes.git')).toBe('online-ada-notes');
+    expect(copyName('https://gitlab.com/team/field-notes')).toBe('online-team-field-notes');
   });
 });

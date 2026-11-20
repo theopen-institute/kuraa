@@ -167,8 +167,8 @@ async function ensureHub(): Promise<RunningHub> {
     host: '127.0.0.1',
     port: 0,
     // What runs and which formats are on: this app's flags.
-    // This app is its own operator: the person using it sets up backups, with their own git credentials.
-    hosts: { run: runOptions(), formats: list(flags.format), timings: timings(), manageBackups: true },
+    // This app is its own operator: the person using it sets up the online copy, with their own git credentials.
+    hosts: { run: runOptions(), formats: list(flags.format), timings: timings(), manageOnline: true },
     peers: { everywhere: flags.peer === true || preferences.syncDevices },
     log: (m) => console.log(`[hub] ${m}`),
   });

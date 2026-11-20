@@ -96,8 +96,8 @@ const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
   flag, dir, '--port', String(hostPort), '--host', '127.0.0.1',
   '--engine', 'r', '--allow-installs',
-  // Your own computer: the browser may manage your keys (person.ts) and backups, as the desktop app's menu does.
-  '--manage-person', '--manage-backups',
+  // Your own computer: the browser may manage your keys (person.ts) and online copies, as the desktop app's menu does.
+  '--manage-person', '--manage-online',
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
 ], { KURAA_TOKEN: token });

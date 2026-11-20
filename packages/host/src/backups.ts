@@ -1,29 +1,34 @@
-// Backups (docs/decisions/0036-backups.md): plain git servers (GitHub, GitLab,
-// any git host, or a folder) that this workspace's branches are pushed to, and
-// nothing more. Never fetched from or merged: a backup receives, it never sends
-// anything back. Never forced: a backup with work this device lacks (another of
-// the person's devices pushed first) refuses the push, which is said, and done
-// again once this device has that work.
+// Online copies (docs/decisions/0039-online-copy.md): plain git servers (GitHub,
+// GitLab, any git host, or a folder) that this workspace keeps a copy on, so
+// devices that cannot reach each other directly still meet there.
 //
-// Kept in the repository's git config: `kuraa.backup` names the remotes; a
-// backup added by address gets a remote of its own (`backup-<name>`), taken
-// away with it. Pushed after commits (a while after the last), at start, and on
-// request; with the person's own git credentials (SSH keys, a credential helper),
-// never asking for any.
+// - Each save is pushed to it (a while after the last), and so is everything
+//   at start.
+// - On Sync, and every few minutes, it is fetched from, its branches are merged
+//   in (the same merges every device makes, merging.ts), and the result pushed.
+// - A push refused because the copy moved (another device pushed first) is
+//   followed by the same: fetch, merge, push. Never forced.
+//
+// Kept in the repository's git config: `kuraa.online` names the remotes; one
+// added by address gets a remote of its own (`online-<owner>-<name>`), taken
+// away with it. Network calls run in one place (`network`), outside the host's
+// queue of git work, with the person's own git credentials (SSH keys, a
+// credential helper), never asking for any and never waiting forever; only the
+// merge runs in the queue (`bringIn`).
 import { devNull } from 'node:os';
 import type { Git } from './git.js';
 
-export interface BackupStatus {
-  /** The git remote it is pushed to. */
+export interface OnlineCopyStatus {
+  /** The git remote it is. */
   name: string;
   /** Where, with any password in it left out. */
   url: string;
-  /** When it last took everything (ISO), if it has. */
-  lastPush: string | null;
-  /** Why the last push did not go through, if it did not. */
+  /** When this device and it last had the same work (ISO), if they have. */
+  lastSync: string | null;
+  /** Why the last sync with it did not go through, if it did not. */
   error: string | null;
-  /** A push is under way. */
-  pushing: boolean;
+  /** Syncing with it now. */
+  busy: boolean;
 }
 
 /** An address as it may be shown: no user:password@ in it. */
@@ -31,117 +36,200 @@ export function shownUrl(url: string): string {
   return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, '$1');
 }
 
-/** A remote name from an address: github.com/ada/notes → backup-ada-notes. */
-export function backupName(url: string): string {
+/** A remote name from an address: github.com/ada/notes → online-ada-notes. */
+export function copyName(url: string): string {
   const tail = shownUrl(url).replace(/\.git$/, '').split(/[/:]/).filter(Boolean).slice(-2).join('-');
   const slug = tail.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  return `backup-${slug || 'remote'}`;
+  return `online-${slug || 'copy'}`;
 }
 
-export class Backups {
-  private readonly status = new Map<string, { lastPush: string | null; error: string | null; pushing: boolean }>();
+/** How long one fetch or push may take. */
+const NETWORK_MS = 10 * 60_000;
+/** How many times a push refused because the copy moved is tried again (after fetching and merging). */
+const TRIES = 3;
+
+export interface OnlineOptions {
+  /** Push this long after the last save. */
+  delayMs: number;
+  /** Fetch, merge and push this often (0: never on its own). */
+  everyMs: number;
+  log: (m: string) => void;
+  /**
+   * Bring the copy's branches (fetched into refs/remotes/<name>/) into this
+   * repository's, merging as every device does, in turn with the host's other
+   * git work. Returns what the merge into the open branch kept, to say.
+   * Without it (the command line), work on the copy is left for a host to bring in.
+   */
+  bringIn?: (name: string) => Promise<string>;
+}
+
+export class OnlineCopies {
+  private readonly status = new Map<string, { lastSync: string | null; error: string | null; busy: boolean }>();
+  /** One sync per copy at a time. */
+  private readonly running = new Map<string, Promise<string | null>>();
   private timer: NodeJS.Timeout | undefined;
+  private every: NodeJS.Timeout | undefined;
   private closed = false;
 
-  constructor(private readonly git: Git, private readonly o: { delayMs: number; log: (m: string) => void; serial: <T>(fn: () => Promise<T>) => Promise<T> }) {}
+  constructor(private readonly git: Git, private readonly o: OnlineOptions) {}
 
-  /** The remotes that are backups. */
+  /** Fetch, merge and push every few minutes, so work pushed by others comes in without a save here. */
+  start(): void {
+    if (!this.o.everyMs || this.every) return;
+    this.every = setInterval(() => void this.syncAll().catch(() => undefined), this.o.everyMs);
+    this.every.unref?.();
+  }
+
+  /** The remotes that are online copies. */
   async names(): Promise<string[]> {
-    const r = await this.git.run(['config', '--get-all', 'kuraa.backup'], { allowFail: true });
+    const r = await this.git.run(['config', '--get-all', 'kuraa.online'], { allowFail: true });
     return r.code === 0 ? [...new Set(r.stdout.split('\n').map((s) => s.trim()).filter(Boolean))] : [];
   }
 
-  private async remotes(): Promise<string[]> {
-    return (await this.git.out(['remote'])).split('\n').filter(Boolean);
-  }
-
-  async list(): Promise<BackupStatus[]> {
-    const out: BackupStatus[] = [];
-    for (const name of await this.names()) {
-      const url = (await this.git.run(['remote', 'get-url', name], { allowFail: true })).stdout.trim();
-      const s = this.status.get(name) ?? { lastPush: null, error: null, pushing: false };
-      out.push({ name, url: shownUrl(url), ...s });
+  private async remotes(): Promise<Map<string, string>> {
+    const r = await this.git.run(['config', '--get-regexp', '^remote\\..*\\.url$'], { allowFail: true });
+    const out = new Map<string, string>();
+    for (const line of r.stdout.split('\n')) {
+      const m = /^remote\.(.+)\.url (.*)$/.exec(line.trim());
+      if (m) out.set(m[1]!, m[2]!);
     }
     return out;
   }
 
+  async list(): Promise<OnlineCopyStatus[]> {
+    const remotes = await this.remotes();
+    return (await this.names()).map((name) => ({ name, url: shownUrl(remotes.get(name) ?? ''), ...(this.status.get(name) ?? { lastSync: null, error: null, busy: false }) }));
+  }
+
   /**
-   * Add a backup: an existing remote by its name, or an address (a remote of its
-   * own is made for it). It is pushed to at once. Returns its remote's name.
+   * Add an online copy: an existing remote, by its name or address, or an
+   * address (a remote of its own is made for it). It is synced with at once.
+   * Returns its remote's name.
    */
   async add(target: string): Promise<string> {
     const t = target.trim();
     if (!t) throw new Error('Give the address of a git repository (or the name of a remote)');
-    if (t.startsWith('kuraa://')) throw new Error('That is a device of this workspace: devices sync with each other already');
-    let name = t;
-    if (!(await this.remotes()).includes(t)) {
-      name = backupName(t);
-      for (let i = 2; (await this.remotes()).includes(name); i++) name = `${backupName(t)}-${i}`;
+    const device = 'That is a device of this workspace: devices sync with each other already';
+    if (t.startsWith('kuraa://')) throw new Error(device);
+    const remotes = await this.remotes();
+    let name = remotes.has(t) ? t : [...remotes].find(([, url]) => url === t)?.[0];
+    if (name && remotes.get(name)!.startsWith('kuraa://')) throw new Error(device);
+    if (!name) {
+      name = copyName(t);
+      for (let i = 2; remotes.has(name); i++) name = `${copyName(t)}-${i}`;
       await this.git.run(['remote', 'add', name, t]);
-      await this.git.run(['config', `remote.${name}.kuraabackup`, 'true']);
-    } else if ((await this.git.run(['remote', 'get-url', t])).stdout.trim().startsWith('kuraa://')) {
-      throw new Error('That is a device of this workspace: devices sync with each other already');
+      await this.git.run(['config', `remote.${name}.kuraaonline`, 'true']);
     }
-    if (!(await this.names()).includes(name)) await this.git.run(['config', '--add', 'kuraa.backup', name]);
-    void this.push(name).catch(() => undefined);
+    if (!(await this.names()).includes(name)) await this.git.run(['config', '--add', 'kuraa.online', name]);
+    void this.sync(name).catch(() => undefined);
     return name;
   }
 
-  /** No longer a backup. A remote made for it goes too; one that was there before stays. The repository there is not touched. */
+  /** No longer an online copy. A remote made for it goes too; one that was there before stays. The repository there is not touched. */
   async remove(name: string): Promise<void> {
-    if (!(await this.names()).includes(name)) throw new Error(`No backup called ${name}`);
-    await this.git.run(['config', '--unset-all', 'kuraa.backup', `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`], { allowFail: true });
-    if ((await this.git.run(['config', `remote.${name}.kuraabackup`], { allowFail: true })).stdout.trim() === 'true') {
+    if (!(await this.names()).includes(name)) throw new Error(`No online copy called ${name}`);
+    await this.git.run(['config', '--unset-all', 'kuraa.online', `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`], { allowFail: true });
+    if ((await this.git.run(['config', `remote.${name}.kuraaonline`], { allowFail: true })).stdout.trim() === 'true') {
       await this.git.run(['remote', 'remove', name], { allowFail: true });
     }
     this.status.delete(name);
   }
 
-  /** Something was committed: push to every backup a while after the last such. */
+  /** Something was committed: push to every online copy a while after the last such. */
   changed(): void {
     if (this.closed) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.pushAll().catch(() => undefined), this.o.delayMs);
+    this.timer = setTimeout(() => {
+      void this.names().then((names) => Promise.all(names.map((n) => this.sync(n, false)))).catch(() => undefined);
+    }, this.o.delayMs);
     this.timer.unref?.();
   }
 
-  async pushAll(): Promise<BackupStatus[]> {
-    for (const name of await this.names()) await this.push(name);
-    return this.list();
+  /** Sync with every online copy: fetch, merge, push. What each brought (or why it did not go through). */
+  async syncAll(): Promise<{ ok: boolean; messages: string[] }> {
+    const names = await this.names();
+    const said = await Promise.all(names.map(async (name) => ({ name, said: await this.sync(name) })));
+    const messages = said.map(({ name, said }) => {
+      const s = this.status.get(name);
+      return s?.error ? `${name}: ${s.error}` : (said ?? `Synced with ${name}`);
+    });
+    return { ok: names.every((n) => !this.status.get(n)?.error), messages };
   }
 
   /**
-   * Push every branch to a backup: only what comes on top of what it has (never
-   * forced), with the person's own credentials, and no prompting for any.
+   * Sync with one online copy: fetch it and bring its work in (unless only
+   * pushing, after a save), then push every branch. A push refused because the
+   * copy moved is followed by fetch, merge and push again: never forced.
+   * Returns what it said, or null if it did not go through (see list()).
    */
-  async push(name: string): Promise<void> {
-    const s = this.status.get(name) ?? { lastPush: null, error: null, pushing: false };
+  sync(name: string, fetchFirst = true): Promise<string | null> {
+    const before = this.running.get(name) ?? Promise.resolve(null);
+    const run = before.catch(() => null).then(() => this.syncNow(name, fetchFirst));
+    this.running.set(name, run);
+    void run.finally(() => {
+      if (this.running.get(name) === run) this.running.delete(name);
+    });
+    return run;
+  }
+
+  private async syncNow(name: string, fetchFirst: boolean): Promise<string | null> {
+    if (this.closed) return null;
+    const s = this.status.get(name) ?? { lastSync: null, error: null, busy: false };
     this.status.set(name, s);
-    s.pushing = true;
+    s.busy = true;
+    const fail = (why: string) => {
+      s.error = why;
+      this.o.log(`online copy ${name}: ${why}`);
+      return null;
+    };
     try {
-      // In turn with commits and merges, so the branches do not move underneath.
-      const r = await this.o.serial(() => this.git.run(
-        ['-c', `core.hooksPath=${devNull}`, 'push', '--porcelain', name, 'refs/heads/*:refs/heads/*'],
-        { allowFail: true, timeoutMs: 10 * 60_000, env: { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes' } },
-      ));
-      const rejected = r.stdout.split('\n').filter((l) => l.startsWith('!'));
-      if (r.code === 0 && !rejected.length) {
-        s.lastPush = new Date().toISOString();
-        s.error = null;
-      } else if (rejected.length && rejected.every((l) => /\[rejected\]|non-fast-forward|fetch first/.test(l))) {
-        s.error = 'It has work this device does not have yet (from another of your devices): it is backed up once this device has it.';
-      } else {
-        const why = (r.stderr || r.stdout).trim().split('\n').filter((l) => !l.startsWith('To ')).slice(-2).join(' ');
-        s.error = `${why || 'The push did not go through'}. Backups use your own git credentials (an SSH key, or a credential helper for https).`;
+      let said = '';
+      for (let i = 0; i < TRIES; i++) {
+        if (fetchFirst || i > 0) {
+          const f = await this.network(['fetch', '--prune', '--no-write-fetch-head', name, `+refs/heads/*:refs/remotes/${name}/*`]);
+          if (f.code !== 0) return fail(gitSays(f));
+          said = (await this.o.bringIn?.(name)) ?? '';
+        }
+        const p = await this.network(['push', '--porcelain', name, 'refs/heads/*:refs/heads/*']);
+        const rejected = p.stdout.split('\n').filter((l) => l.startsWith('!'));
+        if (p.code === 0 && !rejected.length) {
+          s.lastSync = new Date().toISOString();
+          s.error = null;
+          return `Synced with ${name}${said}`;
+        }
+        // Moved since this device last fetched: fetch, merge and push again.
+        if (!rejected.length || !rejected.every((l) => /\[rejected\]|non-fast-forward|fetch first/.test(l))) return fail(gitSays(p));
+        if (!this.o.bringIn) return fail('It has work this device does not have yet: the host brings it in when it next syncs.');
       }
-      if (s.error) this.o.log(`backup ${name}: ${s.error}`);
+      return fail('It kept changing while this device synced with it; this device tries again after its next save.');
+    } catch (e) {
+      return fail((e as Error).message);
     } finally {
-      s.pushing = false;
+      s.busy = false;
     }
+  }
+
+  /**
+   * The one place this talks to a git server: hooks off, with the person's own
+   * credentials and never a prompt for any (SSH in batch mode), and a time limit.
+   */
+  private network(args: string[]) {
+    return this.git.run(['-c', `core.hooksPath=${devNull}`, ...args], {
+      allowFail: true,
+      timeoutMs: NETWORK_MS,
+      env: { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes' },
+    });
   }
 
   close(): void {
     this.closed = true;
     clearTimeout(this.timer);
+    clearInterval(this.every);
   }
+}
+
+/** Git's own answer, shortened, and where credentials come from. */
+function gitSays(r: { stdout: string; stderr: string }): string {
+  const why = (r.stderr || r.stdout).trim().split('\n').filter((l) => !l.startsWith('To ') && l !== 'Done').slice(-2).join(' ');
+  return `${why || 'It did not go through'}. Online copies use your own git credentials (an SSH key, or a credential helper for https).`;
 }

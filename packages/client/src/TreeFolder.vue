@@ -70,7 +70,8 @@ const tip = (f: TreeFile) => {
         v-if="f.conflicts"
         class="tree-conflict"
         :data-testid="`conflicts:${f.path}`"
-        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between`"
+        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between. Click to go to the first`"
+        @click.stop="t.showConflicts(f.path)"
       >{{ f.conflicts }} conflict{{ f.conflicts === 1 ? '' : 's' }}</span>
     </button>
     <span class="tree-actions">

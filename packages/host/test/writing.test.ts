@@ -66,7 +66,7 @@ describe('writing: images and files', () => {
   });
 
   it('keeps an image in images/ beside the document, with a safe name, committed', async () => {
-    const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}&by=Ada&email=ada@example.org`, { method: 'POST', body });
+    const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}&by=Ada&email=ada@example.org`, { method: 'POST', body: new Uint8Array(body) });
     const first = await add('My Plot (final).PNG', PNG);
     expect(first.status).toBe(201);
     expect(await first.json()).toEqual({ path: 'chapters/images/my-plot-final.png', src: 'images/my-plot-final.png' });
@@ -82,7 +82,7 @@ describe('writing: images and files', () => {
   });
 
   it('refuses what is not an image, too large, or for a document outside the workspace', async () => {
-    const post = (q: string, body: Buffer) => call(`/api/images?${q}`, { method: 'POST', body });
+    const post = (q: string, body: Buffer) => call(`/api/images?${q}`, { method: 'POST', body: new Uint8Array(body) });
     expect((await post('doc=chapters/one.md&name=x.png', Buffer.from('<html><script>alert(1)</script>'))).status).toBe(415);
     expect((await post('doc=chapters/one.md&name=x.png', Buffer.alloc(0))).status).toBe(400);
     expect((await post('doc=chapters/one.md&name=x.png', Buffer.concat([PNG, Buffer.alloc(20 * 1024 * 1024)]))).status).toBe(413);

@@ -25,9 +25,6 @@ const TYPES: Record<string, string> = {
   txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', json: 'application/json',
 };
 
-/** Images that may be added, by extension: what every browser shows, and SVG (only ever shown as an image). */
-const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
-
 const send = (c: Context, status: number, body: unknown) => {
   c.res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   c.res.end(JSON.stringify(body));
@@ -62,7 +59,7 @@ export function sniffImage(bytes: Buffer): string | null {
   if (hex.startsWith('ffd8ff')) return 'jpg';
   if (hex.startsWith('474946383761') || hex.startsWith('474946383961')) return 'gif';
   if (hex.startsWith('52494646') && bytes.subarray(8, 12).toString('latin1') === 'WEBP') return 'webp';
-  const head = bytes.subarray(0, 4096).toString('utf8').replace(/^﻿/, '').trimStart();
+  const head = bytes.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '').trimStart();
   if ((head.startsWith('<?xml') || head.startsWith('<svg') || head.startsWith('<!--') || head.startsWith('<!DOCTYPE svg')) && /<svg[\s>]/.test(head)) return 'svg';
   return null;
 }
@@ -106,7 +103,7 @@ export async function addImage(host: Host, doc: string, name: string, bytes: Buf
   const stem = base.slice(0, -(ext.length + 1));
   const hash = createHash('sha256').update(bytes).digest('hex');
   return host.serial(async () => {
-    let path = '';
+    let path: string;
     for (let n = 1; ; n++) {
       path = `${folder}/${n === 1 ? stem : `${stem}-${n}`}.${ext}`;
       const abs = host.resolvePath(path);

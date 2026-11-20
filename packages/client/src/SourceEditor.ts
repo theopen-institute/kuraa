@@ -32,6 +32,7 @@ import { EditorView, keymap, lineNumbers, drawSelection } from '@codemirror/view
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
+import { search, searchKeymap } from '@codemirror/search';
 import { highlighter } from './languages.js';
 
 /** Marks document transactions made from the source view, so they are not echoed back. */
@@ -103,7 +104,9 @@ export class SourceEditor {
           lineNumbers(),
           drawSelection(),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          // ⌘F: find and replace in the source, with CodeMirror's own bar; replacing is ordinary editing.
+          search({ top: true }),
+          keymap.of([...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           markdown(),
           syntaxHighlighting(highlighter),
           EditorView.lineWrapping,

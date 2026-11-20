@@ -30,6 +30,8 @@ const emit = defineEmits<{
   error: [message: string];
   /** Open this file and its Header dialog. */
   header: [path: string];
+  /** Open this file at its first conflict. */
+  conflicts: [path: string];
 }>();
 
 const tree = computed(() => buildTree(props.files));
@@ -237,6 +239,7 @@ provide(TREE, {
   dragging,
   over,
   select: (path) => emit('select', path),
+  showConflicts: (path) => emit('conflicts', path),
   toggle,
   create: (folder) => void create(folder),
   newFolder: (inside) => void newFolder(inside),

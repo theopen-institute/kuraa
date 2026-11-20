@@ -3,7 +3,7 @@
 // client's, from the type's hints, with the module's over them), and the keys
 // for the session's undo and redo.
 import type { DocumentType } from '@kuraa/kernel';
-import type { EditorContext, FormatEditor } from '@kuraa/editor-kit';
+import type { EditorContext, EditorUi, FormatEditor } from '@kuraa/editor-kit';
 import type { Plugin } from 'prosemirror-state';
 import type { NodeViewConstructor } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
@@ -16,9 +16,12 @@ const ui = { askText, askConfirm };
 const nothing = () => false;
 
 /** The context for a live document (its room's undo and remote check), or a read-only one for a past version. */
-export function editorContext(type: DocumentType, live?: { history: History; isRemote: EditorContext['isRemote'] }): EditorContext {
+export function editorContext(
+  type: DocumentType,
+  live?: { history: History; isRemote: EditorContext['isRemote']; path?: string; files?: EditorContext['files']; notify?: EditorUi['notify'] },
+): EditorContext {
   return live
-    ? { schema: type.schema, readOnly: false, history: live.history, isRemote: live.isRemote, ui }
+    ? { schema: type.schema, readOnly: false, history: live.history, isRemote: live.isRemote, ui: { ...ui, notify: live.notify }, path: live.path, files: live.files }
     : { schema: type.schema, readOnly: true, history: { undo: nothing, redo: nothing }, isRemote: () => false, ui };
 }
 

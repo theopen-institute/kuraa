@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The client: a file tree, one live editor, and a history sidebar that starts
 // closed. Everything else is in the menu, so the page is mostly the document.
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
 import type { CommitInfo, HubWorkspace, TreeFile, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
@@ -88,6 +88,15 @@ const shownFiles = computed(() => {
 });
 /** The Header dialog is open for the open file. */
 const headerOpen = ref(false);
+/** The live editor: its find bar, outline and format commands, for the menu. */
+const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
+/** A file to show at its first conflict once open (its count in the file list was clicked). */
+const conflictJump = ref<string | null>(null);
+function showConflicts(next: string) {
+  select(next);
+  view(null);
+  conflictJump.value = next;
+}
 
 async function invite() {
   let syncing = false;
@@ -312,6 +321,7 @@ function useSettings(s: Settings) {
         :header-types="headerTypes"
         @select="select"
         @header="openHeader"
+        @conflicts="showConflicts"
         @changed="refreshTree"
         @error="(m) => (error = m)"
       >
@@ -374,6 +384,7 @@ function useSettings(s: Settings) {
         <div v-if="path && type && !versionMismatch && !editingSettings" class="centre-stack">
           <div :style="{ display: viewing ? 'none' : 'contents' }">
             <Editor
+              ref="editor"
               :key="`${api.baseUrl}|${path}|${type.id}`"
               :api="api"
               :settings="settings"
@@ -383,6 +394,8 @@ function useSettings(s: Settings) {
               :run="workspace?.run ?? null"
               :format-editor="editorFor(type.id)"
               :header-open="headerOpen"
+              :jump-to-conflict="conflictJump === path"
+              @jumped="conflictJump = null"
               @status="(s) => (status = s)"
               @close-header="headerOpen = false"
               @title="(t) => (liveTitle = { path: path!, title: t })"
@@ -431,9 +444,14 @@ function useSettings(s: Settings) {
       :settings="settings"
       :shell="shell"
       :api="api"
+      :conflicts="file?.conflicts ?? 0"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @header="headerOpen = true"
+      @find="editor?.openFind()"
+      @outline="editor?.toggleOutline()"
+      @insert-table="editor?.command('insertTable')"
+      @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
       @sync="sync"
       @save-settings="useSettings"

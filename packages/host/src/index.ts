@@ -10,7 +10,8 @@ export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './wo
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
 export type { JoinOptions } from './peers/join.js';
-export { Hub, startHub, slugOf, type HubOptions, type HubWorkspace, type RunningHub } from './hub.js';
+export { Hub, startHub, slugOf, isLoopback, OWNER_OFF, type HubOptions, type HubWorkspace, type HubList, type FolderListing, type RunningHub } from './hub.js';
+export { SettingsStore, DEFAULT_SETTINGS, DATA_MARKER, settingsFrom, readSettings, writeSettings, checkDataDir, fromSettings, type Settings, type SettingsView } from './settings.js';
 export type { PeerOptions, PeersStatus, DeviceInfo, LinkInfo } from './peers/peers.js';
 
 /** A person's key on this computer: make, read, export, import (peers/person.ts; loaded only when called). */

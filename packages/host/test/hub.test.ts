@@ -9,7 +9,7 @@ import { Transform } from 'prosemirror-transform';
 import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless } from '@kuraa/session/testing';
-import { slugOf, startHost, startHub, type RunningHost, type RunningHub } from '../src/index.js';
+import { Hub, OWNER_OFF, SettingsStore, slugOf, startHost, startHub, type RunningHost, type RunningHub } from '../src/index.js';
 import { isLoopback } from '../src/hub.js';
 
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
@@ -64,7 +64,7 @@ describe('a hub', () => {
   it('makes a new workspace as a git folder, and serves it under /w/<id> like a host of its own', async () => {
     const h = await hub();
     expect((await fetch(`${h.url}/hub/api/workspaces`)).status).toBe(401);
-    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [], canAdd: true, canInvite: true });
+    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [], canAdd: true, canInvite: true, canOpenFolder: true, canChangeSettings: false });
     const made = await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Field notes' }) });
     expect(made.status).toBe(201);
     const { workspace } = (await made.json()) as { workspace: { id: string; path: string; name: string } };
@@ -139,7 +139,7 @@ describe('a hub', () => {
     expect((await call(third, '/w/gone/api/tree')).status).toBe(503);
   });
 
-  it('of one folder: serves it as its only workspace, and lets no one add, remove or invite unless allowed', async () => {
+  it('of one folder: serves it as its only workspace, and lets no one add or remove workspaces', async () => {
     const dir = temp('kuraa-one-');
     git(dir, 'init', '-q', '-b', 'main');
     git(dir, 'config', 'user.name', 'Ada');
@@ -147,29 +147,41 @@ describe('a hub', () => {
     writeFileSync(join(dir, 'notes.md'), '# Notes\n');
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'Initial');
-    const h = await startHub({ folder: { dir }, hosts: { timings: FAST }, invites: false });
+    const h = await startHub({ folder: { dir }, hosts: { timings: FAST } });
     running.push(h);
     const id = slugOf(basename(dir));
+    // Invites are always on: every member has the same say (0038). Opening other folders is not (one folder).
     expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({
-      workspaces: [{ id, name: basename(dir), path: dir, peers: false }], canAdd: false, canInvite: false,
+      workspaces: [{ id, name: basename(dir), path: dir, peers: false }], canAdd: false, canInvite: true, canOpenFolder: false, canChangeSettings: false,
     });
     expect(((await (await call(h, `/w/${id}/api/tree`)).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('notes.md');
     expect((await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'More' }) })).status).toBe(403);
     expect((await call(h, `/hub/api/workspaces/${id}`, { method: 'DELETE' })).status).toBe(403);
-    expect((await call(h, `/w/${id}/api/peers/links`, { method: 'POST', body: JSON.stringify({ hours: 24 }) })).status).toBe(403);
+    expect((await call(h, '/hub/api/workspaces/open', { method: 'POST', body: JSON.stringify({ path: dir }) })).status).toBe(403);
     // It keeps no list beside the folder.
     expect(existsSync(join(dir, '.kuraa-workspaces.json'))).toBe(false);
   });
 
-  it('manages your identity only listening on this computer alone', async () => {
+  it('gives the owner’s features only listening on this computer alone, and says why not', async () => {
     expect(isLoopback('127.0.0.1')).toBe(true);
     expect(isLoopback('::1')).toBe(true);
     expect(isLoopback('localhost')).toBe(true);
     expect(isLoopback('0.0.0.0')).toBe(false);
     expect(isLoopback('192.168.1.4')).toBe(false);
-    const dir = mkdtempSync(join(tmpdir(), 'kuraa-hub-person-'));
-    await expect(startHub({ folder: { dir }, host: '0.0.0.0', hosts: { managePerson: true } })).rejects.toThrow('--manage-person');
-    rmSync(dir, { recursive: true, force: true });
+    const root = temp('kuraa-hub-net-');
+    const settings = new SettingsStore(join(temp('kuraa-hub-net-settings-'), 'settings.json'));
+    // Not started: listening on the network is not needed to see what it would allow.
+    const open = new Hub({ root, host: '0.0.0.0', settings });
+    expect(open.owner).toBe(false);
+    expect(open.listing()).toMatchObject({ canAdd: true, canInvite: true, canOpenFolder: false, canChangeSettings: false, ownerOff: OWNER_OFF });
+    expect(OWNER_OFF).toContain('open to other computers on the network');
+    for (const refused of [open.settingsView(), open.saveSettings({}), open.folders(null), open.openFolder(root, true)]) {
+      await expect(refused).rejects.toMatchObject({ status: 403, message: OWNER_OFF });
+    }
+    const own = new Hub({ root, settings });
+    expect(own.owner).toBe(true);
+    expect(own.listing()).toMatchObject({ canOpenFolder: true, canChangeSettings: true });
+    expect(own.listing().ownerOff).toBeUndefined();
   });
 
   it('a host started on its own says it is not a hub, so a client shows it as one workspace', async () => {
@@ -285,7 +297,7 @@ describe('invite links from the app', () => {
     expect(existsSync(join(other.hub.root, 'too-late'))).toBe(false);
   }, 240_000);
 
-  it('a host of one workspace refuses unless its operator allows it', async () => {
+  it('a host started on its own (not a hub) makes no invite links unless told to', async () => {
     const dir = temp('kuraa-host-');
     git(dir, 'init', '-q', '-b', 'main');
     git(dir, 'config', 'user.name', 'A');
@@ -297,6 +309,6 @@ describe('invite links from the app', () => {
     expect(await (await api('/api/peers')).json()).toEqual({ enabled: false, canInvite: false });
     const r = await api('/api/peers/links', { method: 'POST', body: JSON.stringify({ hours: 24 }) });
     expect(r.status).toBe(403);
-    expect(((await r.json()) as { error: string }).error).toContain('turned off on this server');
+    expect(((await r.json()) as { error: string }).error).toContain('turned off for this workspace');
   });
 });

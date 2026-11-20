@@ -371,20 +371,24 @@ const historyRoutes: Route[] = [
 // paired and connected. Where the operator allows it (canInvite), people using the
 // app make and revoke invite links, remove devices and rename this one: every
 // member has the same say (0038).
-// You on this computer (peers/person.ts, 0035), where the one running the host allows it
-// (managePerson): this computer's signing key, your identity if it is here, and your keys
+// You on this computer (peers/person.ts, 0035), where the one running the host uses it
+// (managePerson: a hub on loopback, 0047): this computer's signing key, your identity if it is here, and your keys
 // the workspace knows of.
 const personKeys = () => import('./peers/person.js');
 const hostPerson = async (host: Host) => {
-  if (!host.options.managePerson) throw new HttpError(404, 'This host\'s keys are its operator\'s to manage');
+  if (!host.options.managePerson) throw new HttpError(404, 'Your identity is managed only on the computer running this server, while it is not open to the network');
   const keys = await personKeys();
   const p = await keys.readPerson();
   const known = p && host.peers ? (await host.peers.node.identity.people()).find((x) => x.key === p.publicKey.toString('hex'))?.keys ?? [] : [];
   return keys.personInfo(known);
 };
-/** Made, imported or revoked: said in this workspace now (the others say it at their next save). */
+/**
+ * Made, imported or revoked: said now by every workspace that syncs (the hub tells
+ * them all, through personChanged), or by this one alone if the host is on its own.
+ */
 const personChanged = async (host: Host) => {
-  await host.peers?.node.signingKey();
+  if (host.options.personChanged) await host.options.personChanged();
+  else await host.peers?.node.signingKey();
 };
 const keysDo = async (fn: () => Promise<unknown>) => {
   try {
@@ -429,7 +433,7 @@ const personRoutes: Route[] = [
 // Online copies (backups.ts): git servers this workspace keeps a copy on, and syncs with. Everyone
 // sees them (Sync syncs with them); adding and removing them is for the one running the host (manageOnline).
 const mayManageOnline = (host: Host) => {
-  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy here is set up by whoever runs this server');
+  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy is set up only on the computer running this server, while it is not open to the network');
 };
 const onlineRoutes: Route[] = [
   route('GET', '/api/online', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageOnline, copies: await host.online.list() })),

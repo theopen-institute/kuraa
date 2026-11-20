@@ -72,25 +72,26 @@ export interface HostOptions {
   peers?: PeerOptions | boolean;
   /**
    * Let people using the app make invitations and subscription links for this
-   * workspace (an operator's choice: --allow-invites; a hub allows it for its
-   * workspaces). Making one starts syncing with devices if it is not on, with
+   * workspace (a hub always does, for its workspaces: every member has the same
+   * say, 0038). Making one starts syncing with devices if it is not on, with
    * these options.
    */
   invites?: { peers?: PeerOptions };
   /**
    * People using the app may see, make and import this computer's person's key
-   * (person.ts), whose this host's commits are (0034). Only where the one who runs
-   * the host is the one using it (`pnpm dev`; --manage-person): on a shared
-   * server, its key is its operator's.
+   * (person.ts), whose this host's commits are (0034). A hub turns it on while it
+   * listens only on this computer (0047): on a server open to the network, its
+   * key is its owner's.
    */
   managePerson?: boolean;
   /**
    * People using the app may add and remove online copies (backups.ts): git
-   * servers synced with this computer's credentials. Only where the one running
-   * the host is the one using it (the desktop app, `pnpm dev`; --manage-online).
-   * Everyone sees them, and Sync syncs with them.
+   * servers synced with this computer's credentials. A hub turns it on while it
+   * listens only on this computer (0047). Everyone sees them, and Sync syncs with them.
    */
   manageOnline?: boolean;
+  /** Your identity changed through this host's API: tell every workspace that syncs (the hub's), not just this one. */
+  personChanged?: () => Promise<void>;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }
@@ -1149,7 +1150,7 @@ export class Host {
   /** The workspace's devices, syncing, for making an invitation from the app; refused unless the operator allows it. */
   async peersForInvites(): Promise<Peers> {
     const allowed = this.options.invites;
-    if (!allowed) throw new HttpError(403, 'Making invitations from the app is turned off on this server; whoever runs it can turn it on');
+    if (!allowed) throw new HttpError(403, 'Making invitations from the app is turned off for this workspace');
     if (this.peers) return this.peers;
     const peers = await this.startPeers(allowed.peers ?? {});
     this.log('syncing with other devices is now on, for an invitation');

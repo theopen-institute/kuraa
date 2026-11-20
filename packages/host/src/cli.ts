@@ -1,31 +1,35 @@
-// kuraa-host --dir <workspace> [--init] [--port 4321] [--host 127.0.0.1] [--token T] [--static dir]
-//                                          one folder; nothing is added from the app
-// kuraa-host --workspaces <folder> [...]   many workspaces, added from the app (new folders
-//                                          in <folder>, or joined by invitation or link)
+// kuraa-host                              your workspaces, as the desktop app: new ones go in the
+//                                          Preferences' folder (default Documents/kuraa), the list
+//                                          and settings with the app's data (--settings moves them)
+// kuraa-host --workspaces <folder> [...]   the same, with new workspaces in <folder> (its list in it)
+// kuraa-host --dir <workspace> [--init]    one folder; nothing is added from the app
 // Either way the server is a hub (hub.ts): each workspace at /w/<id>, its list at /hub/api.
+//   serving:      [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--settings file]
+//
+// Listening only on this computer (the default), whoever has the access code is
+// its owner (decision 0047): Preferences, Open a folder…, their identity and the
+// online copy are in the app. With --host naming a network address, they are not.
+//
+// The owner's settings (settings.ts; Preferences in the app) can also be given as
+// flags, which win over them for as long as the host runs:
 //   formats:      [--format pandoc-markdown --format text ...]   (default: all)
-//   running code: --engine r [--env podman] [--component <path or package>]...
-//                 [--allow-write] [--allow-network] [--allow-installs] [--data-dir path]
-//                 [--memory 4g] [--cpus 2] [--disk 2g] [--podman path] [--allow-unsandboxed]
+//   running code: [--engine r | --engine none] [--env podman]
+//                 [--allow-write] [--allow-network] [--no-allow-installs] [--data-dir path]
+//                 [--memory 4g] [--cpus 2] [--disk 2g]
 //                 [--r-image <image>]...   base images a workspace may name for R (besides the default)
+//   devices:      [--peer] [--bootstrap host:port]...   sync every workspace with its other computers
+//                 (see peers/cli.ts for invite, join, devices, online, fork)
+//   saving:       [--flush-ms N] [--commit-ms N]
 //
-// The run components that ship (@kuraa/run-components: R, and Podman containers) are
-// always loaded; --component adds more. --env picks the environment code runs in;
-// with only one loaded, that one. One that is not sandboxed needs --allow-unsandboxed.
-//
-// Everything that configures the host is a flag: people using the app can see
-// what is on, but change nothing about the host.
-//   devices:      --peer [--bootstrap host:port]...   sync with paired devices (see peers/cli.ts
-//                 for invite, join, devices, online, fork); --allow-invites lets people make
-//                 invite links and remove devices from the app (a hub always does, for its workspaces)
-//   people:       --manage-person   let people using the app see, make and import this computer's
-//                 person's key (for one's own computer, as pnpm dev; refused unless --host is
-//                 this computer alone, 127.0.0.1; never on a shared server)
-//   online copy:  --manage-online  let people using the app add and remove online copies (git servers
-//                 synced with this computer's credentials); kuraa-host online … from the command line
+// Flags only, because they choose what code runs with your rights (0046, 0047):
+//   --component <path or package>...   more run components; @kuraa/run-components always loads
+//   --allow-unsandboxed                an environment that is not sandboxed
+//   --podman <path>                    the Podman program (also KURAA_PODMAN)
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
-import { lastResort, startHub } from './index.js';
+import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { defaultDataDir, lastResort, SettingsStore, startHub, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
@@ -38,9 +42,24 @@ if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
   }
 }
 
+// Flags that are gone (decision 0047): what they turned on now follows from where the server listens.
+const GONE: Record<string, string> = {
+  '--manage-person': 'your identity is managed from the app whenever the server listens only on this computer',
+  '--manage-online': 'the online copy is managed from the app whenever the server listens only on this computer',
+  '--allow-invites': 'people may always invite others from the app',
+};
+for (const arg of process.argv.slice(2)) {
+  if (GONE[arg]) {
+    console.error(`[kuraa] ${arg} is no longer needed: ${GONE[arg]}.`);
+    process.exit(2);
+  }
+}
+
 const { values } = parseArgs({
+  allowNegative: true,
   options: {
-    dir: { type: 'string', default: '.' },
+    dir: { type: 'string' },
+    settings: { type: 'string' },
     workspaces: { type: 'string' },
     init: { type: 'boolean', default: false },
     format: { type: 'string', multiple: true },
@@ -48,9 +67,9 @@ const { values } = parseArgs({
     env: { type: 'string' },
     component: { type: 'string', multiple: true },
     'allow-unsandboxed': { type: 'boolean', default: false },
-    'allow-write': { type: 'boolean', default: false },
-    'allow-network': { type: 'boolean', default: false },
-    'allow-installs': { type: 'boolean', default: false },
+    'allow-write': { type: 'boolean' },
+    'allow-network': { type: 'boolean' },
+    'allow-installs': { type: 'boolean' },
     'data-dir': { type: 'string' },
     memory: { type: 'string' },
     cpus: { type: 'string' },
@@ -61,10 +80,7 @@ const { values } = parseArgs({
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
     static: { type: 'string' },
-    peer: { type: 'boolean', default: false },
-    'allow-invites': { type: 'boolean', default: false },
-    'manage-person': { type: 'boolean', default: false },
-    'manage-online': { type: 'boolean', default: false },
+    peer: { type: 'boolean' },
     bootstrap: { type: 'string', multiple: true },
     'flush-ms': { type: 'string' },
     'commit-ms': { type: 'string' },
@@ -85,47 +101,65 @@ const port = numberFlag('port', values.port, { min: 0, whole: true })!;
 const flushMs = numberFlag('flush-ms', values['flush-ms'], { min: 1, whole: true });
 const commitMs = numberFlag('commit-ms', values['commit-ms'], { min: 1, whole: true });
 
-const runOptions = {
-  engines: values.engine ?? [],
+const cpus = numberFlag('cpus', values.cpus, { min: 0.1, whole: false });
+
+// The settings the flags give: they win over the saved ones, and the app says so.
+const flags: Partial<Settings> = Object.fromEntries(Object.entries({
+  syncDevices: values.peer,
+  bootstrap: values.bootstrap,
+  runCode: values.engine ? values.engine.some((e) => e !== 'none') : undefined,
   environment: values.env,
-  components: [...standardRunComponents, ...(values.component ?? [])],
-  allowUnsandboxed: values['allow-unsandboxed'],
-  allowWorkspaceWrite: values['allow-write'],
+  rImages: values['r-image'],
+  memory: values.memory,
+  cpus,
+  disk: values.disk,
+  allowWrite: values['allow-write'],
   allowNetwork: values['allow-network'],
   allowInstalls: values['allow-installs'],
-  dataDir: values['data-dir'],
-  memory: values.memory,
-  cpus: numberFlag('cpus', values.cpus, { min: 0.1, whole: false }),
-  disk: values.disk,
-  options: { podman: { podman: values.podman }, r: { images: values['r-image'] ?? [] } },
-};
-const timings = {
-  ...(flushMs ? { flushMs } : {}),
-  ...(commitMs ? { idleCommitMs: commitMs } : {}),
-};
+  dataDir: values['data-dir'] ? resolve(values['data-dir']) : undefined,
+  formats: values.format,
+  saveSeconds: flushMs !== undefined ? flushMs / 1000 : undefined,
+  versionSeconds: commitMs !== undefined ? commitMs / 1000 : undefined,
+  workspaces: values.workspaces ? resolve(values.workspaces) : undefined,
+}).filter(([, v]) => v !== undefined));
 
-// Every server is a hub (docs/decisions/0030-one-kind-of-server.md): of a folder
-// of workspaces people may add to (--workspaces), or of one folder (--dir).
+// Kept with the app's data, apart from the desktop app's (its preferences.json and list).
+const settingsFile = resolve(values.settings ?? join(defaultDataDir(), 'settings.json'));
+const settings = new SettingsStore(settingsFile, flags);
+
+// Every server is a hub (docs/decisions/0030-one-kind-of-server.md): of one folder (--dir), or of
+// your workspaces, in --workspaces or the settings' folder.
 const hub = await startHub({
-  ...(values.workspaces ? { root: values.workspaces } : { folder: { dir: values.dir!, init: values.init } }),
+  ...(values.dir ? { folder: { dir: values.dir, init: values.init } } : values.workspaces ? { root: values.workspaces } : {
+    // The list lives beside the settings, so choosing another folder for new workspaces keeps it.
+    registry: join(dirname(settingsFile), 'host-workspaces.json'),
+  }),
+  defaultRoot: join(homedir(), 'Documents', 'kuraa'),
+  settings,
   port,
   host: values.host!,
   token: values.token ?? process.env.KURAA_TOKEN,
   staticDir: values.static,
-  // Nothing runs unless an engine is on.
-  hosts: { formats: values.format, run: runOptions, timings, managePerson: values['manage-person'], manageOnline: values['manage-online'] },
-  peers: { bootstrap: values.bootstrap, everywhere: values.peer },
-  // A hub of many lets people invite others to its workspaces; for one folder, the operator says (--allow-invites).
-  invites: !!values.workspaces || values['allow-invites'],
+  // What only flags set: more components, the sandbox, the Podman program, engines named.
+  hosts: {
+    run: {
+      ...(values.engine ? { engines: values.engine } : {}),
+      components: [...standardRunComponents, ...(values.component ?? [])],
+      allowUnsandboxed: values['allow-unsandboxed'],
+      options: { podman: { podman: values.podman } },
+    },
+  },
+  peers: {},
   log: (m) => console.log(`[kuraa] ${m}`),
 });
 const close = () => hub.close();
-if (values.workspaces) console.log(`[kuraa] workspaces: ${hub.hub.root}`);
+if (!values.dir) console.log(`[kuraa] workspaces: ${hub.hub.root}`);
 else console.log(`[kuraa] workspace: ${hub.hub.root}`);
+console.log(`[kuraa] settings:  ${settingsFile}`);
 console.log(`[kuraa] url:       ${hub.url}`);
 console.log(`[kuraa] token:     ${hub.token}`);
 if (values.static) console.log(`[kuraa] open:      ${hub.url}/?token=${hub.token}`);
-if (!values.workspaces) {
+if (values.dir) {
   const [w] = hub.hub.list();
   console.log(`[kuraa] git clone: git clone http://kuraa:${hub.token}@${hub.url.replace(/^https?:\/\//, '')}/w/${w!.id}/git ${w!.id}`);
 }

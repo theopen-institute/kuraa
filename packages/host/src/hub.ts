@@ -10,21 +10,29 @@
 // workspaces and adds them: a new folder (made a git repository), or a
 // workspace joined from an invitation or subscription link.
 //
-// What may be added is the operator's to decide, as everything about a host is:
-// new workspaces go only in the folder the hub was started with (--workspaces).
-// People may also invite others to its workspaces from the app (invitations and
-// subscription links), which turns syncing on for that workspace. A workspace
-// syncs once it is shared (joined, invited from, forked: its repository has a
-// workspace id and secret, peers/identity.ts), or with --peer, every one.
-// The desktop app, being its own operator, also adds folders the person picks.
+// New workspaces go in one folder: --workspaces, else the owner's setting (by
+// default Documents/kuraa). People may invite others to its workspaces from the
+// app (invitations and subscription links), which turns syncing on for that
+// workspace. A workspace syncs once it is shared (joined, invited from, forked:
+// its repository has a workspace id and secret, peers/identity.ts), or with
+// --peer (or the setting), every one.
+//
+// Whoever has the access code of a hub listening only on this computer is its
+// owner (decision 0047): they change its settings (settings.ts), which the hub
+// applies by reopening every workspace, open any folder on the computer as a
+// workspace, browse its folders to choose one, manage their identity and the
+// online copy. On a hub open to the network those are off, and the app says why.
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { basename, dirname, join, resolve } from 'node:path';
-import type { HostOptions } from './host.js';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { standardTypes } from '@kuraa/formats';
+import { DEFAULT_POLICY } from '@kuraa/run-kit';
+import { DEFAULT_TIMINGS, type HostOptions } from './host.js';
 import { HttpError } from './errors.js';
 import { Git } from './git.js';
 import { renameOver, reservedName } from './files.js';
@@ -33,10 +41,18 @@ import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from '.
 import { initWorkspace, inspectFolder } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
 import { startHost, joinWorkspace, type RunningHost } from './index.js';
+import { loadRunComponents } from './components.js';
+import { defaultDataDir, type RunOptions } from './runner.js';
+import { fromSettings, type SettingsStore, type SettingsView } from './settings.js';
 
 export interface HubOptions {
-  /** Where new workspaces are made, one folder each. Not with `folder`. */
+  /**
+   * Where new workspaces are made, one folder each (--workspaces). Not with
+   * `folder`. Without either, the settings' folder for new workspaces, else `defaultRoot`.
+   */
   root?: string;
+  /** Where new workspaces go when neither `root` nor the settings say (Documents/kuraa). */
+  defaultRoot?: string;
   /**
    * A hub of this one folder (--dir): the only workspace, nothing added or
    * removed from the app, and no list kept. `init` makes it a git repository if it is not.
@@ -44,15 +60,25 @@ export interface HubOptions {
   folder?: { dir: string; init?: boolean };
   /** Where the hub keeps its list of workspaces. Default: `<root>/.kuraa-workspaces.json`. */
   registry?: string;
-  /** Whether people may invite others to its workspaces from the app, which turns syncing on for good. Default: yes. */
-  invites?: boolean;
+  /**
+   * The owner's settings (settings.ts), with the flags given at start winning.
+   * With them, what runs, the formats, timings, syncing and where new workspaces
+   * go come from the settings, and `hosts` gives only what flags alone set
+   * (components, --allow-unsandboxed, the Podman program, engines named with
+   * --engine; timings in `hosts` still win, for tests). Without them, `hosts` and
+   * `peers` are all, and there is nothing to change from the app.
+   */
+  settings?: SettingsStore;
   token?: string;
   host?: string;
   port?: number;
   /** The built web client, served at `/`. */
   staticDir?: string;
   /** For every workspace's host: formats, running code, timings, identity, logging. */
-  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init'>;
+  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'run'> & {
+    /** Running code. With settings, only what flags set: engines here (--engine) win over the setting. */
+    run?: Partial<RunOptions>;
+  };
   /**
    * Syncing with other devices: for workspaces joined from an invitation or link,
    * or that invited someone (always), and for the others while `everywhere` is
@@ -94,9 +120,29 @@ export interface HubList {
   workspaces: HubWorkspace[];
   /** People may add workspaces (and take them off the list). */
   canAdd: boolean;
-  /** People may invite others to its workspaces. */
+  /** People may invite others to its workspaces (always: every member has the same say, 0038). */
   canInvite: boolean;
+  /** Any folder on the server's computer may be opened as a workspace (the owner, on a hub of many). */
+  canOpenFolder: boolean;
+  /** The settings may be changed from the app (Preferences). */
+  canChangeSettings: boolean;
+  /** Why the owner's features (Preferences, opening folders, your identity) are off here, if they are. */
+  ownerOff?: string;
 }
+
+/** What GET /hub/api/folders answers: the folders in one, to choose one from. */
+export interface FolderListing {
+  path: string;
+  /** The folder above, or null at the top. */
+  parent: string | null;
+  /** The home folder, where choosing starts. */
+  home: string;
+  /** Its folders (never links, files or, unless asked, hidden ones), by name. */
+  folders: { name: string; path: string }[];
+}
+
+/** Why the owner's features are off on a hub listening on the network, in plain words. */
+export const OWNER_OFF = 'This server is open to other computers on the network, so Preferences, opening folders and your identity are not available from the app. Start it without --host (listening only on this computer) to use them.';
 
 /** An id and folder name from a name: lowercase letters, digits and hyphens. */
 export function slugOf(name: string): string {
@@ -111,7 +157,7 @@ export class Hub {
   private readonly errors = new Map<string, string>();
   private server: Server | null = null;
   readonly token: string;
-  readonly root: string;
+  private rootDir: string;
   private readonly registry: string;
   /** WebSockets passed through to workspaces: closed with the hub (the server does not track them). */
   private readonly tunnels = new Set<import('node:net').Socket>();
@@ -120,14 +166,34 @@ export class Hub {
   address: AddressInfo | null = null;
 
   constructor(readonly o: HubOptions) {
-    if (!o.root === !o.folder) throw new Error('A hub needs a folder of workspaces (root) or one folder (folder), not both');
-    // Your identity is reachable through the app with it, its secret too (export): only from this computer.
-    if (o.hosts?.managePerson && !isLoopback(o.host ?? '127.0.0.1')) {
-      throw new Error(`--manage-person is for a host on your own computer, listening only there (--host 127.0.0.1), not on ${o.host}`);
-    }
-    this.root = resolve(o.folder?.dir ?? o.root!);
-    this.registry = o.registry ?? join(this.root, '.kuraa-workspaces.json');
+    if (o.root && o.folder) throw new Error('A hub needs a folder of workspaces (root) or one folder (folder), not both');
+    if (!o.root && !o.folder && !o.settings && !o.defaultRoot) throw new Error('A hub needs a folder of workspaces (root) or one folder (folder)');
+    this.rootDir = this.rootFor();
+    this.registry = o.registry ?? join(this.rootDir, '.kuraa-workspaces.json');
     this.token = o.token ?? randomBytes(18).toString('base64url');
+  }
+
+  /** The hub's folder: the one folder, or where new workspaces go (--workspaces, else the setting, else the default). */
+  get root(): string {
+    return this.rootDir;
+  }
+
+  private rootFor(): string {
+    const o = this.o;
+    return resolve(o.folder?.dir ?? o.root ?? o.settings?.current.workspaces ?? o.defaultRoot ?? join(homedir(), 'Documents', 'kuraa'));
+  }
+
+  /**
+   * Whoever has the access code is the owner, with Preferences, opening any
+   * folder, your identity and the online copy, while the hub listens only on this
+   * computer (decision 0047). On the network, not.
+   */
+  get owner(): boolean {
+    return isLoopback(this.o.host ?? '127.0.0.1');
+  }
+
+  private mayOwn(): void {
+    if (!this.owner) throw new HttpError(403, OWNER_OFF);
   }
 
   /** People may add workspaces: not to a hub of one folder. */
@@ -144,6 +210,8 @@ export class Hub {
   }
 
   async start(): Promise<AddressInfo> {
+    // The environments loaded, so that a setting naming one no longer there is passed over.
+    if (this.o.settings) this.environmentIds = await loadRunComponents(this.o.hosts?.run?.components ?? []).then((c) => [...c.environments.keys()], () => undefined);
     if (this.o.folder) {
       const name = basename(this.root);
       this.entries = [{ id: slugOf(name), name, dir: this.root, added: new Date().toISOString() }];
@@ -214,19 +282,47 @@ export class Hub {
   }
 
   private async syncs(e: Entry): Promise<boolean> {
-    return !!this.o.peers?.everywhere || shared(e.dir);
+    return !!this.peerOptions().everywhere || shared(e.dir);
+  }
+
+  /** Syncing: the settings (syncing everywhere, servers to find computers through), else `peers`. */
+  private peerOptions(): PeerOptions & { everywhere?: boolean } {
+    if (!this.o.settings) return this.o.peers ?? {};
+    const s = fromSettings(this.o.settings.current).peers;
+    return { ...this.o.peers, everywhere: s.everywhere, ...(s.bootstrap ? { bootstrap: s.bootstrap } : {}) };
+  }
+
+  /** Every workspace's host options: `hosts`, with the settings applied where there are any. */
+  private hostOptions(): Omit<HostOptions, 'dir' | 'token'> {
+    const base = this.o.hosts ?? {};
+    if (!this.o.settings) return { ...base, run: base.run ? { engines: [], ...base.run } : undefined };
+    const types = base.types ?? standardTypes;
+    const s = fromSettings(this.o.settings.current, { run: base.run, timings: base.timings, formats: types.map((t) => t.id), environments: this.environmentIds });
+    return { ...base, run: s.run, formats: s.formats, timings: s.timings };
+  }
+
+  /** The environments loaded (known once the settings are first shown or applied): a setting naming another is passed over. */
+  private environmentIds: string[] | undefined;
+
+  /** Your identity changed (made, imported, a key revoked): every workspace that syncs says so to its other devices now. */
+  private async personChanged(): Promise<void> {
+    await Promise.all([...this.hosts.values()].map((h) => h.host.peers?.node.signingKey().catch(() => undefined)));
   }
 
   /** Start a workspace's host. A workspace that cannot open is listed with why. */
   private async open(e: Entry, init = false): Promise<void> {
     try {
       if (!init && !existsSync(e.dir)) throw new Error(`Its folder is gone: ${e.dir}`);
-      const { everywhere: _, ...peerOptions } = this.o.peers ?? {};
+      const { everywhere: _, ...peerOptions } = this.peerOptions();
       const h = await startHost({
-        ...this.o.hosts, dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers: (await this.syncs(e)) ? peerOptions : undefined, log: (m) => this.log(`[${e.id}] ${m}`),
-        // People may invite others to a hub's workspaces from the app (unless the operator says not);
+        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers: (await this.syncs(e)) ? peerOptions : undefined, log: (m) => this.log(`[${e.id}] ${m}`),
+        // People may invite others to a hub's workspaces from the app (every member has the same say, 0038);
         // the first invitation turns syncing on, for good (the workspace is shared from then on).
-        invites: this.o.invites === false ? undefined : { peers: peerOptions },
+        invites: { peers: peerOptions },
+        // The owner's own features: only while the hub listens on this computer alone (0047).
+        managePerson: this.owner,
+        manageOnline: this.owner,
+        personChanged: () => this.personChanged(),
       });
       this.hosts.set(e.id, h);
       this.errors.delete(e.id);
@@ -238,7 +334,14 @@ export class Hub {
 
   /** The workspaces, and what people may do with them. */
   listing(): HubList {
-    return { workspaces: this.list(), canAdd: this.canAdd, canInvite: this.o.invites !== false };
+    return {
+      workspaces: this.list(),
+      canAdd: this.canAdd,
+      canInvite: true,
+      canOpenFolder: this.owner && this.canAdd,
+      canChangeSettings: this.owner && !!this.o.settings,
+      ...(this.owner ? {} : { ownerOff: OWNER_OFF }),
+    };
   }
 
   list(): HubWorkspace[] {
@@ -294,8 +397,7 @@ export class Hub {
   }
 
   /**
-   * A folder that is already there (the desktop app, for a folder the person
-   * picked): added as it is, made a git repository first if `init`, called
+   * A folder that is already there (Open a folder…, or `pnpm dev`'s Scratch): added as it is, made a git repository first if `init`, called
    * `name` (default: the folder's name).
    */
   addFolder(folder: string, init = false, name?: string): Promise<HubWorkspace> {
@@ -314,6 +416,121 @@ export class Hub {
       const label = name?.trim() || basename(dir);
       return this.add({ id: this.freeId(label), name: label, dir, added: new Date().toISOString() });
     });
+  }
+
+  /**
+   * Open any folder on this computer as a workspace (the owner's Open a folder…).
+   * A folder that is not yet a git repository is made one only if `init`; else the
+   * answer says so (409), with what the app asks before making it one.
+   */
+  async openFolder(path: unknown, init: boolean): Promise<HubWorkspace> {
+    this.mayOwn();
+    this.mayAdd();
+    if (typeof path !== 'string' || !isAbsolute(path)) throw new HttpError(400, 'Choose a folder on this computer');
+    let isDir = false;
+    try {
+      isDir = (await lstat(path)).isDirectory();
+    } catch { /* not there */ }
+    if (!isDir) throw new HttpError(400, `There is no folder at ${path}.`);
+    const info = await inspectFolder(path);
+    if (!info.repoRoot && !init) {
+      throw Object.assign(new HttpError(409, `${info.dir} does not keep versions yet`), { notRepository: { name: basename(info.dir), path: info.dir, entries: info.entries } });
+    }
+    return this.addFolder(info.repoRoot ?? info.dir, !info.repoRoot);
+  }
+
+  /**
+   * The folders in a folder of this computer (the owner's folder browser): never
+   * links (nothing is followed out of a listing), files, or hidden ones unless
+   * asked for. Starts at the home folder.
+   */
+  async folders(path: string | null, hidden = false): Promise<FolderListing> {
+    this.mayOwn();
+    const home = homedir();
+    const dir = resolve(path || home);
+    if (path && !isAbsolute(path)) throw new HttpError(400, 'Choose a folder on this computer');
+    let entries;
+    try {
+      if ((await lstat(dir)).isSymbolicLink()) throw new HttpError(400, `${dir} is a link to somewhere else: the app does not follow links`);
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(400, `Cannot look in ${dir}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'there is no folder there' : (e as Error).message}`);
+    }
+    const folders = entries
+      // Dirents describe the entry itself: a link to a folder is a link, not a folder, and is left out.
+      .filter((d) => d.isDirectory() && (hidden || !d.name.startsWith('.')))
+      .map((d) => ({ name: d.name, path: join(dir, d.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const up = dirname(dir);
+    return { path: dir, parent: up === dir ? null : up, home, folders };
+  }
+
+  /** What the Preferences dialog shows: the settings, which flags set, the defaults, and whether code can run. */
+  async settingsView(): Promise<SettingsView> {
+    this.mayOwn();
+    const store = this.o.settings;
+    if (!store) throw new HttpError(404, 'This server is set up with flags when it starts');
+    const run = this.hostOptions().run;
+    let environments: SettingsView['environments'] = [];
+    try {
+      const loaded = await loadRunComponents(this.o.hosts?.run?.components ?? []);
+      this.environmentIds = [...loaded.environments.keys()];
+      environments = await Promise.all([...loaded.environments.values()].map(async (e) => {
+        try {
+          return { id: e.id, label: e.label, ...(await e.check(run?.options?.[e.id])) };
+        } catch (err) {
+          return { id: e.id, label: e.label, available: false, message: (err as Error).message };
+        }
+      }));
+    } catch (e) {
+      this.log(`could not load the run components to show them: ${(e as Error).message}`);
+    }
+    return {
+      settings: store.current,
+      fromFlags: store.fromFlags,
+      defaults: {
+        memory: DEFAULT_POLICY.memory, cpus: DEFAULT_POLICY.cpus, disk: DEFAULT_POLICY.disk,
+        saveSeconds: DEFAULT_TIMINGS.flushMs / 1000, versionSeconds: DEFAULT_TIMINGS.idleCommitMs / 1000,
+      },
+      defaultWorkspaces: resolve(this.o.defaultRoot ?? join(homedir(), 'Documents', 'kuraa')),
+      defaultDataDir: store.defaultDataDir ?? defaultDataDir(),
+      environments,
+      formats: (this.o.hosts?.types ?? standardTypes).map((t) => ({ id: t.id, label: t.label })),
+      canAdd: this.canAdd,
+    };
+  }
+
+  /**
+   * Keep new settings (refused, with what is wrong, if a value is), and apply
+   * them: every workspace's host is closed, writing and committing its edits,
+   * and opened again with them. The address and access code stay the same.
+   */
+  saveSettings(v: unknown): Promise<SettingsView> {
+    return this.serial(async () => {
+      this.mayOwn();
+      const store = this.o.settings;
+      if (!store) throw new HttpError(404, 'This server is set up with flags when it starts');
+      if (await store.save(v)) await this.reconfigure();
+      return this.settingsView();
+    });
+  }
+
+  /** Close every workspace (each writes and commits first) and open them again with the options as they now are. */
+  private async reconfigure(): Promise<void> {
+    const running = [...this.hosts.entries()];
+    this.hosts.clear();
+    await Promise.all(running.map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
+    if (!this.o.folder) {
+      const root = this.rootFor();
+      if (root !== this.rootDir) {
+        await mkdir(root, { recursive: true });
+        this.rootDir = root;
+        this.log(`new workspaces now go in ${root}`);
+      }
+    }
+    await Promise.all(this.entries.map((e) => this.open(e)));
+    this.log('settings applied: every workspace opened again');
   }
 
   /** Take a workspace off the list and close it. Its folder stays as it is. */
@@ -360,6 +577,19 @@ export class Hub {
   private async api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const route = `${req.method} ${url.pathname}`;
     if (route === 'GET /hub/api/workspaces') return send(res, 200, this.listing());
+    if (route === 'POST /hub/api/workspaces/open') {
+      const b = await readBody(req);
+      try {
+        return send(res, 201, { workspace: await this.openFolder(b.path, b.init === true) });
+      } catch (e) {
+        const notRepository = (e as { notRepository?: unknown }).notRepository;
+        if (notRepository) return send(res, 409, { error: (e as Error).message, notRepository });
+        throw e;
+      }
+    }
+    if (route === 'GET /hub/api/folders') return send(res, 200, await this.folders(url.searchParams.get('path'), url.searchParams.get('hidden') === '1'));
+    if (route === 'GET /hub/api/settings') return send(res, 200, await this.settingsView());
+    if (route === 'PUT /hub/api/settings') return send(res, 200, await this.saveSettings(await readBody(req)));
     if (route === 'POST /hub/api/workspaces') {
       const b = await readBody(req);
       if (b.kind === 'new') return send(res, 201, { workspace: await this.create(String(b.name ?? '')) });

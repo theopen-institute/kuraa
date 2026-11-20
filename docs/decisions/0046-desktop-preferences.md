@@ -1,5 +1,11 @@
 # 0046 · The desktop app's Preferences set what a host's flags set; what stays a flag, and why
 
+> Superseded in part by [0047](0047-browser-equals-desktop.md): Preferences are one model in the hub
+> (`packages/host/src/settings.ts`), the same dialog in a browser and in the desktop app wherever the
+> host listens only on this computer, applied by the hub reopening its workspaces in place. The
+> Podman program is a flag again, `--allow-invites`, `--manage-online` and `--manage-person` are gone,
+> and `pnpm host` alone serves your workspaces as the desktop app does.
+
 A host is configured by flags ([0018](0018-untrusted-users.md)): whoever starts it is its operator,
 and people using the app cannot change what it allows. The desktop app is the one case where the
 person using the app *is* the operator: its hub runs on their own computer, for them, on the

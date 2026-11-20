@@ -368,8 +368,8 @@ const historyRoutes: Route[] = [
 ];
 
 // The workspace's devices, as the app shows them: who this device is, and which are
-// paired and connected. Where the operator allows it (canInvite), people using the
-// app make and revoke invite links, remove devices and rename this one: every
+// paired and connected. Where invites are on (canInvite: every hub's workspace, 0047), people using
+// the app make and revoke invite links, remove devices and rename this one: every
 // member has the same say (0038).
 // You on this computer (peers/person.ts, 0035), where the one running the host uses it
 // (managePerson: a hub on loopback, 0047): this computer's signing key, your identity if it is here, and your keys

@@ -1,5 +1,10 @@
 # 0018 · People using the app are not trusted; code runs only in Podman
 
+> Superseded in part by [0047](0047-browser-equals-desktop.md): whoever has the access code of a host
+> listening only on their own computer is its owner, and changes its settings from the app
+> (Preferences), in a browser as in the desktop app. Loading components, turning off the sandbox and
+> naming the Podman program stay flags. Nothing in a document runs in the app or on the computer still.
+>
 > Changed by [0019](0019-engine-and-environment-components.md): environments are plugins again, like
 > engines; Podman is one, and none that runs code on the computer itself ships. An unsandboxed
 > environment is used only with `--allow-unsandboxed`.

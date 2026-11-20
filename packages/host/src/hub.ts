@@ -202,7 +202,7 @@ export class Hub {
   }
 
   private mayAdd(): void {
-    if (!this.canAdd) throw new HttpError(403, 'This server holds one workspace; its operator does not let people add others');
+    if (!this.canAdd) throw new HttpError(403, 'This server holds one workspace: others cannot be added to it');
   }
 
   private log(m: string): void {

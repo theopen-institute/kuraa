@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The menu's Devices section: who is in the workspace, by person and computer,
-// and who is online. Every member has the same say (0038): where the operator
-// allows it, anyone here may invite people, remove a device (for good; it keeps
-// its copy) and rename this one.
+// and who is online. Every member has the same say (0038): on every hub (0047),
+// anyone here may invite people, remove a device (for good; it keeps its copy)
+// and rename this one.
 import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';

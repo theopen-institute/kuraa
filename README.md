@@ -24,54 +24,89 @@ pnpm install
 If `pnpm desktop` reports that Electron failed to install, fetch its binary once with
 `node apps/desktop/node_modules/electron/install.js`.
 
-## Run a shared host on a folder
+## Run a host
 
-The folder must be a git working tree. Build the web client once, then start the host:
+Build the web client once, then start the host:
 
 ```sh
 pnpm web:build
-pnpm host --dir ~/research/notes --static apps/web/dist
+pnpm host --static apps/web/dist                       # your workspaces, as the desktop app
+pnpm host --dir ~/research/notes --static apps/web/dist   # one folder, and nothing else
 ```
 
+With neither `--dir` nor `--workspaces`, `pnpm host` serves **your workspaces**, just as the desktop
+app does: new ones go in the folder Preferences names (`Documents/kuraa` at first), its list and its
+settings are kept with the app's data (`settings.json` and `host-workspaces.json`, or beside the file
+`--settings` names), so choosing another folder for new workspaces keeps the list. `--workspaces
+<folder>` names that folder instead (its list kept in it), and wins over Preferences. `--dir` serves
+exactly one folder, a git working tree (`--init` makes it one), and nothing can be added from the
+app. Either way it is the same kind of server, a hub
+([decision 0030](docs/decisions/0030-one-kind-of-server.md)).
+
 The host prints its URL, the access token, a link that opens the client with the token filled
-in, and a `git clone` command. People see the folder as the one workspace in the app's workspace
-menu, and cannot add others; `--workspaces` instead serves a folder of workspaces people may add to
-(see below). Either way it is the same kind of server, a hub
-([decision 0030](docs/decisions/0030-one-kind-of-server.md)). Useful options:
+in, and for `--dir` a `git clone` command.
 
-The desktop app sets the same things in **Preferences…**, so nobody double-clicking it needs a flag;
-the last column says where. What stays on the command line, and why, is in
-[decision 0046](docs/decisions/0046-desktop-preferences.md).
+**Whoever has the access code of a host listening only on this computer is its owner**, as the
+person using the desktop app is ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)):
+in a browser too they have **Preferences…**, **Open a folder…** (any folder on the computer, chosen
+in the page), their identity and the online copy. That is the default (`--host 127.0.0.1`). With
+`--host` naming a network address, those are off, and the app says why; invites and devices stay,
+as every member has the same say ([0038](docs/decisions/0038-equal-peers.md)). A server for many
+people will need a design of its own.
 
-| Option | Default | Notes | Desktop app |
+Every setting below is in **Preferences**, in a browser and in the desktop app alike, so nobody
+needs a flag; a flag given at start wins over its setting for as long as the host runs, and
+Preferences says so. The last column says where. What stays on the command line, and why, is in
+[decision 0047](docs/decisions/0047-browser-equals-desktop.md).
+
+| Option | Default | Notes | In the app |
 | --- | --- | --- | --- |
-| `--port` | `4321` | — | Command line only: its server is private to the app |
-| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect | Command line only (as `--port`) |
+| `--port` | `4321` | — | Command line only: how the server is reached |
+| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect (Preferences, opening folders and your identity are then off) | Command line only (as `--port`) |
 | `--token` | random | Or set `KURAA_TOKEN` | Command line only (as `--port`) |
-| `--workspaces` | off | Be a hub of many workspaces, added from the app, kept in this folder. See below | Preferences: New workspaces |
-| `--peer` | off | Sync with this workspace's other devices, directly. See below | Preferences: Other computers |
-| `--allow-invites` | off | Let people make invite links, remove devices and rename this one from the app (`--workspaces` always does) | Always on |
-| `--manage-online` | off | Let people using the app add and remove the online copy (desktop app and `pnpm dev`: on). See below | Always on |
-| `--manage-person` | off | Let people using the app see and import this computer's identity (your own computer only; `pnpm dev`: on) | Always on |
+| `--static` | none | The built web client to serve | Command line only (as `--port`) |
+| `--dir` | off | Serve this one folder, and nothing else | Command line only; **Open a folder…** adds one to your workspaces |
+| `--settings` | `settings.json` in your app data folder | Where Preferences are kept | Command line only |
+| `--workspaces` | Preferences, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Preferences: New workspaces |
+| `--peer` | off | Sync every workspace with its other devices, directly. See below | Preferences: Other computers |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Preferences: Other computers › Advanced |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Preferences: Saving › Advanced (in seconds) |
-| `--engine` | off | Turn on running code: `--engine r`. See below | Preferences: Run R code (on) |
+| `--engine` | `r` | Which engines run code: `--engine r`, or `--engine none`. See below | Preferences: Run R code |
 | `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Preferences: Where code runs (shown when there is a choice) |
-| `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) | Command line only |
 | `--memory` | `4g` | The most memory a code session's container may use | Preferences: Running code › Advanced |
 | `--cpus` | `2` | How many CPUs a code session's container may use (fractions allowed: `0.5`) | Preferences: Running code › Advanced |
 | `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Preferences: Running code › Advanced |
-| `--podman` | found on the `PATH` or where the installers put it | The Podman program to run containers with; or set `KURAA_PODMAN` | Preferences: Running code › Advanced |
 | `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Preferences: Running code › Advanced |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Preferences: Kinds of documents |
-| `--component` | none | Load a run component (engine or environment) by path or package name | Command line only |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Preferences: Running code › Advanced |
-| `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) | Preferences: Running code (on) |
-| `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces | Preferences: Running code › Advanced |
+| `--allow-installs` | on | Let people install packages and download tools (`--no-allow-installs` to refuse) | Preferences: Running code |
+| `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Preferences: Running code › Advanced |
+| `--podman` | found on the `PATH` or where the installers put it | The Podman program to run containers with; or set `KURAA_PODMAN` | Command line only: it names a program run with your rights |
+| `--component` | none | Load a run component (engine or environment) by path or package name | Command line only: code run with your rights |
+| `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) | Command line only: code run with your rights |
+
+`--allow-invites`, `--manage-online` and `--manage-person` are gone: invites are always on, and the
+online copy and your identity follow from where the host listens.
 
 Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
 section changes them. In the app the URL and token are the **server address** and **access code**.
+
+## Preferences
+
+**Preferences…** in the menu's **You** section, or ⌥⌘, (Ctrl+Alt+,; ⌘, is the menu's own), opens
+the same dialog in a browser and in the desktop app (where it is also in the app menu on a Mac, and
+in File elsewhere), wherever the host listens only on this computer. In view: syncing with other
+computers, the kinds of documents that are on, running R code (and whether Podman is ready for it),
+whether documents may install packages and download tools, and where new workspaces go. Under
+**Advanced**: the servers used to find other computers on a private network, the limits on each
+document's code (memory, CPUs, disk), what a workspace may ask for (writing to its own folder, the
+network), base images R may use, where packages and tools are kept, and how soon edits are written
+and versions saved. A value that is wrong is refused, saying what. Saving reopens every workspace
+with them, committing pending edits first, at the same address and access code, and the page reloads.
+A flag given at start wins over its setting, and the dialog says so. The desktop app keeps them in
+`preferences.json` with its data, `pnpm host` in `settings.json`, `pnpm dev` in
+`.dev-workspaces/settings.json` ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)).
 
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
@@ -139,8 +174,8 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 ## An online copy
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. In the
-menu's **Online copy** section (the desktop app, `pnpm dev`, or a host started with
-`--manage-online`), add the address of an empty repository, such as
+menu's **Online copy** section (wherever the host listens only on this computer: the desktop app,
+`pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
 with your own git credentials (an SSH key, or a credential helper for https). On **Sync**, and
@@ -209,7 +244,7 @@ computer", and keeps the keys under **Advanced**: copy your identity there to a 
 host person [create | export | import | revoke <key>]`; `pnpm host signing-key` prints this
 computer's signing key, to add to GitHub as a signing key.
 
-In the desktop app, turn on **Sync every workspace with the other computers it is on** in
+To sync every workspace, turn on **Sync every workspace with the other computers it is on** in
 Preferences (or pass `--peer`); workspaces you invited people to, or joined, always sync.
 
 Devices running different versions of kuraa can work together. Each tells the others how it merges
@@ -236,14 +271,16 @@ the ones that ship are R and **Podman**: a container with no network, the worksp
 `podman machine init`, `podman machine start`. The first run builds an R image, which takes a few
 minutes. Package installs run in containers too. A workspace may name another base image only if the host allows it (`--r-image`); containers a host left behind (it crashed) are removed by the next host to start one on that computer.
 
-**People using the app are not trusted with the computer the host runs on**; only the content of
-their documents is theirs ([decision 0018](docs/decisions/0018-untrusted-users.md)). No environment
+**Nothing in a document runs on the computer itself** ([decision 0018](docs/decisions/0018-untrusted-users.md)):
+code runs only where the environment keeps it from your files and network. No environment
 that runs code on the computer itself ships. One can be written, but a host uses an environment
 that is not sandboxed only when started with `--allow-unsandboxed`.
 
-Everything that configures a host is a flag (`--engine`, `--env`, `--format`, `--component`, the
-`--allow-…` flags); the desktop app takes `--engine` (`--engine none` for none), `--env`,
-`--format`, `--component` and `--allow-unsandboxed` too. **Components…** in the menu shows what is on, read-only, and lets each person turn their own
+What runs and which formats are on are the host's Preferences (or its flags); loading a component,
+turning off the sandbox and naming the Podman program are flags only (`--component`,
+`--allow-unsandboxed`, `--podman`), as they choose code that runs with your rights. The desktop app
+takes `--engine` (`--engine none` for none), `--env`, `--format`, `--component`,
+`--allow-unsandboxed` and `--podman` too. **Components…** in the menu shows what is on, read-only, and lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
 browser. A file whose format is off opens as a Text file
 ([decision 0017](docs/decisions/0017-components-panel.md)). A workspace can say what it needs in
@@ -256,8 +293,8 @@ browser. A file whose format is off opens as a Text file
 }
 ```
 
-Write access and the network are granted only if the host was started with `--allow-write` or
-`--allow-network`.
+Write access and the network are granted only where Preferences (or `--allow-write`,
+`--allow-network`) allow them.
 
 **Packages.** The environment starts with the tidyverse. Install more with `install.packages()` in
 a chunk, or **Packages…** in the menu (CRAN names, `name@version`, `bioc::name`, or
@@ -287,8 +324,10 @@ pnpm dev --workspaces ~/research  # another folder of workspaces
 pnpm dev --dir ~/research/notes   # one folder, as `pnpm host --dir` serves it
 ```
 
-Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app. The
-first time, it starts with a Scratch workspace.
+Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
+Preferences and **Open a folder…** in the page; its settings are kept in
+`.dev-workspaces/settings.json` (beside `--workspaces`, if given). The first time, it starts with a
+Scratch workspace.
 
 R chunks run in Podman, as everywhere. `--allow-write` and `--allow-network` let the workspace ask
 for those in `.kuraa/run.json`.
@@ -319,17 +358,10 @@ changes appear in the editor. Quitting writes and commits any pending edits.
 
 Joining a shared host or hub runs none of the app's own; the launcher leads back to your workspaces.
 
-**Preferences…** (in the app menu on a Mac, ⌥⌘,; in File elsewhere, Ctrl+Alt+,; or **App preferences…** in
-the in-app menu, which keeps ⌘, for itself) sets what a host's flags would (the table under
-[Run a shared host](#run-a-shared-host-on-a-folder) says which). In view: syncing with other
-computers, the kinds of documents that are on, running R code (and whether Podman is ready for it),
-whether documents may install packages and download tools, and where new workspaces go. Under
-**Advanced**: the servers used to find other computers on a private network, the limits on each
-document's code (memory, CPUs, disk), what a workspace may ask for (writing to its own folder, the
-network), base images R may use, the Podman program, where packages and tools are kept, and how soon
-edits are written and versions saved. Saving restarts your workspaces, committing pending edits first;
-a value that is wrong is refused, saying what. A flag given on the command line (`--engine`, `--env`,
-`--format`, `--r-image`, `--peer`, `--workspaces`) wins over its preference, and the window says so.
+**Preferences…** is the client's dialog, as in a browser ([above](#preferences)). What stays the
+desktop app's own: its native menus, the spelling suggestions in its right-click menu, the git it
+ships, the launcher and joining another server, native save dialogs (a browser downloads instead), and
+leaving out the server address and access code, which it manages itself.
 
 ## Package the desktop app
 
@@ -406,6 +438,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
+| — | `packages/host/test/settings.test.ts`, `tests/e2e/preferences.spec.ts`: one settings model in the hub (read leniently, saved strictly, flags winning), applied by reopening every workspace at the same address; the owner's features only on loopback; Preferences and Open a folder… in the browser, through the folder picker |
 
 ## Layout
 

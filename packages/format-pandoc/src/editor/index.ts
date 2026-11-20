@@ -15,11 +15,18 @@ import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingI
 import { keymap } from 'prosemirror-keymap';
 import { footnotes } from './notes.js';
 import { headerBehaviour, headerSpec } from './header.js';
-import { conflictViews } from './conflicts.js';
+import { conflictViews, nextConflict } from './conflicts.js';
+import { citationPlugins, citationRules, citationViews } from './citations.js';
+import { imagePlugins, imageRules, imageViews } from './images.js';
+import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
-export { versionLabel } from './conflicts.js';
+export { conflictPositions, nextConflict, versionDateLabel, versionLabel } from './conflicts.js';
+export { Bibliography, citationLabel, describeEntry } from './citations.js';
+export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable } from './tables.js';
+export { workspacePath } from './paths.js';
+export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
 
 export interface PandocEditorExtension {
   /**
@@ -110,6 +117,19 @@ const fenceOnEnter = (schema: Schema, ext: PandocEditorExtension): Command => (s
   return true;
 };
 
+/** `$$` on a line of its own, then Enter: a display math block. */
+const mathOnEnter = (schema: Schema): Command => (state, dispatch) => {
+  const math = schema.nodes.math_display;
+  const { $from, empty } = state.selection;
+  if (!math || !empty || $from.parent.type !== schema.nodes.paragraph || $from.parent.textContent.trim() !== '$$') return false;
+  if ($from.parentOffset !== $from.parent.content.size) return false;
+  if (dispatch) {
+    const tr = state.tr.replaceWith($from.before(), $from.after(), math.create());
+    dispatch(tr.setSelection(TextSelection.create(tr.doc, $from.before() + 1)).scrollIntoView());
+  }
+  return true;
+};
+
 function markdownRules(schema: Schema, ext: PandocEditorExtension): InputRule[] {
   const n = schema.nodes;
   const m = schema.marks;
@@ -145,6 +165,9 @@ function markdownRules(schema: Schema, ext: PandocEditorExtension): InputRule[] 
     markRule(/(?<![!\\])\[([^\]]+)\]\(([^)\s]+)\)$/, m.link, (x) => ({ href: x[2] })),
     n.math_inline ? new InputRule(/(?<![\\$\w])\$([^\s$](?:[^$]*[^\s$])?)\$$/, (state, x, start, end) =>
       state.tr.replaceWith(start, end, n.math_inline!.create({ tex: x[1] }))) : null,
+    // $$tex$$ in a line: display math there.
+    n.math_inline ? new InputRule(/(?<![\\$\w])\$\$([^\s$](?:[^$]*[^\s$])?)\$\$$/, (state, x, start, end) =>
+      state.tr.replaceWith(start, end, n.math_inline!.create({ tex: x[1], display: true }))) : null,
   ];
   return rules.filter((r): r is InputRule => r !== null);
 }
@@ -177,7 +200,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         'Mod-[': lift,
         'Mod-Alt-c': setBlockType(n.code_block!),
         ...notes.keys,
-        Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), splitListItem(n.list_item!)),
+        Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitListItem(n.list_item!)),
         'Shift-Enter': chainCommands(
           (state, dispatch, view) => (notes.inNote(state) ? newParagraph(state, dispatch, view) : false),
           exitCode,
@@ -187,19 +210,31 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
           },
         ),
         Backspace: undoInputRule,
-        Tab: sinkListItem(n.list_item!),
-        'Shift-Tab': liftListItem(n.list_item!),
+        ...tableKeys(),
+        Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
+        'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
+        'Mod-Alt-n': nextConflict,
         ...(ext.keys?.(schema, ctx) ?? {}),
       };
       return [
-        inputRules({ rules: [...(ext.rules?.(schema) ?? []), ...notes.rules, ...markdownRules(schema, ext)] }),
+        ...citationPlugins(ctx),
+        inputRules({ rules: [...(ext.rules?.(schema) ?? []), ...notes.rules, ...imageRules(schema), ...citationRules(schema), ...markdownRules(schema, ext)] }),
         keymap(keys),
+        ...tablePlugins(),
+        ...imagePlugins(ctx),
         ...notes.plugins,
         ...header.plugins,
       ];
     },
-    nodeViews: (ctx) => ({ ...footnotes(ctx.schema, ctx).nodeViews, ...headerBehaviour(ctx.schema, ctx).nodeViews, ...conflictViews(!!ctx.readOnly) }),
+    nodeViews: (ctx) => ({
+      ...footnotes(ctx.schema, ctx).nodeViews,
+      ...headerBehaviour(ctx.schema, ctx).nodeViews,
+      ...conflictViews(!!ctx.readOnly, ctx),
+      ...citationViews(ctx),
+      ...imageViews(ctx),
+    }),
     header: headerSpec(ext.headerFields),
+    commands: () => ({ insertTable, nextConflict }),
   };
 }
 

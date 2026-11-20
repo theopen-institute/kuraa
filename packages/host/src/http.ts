@@ -15,6 +15,7 @@ import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
+import { writingRoutes } from './writing.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -100,7 +101,7 @@ function chunkRefOf(v: unknown): ChunkRef | undefined {
 // ---------------------------------------------------------------------------
 // Routes
 
-interface Context {
+export interface Context {
   host: Host;
   req: IncomingMessage;
   res: ServerResponse;
@@ -110,7 +111,7 @@ interface Context {
   params: string[];
 }
 
-interface Route {
+export interface Route {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string | RegExp;
   handle(c: Context): Promise<void> | void;
@@ -490,7 +491,7 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...backupRoutes, ...writingRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

@@ -258,12 +258,12 @@ export interface FromSettings {
 /**
  * Host options from settings. `fixed` is what only flags set (the components,
  * --allow-unsandboxed, the Podman program, engines named with --engine) and
- * timings that win over the settings (tests). An environment or format the
- * host no longer has is passed over, not an error at every start.
+ * timings that win over the settings (tests). An engine, environment or format
+ * the host does not have is passed over, not an error at every start.
  */
 export function fromSettings(
   s: Settings,
-  fixed: { run?: Partial<RunOptions>; timings?: Partial<HostTimings>; environments?: string[]; formats?: string[] } = {},
+  fixed: { run?: Partial<RunOptions>; timings?: Partial<HostTimings>; engines?: string[]; environments?: string[]; formats?: string[] } = {},
 ): FromSettings {
   const environment = s.environment && (!fixed.environments || fixed.environments.includes(s.environment)) ? s.environment : undefined;
   const formats = s.formats?.filter((id) => !fixed.formats || fixed.formats.includes(id));
@@ -271,7 +271,7 @@ export function fromSettings(
   return {
     run: {
       ...r,
-      engines: (r.engines ?? (s.runCode ? ['r'] : [])).filter((e) => e !== 'none'),
+      engines: (r.engines ?? (s.runCode ? ['r'] : []).filter((e) => !fixed.engines || fixed.engines.includes(e))).filter((e) => e !== 'none'),
       environment,
       allowInstalls: s.allowInstalls,
       allowWorkspaceWrite: s.allowWrite,

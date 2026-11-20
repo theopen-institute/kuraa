@@ -211,7 +211,7 @@ export class Hub {
 
   async start(): Promise<AddressInfo> {
     // The environments loaded, so that a setting naming one no longer there is passed over.
-    if (this.o.settings) this.environmentIds = await loadRunComponents(this.o.hosts?.run?.components ?? []).then((c) => [...c.environments.keys()], () => undefined);
+    if (this.o.settings) await this.loadComponents();
     if (this.o.folder) {
       const name = basename(this.root);
       this.entries = [{ id: slugOf(name), name, dir: this.root, added: new Date().toISOString() }];
@@ -297,12 +297,23 @@ export class Hub {
     const base = this.o.hosts ?? {};
     if (!this.o.settings) return { ...base, run: base.run ? { engines: [], ...base.run } : undefined };
     const types = base.types ?? standardTypes;
-    const s = fromSettings(this.o.settings.current, { run: base.run, timings: base.timings, formats: types.map((t) => t.id), environments: this.environmentIds });
+    const s = fromSettings(this.o.settings.current, { run: base.run, timings: base.timings, formats: types.map((t) => t.id), engines: this.loaded?.engines, environments: this.loaded?.environments });
     return { ...base, run: s.run, formats: s.formats, timings: s.timings };
   }
 
-  /** The environments loaded (known once the settings are first shown or applied): a setting naming another is passed over. */
-  private environmentIds: string[] | undefined;
+  /** The engines and environments loaded: a setting naming another is passed over. */
+  private loaded: { engines: string[]; environments: string[] } | undefined;
+
+  private async loadComponents(): Promise<import('./components.js').RunComponents | null> {
+    try {
+      const c = await loadRunComponents(this.o.hosts?.run?.components ?? []);
+      this.loaded = { engines: [...c.engines.keys()], environments: [...c.environments.keys()] };
+      return c;
+    } catch (e) {
+      this.log(`could not load the run components: ${(e as Error).message}`);
+      return null;
+    }
+  }
 
   /** Your identity changed (made, imported, a key revoked): every workspace that syncs says so to its other devices now. */
   private async personChanged(): Promise<void> {
@@ -472,20 +483,14 @@ export class Hub {
     const store = this.o.settings;
     if (!store) throw new HttpError(404, 'This server is set up with flags when it starts');
     const run = this.hostOptions().run;
-    let environments: SettingsView['environments'] = [];
-    try {
-      const loaded = await loadRunComponents(this.o.hosts?.run?.components ?? []);
-      this.environmentIds = [...loaded.environments.keys()];
-      environments = await Promise.all([...loaded.environments.values()].map(async (e) => {
-        try {
-          return { id: e.id, label: e.label, ...(await e.check(run?.options?.[e.id])) };
-        } catch (err) {
-          return { id: e.id, label: e.label, available: false, message: (err as Error).message };
-        }
-      }));
-    } catch (e) {
-      this.log(`could not load the run components to show them: ${(e as Error).message}`);
-    }
+    const loaded = await this.loadComponents();
+    const environments: SettingsView['environments'] = await Promise.all([...(loaded?.environments.values() ?? [])].map(async (e) => {
+      try {
+        return { id: e.id, label: e.label, ...(await e.check(run?.options?.[e.id])) };
+      } catch (err) {
+        return { id: e.id, label: e.label, available: false, message: (err as Error).message };
+      }
+    }));
     return {
       settings: store.current,
       fromFlags: store.fromFlags,

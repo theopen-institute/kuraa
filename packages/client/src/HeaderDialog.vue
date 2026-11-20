@@ -187,10 +187,10 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
 
 <template>
   <div class="modal-backdrop" @mousedown.self="cancel">
-    <form ref="root" class="modal header-dialog" role="dialog" aria-modal="true" aria-labelledby="header-title" data-testid="header" @submit.prevent="save">
+    <form ref="root" class="modal header-dialog" role="dialog" aria-modal="true" aria-labelledby="header-dialog-title" data-testid="header" @submit.prevent="save">
       <div class="header-top">
         <div class="header-heading">
-          <h2 id="header-title">{{ adding ? S.header.add : S.header.title }}</h2>
+          <h2 id="header-dialog-title">{{ adding ? S.header.add : S.header.title }}</h2>
           <p class="muted">{{ S.header.about(name) }}</p>
         </div>
         <div v-if="!adding" class="segmented" role="tablist" :aria-label="S.header.editAs">

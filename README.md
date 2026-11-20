@@ -62,8 +62,8 @@ menu, and cannot add others; `--workspaces` instead serves a folder of workspace
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` |
 | `--component` | none | Load a run component (engine or environment) by path or package name |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network |
-| `--allow-installs` | off | Let people install packages (desktop and `pnpm dev`: on) |
-| `--data-dir` | your app data folder | Where package versions are stored, shared by workspaces |
+| `--allow-installs` | off | Let people install packages and download tools such as TeX (desktop and `pnpm dev`: on) |
+| `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces |
 
 Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
@@ -126,8 +126,13 @@ document now (**Compare with now**: changed paragraphs, the words in them marked
 rmarkdown, Markdown by pandoc) and shows the page beside it, in a frame where nothing in the document
 runs; **Update when saved** renders it again each time it is saved. **Save as** HTML, Word or PDF
 renders that format and saves the file. The header's `output:` (or `format:`) settings apply. PDFs are
-made with Typst, which the environment has, so no TeX is needed; a header asking for a LaTeX engine
-gets it if the environment has one. Rendering runs where code runs (in Podman, with the workspace
+made with Typst, which the environment has, so no TeX is needed. A header asking for a LaTeX engine
+(`latex_engine: xelatex`, `pdf-engine:`) gets TeX as a **tool**: where installs are allowed, the
+panel offers **Download PDF with LaTeX** (TinyTeX, about 54 MB, kept once on this computer) and
+renders again when it is there; LaTeX packages a document lacks are added when it first needs them
+and recorded in `.kuraa/tex-packages.json`, so other computers add them before their first PDF.
+Without permission, the PDF is made with Typst and says why
+([decision 0045](docs/decisions/0045-tools.md)). Rendering runs where code runs (in Podman, with the workspace
 read-only and no network), so it needs `--engine r` and Podman, like running chunks; the panel says
 what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the document
 ([decision 0041](docs/decisions/0041-rendering.md)).
@@ -241,7 +246,10 @@ Everything that configures a host is a flag (`--engine`, `--env`, `--format`, `-
 `--allow-…` flags); the desktop app takes `--engine` (`--engine none` for none), `--env`,
 `--format`, `--component` and `--allow-unsandboxed` too. **Components…** in the menu shows what is on, read-only, and lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
-browser. A file whose format is off opens as a Text file
+browser. It also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and
+where installs are allowed offers **Download** and **Remove**: tools are kept once per computer in
+the data folder and used only where code runs ([decision 0045](docs/decisions/0045-tools.md)). A
+file whose format is off opens as a Text file
 ([decision 0017](docs/decisions/0017-components-panel.md)). A workspace can say what it needs in
 `.kuraa/run.json`, but cannot loosen what the host allows:
 
@@ -262,8 +270,9 @@ running without it. Each workspace records its packages in `.kuraa/r-packages.js
 so collaborators and other machines get the same ones; each package version is stored once per
 computer. A shared host allows installs only with `--allow-installs`
 ([decision 0014](docs/decisions/0014-packages.md)). A run component is a module exporting `defineRunComponent({ name, engines,
-environments })` from `@kuraa/run-kit`: examples of [an engine](packages/host/test/fixtures/echo-engine.mjs)
-and [environments](packages/host/test/fixtures/environments.mjs), loaded with `--component <path>`.
+environments, tools })` from `@kuraa/run-kit`: examples of [an engine](packages/host/test/fixtures/echo-engine.mjs),
+[environments](packages/host/test/fixtures/environments.mjs) and [a tool](packages/host/test/fixtures/tools.mjs),
+loaded with `--component <path>`.
 
 The repository is also served over git's HTTP protocol at `/w/<workspace>/git`, with the token as
 the password (the host prints the command):
@@ -402,9 +411,10 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type registry, hook bus and merging (lines, words, blocks). No DOM, no Node, no formats |
-| `packages/run-kit` | The contract between run components: engines (languages) and environments (where processes run), the policy |
+| `packages/run-kit` | The contract between run components: engines (languages), environments (where processes run) and tools (toolchains downloaded on request), the policy |
 | `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate`, and rendering R Markdown and Markdown (rmarkdown, pandoc, Typst) |
 | `packages/env-podman` | Environment component: a locked-down Podman container |
+| `packages/tool-tinytex` | Tool component: TinyTeX, for PDFs made with LaTeX, pinned per architecture; reads LaTeX logs for missing packages |
 | `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |

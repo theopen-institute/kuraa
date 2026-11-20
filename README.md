@@ -70,7 +70,14 @@ co-author credit) and a cursor colour under **Settings** in the client.
 
 The editor has no toolbar: type markdown (`**bold**`, `## `, ```` ```{r} ````, `[text](url)` and
 so on) and it is formatted as you type; Backspace straight afterwards undoes the conversion. The
-full list is in [decision 0008](docs/decisions/0008-markdown-cues.md).
+full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Citations are typed as
+Pandoc writes them (`[@smith2020, p. 3]`, `@smith2020`); typing `@` offers the keys of the
+bibliography the header names, and citations show as "Smith 2020", a key the bibliography lacks
+marked. Paste or drop an image to keep it in `images/` beside the document; `| a | b |` then Enter
+makes a table (Tab between cells, right-click for rows and columns; **Insert table** in the menu);
+`$$` then Enter starts display math. ⌘F finds and replaces, ⌥⌘O shows the outline, and ⌥⌘N goes to
+the next conflict; clicking a file's conflict count opens it at the first
+([decision 0040](docs/decisions/0040-writing-in-the-editor.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;
@@ -349,6 +356,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | M2–M5, M9 | `packages/host/test`: headless clients against a real host and git repo |
 | M2 | `tests/e2e/collab.spec.ts`: two browsers type into one paragraph, converge and show each other's cursors |
 | — | `tests/e2e/cues.spec.ts`: typed markdown cues format the text, and the file keeps that markdown |
+| — | `tests/e2e/citations.spec.ts`, `images.spec.ts`, `tables.spec.ts`, `find.spec.ts`: the citation picker and chips, pasted images, tables, find and replace, the outline and going to conflicts |
 | — | `tests/e2e/text.spec.ts`: source files are highlighted; Enter, Tab and paste keep indentation and line endings |
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |

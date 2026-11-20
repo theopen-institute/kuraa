@@ -19,6 +19,11 @@ import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
 import { defaultBlock } from './blocks.js';
 import HeaderDialog from './HeaderDialog.vue';
+import FindBar from './FindBar.vue';
+import OutlinePanel from './OutlinePanel.vue';
+import { findPlugin } from './find.js';
+import type { FormatCommands } from '@kuraa/editor-kit';
+import { workspaceFiles } from './workspaceFiles.js';
 
 const props = defineProps<{
   api: HostApi;
@@ -33,6 +38,8 @@ const props = defineProps<{
   formatEditor?: FormatEditor;
   /** Show the Header dialog (if the format has a header). */
   headerOpen?: boolean;
+  /** Go to the document's first conflict once it is open (its conflict count was clicked). */
+  jumpToConflict?: boolean;
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -44,6 +51,8 @@ const emit = defineEmits<{
   conflicts: [count: number];
   /** Files changed under everyone (work from another device came in). */
   filesChanged: [];
+  /** It went to the first conflict, as asked. */
+  jumped: [];
 }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
@@ -54,7 +63,11 @@ const error = ref<string | null>(null);
 const loading = ref(true);
 /** Goes up with every change to the document while the Header dialog is open. */
 const docVersion = ref(0);
+/** Goes up with every transaction: the find bar and the outline follow the document by it. */
+const tick = ref(0);
 let source: SourceEditor | null = null;
+/** Commands the format offers by name (insert a table, the next conflict). */
+let commands: FormatCommands = {};
 let connection: RoomConnection | null = null;
 
 const fresh = (): EditorStatus => ({ connection: 'connecting', peers: [], room: null, unsynced: 0, lastFlushAt: null, lastCommitAt: null, lastCommit: null, notice: null, runner: null });
@@ -144,6 +157,7 @@ function open(): () => void {
   const token = props.settings.token;
   let cancelled = false;
   let pmView: EditorView | null = null;
+  let disposeFiles = () => {};
   loading.value = true;
   error.value = null;
   view.value = null;
@@ -202,11 +216,15 @@ function open(): () => void {
     const layout = type.editor?.layout;
     // A source file gets line editing; anything else gets its format's editor
     // module (cues, keys, behaviour), then undo/redo and ProseMirror's base keys.
-    const ctx = editorContext(type, { history, isRemote: conn.isRemote });
+    const files = workspaceFiles(api, path, () => user.value);
+    disposeFiles = () => files.dispose();
+    const notify = (text: string, kind: 'info' | 'warn' = 'info') => report({ notice: { kind, text } });
+    const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify });
+    commands = formatEditor?.commands?.(ctx) ?? {};
     const plugins = layout?.kind === 'lines'
       ? linesPlugins(type.schema, layout, path, history)
       : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap)];
-    const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins] });
+    const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins, findPlugin()] });
     pmView = new EditorView(mount.value!, {
       state,
       nodeViews: nodeViewsFor(type, ctx, formatEditor, { runner }),
@@ -216,6 +234,7 @@ function open(): () => void {
       // y-prosemirror dispatches while the view is still being constructed, so use `this`, not `pmView`.
       dispatchTransaction(this: EditorView, tr) {
         this.updateState(this.state.apply(tr));
+        tick.value++;
         source?.documentChanged(tr); // the source view follows the live document
         if (tr.docChanged && props.headerOpen) docVersion.value++;
         // The title is in the header, the first block: read it again when that changes.
@@ -248,6 +267,7 @@ function open(): () => void {
   });
 
   return () => {
+    disposeFiles();
     cancelled = true;
     clearTimeout(chunkTimer);
     clearTimeout(conflictTimer);
@@ -276,6 +296,57 @@ onBeforeUnmount(() => {
 
 watch(user, (u) => connection?.setUser(u));
 
+// Find (⌘F) and the outline (⌥⌘O), over the rich view; the Source view finds with its own bar.
+const find = ref<{ initial: string; focus: number } | null>(null);
+const outlineOpen = ref(false);
+function openFind() {
+  const v = view.value;
+  if (!v || props.showSource || props.type.editor?.layout) return false;
+  const { from, to } = v.state.selection;
+  const selected = v.state.doc.textBetween(from, to, ' ').slice(0, 200);
+  find.value = { initial: selected && !selected.includes('\n') ? selected : find.value?.initial ?? '', focus: (find.value?.focus ?? 0) + 1 };
+  return true;
+}
+function toggleOutline() {
+  if (props.type.editor?.layout) return;
+  outlineOpen.value = !outlineOpen.value && !!view.value;
+}
+/** Run a command the format offers by name; false if it has none, or it did not apply. */
+function command(name: keyof FormatCommands): boolean {
+  const v = view.value;
+  const c = commands[name];
+  if (!v || !c || props.showSource) return false;
+  v.focus();
+  return c(v.state, v.dispatch, v);
+}
+const onWritingKey = (e: KeyboardEvent) => {
+  if (!(e.metaKey || e.ctrlKey) || e.defaultPrevented) return;
+  if (e.code === 'KeyF' && !e.altKey && !e.shiftKey && openFind()) e.preventDefault();
+  else if (e.code === 'KeyO' && e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    toggleOutline();
+  }
+};
+onMounted(() => window.addEventListener('keydown', onWritingKey));
+onBeforeUnmount(() => window.removeEventListener('keydown', onWritingKey));
+watch(() => props.showSource, (s) => {
+  if (s) find.value = null;
+});
+
+// Asked to show the first conflict (its count in the file list was clicked).
+watch([() => props.jumpToConflict, view], ([jump, v]) => {
+  if (!jump || !v) return;
+  const next = commands.nextConflict;
+  if (next) {
+    v.dispatch(v.state.tr.setSelection(Selection.atStart(v.state.doc)));
+    next(v.state, v.dispatch, v);
+    v.focus();
+  }
+  emit('jumped');
+}, { immediate: true });
+
+defineExpose({ openFind, toggleOutline, command });
+
 // The editable Source view, while it is shown. It starts from the file as it is
 // on disk, so blocks nobody has touched show exactly as written.
 watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
@@ -300,6 +371,8 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
   <div class="editor-pane">
     <div v-if="error" class="banner warn">Could not open {{ path }}: {{ error }}</div>
     <div v-if="loading && !error" class="loading">Opening {{ path }}…</div>
+    <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
+    <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
     <div v-show="!showSource" class="editor-scroll" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
     </div>

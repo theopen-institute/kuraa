@@ -38,6 +38,8 @@ const props = defineProps<{
   settings: Settings;
   shell: Shell;
   api: HostApi;
+  /** How many conflicts the open document keeps. */
+  conflicts?: number;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -50,6 +52,11 @@ const emit = defineEmits<{
   components: [];
   /** Invite people to the workspace. */
   invite: [];
+  /** Find in the document, show its outline, put a table in, or go to its next conflict. */
+  find: [];
+  outline: [];
+  insertTable: [];
+  nextConflict: [];
   close: [];
 }>();
 
@@ -104,6 +111,12 @@ const runner = computed(() => props.status?.runner ?? null);
             {{ historyOpen ? 'Hide history' : 'History' }}
           </button>
           <button type="button" @click="emit('saveVersion'); emit('close')">Save version…</button>
+        </div>
+        <div v-if="doc && !type!.editor?.layout && !showSource" class="menu-actions" data-testid="menu-writing">
+          <button type="button" title="⌘F" data-testid="menu-find" @click="emit('close'); emit('find')">Find and replace…</button>
+          <button type="button" title="⌥⌘O" data-testid="menu-outline" @click="emit('close'); emit('outline')">Outline</button>
+          <button type="button" data-testid="menu-insert-table" @click="emit('close'); emit('insertTable')">Insert table</button>
+          <button v-if="conflicts" type="button" title="⌥⌘N" data-testid="menu-next-conflict" @click="emit('close'); emit('nextConflict')">Next conflict</button>
         </div>
         <p v-if="status" class="menu-facts">
           <span data-testid="last-flush">Written {{ time(status.lastFlushAt) }}</span>

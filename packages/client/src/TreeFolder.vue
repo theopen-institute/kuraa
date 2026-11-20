@@ -51,7 +51,7 @@ const tip = (f: TreeFile) => {
   <li
     v-for="f in folder.files"
     :key="f.path"
-    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path }]"
+    :class="['tree-file', { selected: selected === f.path, untyped: !f.type, untitled: untitled(f), dragging: dragging === f.path, 'has-conflicts': !!f.conflicts }]"
     draggable="true"
     @dragstart="t.dragStart($event, f.path)"
     @dragend="t.dragEnd()"
@@ -71,7 +71,8 @@ const tip = (f: TreeFile) => {
         v-if="f.conflicts"
         class="tree-conflict"
         :data-testid="`conflicts:${f.path}`"
-        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between`"
+        :title="`${f.conflicts} conflict${f.conflicts === 1 ? '' : 's'} from a merge: both versions are in the document, to choose between. Click to go to the first`"
+        @click.stop="t.showConflicts(f.path)"
       >{{ f.conflicts }} conflict{{ f.conflicts === 1 ? '' : 's' }}</span>
     </button>
     <span class="tree-actions">

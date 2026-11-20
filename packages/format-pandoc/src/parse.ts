@@ -13,6 +13,7 @@ import { math } from 'micromark-extension-math';
 import { mathFromMarkdown } from 'mdast-util-math';
 import { frontmatter } from 'micromark-extension-frontmatter';
 import { frontmatterFromMarkdown } from 'mdast-util-frontmatter';
+import { CITATION_KEY } from './citations.js';
 
 /** A loose view of an mdast node with absolute source offsets. */
 export interface MdNode {
@@ -41,6 +42,11 @@ export interface ParseHooks {
   block?(node: MdNode, ctx: ParseContext): PMNode | undefined;
   inline?(node: MdNode, ctx: ParseContext, marks: readonly Mark[]): PMNode[] | undefined;
 }
+
+/** Bracketed text that holds a citation: a key after the start, a space or a semicolon. */
+const CITES = new RegExp(String.raw`(^|[\s;])-?@${CITATION_KEY}`, 'u');
+/** An in-text citation and a space, just before a bracket: `@smith2020 [p. 3]` is one citation with a locator. */
+const IN_TEXT_BEFORE = new RegExp(String.raw`(?<![\p{L}\p{N}_@\\-])@${CITATION_KEY} $`, 'u');
 
 const micromarkExts = [gfmTable(), gfmStrikethrough({ singleTilde: false }), gfmTaskListItem(), gfmFootnote(), math()];
 const mdastExts = [gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown(), gfmTaskListItemFromMarkdown(), gfmFootnoteFromMarkdown(), mathFromMarkdown()];
@@ -523,7 +529,7 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
   /** Bare citations, superscript and subscript inside plain text. */
   function patterns(value: string, base: number, escaped: (i: number) => boolean, marks: readonly Mark[]): PMNode[] {
     const out: PMNode[] = [];
-    const re = /(?<![\w@])(-?@[A-Za-z0-9_][\w]*(?:[:.#$%&+?<>~/-][\w]+)*)|\^([^\s^]+?)\^|~([^\s~]+?)~|(\\[A-Za-z]+(?:\{[^{}\n]*\}|\[[^\]\n]*\])*)/g;
+    const re = new RegExp(String.raw`(?<![\p{L}\p{N}_@])(-?@${CITATION_KEY})|\^([^\s^]+?)\^|~([^\s~]+?)~|(\\[A-Za-z]+(?:\{[^{}\n]*\}|\[[^\]\n]*\])*)`, 'gu');
     let last = 0;
     for (let m = re.exec(value); m; m = re.exec(value)) {
       const at = m.index + (m[1]?.startsWith('-') ? 1 : 0);
@@ -616,9 +622,14 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
               : [rawInline(s, marks)],
           };
         }
-      } else if (!isImage && after !== '(' && after !== '[' && /(^|[\s;])-?@[A-Za-z0-9_]/.test(inner)) {
+      } else if (!isImage && after !== '(' && after !== '[' && CITES.test(inner)) {
         const s = clean(src.slice(i, close + 1));
         sp = { from: abs, to: from + close + 1, make: (marks) => [n.citation!.create({ text: s }, null, marks)] };
+      } else if (!isImage && after !== '(' && after !== '[' && !inner.includes('\n') && IN_TEXT_BEFORE.test(src.slice(Math.max(0, i - 200), i))) {
+        // `@key [p. 3]`: one in-text citation with its locator, from the @.
+        const at = src.lastIndexOf('@', i);
+        const s = src.slice(at, close + 1);
+        sp = { from: from + at, to: from + close + 1, make: (marks) => [n.citation!.create({ text: s }, null, marks)] };
       } else {
         // Brackets remark left as text: implicit header references, unresolved
         // reference links, "[sic]". Kept verbatim so Pandoc reads them unchanged.

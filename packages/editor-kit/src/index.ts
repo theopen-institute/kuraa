@@ -19,6 +19,8 @@ export interface EditorUi {
   askText(message: string, value?: string, ok?: string): Promise<string | null>;
   /** Ask a yes/no question. */
   askConfirm(message: string, ok?: string, danger?: boolean): Promise<boolean>;
+  /** Say something in passing (an image that could not be added), as the client shows its notices. */
+  notify?(text: string, kind?: 'info' | 'warn'): void;
 }
 
 export interface EditorContext {
@@ -34,6 +36,41 @@ export interface EditorContext {
    */
   isRemote(tr: Transaction): boolean;
   ui: EditorUi;
+  /** The document's path in the workspace (`chapters/one.md`), where it has one. */
+  path?: string;
+  /** The workspace's files, as the document reaches them: absent where there is no host to ask. */
+  files?: WorkspaceFiles;
+}
+
+/**
+ * The workspace's files, for what a document refers to: its bibliography, its
+ * images. Paths are relative to the workspace, with `/` between folders.
+ */
+export interface WorkspaceFiles {
+  /** A file's text; null if there is none (or it cannot be read). */
+  text(path: string): Promise<string | null>;
+  /** An address an `<img>` can show a workspace image at (made for this page, not shared); null if there is none. */
+  imageUrl(path: string): Promise<string | null>;
+  /**
+   * Keep an image in the workspace, in the `images/` folder next to the
+   * document, under a safe name not yet taken. Resolves to its path relative to
+   * the document (`images/plot.png`); rejects with a message to show.
+   */
+  uploadImage(file: Blob, name: string): Promise<string>;
+  /** Who made a commit and when (an ISO date), for labels; null if it is not known. */
+  commit(hash: string): Promise<{ author: string; date: string } | null>;
+}
+
+/**
+ * Commands a format offers the client by name, for its menu and for links
+ * elsewhere in the app (a file's conflict count opens it at the first conflict).
+ * Each is an ordinary ProseMirror command; a format offers those it has.
+ */
+export interface FormatCommands {
+  /** Put a small table at the cursor. */
+  insertTable?: Command;
+  /** Move to the next conflict a merge kept in the document, wrapping round to the first. */
+  nextConflict?: Command;
 }
 
 export interface FormatEditor {
@@ -55,6 +92,8 @@ export interface FormatEditor {
    * (only the Source view shows it as text).
    */
   header?: HeaderSpec;
+  /** Commands the client may offer by name (FormatCommands). */
+  commands?(ctx: EditorContext): FormatCommands;
 }
 
 /**

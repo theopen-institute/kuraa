@@ -18,6 +18,11 @@ typed, and Backspace straight afterwards turns a conversion back into the typed 
 | `[^label]` | Footnote reference; if the note does not exist yet, an empty one is added at the end with the cursor in it |
 | `^[text]` | Inline note |
 | ⌥⌘F (Ctrl+Alt+F) | A numbered footnote and its note |
+| `[@key]`, `[see @a, p. 3; -@b]`, `@key` then a space, `@key [p. 3]` | Citation; typing `@` offers the bibliography's keys ([0040](0040-writing-in-the-editor.md)) |
+| `![alt](src)`, or paste or drop an image file | Image (a file is kept in `images/` beside the document) |
+| `$$x$$`; `$$` on a line of its own then Enter | Display math, in the line; a display math block |
+| `\| a \| b \|` then Enter | Table with those headings (Tab, Shift+Tab, Enter and right-click in it) |
+| ⌘F, ⌥⌘O, ⌥⌘N (Ctrl+F, Ctrl+Alt+O, Ctrl+Alt+N) | Find and replace, the outline, the next conflict |
 
 As in Pandoc, an emphasis cue needs text that neither starts nor ends with a space, and an
 underscore inside a word does not start one. The keyboard shortcuts stay (⌘B, ⌘I, ⌘E and so on).

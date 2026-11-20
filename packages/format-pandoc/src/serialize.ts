@@ -385,7 +385,8 @@ export function escapeText(text: string, inTable: boolean): string {
   let s = text
     .replace(/[\\`*[\]<$^~]/g, '\\$&')
     .replace(/(^|[^\w])_|_(?=[^\w]|$)/g, (m) => m.replace('_', '\\_'))
-    .replace(/(^|[^\w])@(?=\w)/g, '$1\\@')
+    // What Pandoc would read as a citation: @ after anything but a letter or digit, before a key.
+    .replace(/(^|[^\p{L}\p{N}_])@(?=[\p{L}\p{N}_{])/gu, '$1\\@')
     .replace(/&(?=#?\w+;)/g, '\\&')
     // Two trailing spaces before a newline would become a hard break.
     .replace(/ +\n/g, '\n');

@@ -121,6 +121,15 @@ export class HostApi {
   tree() { return this.json<{ files: TreeFile[] }>('/api/tree').then((r) => r.files); }
   room(path: string) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
+  /** A workspace file as it is (an image to show), with its type. */
+  async rawFile(path: string) { return (await this.req(`/api/raw?path=${encodeURIComponent(path)}`)).blob(); }
+  /** Keep an image beside a document (in images/ next to it); its path, and its address relative to the document. */
+  uploadImage(doc: string, name: string, image: Blob, by: { name: string; email: string }) {
+    const q = new URLSearchParams({ doc, name, by: by.name, email: by.email });
+    return this.json<{ path: string; src: string }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
+  }
+  /** Who made a commit, and when (ISO). */
+  commitInfo(hash: string) { return this.json<{ author: string; date: string }>(`/api/commits/${encodeURIComponent(hash)}`); }
   createFolder(path: string) { return this.json('/api/folders', { method: 'POST', body: JSON.stringify({ path }) }); }
   createFile(path: string, content = '') { return this.json('/api/files', { method: 'POST', body: JSON.stringify({ path, content }) }); }
   /** Rename or move a file or folder; for a document, `title` also gives it a new title (`to` may then equal `from`). */

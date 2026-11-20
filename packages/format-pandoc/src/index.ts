@@ -10,6 +10,8 @@ export { pandocMarks, pandocNodes, safeUrl } from './schema.js';
 export { parseFragment, type MdNode, type ParseContext, type ParseHooks } from './parse.js';
 export { pandocTitle } from './title.js';
 export { conflictBlock, countConflicts, createMerge, isConflictAttrs, isVersionAttrs } from './merge.js';
+export { CITATION_KEY, citeKey, readCitation, type Citation, type CitationItem } from './citations.js';
+export { authorsShort, bibliographyPaths, entryLabel, headerReferences, readBibliography, readBibtex, readCslJson, readCslYaml, type BibEntry } from './bibliography.js';
 export { escapeText, escapeLineStarts, prefixLines, preserve, type SerializeContext, type SerializeHooks } from './serialize.js';
 
 /**

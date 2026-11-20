@@ -73,6 +73,13 @@ export function findPodman(options?: unknown): string | null {
   return findExecutable(explicit ?? 'podman', installed);
 }
 
+/** Podman's name for the machine's architecture (Go's: amd64, arm64) as `uname -m` gives it, which tools use. */
+export function archOf(podmanArch: string): { arch?: string } {
+  const a = podmanArch.trim();
+  const arch = ({ amd64: 'x86_64', arm64: 'aarch64', '386': 'i686', arm: 'armv7l' } as Record<string, string>)[a] ?? a;
+  return /^[a-z0-9_]+$/.test(arch) ? { arch } : {};
+}
+
 /** The image tag for a recipe: the same recipe always gives the same tag. */
 export function imageTag(recipe: ImageRecipe): string {
   const hash = createHash('sha256').update(recipe.containerfile).update(JSON.stringify(recipe.context ?? {})).digest('hex');
@@ -235,8 +242,8 @@ export const podmanEnvironment: Environment = {
       return { available: false, message: `Podman is not installed. ${how}, then run podman machine init and podman machine start.` };
     }
     try {
-      await run(podman, ['info', '--format', '{{.Host.Arch}}'], { timeout: 15_000 });
-      return { available: true, message: 'Code runs in a container with no network and only this workspace visible, read-only.' };
+      const { stdout } = await run(podman, ['info', '--format', '{{.Host.Arch}}'], { timeout: 15_000 });
+      return { available: true, message: 'Code runs in a container with no network and only this workspace visible, read-only.', ...archOf(stdout) };
     } catch (e) {
       const why = String((e as { stderr?: string }).stderr || (e as Error).message).trim().split('\n')[0];
       const hint = process.platform === 'darwin' || process.platform === 'win32' ? ' Start it with: podman machine start' : '';

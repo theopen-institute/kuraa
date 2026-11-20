@@ -63,12 +63,12 @@ export default tseslint.config(
   },
   {
     // Run components and their contract: host side (Node), never the client or editor.
-    // Engines (languages) and environments (places to run) are separate components
-    // that meet only through @kuraa/run-kit: neither imports the other.
-    files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**'],
+    // Engines (languages), environments (places to run) and tools (toolchains) are
+    // separate components that meet only through @kuraa/run-kit: none imports another.
+    files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**', 'packages/tool-*/src/**'],
     rules: merge(
       restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'vue', '@codemirror/*', 'prosemirror-*'], 'Run components depend on @kuraa/run-kit only.'),
-      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/run-components'], 'Engines and environments meet only through @kuraa/run-kit.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/run-components'], 'Engines, environments and tools meet only through @kuraa/run-kit.'),
       noYjs,
     ),
   },
@@ -83,7 +83,7 @@ export default tseslint.config(
     ignores: ['packages/host/src/cli.ts'],
     rules: merge(
       restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'),
-      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/run-components'], 'The host imports no run component; the program that starts it passes them.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/run-components'], 'The host imports no run component; the program that starts it passes them.'),
       noYjs,
     ),
   },

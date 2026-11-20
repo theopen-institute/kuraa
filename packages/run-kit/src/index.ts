@@ -8,6 +8,8 @@
 //   Environment  a place processes run, and what they may touch there
 //                (env-podman: a locked-down container; others could run them
 //                on this computer, or on a remote server)
+//   Tool         a toolchain those processes may use, downloaded on request and
+//                kept once per computer (tool-tinytex: TeX, for PDFs with LaTeX)
 //
 // The two never know each other's implementation. They meet only through this
 // contract: an engine asks the environment it is given to start a process
@@ -19,8 +21,8 @@
 // matters: an environment says whether it enforces it (`sandboxed`), and a host
 // uses one that does not only if its operator says so (--allow-unsandboxed).
 //
-// A component module exports a RunComponent, with engines, environments or both:
-// `export default defineRunComponent({ name, engines, environments })`. The host
+// A component module exports a RunComponent, with engines, environments, tools,
+// or several: `export default defineRunComponent({ name, engines, environments })`. The host
 // refuses a component whose apiVersion differs from RUN_API_VERSION.
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join, posix, win32 } from 'node:path';
@@ -149,6 +151,11 @@ export interface EnvironmentStatus {
   available: boolean;
   /** What to tell the user: why it is unavailable, or what it is. */
   message: string;
+  /**
+   * The architecture its processes run on, as `uname -m` names it ('x86_64',
+   * 'aarch64'), if it knows: a tool is installed for it, and used only there.
+   */
+  arch?: string;
 }
 
 /** A place processes run. Engines start every process through one; see the top of this file. */
@@ -281,7 +288,44 @@ export interface RenderContext extends ComponentContext {
   timeLimitMs: number;
   /** Aborted when the render is no longer wanted (the host is closing): end its processes. */
   signal: AbortSignal;
+  /**
+   * Tools this render may use (TeX, say): see Tool. Absent on a host that offers
+   * none. Parts a tool lacks (read from the log of a failed render) are the
+   * host's to add: it renders again once they are there.
+   */
+  tools?: RenderTools;
 }
+
+/** Tools for one render. */
+export interface RenderTools {
+  /**
+   * Use a tool in this render: the mounts, PATH and environment variables its
+   * processes need, or why it cannot be used. Adds the parts the workspace
+   * records first, where the host allows it.
+   */
+  use(id: string): Promise<ToolUse>;
+}
+
+export type ToolUse =
+  | {
+    ok: true;
+    /** Read-only. */
+    mounts: Mount[];
+    /** Folders inside, to put first on PATH. */
+    path: string[];
+    env: Record<string, string>;
+  }
+  | {
+    ok: false;
+    /** Why not, in plain words. */
+    reason: string;
+    /**
+     * People here may download it (installs are allowed, it exists for this
+     * architecture): a renderer then answers with `needs` rather than make do
+     * without it.
+     */
+    canDownload: boolean;
+  };
 
 export interface RenderRequest {
   /** The document, on the host (inside the workspace). */
@@ -301,6 +345,11 @@ export interface RenderResult {
   message: string;
   /** What the tools said (rmarkdown's and pandoc's log), for when something went wrong. */
   log: string;
+  /**
+   * What the document needs that this computer does not have yet, and people
+   * here may download: the app offers to, and renders again when it is there.
+   */
+  needs?: { tool: string };
 }
 
 /** Renders documents of some file types to some formats, through the engine's environment. */
@@ -352,6 +401,78 @@ export interface PackageManager {
 }
 
 // ---------------------------------------------------------------------------
+// Tools: toolchains downloaded when someone asks, kept once per computer, and
+// seen, read-only, only by the processes that use them (decision 0045). The
+// host keeps them in its data folder (tools/<id>/<version>-<arch>/), installs
+// them through the environment, with the network and no workspace, and only
+// where installs are allowed; it knows none by name.
+
+/** What a tool's installer prints last on standard output, before its answer as JSON. */
+export const TOOL_REPLY_PREFIX = '\u001fkuraa-tool\u001f';
+
+/** A command for a tool's installer, run in its image. argv[0] is a program on its PATH. */
+export interface ToolCommand {
+  argv: string[];
+  env?: Record<string, string>;
+}
+
+/**
+ * A toolchain processes may use: TeX, say. Its installer runs in a container
+ * of its own (`image`), with the network, its files at view.files, and the
+ * tool's folder writable at `inside`, the path processes later see it at; it
+ * answers with a last line on standard output: TOOL_REPLY_PREFIX and JSON,
+ *   install: { ok, message?, arch?, parts?: string[] }   (parts: what it has now)
+ *   add:     { ok, message?, added?: string[] }          (part names added)
+ * What it prints to standard error is shown to people as progress.
+ */
+export interface Tool {
+  /** A short id: 'tinytex'. Renderers ask for it by this. */
+  id: string;
+  /** What it is for, plainly, as a name: 'PDF with LaTeX'. */
+  label: string;
+  /** A sentence on what it is for (the Components panel). */
+  description: string;
+  /** The version it installs (pinned): folder names and tool.json record it. */
+  version: string;
+  /** Roughly how much it downloads, in bytes. */
+  downloadBytes: number;
+  /** Architectures it has builds for, as `uname -m` names them. */
+  architectures: string[];
+  /** Where processes see its folder, read-only: '/opt/kuraa/tools/tinytex'. */
+  inside: string;
+  /** Folders inside to put first on PATH, for an architecture. */
+  path(arch: string): string[];
+  /** Environment variables for processes that use it. */
+  env?(arch: string): Record<string, string>;
+  installer: {
+    /** The installer's container image. */
+    image: ImageRecipe;
+    /** Its scripts, by file name, made visible read-only at view.files. */
+    files: Record<string, string>;
+    /** The command that installs into the empty folder `inside`. `arch` is the environment's, if it said. */
+    install(view: PathView, o: { arch: string | null }): ToolCommand;
+  };
+  /** If it has parts of its own, added on demand (LaTeX packages). */
+  parts?: ToolParts;
+}
+
+export interface ToolParts {
+  /** What they are, in plain words, plural: 'LaTeX packages'. */
+  label: string;
+  /** Where a workspace records the parts its documents needed, committed with it: '.kuraa/tex-packages.json'. */
+  record: string;
+  /**
+   * Whether a name is one to give the installer. Names come from people and
+   * from logs of people's documents: anything else is refused.
+   */
+  valid(name: string): boolean;
+  /** What a failed process's log says is missing, as names `add` takes. */
+  missing(log: string): string[];
+  /** The command that adds parts to the tool at `inside`. */
+  add(view: PathView, o: { arch: string; names: string[] }): ToolCommand;
+}
+
+// ---------------------------------------------------------------------------
 // Components
 
 export interface RunComponent {
@@ -361,6 +482,8 @@ export interface RunComponent {
   engines?: Engine[];
   /** Places to run processes. */
   environments?: Environment[];
+  /** Toolchains processes may use, downloaded on request (decision 0045). */
+  tools?: Tool[];
 }
 
 export function defineRunComponent(component: Omit<RunComponent, 'apiVersion'>): RunComponent {

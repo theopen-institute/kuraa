@@ -9,6 +9,7 @@
   "dependencies": {
     "@kuraa/engine-r": "workspace:*",
     "@kuraa/env-podman": "workspace:*",
-    "@kuraa/run-kit": "workspace:*"
+    "@kuraa/run-kit": "workspace:*",
+    "@kuraa/tool-tinytex": "workspace:*"
   }
 }

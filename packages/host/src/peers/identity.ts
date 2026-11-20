@@ -169,9 +169,11 @@ export class Identity {
   }
 
   private async removeMemberNow(key: string): Promise<void> {
+    // Recorded as removed before it is forgotten: stopped in between, the device is still never
+    // accepted again, and whoever sees its remote gone can rely on the record being there.
+    if (!(await this.removed()).includes(key)) await this.git.run(['config', '--add', 'kuraa.removed', key]);
     const m = (await this.members()).find((x) => x.key === key);
     if (m) await this.git.run(['remote', 'remove', m.name]);
-    if (!(await this.removed()).includes(key)) await this.git.run(['config', '--add', 'kuraa.removed', key]);
   }
 
   async removed(): Promise<string[]> {

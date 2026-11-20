@@ -1261,6 +1261,7 @@ export class Host {
    * (peers.ts). Call inside serial().
    */
   async replaceFile(path: string, content: string | null, message: string): Promise<string | null> {
+    await this.requireWritable();
     const abs = this.resolvePath(path);
     if (content === null) await rm(abs, { force: true });
     else {

@@ -183,7 +183,8 @@ export class HostApi {
   createPerson(name: string) { return this.json('/api/person', { method: 'POST', body: JSON.stringify({ name }) }); }
   importPerson(line: string) { return this.json('/api/person/import', { method: 'POST', body: JSON.stringify({ line }) }); }
   exportPerson() { return this.json<{ line: string }>('/api/person/export').then((r) => r.line); }
-  sync() { return this.json<{ ok: boolean; message: string }>('/api/sync', { method: 'POST' }); }
+  /** Sync; how many changes came in, and how many conflicts their merges kept. */
+  sync() { return this.json<{ ok: boolean; message: string; brought?: number; conflicts?: number }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }
   run(req: RunRequest) { return this.json<RunRecord>('/api/runs', { method: 'POST', body: JSON.stringify(req) }); }
   interruptRuns(path: string) { return this.json('/api/runs/interrupt', { method: 'POST', body: JSON.stringify({ path }) }); }

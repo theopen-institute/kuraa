@@ -1363,9 +1363,14 @@ export class Host {
     });
   }
 
-  /** Sync: commit, then bring in the work of connected devices, and sync with the online copies. */
-  async syncNow(): Promise<{ ok: boolean; message: string; head?: string | null }> {
+  /**
+   * Sync: commit, then bring in the work of connected devices, and sync with the
+   * online copies. Says how many commits came in (`brought`, merges left out)
+   * and how many conflicts their merges kept, for the app to say in words.
+   */
+  async syncNow(): Promise<{ ok: boolean; message: string; head?: string | null; brought?: number; conflicts?: number }> {
     await this.serial(() => this.commitAll());
+    const before = await this.git.head();
     const said: string[] = [];
     let ok = true;
     if (this.peers) said.push(await this.peers.syncAll());
@@ -1374,8 +1379,16 @@ export class Host {
       ok = r.ok;
       said.push(...r.messages);
     }
-    if (!said.length) return { ok: false, message: 'There is no online copy, and no device to sync with' };
-    return { ok, message: said.join('. '), head: await this.git.head() };
+    if (!said.length) return { ok: false, message: 'There is no online copy, and no other device to sync with.' };
+    const head = await this.git.head();
+    let brought = 0;
+    if (head && head !== before) {
+      const range = before ? [`${before}..${head}`] : [head];
+      const r = await this.git.run(['rev-list', '--count', '--no-merges', ...range], { allowFail: true });
+      brought = r.code === 0 ? Number(r.stdout.trim()) || 0 : 0;
+    }
+    const conflicts = said.reduce((n, m) => n + [...m.matchAll(/(\d+) conflicts? kept/g)].reduce((k, x) => k + Number(x[1]), 0), 0);
+    return { ok, message: said.join('. '), head, brought, conflicts };
   }
 
   // -------------------------------------------------------------------------

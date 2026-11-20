@@ -67,6 +67,8 @@ export interface RoomConnection {
    * clients never make the same structural change at once.
    */
   isRemote(tr: Transaction): boolean;
+  /** Try to connect again now, rather than after the wait between attempts (Try again, while offline). */
+  reconnect(): void;
   destroy(): void;
 }
 
@@ -150,6 +152,7 @@ export function connectRoom(options: RoomOptions): RoomConnection {
     isRemote: (tr) => (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin === true,
     redo: (state, dispatch) => (dispatch ? redo(state) : true),
     setUser,
+    reconnect: () => void provider.configuration.websocketProvider.connect(),
     snapshot: (schema) => yXmlFragmentToProseMirrorRootNode(fragment, schema),
     destroy: () => {
       awareness.off('change', emitPeers);

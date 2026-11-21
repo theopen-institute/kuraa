@@ -1,6 +1,7 @@
 // Git, called as a child process: the one on PATH, or one a shell bundles (useGit).
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { delimiter } from 'node:path';
+import { lstatSync } from 'node:fs';
+import { delimiter, resolve } from 'node:path';
 
 export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
@@ -83,6 +84,27 @@ export class Git {
 
   setEnv(env: Record<string, string>): void {
     this.env = { ...this.env, ...env };
+  }
+
+  /**
+   * Put these paths in the index (`env` may name another index) as they are in
+   * the working tree: those there are added, those gone are taken out. Unlike
+   * `git add -A -- <paths>`, a path in neither the index nor the working tree
+   * (a file moved away that the index had already let go of) is no error.
+   */
+  async stage(paths: string[], opts: { env?: Record<string, string> } = {}): Promise<void> {
+    const there = (p: string) => {
+      try {
+        lstatSync(resolve(this.dir, p));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const present = paths.filter(there);
+    const gone = paths.filter((p) => !there(p));
+    if (present.length) await this.run(['add', '-A', '--', ...present], opts);
+    if (gone.length) await this.run(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...gone], opts);
   }
 
   /**

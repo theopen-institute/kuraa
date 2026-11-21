@@ -125,15 +125,16 @@ export async function commitSigned(git: Git, paths: string[], message: string, k
   const env = { GIT_INDEX_FILE: join(tmpDir, `sign-index-${process.pid}-${randomBytes(4).toString('hex')}`) };
   try {
     await git.run(head ? ['read-tree', head] : ['read-tree', '--empty'], { env });
-    await git.run(['add', '-A', '--', ...paths], { env });
+    await git.stage(paths, { env });
     const tree = await git.out(['write-tree'], { env });
     const text = `${message.trimEnd()}\n`;
     const unsigned = await git.out(['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { input: text });
     const raw = (await git.run(['cat-file', 'commit', unsigned])).bytes;
     const signed = await git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, key) });
     await git.run(['update-ref', '-m', `commit: ${text.split('\n')[0]}`, 'HEAD', signed, head ?? '']);
-    // The index, as `git commit -- <paths>` leaves it.
-    await git.run(['add', '-A', '--', ...paths]);
+    // The index, as `git commit -- <paths>` leaves it. (A path the index already
+    // let go of, such as a file just moved away, is no error.)
+    await git.stage(paths);
     return signed;
   } finally {
     await rm(env.GIT_INDEX_FILE, { force: true });

@@ -804,17 +804,25 @@ export class Host {
     // Never in the middle of a git operation, or with no branch checked out.
     await this.requireWritable();
     // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
-    const known = new Set((await this.git.out(['ls-files', '-z', '--', ...paths])).split('\0').filter(Boolean));
-    paths = paths.filter((p) => known.has(p) || existsSync(this.resolvePath(p, { link: 'self' })));
+    const listed = async (args: string[]) => (await this.git.run([...args, '--', ...paths], { allowFail: true })).stdout.split('\0').filter(Boolean);
+    const inIndex = new Set(await listed(['ls-files', '-z']));
+    const inHead = new Set(await listed(['ls-tree', '-r', '--name-only', '-z', 'HEAD']));
+    // A folder (a folder moved) is known by the files in it.
+    const known = (p: string, set: Set<string>) => set.has(p) || [...set].some((x) => x.startsWith(`${p}/`));
+    paths = paths.filter((p) => known(p, inIndex) || known(p, inHead) || existsSync(this.resolvePath(p, { link: 'self' })));
     if (!paths.length) return null;
-    await this.git.run(['add', '-A', '--', ...paths]);
+    await this.git.stage(paths);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
     if (diff.code === 0) return null;
     const full = withTrailers(message, coAuthors, extra);
     // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
     // Signed with this host's person's key if it keeps one, else its device's (0034).
     if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
-    else await this.git.run(['commit', '-q', '-F', '-', '--', ...paths], { input: full });
+    else {
+      // `git commit -- <paths>` refuses a path git knows nothing of (now in neither the index nor HEAD).
+      const staged = new Set(await listed(['ls-files', '-z']));
+      await this.git.run(['commit', '-q', '-F', '-', '--', ...paths.filter((p) => known(p, staged) || known(p, inHead))], { input: full });
+    }
     const head = await this.git.head();
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();

@@ -2,7 +2,7 @@
 // attribution (docs/decisions/0031-signed-membership.md, 0038-equal-peers.md).
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -240,6 +240,30 @@ describe('signed commits', () => {
     const v = await git.run(['verify-commit', signed], { allowFail: true });
     expect(v.code).toBe(0);
     expect(v.stderr).toContain('Good "git" signature for ada-laptop');
+  });
+
+  it('commit a file moved into a folder, though the index has already let go of where it was', async () => {
+    // A move as the host makes one: the file renamed, both paths staged, then committed (signed when syncing).
+    const { dir, git } = repo();
+    execFileSync('git', ['config', 'user.name', 'Ada'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'ada@example.org'], { cwd: dir });
+    const tmp = join(dir, '.git', 'kuraa', 'tmp');
+    writeFileSync(join(dir, 'name.md'), '# Name\n');
+    await commitSigned(git, ['name.md'], 'Create name.md', ada, tmp);
+    mkdirSync(join(dir, 'sub'));
+    renameSync(join(dir, 'name.md'), join(dir, 'sub', 'name.md'));
+    await git.stage(['name.md', 'sub/name.md']);
+    await commitSigned(git, ['name.md', 'sub/name.md'], 'Move name.md to sub/', ada, tmp);
+    expect(await git.out(['ls-tree', '-r', '--name-only', 'HEAD'])).toBe('sub/name.md');
+    expect(await git.out(['status', '--porcelain'])).toBe('');
+    // A file staged but never committed, moved away: nothing of it is left behind.
+    writeFileSync(join(dir, 'draft.md'), 'draft\n');
+    await git.run(['add', '--', 'draft.md']);
+    renameSync(join(dir, 'draft.md'), join(dir, 'sub', 'draft.md'));
+    await git.stage(['draft.md', 'sub/draft.md']);
+    await commitSigned(git, ['draft.md', 'sub/draft.md'], 'Move draft.md to sub/', ada, tmp);
+    expect((await git.out(['ls-tree', '-r', '--name-only', 'HEAD'])).split('\n')).toEqual(['sub/draft.md', 'sub/name.md']);
+    expect(await git.out(['status', '--porcelain'])).toBe('');
   });
 
   it('are not taken for another device’s', async () => {

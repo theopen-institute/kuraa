@@ -804,12 +804,15 @@ export class Host {
     // Never in the middle of a git operation, or with no branch checked out.
     await this.requireWritable();
     // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
-    const listed = async (args: string[]) => (await this.git.run([...args, '--', ...paths], { allowFail: true })).stdout.split('\0').filter(Boolean);
-    const inIndex = new Set(await listed(['ls-files', '-z']));
-    const inHead = new Set(await listed(['ls-tree', '-r', '--name-only', '-z', 'HEAD']));
+    // Git is asked only about paths gone from the working tree (a move's old path, a deleted file): most commits have none.
+    const here = (p: string) => existsSync(this.resolvePath(p, { link: 'self' }));
+    const gone = paths.filter((p) => !here(p));
+    const listed = async (args: string[]) => new Set(gone.length ? (await this.git.run([...args, '--', ...gone], { allowFail: true })).stdout.split('\0').filter(Boolean) : []);
     // A folder (a folder moved) is known by the files in it.
     const known = (p: string, set: Set<string>) => set.has(p) || [...set].some((x) => x.startsWith(`${p}/`));
-    paths = paths.filter((p) => known(p, inIndex) || known(p, inHead) || existsSync(this.resolvePath(p, { link: 'self' })));
+    const inHead = await listed(['ls-tree', '-r', '--name-only', '-z', 'HEAD']);
+    const inIndex = await listed(['ls-files', '-z']);
+    paths = paths.filter((p) => here(p) || known(p, inIndex) || known(p, inHead));
     if (!paths.length) return null;
     await this.git.stage(paths);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
@@ -819,9 +822,9 @@ export class Host {
     // Signed with this host's person's key if it keeps one, else its device's (0034).
     if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
     else {
-      // `git commit -- <paths>` refuses a path git knows nothing of (now in neither the index nor HEAD).
-      const staged = new Set(await listed(['ls-files', '-z']));
-      await this.git.run(['commit', '-q', '-F', '-', '--', ...paths.filter((p) => known(p, staged) || known(p, inHead))], { input: full });
+      // `git commit -- <paths>` refuses a path git knows nothing of (gone, and now in neither the index nor HEAD).
+      const staged = await listed(['ls-files', '-z']);
+      await this.git.run(['commit', '-q', '-F', '-', '--', ...paths.filter((p) => here(p) || known(p, staged) || known(p, inHead))], { input: full });
     }
     const head = await this.git.head();
     this.log(`committed ${head?.slice(0, 7)} ${message}`);

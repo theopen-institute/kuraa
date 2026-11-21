@@ -15,6 +15,9 @@
 //                                                     the online copy: a git server synced with (backup)
 //   kuraa-host fork     [--dir .]                     make this copy a workspace of its own
 //   kuraa-host signing-key                            the key commits made on this computer are signed with, for GitHub
+//   kuraa-host relay [--bootstrap host:port]          run a relay (relay.ts) on this computer, and print its key, for
+//                                                     others to name (--relay, or Preferences): for computers that cannot
+//                                                     connect to each other directly. It passes on what it cannot read.
 //
 // Every member has the same say (0038): any device may invite people, remove
 // devices and revoke links. Each change is signed by the device that made it
@@ -22,15 +25,30 @@
 import { parseArgs } from 'node:util';
 import { join, resolve } from 'node:path';
 import { Git } from '../git.js';
-import { Identity, decodeLink } from './identity.js';
+import { Identity, decodeLink, type LinkHints } from './identity.js';
+import { readFile } from 'node:fs/promises';
 import { joinWorkspace } from './join.js';
+import { useDht } from './dht.js';
+import { Relay, keptRelayKey } from './relay.js';
 import { sshPublicKey } from '../signing.js';
 import { createPerson, exportPerson, importPerson, personFile, readPerson, revokeKey, signingFile, signingKey } from './person.js';
 
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
 
-export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'online', 'fork', 'signing-key', 'person', ...Object.keys(ALIASES)];
+export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
+
+/** The ways into a workspace besides the DHT this device knows (node.ts keeps them in hints.json), for an invite link. */
+async function storedHints(dir: string, id: Identity, relays: string[]): Promise<LinkHints> {
+  const git = new Git(resolve(dir));
+  let h: { tcp?: Record<string, string[]>; relays?: string[] } = {};
+  try {
+    h = JSON.parse(await readFile(join(await git.gitDir(), 'kuraa', 'hints.json'), 'utf8')) as typeof h;
+  } catch { /* none yet */ }
+  const members = new Set((await id.members()).map((m) => m.key));
+  const tcp = Object.entries(h.tcp ?? {}).filter(([k]) => members.has(k)).flatMap(([k, as]) => as.map((a) => `${k}@${a}`));
+  return { relays: [...new Set([...relays, ...(h.relays ?? [])])].filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4), tcp: tcp.slice(0, 4) };
+}
 
 async function identityAt(dir: string): Promise<{ git: Git; id: Identity }> {
   const git = new Git(resolve(dir));
@@ -49,6 +67,7 @@ export async function peerCommand(argv: string[]): Promise<void> {
       anyone: { type: 'boolean', default: false },
       name: { type: 'string' },
       bootstrap: { type: 'string', multiple: true },
+      relay: { type: 'string', multiple: true },
     },
   });
   const [given, arg, ...more] = positionals;
@@ -62,14 +81,15 @@ export async function peerCommand(argv: string[]): Promise<void> {
       if (hours !== null && !(hours > 0)) throw new Error('--hours must be a number of hours');
       // `link` was the name of a link for anyone.
       const once = !values.anyone && given !== 'link';
-      const link = await id.createLink(hours, once);
+      // With the ways in this device knows besides the DHT (0053): servers members said take TCP, relays named.
+      const link = await id.createLink(hours, once, await storedHints(values.dir!, id, values.relay ?? []));
       say(link);
       const until = hours === null ? 'until it is revoked' : `for ${hours} hours, or until it is revoked`;
       say(`\n${once ? `For one person: the first device it lets in uses it up. It works ${until}.` : `Anyone with this link can join, ${until}.`}`);
       say('They join as a full member, able to read and change everything, and to invite and remove others:');
       say('  kuraa-host join <link> --dir <new folder>');
-      say('Any device of the workspace running its host with --peer can let them in.');
-      say(`It carries the workspace's secret: share it only with people who may join. Revoke it: kuraa-host revoke-invite ${decodeLink(link).id}`);
+      say('Any running device of the workspace can let them in.');
+      say(`Share it only with people who may join. Revoke it: kuraa-host revoke-invite ${decodeLink(link).id}`);
       return;
     }
     case 'invites': {
@@ -94,8 +114,23 @@ export async function peerCommand(argv: string[]): Promise<void> {
     }
     case 'join': {
       if (!arg) throw new Error('Usage: kuraa-host join <invite link> --dir <new folder>');
-      const r = await joinWorkspace({ dir: values.dir === '.' ? 'workspace' : values.dir!, invitation: arg, name: values.name, bootstrap: values.bootstrap, log: (m) => say(`[kuraa] ${m}`) });
-      say(`Now run: kuraa-host --dir ${r.dir} --peer`);
+      const r = await joinWorkspace({ dir: values.dir === '.' ? 'workspace' : values.dir!, invitation: arg, name: values.name, bootstrap: values.bootstrap, relays: values.relay, log: (m) => say(`[kuraa] ${m}`) });
+      say(`Now run: kuraa-host --dir ${r.dir}`);
+      return;
+    }
+    case 'relay': {
+      const dht = await useDht(values.bootstrap?.map((b) => ({ host: b.slice(0, b.lastIndexOf(':')), port: Number(b.slice(b.lastIndexOf(':') + 1)) })));
+      const relay = new Relay(dht, await keptRelayKey());
+      await relay.start();
+      await dht.ready();
+      say(`Relaying. Its key, to name in Preferences (or kuraa-host --relay):\n${relay.key}`);
+      if (dht.randomized) say('This computer\'s network changes its port for each connection: other computers will find it hard to reach this relay. Run it on one with a public address, or a home network.');
+      // Until stopped.
+      await new Promise<void>((resolve) => {
+        const stop = () => void relay.close().then(() => dht.destroy()).then(resolve);
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+      });
       return;
     }
     case 'devices': {
@@ -126,7 +161,9 @@ export async function peerCommand(argv: string[]): Promise<void> {
       const m = (await id.members()).find((x) => x.name === arg || x.key === arg);
       if (!m) throw new Error(`No paired device called ${arg}`);
       await id.removeMember(m.key);
-      return say(`Removed ${m.name}, for good: it keeps its copy, but no longer syncs with this workspace. Other devices learn of it when they next meet this one.`);
+      // It knew the workspace's secret: a new one, so it can no longer find the others (0050).
+      await id.newSecret();
+      return say(`Removed ${m.name}, for good: it keeps its copy, but no longer syncs with this workspace, and can no longer find its devices. Other devices learn of it when they next meet this one.`);
     }
     case 'person': {
       const file = personFile();

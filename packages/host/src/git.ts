@@ -9,6 +9,8 @@ export interface GitResult { stdout: string; stderr: string; code: number; /** s
 // on that signal by finishing its git work first. (Not on Windows, where a
 // detached child would get its own console window.)
 const OWN_GROUP = process.platform !== 'win32';
+/** git's word for a config file another writer holds (`.git/config.lock`): nothing was written. */
+const CONFIG_LOCKED = /could not lock config file/;
 
 /** The git to run, and what it needs in its environment. */
 let program: { command: string; env: Record<string, string> } = { command: 'git', env: {} };
@@ -81,7 +83,24 @@ export class Git {
     this.env = { ...this.env, ...env };
   }
 
-  run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
+  /**
+   * Run git. A change to the repository's config that finds it locked (another
+   * process, or this one, writing it at that moment) is tried again a little
+   * later: git wrote nothing, and the lock is held only for a moment.
+   */
+  async run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
+    for (let attempt = 0; ; attempt++) {
+      const r = await this.runOnce(args, { ...opts, allowFail: true });
+      if (r.code !== 0 && attempt < 40 && CONFIG_LOCKED.test(r.stderr)) {
+        await new Promise((res) => setTimeout(res, 25 + Math.random() * 50));
+        continue;
+      }
+      if (r.code !== 0 && !opts.allowFail) throw new Error(`git ${args.join(' ')} failed (${r.signal ? `killed by ${r.signal}` : r.code}): ${r.stderr || r.stdout}`);
+      return { stdout: r.stdout, stderr: r.stderr, code: r.code, bytes: r.bytes };
+    }
+  }
+
+  private runOnce(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): Promise<GitResult & { signal: NodeJS.Signals | null }> {
     return new Promise((resolve, reject) => {
       const child = spawnGit(args, { cwd: this.dir, env: gitEnv(this.env, opts.env) });
       const out: Buffer[] = [];
@@ -96,9 +115,7 @@ export class Git {
         const bytes = Buffer.concat(out);
         const stdout = bytes.toString('utf8');
         const stderr = Buffer.concat(err).toString('utf8');
-        const code = exit ?? 1;
-        if (code !== 0 && !opts.allowFail) reject(new Error(`git ${args.join(' ')} failed (${signal ? `killed by ${signal}` : code}): ${stderr || stdout}`));
-        else resolve({ stdout, stderr, code, bytes });
+        resolve({ stdout, stderr, code: exit ?? 1, bytes, signal });
       });
       child.stdin.end(opts.input);
     });

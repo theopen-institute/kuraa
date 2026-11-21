@@ -1,0 +1,162 @@
+# A release, from a version tag (pnpm release <version> makes and pushes one;
+# decision 0051):
+#
+#   check   lint, typecheck, unit tests, and the tag is the app's version
+#   draft   a draft GitHub release for the tag, with notes from the commits
+#           (a pre-release for a tag like v1.2.0-beta.1, which installed apps
+#           never update to)
+#   build   macOS (Apple silicon and Intel), Windows and Linux, each signed and
+#           added to the draft, in the `release` environment, which holds the
+#           signing secrets
+#   server  the server as released (decision 0052), signed with the release
+#           key, added to the draft
+#   publish the draft, once everything is in it: installed apps, and servers
+#           run with --auto-update, update to it within hours (they look only
+#           at the latest published release). If a build fails, the draft
+#           stays a draft.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The tag is the app's version
+        run: |
+          v=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME, but apps/desktop/package.json says $v. Make releases with pnpm release <version>."
+            exit 1
+          fi
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  draft:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Made once, here: the three builds each add to it, rather than each making one.
+      - name: A draft release for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "kuraa ${GITHUB_REF_NAME#v}" $pre
+
+  build:
+    needs: draft
+    environment: release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      # Where the app built looks for updates, and where electron-builder adds the builds.
+      KURAA_UPDATES: github:${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apple's API key, as the file notarizing reads
+        if: matrix.platform == 'mac'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple-api-key.p8"
+      - name: Build for macOS, signed and notarized
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ runner.temp }}/apple-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: pnpm --filter @kuraa/desktop release:mac
+
+      - name: Build for Windows, signed with Azure Trusted Signing
+        if: matrix.platform == 'win'
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
+        run: pnpm --filter @kuraa/desktop release:win
+
+      - name: Build for Linux
+        if: matrix.platform == 'linux'
+        run: pnpm --filter @kuraa/desktop release:linux
+
+  server:
+    needs: draft
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm web:build
+      - name: Build the server, signed with the release key
+        env:
+          KURAA_UPDATES: github:${{ github.repository }}
+          SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}
+        run: node scripts/build-server.mjs
+      - name: Add it to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/server/kuraa-server-*.tar.gz* dist/server/kuraa-server.tar.gz
+
+  publish:
+    needs: [build, server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

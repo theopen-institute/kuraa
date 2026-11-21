@@ -3,6 +3,7 @@
 // (plain file writes, git pull) change it.
 import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -21,11 +22,16 @@ const MAC = process.platform === 'darwin';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 
-function makeRepo(): string {
+/** A repository with notes.md; `shared`: a workspace shared between devices (as inviting someone makes it), which syncs. */
+function makeRepo(shared = false): string {
   const dir = mkdtempSync(join(tmpdir(), 'kuraa-desktop-'));
   git(dir, 'init', '-q', '-b', 'main');
   git(dir, 'config', 'user.name', 'Desk Top');
   git(dir, 'config', 'user.email', 'desk@example.org');
+  if (shared) {
+    git(dir, 'config', 'kuraa.workspace', randomBytes(16).toString('hex'));
+    git(dir, 'config', 'kuraa.secret', randomBytes(32).toString('hex'));
+  }
   writeFileSync(join(dir, 'notes.md'), NOTES);
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'Initial');
@@ -292,6 +298,33 @@ test('flags set what runs and which formats are on; the window shows only the ap
   }
 });
 
+test('updates: says when one is ready, with Restart now; run from the repository, it does not look for them', async () => {
+  const dir = makeRepo();
+  const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
+  try {
+    await openNotes(page);
+    // Check for Updates… in the app's menu says this copy does not update itself.
+    const said = await app.evaluate(async ({ dialog, Menu }) => {
+      let message = '';
+      dialog.showMessageBox = (async (_w: unknown, o: { message: string }) => {
+        message = o.message;
+        return { response: 0, checkboxChecked: false };
+      }) as unknown as typeof dialog.showMessageBox;
+      const items = Menu.getApplicationMenu()!.items.flatMap((i) => i.submenu?.items ?? []);
+      items.find((i) => i.label === 'Check for Updates…')!.click();
+      for (let i = 0; i < 50 && !message; i++) await new Promise((r) => setTimeout(r, 50));
+      return message;
+    });
+    expect(said).toBe('This copy of kuraa does not update itself (run from the repository).');
+    // An update downloaded (as updates.ts tells the page): the page says so, with Restart now.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.send('kuraa:update-ready', '9.9.9'));
+    await expect(page.getByTestId('notice')).toContainText('kuraa 9.9.9 is ready');
+    await expect(page.getByTestId('update-restart')).toHaveText('Restart now');
+  } finally {
+    await app.close();
+  }
+});
+
 /** Open Preferences from the app's menu (⌥⌘,): the client's dialog, in the window, as in a browser (decision 0047). */
 async function openPreferences(app: ElectronApplication, page: Page): Promise<Locator> {
   const item = await app.evaluate(({ Menu }) => {
@@ -308,8 +341,8 @@ async function openPreferences(app: ElectronApplication, page: Page): Promise<Lo
   return prefs;
 }
 
-test('preferences set what runs and syncing, apply at once, and are kept', async () => {
-  const dir = makeRepo();
+test('preferences set what runs, apply at once, and are kept; a shared workspace syncs', async () => {
+  const dir = makeRepo(true);
   const data = mkdtempSync(join(tmpdir(), 'kuraa-desktop-data-'));
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const rOn = async (page: Page) => {
@@ -327,7 +360,8 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     // Whether code can run here is said up front (Podman installed and running, or not).
     await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
     await prefs.getByTestId('pref-run').uncheck();
-    await prefs.getByTestId('pref-sync').check();
+    // Syncing is not a setting: the dialog says which workspaces sync (0048).
+    await expect(prefs.getByTestId('pref-sync')).toContainText('invite link');
     // What a host takes as flags is here too (decision 0046): a value that is wrong is refused, saying what.
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();
     await prefs.getByTestId('pref-memory').fill('lots');
@@ -342,7 +376,7 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(false);
     expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({
-      syncDevices: true, runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
+      runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
     });
     // R Markdown is off now: the Components panel says so.
     await page.getByTestId('menu-button').click();
@@ -351,7 +385,7 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'Pandoc markdown' })).toBeChecked();
     await page.keyboard.press('Escape');
 
-    // Syncing is on: git reaches other devices through git-remote-kuraa, which runs the app as Node.
+    // The workspace is shared, so it syncs: git reaches other devices through git-remote-kuraa, which runs the app as Node.
     const helper = join(dir, '.git', 'kuraa', 'bin');
     await expect.poll(() => existsSync(join(helper, 'git-remote-kuraa'))).toBe(true);
     let answer = '';
@@ -371,7 +405,6 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
     expect(await rOn(page)).toBe(false);
     const prefs = await openPreferences(app, page);
     await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
-    await expect(prefs.getByTestId('pref-sync')).toBeChecked();
     await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');
     await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     // The page's own ⌥⌘, opens it too (as in a browser), and Escape closes it.
@@ -385,10 +418,10 @@ test('preferences set what runs and syncing, apply at once, and are kept', async
 });
 
 test('you on this computer: made from your name, said in each workspace that syncs, and taken to another computer', async () => {
-  const dir = makeRepo();
+  const dir = makeRepo(true);
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const person = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
-  let { app, page } = await launch(['--open', dir, '--peer'], timings, { KURAA_PERSON: person });
+  let { app, page } = await launch(['--open', dir], timings, { KURAA_PERSON: person });
   let line: string;
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();

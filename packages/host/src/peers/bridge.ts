@@ -153,12 +153,17 @@ export class GitBridge {
           sock.destroy();
           return;
         }
-        sock.write(chunk);
+        // git reading slowly: the device waits (link.ts), rather than its pack piling up here.
+        if (!sock.write(chunk)) stream.pause();
       });
+      sock.on('drain', () => stream.resume());
       stream.on('end', () => sock.end());
       stream.on('error', () => sock.destroy());
       stream.on('close', () => sock.end());
-      sock.on('data', (chunk: Buffer) => stream.write(chunk));
+      sock.on('data', (chunk: Buffer) => {
+        if (!stream.write(chunk)) sock.pause();
+      });
+      stream.on('drain', () => sock.resume());
       sock.on('end', () => stream.end());
       sock.on('error', () => stream.destroy());
     };

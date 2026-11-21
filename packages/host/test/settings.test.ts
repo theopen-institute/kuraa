@@ -41,12 +41,14 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 10_000, what =
 describe('settings', () => {
   it('fill in what an older file lacks with the defaults, and pass over what is no longer a setting', () => {
     expect(settingsFrom({ syncDevices: true, runCode: false, rImages: ['a'], workspaces: '/w', podman: '/opt/podman' })).toEqual({
-      ...DEFAULT_SETTINGS, syncDevices: true, runCode: false, rImages: ['a'], workspaces: '/w',
+      ...DEFAULT_SETTINGS, runCode: false, rImages: ['a'], workspaces: '/w',
     });
     expect(settingsFrom(null)).toEqual(DEFAULT_SETTINGS);
     // Installs are allowed unless turned off, everywhere.
     expect(DEFAULT_SETTINGS.allowInstalls).toBe(true);
     expect('podman' in DEFAULT_SETTINGS).toBe(false);
+    // Shared workspaces always sync, and others have nothing to sync with (0048).
+    expect('syncDevices' in DEFAULT_SETTINGS).toBe(false);
   });
 
   it('keep what the dialog sets', () => {
@@ -75,6 +77,7 @@ describe('settings', () => {
     expect(() => settingsFrom({ disk: '0' }, true)).toThrow(/disk limit/);
     expect(() => settingsFrom({ cpus: 0 }, true)).toThrow(/at least 0.1/);
     expect(() => settingsFrom({ bootstrap: ['https://node.example.org'] }, true)).toThrow(/host:port/);
+    expect(() => settingsFrom({ relays: ['not-a-key'] }, true)).toThrow(/relay's key/);
     expect(() => settingsFrom({ formats: [] }, true)).toThrow(/at least one kind/);
     expect(() => settingsFrom({ versionSeconds: 0 }, true)).toThrow(/Saving a version/);
     expect(() => settingsFrom({ workspaces: 'Documents/kuraa' }, true)).toThrow(/whole path/);
@@ -82,8 +85,8 @@ describe('settings', () => {
   });
 
   it('pass over, when read from disk, what is wrong', () => {
-    expect(settingsFrom({ memory: 'lots', cpus: -1, bootstrap: ['nope', 'a.b:1'], formats: [], workspaces: 'relative' })).toMatchObject({
-      memory: null, cpus: null, bootstrap: ['a.b:1'], formats: null, workspaces: null,
+    expect(settingsFrom({ memory: 'lots', cpus: -1, bootstrap: ['nope', 'a.b:1'], relays: ['nope', 'AB'.repeat(32)], formats: [], workspaces: 'relative' })).toMatchObject({
+      memory: null, cpus: null, bootstrap: ['a.b:1'], relays: ['ab'.repeat(32)], formats: null, workspaces: null,
     });
   });
 
@@ -142,7 +145,7 @@ describe('settings', () => {
   });
 
   it('become host options, with what only flags set kept apart', () => {
-    const o = fromSettings({ ...DEFAULT_SETTINGS, runCode: true, environment: 'gone', memory: '2g', saveSeconds: 0.5, formats: ['text', 'old'], syncDevices: true, bootstrap: ['a.b:1'] }, {
+    const o = fromSettings({ ...DEFAULT_SETTINGS, runCode: true, environment: 'gone', memory: '2g', saveSeconds: 0.5, formats: ['text', 'old'], bootstrap: ['a.b:1'] }, {
       run: { components: ['x'], allowUnsandboxed: true, options: { podman: { podman: '/p' } } },
       timings: { flushMs: 50 },
       environments: ['podman'],
@@ -151,7 +154,9 @@ describe('settings', () => {
     expect(o.run).toMatchObject({ engines: ['r'], environment: undefined, memory: '2g', allowInstalls: true, components: ['x'], allowUnsandboxed: true, options: { podman: { podman: '/p' }, r: { images: [] } } });
     expect(o.formats).toEqual(['text']);
     expect(o.timings).toEqual({ flushMs: 50 });
-    expect(o.peers).toEqual({ everywhere: true, bootstrap: ['a.b:1'] });
+    expect(o.peers).toEqual({ bootstrap: ['a.b:1'] });
+    expect(fromSettings({ ...DEFAULT_SETTINGS, relays: ['ab'.repeat(32)] }).peers).toEqual({ relays: ['ab'.repeat(32)] });
+    expect(fromSettings(DEFAULT_SETTINGS).peers).toEqual({});
     expect(fromSettings({ ...DEFAULT_SETTINGS, runCode: false }).run.engines).toEqual([]);
     // Engines named with --engine win.
     expect(fromSettings({ ...DEFAULT_SETTINGS, runCode: true }, { run: { engines: ['none'] } }).run.engines).toEqual([]);

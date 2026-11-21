@@ -18,10 +18,10 @@ import { DATA_MARKER, defaultDataDir as hostDataDir, markDataDir, type RunOption
 export { DATA_MARKER };
 
 export interface Settings {
-  /** Sync every workspace with the other computers it is on (--peer). Workspaces shared by an invite link always do. */
-  syncDevices: boolean;
   /** Servers to find other computers through, host:port (--bootstrap); empty for the public ones. */
   bootstrap: string[];
+  /** Relays to connect to other computers through when they cannot be reached directly, by key (--relay; peers/relay.ts). */
+  relays: string[];
   /** Run code in documents: the R engine (--engine r; --engine none turns it off). */
   runCode: boolean;
   /** Where code runs, by environment id (--env); null for the only one loaded. */
@@ -72,7 +72,8 @@ export interface SettingsView {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  syncDevices: false, bootstrap: [],
+  bootstrap: [],
+  relays: [],
   runCode: true, environment: null, rImages: [], memory: null, cpus: null, disk: null,
   allowWrite: false, allowNetwork: false, allowInstalls: true, dataDir: null,
   formats: null, saveSeconds: null, versionSeconds: null, workspaces: null,
@@ -139,14 +140,19 @@ export function settingsFrom(v: unknown, strict = false): Settings {
     problem(`“${b}” is not a server address; write it as host:port, such as node.example.org:49737.`);
     return false;
   });
+  const relays = (strings(o.relays) ?? d.relays).map((k) => k.toLowerCase()).filter((k) => {
+    if (/^[0-9a-f]{64}$/.test(k)) return true;
+    problem(`“${k}” is not a relay's key: it is 64 letters and digits, as kuraa-host relay prints it.`);
+    return false;
+  });
   let formats = Array.isArray(o.formats) ? strings(o.formats) : null;
   if (formats && formats.length === 0) {
     problem('Turn on at least one kind of document.');
     formats = null;
   }
   return {
-    syncDevices: flag('syncDevices'),
     bootstrap,
+    relays,
     runCode: flag('runCode'),
     environment: text(o.environment),
     rImages: strings(o.rImages) ?? d.rImages,
@@ -255,7 +261,7 @@ export interface FromSettings {
   run: RunOptions;
   formats: string[] | undefined;
   timings: Partial<HostTimings>;
-  peers: { everywhere: boolean; bootstrap?: string[] };
+  peers: { bootstrap?: string[]; relays?: string[] };
 }
 
 /**
@@ -291,6 +297,6 @@ export function fromSettings(
       ...(s.versionSeconds !== null ? { idleCommitMs: Math.round(s.versionSeconds * 1000) } : {}),
       ...fixed.timings,
     },
-    peers: { everywhere: s.syncDevices, ...(s.bootstrap.length ? { bootstrap: s.bootstrap } : {}) },
+    peers: { ...(s.bootstrap.length ? { bootstrap: s.bootstrap } : {}), ...(s.relays.length ? { relays: s.relays } : {}) },
   };
 }

@@ -2,7 +2,7 @@
 // attribution (docs/decisions/0031-signed-membership.md, 0038-equal-peers.md).
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -151,6 +151,56 @@ describe('a device and its records', () => {
     // Cy, the newest, removes Bo, who paired Cy: taken like any member's.
     expect((await id.takeRecords([signRecord({ kind: 'remove', workspace: ws.id, subject: hex(bo) }, cy)])).map((r) => r.kind)).toEqual(['remove']);
     expect((await id.members()).map((m) => m.name)).toEqual(['cy']);
+  });
+
+  it('applies a record it kept but could not apply (git config held by another writer), before its next change', async () => {
+    const { dir, id } = repo();
+    const ws = await id.found();
+    await id.addMember(hex(bo), 'bo');
+    // Another writer holds .git/config for longer than git.ts waits: Bo's pairing of Cy is kept, not applied.
+    writeFileSync(join(dir, '.git', 'config.lock'), '');
+    const add = signRecord({ kind: 'add', workspace: ws.id, subject: hex(cy), name: 'cy' }, bo);
+    expect((await id.takeRecords([add])).map((r) => r.kind)).toEqual(['add']);
+    expect((await id.members()).map((m) => m.name)).toEqual(['bo']);
+    // Let go of: the next change applies it first, though the record is not new to this device.
+    rmSync(join(dir, '.git', 'config.lock'));
+    expect(await id.takeRecords([add])).toEqual([]);
+    expect((await id.members()).map((m) => m.name).sort()).toEqual(['bo', 'cy']);
+    // A removal on record but not in the config (stopped in between) is applied when the device starts (reconcile).
+    const remove = signRecord({ kind: 'remove', workspace: ws.id, subject: hex(bo) }, cy);
+    const file = join(dir, '.git', 'kuraa', 'records.json');
+    writeFileSync(file, JSON.stringify([...JSON.parse(readFileSync(file, 'utf8')), remove]));
+    await id.reconcile();
+    expect(await id.removed()).toEqual([hex(bo)]);
+    expect((await id.members()).map((m) => m.name)).toEqual(['cy']);
+  }, 30_000);
+
+  it('makes its secret anew on record, the latest counting, and keeps its records from other users of the computer', async () => {
+    const { dir, git, id } = repo();
+    const ws = await id.found();
+    await id.addMember(hex(bo), 'bo');
+    const mine = await id.newSecret();
+    expect((await id.workspace())!.secret).toBe(mine);
+    expect(mine).not.toBe(ws.secret);
+    // Bo's, made later, counts here too; an older one does not.
+    const later = signRecord({ kind: 'secret', workspace: ws.id, subject: 'cd'.repeat(32), at: Date.now() + 1000 }, bo);
+    const older = signRecord({ kind: 'secret', workspace: ws.id, subject: 'ef'.repeat(32), at: Date.now() - 60_000 }, bo);
+    await id.takeRecords([later, older]);
+    expect((await git.out(['config', 'kuraa.secret']))).toBe('cd'.repeat(32));
+    if (process.platform !== 'win32') expect(statSync(join(dir, '.git', 'kuraa', 'records.json')).mode & 0o077).toBe(0);
+  });
+
+  it('puts the links it makes on record, with their topic, announced while they let people in', async () => {
+    const { id } = repo();
+    await id.found();
+    const day = decodeLink(await id.createLink(24, false));
+    const gone = decodeLink(await id.createLink(-1, false));
+    const revoked = decodeLink(await id.createLink(null, true));
+    await id.revokeLink(revoked.id);
+    const { topics, next } = await id.linkTopics();
+    expect(topics).toEqual([day.topic]);
+    expect(next).toBe(day.expires);
+    expect(gone.topic).not.toBe(day.topic);
   });
 
   it('makes invite links for one person or anyone, and knows those used up', async () => {

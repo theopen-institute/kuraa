@@ -35,8 +35,8 @@ function temp(prefix: string): string {
   return d;
 }
 
-async function hub(root = temp('kuraa-hub-'), token?: string, everywhere = false): Promise<RunningHub> {
-  const h = await startHub({ root, token, hosts: { timings: FAST }, peers: { bootstrap: testnet.bootstrap as never, everywhere } });
+async function hub(root = temp('kuraa-hub-'), token?: string): Promise<RunningHub> {
+  const h = await startHub({ root, token, hosts: { timings: FAST }, peers: { bootstrap: testnet.bootstrap as never } });
   running.push(h);
   return h;
 }
@@ -201,38 +201,28 @@ describe('a hub', () => {
     await expect(startHub({ folder: { dir: join(dir, 'not-there') }, hosts: { timings: FAST } })).rejects.toThrow();
   });
 
-  it('syncs every workspace while told to, those it already had too; those it made shared so, and only those, from then on', async () => {
+  it('syncs a workspace once it is shared, and only then: one on this computer alone has nothing to sync with', async () => {
     const root = temp('kuraa-hub-');
     const syncing = async (h: RunningHub) => ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { peers: boolean }[] }).workspaces.map((w) => w.peers);
-    const restart = async (h: RunningHub, everywhere: boolean) => {
+    const restart = async (h: RunningHub) => {
       await h.close();
       running.splice(running.indexOf(h), 1);
-      return hub(root, h.token, everywhere);
+      return hub(root, h.token);
     };
     let h = await hub(root);
     await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Thesis' }) });
-    expect(await syncing(h)).toEqual([false]);
     await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Diary' }) });
     expect(await syncing(h)).toEqual([false, false]);
-    // Not shared, not syncing, whatever the hub's list says.
-    h = await restart(h, false);
+    // Not shared, not syncing, after a restart too: nothing is announced for them.
+    h = await restart(h);
     expect(await syncing(h)).toEqual([false, false]);
-    h = await restart(h, true);
-    expect(await syncing(h)).toEqual([true, true]);
+    expect(existsSync(join(root, 'thesis', '.git', 'kuraa', 'bin', 'git-remote-kuraa'))).toBe(false);
+    // Made shared outside the hub (kuraa-host invite, say): it syncs from its next start on, and the other still does not.
+    git(join(root, 'thesis'), 'config', 'kuraa.workspace', 'ab'.repeat(16));
+    git(join(root, 'thesis'), 'config', 'kuraa.secret', 'cd'.repeat(32));
+    h = await restart(h);
+    expect(await syncing(h)).toEqual([true, false]);
     await until(() => existsSync(join(root, 'thesis', '.git', 'kuraa', 'bin', 'git-remote-kuraa')), 10_000, 'syncing started');
-    // Shared now (each repository has a workspace id and secret): they go on syncing.
-    h = await restart(h, false);
-    expect(await syncing(h)).toEqual([true, true]);
-    // One made shared outside the hub (kuraa-host invite, say) syncs too.
-    const other = temp('kuraa-hub-');
-    let g = await hub(other);
-    await call(g, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Notes' }) });
-    git(join(other, 'notes'), 'config', 'kuraa.workspace', 'ab'.repeat(16));
-    git(join(other, 'notes'), 'config', 'kuraa.secret', 'cd'.repeat(32));
-    await g.close();
-    running.splice(running.indexOf(g), 1);
-    g = await hub(other, g.token);
-    expect(await syncing(g)).toEqual([true]);
   });
 
   it('joins a workspace from an invite link, as a device that syncs', async () => {
@@ -250,7 +240,22 @@ describe('a hub', () => {
     const bad = await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: 'kuraa-invite:nonsense', name: 'X' }) });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toContain('damaged');
-    const res = await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'Ada’s notes' }) });
+    // How it is going, asked by the id given, while it goes; nothing once it is over.
+    const id = 'join-progress-1';
+    const steps = new Set<string>();
+    let done = false;
+    const posted = call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'Ada’s notes', progress: id }) }).finally(() => {
+      done = true;
+    });
+    while (!done) {
+      const s = await call(h, `/hub/api/joins/${id}`);
+      if (s.status === 200) steps.add(((await s.json()) as { step: string }).step);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const res = await posted;
+    expect(steps.size).toBeGreaterThan(0);
+    for (const step of steps) expect(['waiting', 'looking', 'letting-in', 'copying', 'opening']).toContain(step);
+    expect((await call(h, `/hub/api/joins/${id}`)).status).toBe(404);
     expect(res.status).toBe(201);
     const { workspace } = (await res.json()) as { workspace: { id: string; path: string; peers: boolean } };
     expect(workspace).toMatchObject({ id: 'ada-s-notes', peers: true });

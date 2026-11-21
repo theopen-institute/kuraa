@@ -83,6 +83,52 @@ test('workspaces are added from the app: a new folder, or one joined from a link
   }
 });
 
+test('joining says how it is going: looking, a slow network, copying; and why it failed', async ({ page }) => {
+  const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-hub-'));
+  const hub = await startHub({ root, staticDir: STATIC, hosts: { timings: TIMINGS } });
+  // The hub's answers, as the test sets them: a join that goes on until let go.
+  let status: object | null = null;
+  const asked = new Set<string>();
+  await page.route('**/hub/api/joins/*', (route) => {
+    asked.add(new URL(route.request().url()).pathname.split('/').pop()!);
+    return status ? route.fulfill({ json: status }) : route.fulfill({ status: 404, json: { error: 'none' } });
+  });
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  let progress = '';
+  await page.route('**/hub/api/workspaces', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    progress = (route.request().postDataJSON() as { progress: string }).progress;
+    await released;
+    return route.fulfill({ status: 400, json: { error: 'Could not reach a device of the workspace: is one running, with syncing on?' } });
+  });
+  try {
+    await page.goto(`${hub.url}/?token=${hub.token}&name=Ada`);
+    await page.getByTestId('add-workspace-button').click();
+    const dialog = page.getByTestId('add-workspace');
+    await dialog.getByTestId('add-workspace-join').click();
+    await dialog.getByTestId('add-workspace-invitation').fill('kuraa-invite:test');
+    await dialog.getByTestId('add-workspace-submit').click();
+    const shown = dialog.getByTestId('add-workspace-progress');
+    await expect(shown).toContainText('Looking for a computer the workspace is on…');
+    status = { step: 'looking', slowNetwork: true };
+    await expect(dialog.getByTestId('add-workspace-slow')).toContainText('take a few tries');
+    status = { step: 'copying', slowNetwork: false, from: 'bo' };
+    await expect(shown).toContainText('Copying the workspace from bo…');
+    await expect(dialog.getByTestId('add-workspace-slow')).toHaveCount(0);
+    // It asked by the id it gave the join.
+    expect(progress).toMatch(/^[0-9a-f]{24}$/);
+    expect([...asked]).toEqual([progress]);
+    release();
+    await expect(dialog.getByRole('alert')).toContainText('Could not reach a device');
+    await expect(shown).toHaveCount(0);
+  } finally {
+    release();
+    await hub.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('people are invited from the app: a link for anyone, joined elsewhere, then revoked', async ({ page }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);

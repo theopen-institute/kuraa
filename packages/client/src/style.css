@@ -240,6 +240,7 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .menu-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .menu-actions button { font-size: 13px; }
 .menu-facts { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.menu-facts.warn { color: var(--warn); margin-top: 4px; }
 .menu-peers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
 .menu-peers li { display: flex; align-items: center; gap: 4px; }
 .settings-form { display: grid; gap: 10px; }
@@ -512,12 +513,16 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .menu-devices li { display: flex; align-items: center; gap: 6px; }
 .device-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
 .device-dot.online { background: var(--accent); }
+.device-dot.through { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .device-tag { font-size: 11px; padding: 0 5px; border-radius: 3px; background: var(--selected); color: var(--muted); }
+.device-tag.warn { background: var(--warn-soft); color: var(--warn); }
 .device-state { margin-left: auto; font-size: 12px; color: var(--muted); }
 .menu-devices button { font-size: 12px; padding: 1px 8px; }
 .device-who { min-width: 0; overflow-wrap: anywhere; }
 /* Adding a workspace. */
 .naming-hint { margin: 0; font-size: 12.5px; color: var(--muted); }
+.naming-hint p { margin: 0; }
+.naming-hint p + p { margin-top: 4px; }
 .add-workspace textarea { font: 12px var(--mono); resize: vertical; }
 .add-workspace .segmented { justify-self: start; }
 /* The workspace switcher, in the sidebar's header. */

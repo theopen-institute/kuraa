@@ -343,6 +343,10 @@ onMounted(() => {
     if (!preferencesOpen.value) openPreferences();
   });
   props.shell.onOpenFolder?.(() => void openFolder());
+  // The desktop app downloaded an update (decision 0051): it installs when the app quits, or now.
+  props.shell.onUpdateReady?.((version) => {
+    notice.value = { kind: 'info', text: S.app.updateReady(version), actions: [{ label: S.app.restartToUpdate, run: () => props.shell.restartToUpdate?.(), testid: 'update-restart' }] };
+  });
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 

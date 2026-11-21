@@ -45,3 +45,37 @@ describe('room messages between devices', () => {
     b.close();
   });
 });
+
+describe('git streams between devices', () => {
+  it('make a fast writer wait for a slow reader, rather than pile up what it sent', async () => {
+    const [a, b] = linked();
+    let served: import('node:stream').Duplex | null = null;
+    b.onGit((_service, _protocol, stream) => (served = stream));
+    const reading = a.openGit('git-upload-pack', '');
+    reading.write(Buffer.from('want'));
+    for (let i = 0; i < 100 && !served; i++) await new Promise((r) => setTimeout(r, 10));
+    const writer = served as unknown as import('node:stream').Duplex;
+    // 8 MiB, written as fast as the stream takes it; the reader takes nothing yet.
+    const chunk = Buffer.alloc(64 * 1024, 7);
+    let written = 0;
+    const writing = (async () => {
+      while (written < 8 * 1024 * 1024) {
+        if (!writer.write(chunk)) await new Promise((r) => writer.once('drain', r));
+        written += chunk.length;
+      }
+      writer.end();
+    })();
+    await new Promise((r) => setTimeout(r, 300));
+    // Held back at about the window (1 MiB) and the streams' own buffers, not all 8 MiB.
+    expect(written).toBeLessThan(3 * 1024 * 1024);
+    expect(reading.readableLength).toBeLessThan(3 * 1024 * 1024);
+    // Read, everything comes, whole.
+    let got = 0;
+    reading.on('data', (d: Buffer) => (got += d.length));
+    await writing;
+    await new Promise((r) => reading.once('end', r));
+    expect(got).toBe(8 * 1024 * 1024);
+    a.close();
+    b.close();
+  });
+});

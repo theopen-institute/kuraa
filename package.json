@@ -16,7 +16,8 @@
     "host": "tsx packages/host/src/cli.ts",
     "web:dev": "pnpm --filter @kuraa/web dev",
     "web:build": "pnpm --filter @kuraa/web build",
-    "desktop": "pnpm --filter @kuraa/desktop start"
+    "desktop": "pnpm --filter @kuraa/desktop start",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

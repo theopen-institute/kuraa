@@ -32,6 +32,10 @@ export interface Shell {
   onOpenFolder?(show: () => void): void;
   /** Be told when the shell's own menu asks for the Markdown and shortcuts sheet (the desktop app's Help menu). */
   onHelp?(show: () => void): void;
+  /** Be told when the shell (the desktop app) has downloaded an update, with its version (decision 0051). */
+  onUpdateReady?(show: (version: string) => void): void;
+  /** Save everything, quit, put the update in place and start again. */
+  restartToUpdate?(): void;
 }
 
 /** What a folder is being chosen for: to open as a workspace, for new workspaces, or for packages and tools. */
@@ -98,4 +102,8 @@ export interface ShellBridge {
   onOpenFolder?(show: () => void): void;
   /** Called when the app's Help menu asks for the Markdown and shortcuts sheet. */
   onHelp?(show: () => void): void;
+  /** Called when the desktop app has downloaded an update (decision 0051), with its version. */
+  onUpdateReady?(show: (version: string) => void): void;
+  /** Save everything, quit, put the update in place and start again. */
+  restartToUpdate?(): void;
 }

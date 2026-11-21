@@ -68,8 +68,10 @@ Preferences says so. The last column says where. What stays on the command line,
 | `--dir` | off | Serve this one folder, and nothing else | Command line only; **Open a folder…** adds one to your workspaces |
 | `--settings` | `settings.json` in your app data folder | Where Preferences are kept | Command line only |
 | `--workspaces` | Preferences, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Preferences: New workspaces |
-| `--peer` | off | Sync every workspace with its other devices, directly. See below | Preferences: Other computers |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Preferences: Other computers › Advanced |
+| `--relay` | none | Relays to connect through when computers cannot connect directly, by key (`pnpm host relay` runs one) | Preferences: Other computers › Advanced |
+| `--peer-port`, `--public-address` | none | A server's: take devices' connections over TCP on this port, and where they reach it (`host` or `host:port`), for networks that block UDP; told to members and put in invite links | Command line only |
+| `--dht-port`, `--no-serve-dht` | any, serving | A server's: its DHT node on a fixed port, for members to start from; never serving the public DHT | Command line only |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Preferences: Saving › Advanced (in seconds) |
 | `--engine` | `r` | Which engines run code: `--engine r`, or `--engine none`. See below | Preferences: Run R code |
 | `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Preferences: Where code runs (shown when there is a choice) |
@@ -96,8 +98,8 @@ section changes them. In the app the URL and token are the **server address** an
 
 **Preferences…** in the menu's **You** section, or ⌥⌘, (Ctrl+Alt+,; ⌘, is the menu's own), opens
 the same dialog in a browser and in the desktop app (where it is also in the app menu on a Mac, and
-in File elsewhere), wherever the host listens only on this computer. In view: syncing with other
-computers, the kinds of documents that are on, running R code (and whether Podman is ready for it),
+in File elsewhere), wherever the host listens only on this computer. In view: the kinds of
+documents that are on, running R code (and whether Podman is ready for it),
 whether documents may install packages and download tools, and where new workspaces go. Under
 **Advanced**: the servers used to find other computers on a private network, the limits on each
 document's code (memory, CPUs, disk), what a workspace may ask for (writing to its own folder, the
@@ -205,22 +207,52 @@ for the open workspace, to send to whoever should join it. The desktop app works
 new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
 any folder on the computer.
 
+## A server that updates itself
+
+For a computer that serves kuraa all the time (to browsers, or as an always-on device of shared
+workspaces), each release has the server on its own: `kuraa-server-<version>.tar.gz`, the server
+and the web client in one folder, needing only Node 24 and git (and Podman to run R). Installed,
+it updates itself ([decision 0052](docs/decisions/0052-the-server-updates-itself.md)):
+
+```sh
+curl -L https://github.com/<owner>/<repo>/releases/latest/download/kuraa-server.tar.gz | tar xz
+node kuraa-server-*/kuraa-host.mjs install --service -- --workspaces ~/kuraa
+# Installed kuraa in ~/.kuraa/server, with a service (systemd on Linux, launchd on macOS) that runs
+# ~/.kuraa/server/kuraa-host --auto-update --workspaces ~/kuraa, with an access code of its own.
+systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it says
+```
+
+The flags after `--` are the server's (`--host`, `--port`, `--workspaces`, as above). For devices on
+networks that block UDP (many companies and universities), and to be where the workspace's devices
+start from, give it a public address: `-- --workspaces ~/kuraa --peer-port 443 --public-address
+kuraa.example.org --dht-port 49737`, with those ports open in its firewall (TCP 443, UDP 49737).
+Members learn them from it, and invite links made from then on carry them. With
+`--auto-update`, it looks for a newer release every six hours, takes it only if it is signed with
+the release key, puts it beside the one running, and restarts to use it at night (between 3 and 5),
+or at once when a device of a workspace runs a newer kuraa (the two do not sync until then). Its
+service starts it again; the version before is kept. `~/.kuraa/server/kuraa-host update` takes the
+latest by hand, for the next start; `--version` says which runs. Run from the repository (`pnpm
+host`), a server does not update itself: `git pull`, `pnpm install` and `pnpm web:build`.
+
 ## On several devices
 
-A workspace can be on several devices at once, each running its own host with `--peer`, with no
-server in between ([decision 0028](docs/decisions/0028-peers.md)). When people on two devices
+A workspace can be on several devices at once, each running its own host, with no server in
+between ([decision 0028](docs/decisions/0028-peers.md)). A workspace syncs once it is shared:
+inviting someone to it, or joining it from an invite link, makes it so, for good. One on this
+computer alone has nothing to sync with, so there is no setting for it
+([0048](docs/decisions/0048-shared-workspaces-always-sync.md)). When people on two devices
 have the same document open, they edit it together live; what is done apart reaches the other
 devices through git as soon as they meet. Merges read documents and never stop: a passage both
 sides changed differently stays in the document with both versions, to choose between there
 ([0025](docs/decisions/0025-merging.md)).
 
 ```sh
-# On the first device (its host running with --peer):
+# On the first device (inviting makes the workspace shared; its host syncs it from then on):
 pnpm host invite --dir ~/research/notes          # an invite link for one person, for a week
 pnpm host invite --anyone --forever --dir ~/research/notes   # or for anyone with it, with no expiry
 # On another device:
 pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
-pnpm host --dir ~/notes --peer --static apps/web/dist
+pnpm host --dir ~/notes --static apps/web/dist
 ```
 
 **Every member has the same say** ([decision 0038](docs/decisions/0038-equal-peers.md)): every
@@ -229,8 +261,29 @@ revoke links. An invite link is for one person (the first device it lets in uses
 anyone who has it, and lasts a day, a week (`--hours`) or forever (`--forever`), unless revoked
 (`pnpm host revoke-invite <id>`; `pnpm host invites` lists them). Any running device of the
 workspace can let someone in. Whoever joins can read and change everything, and invite and remove
-others: share a link only with people you trust with that. It carries the workspace's secret.
-The trust model is to be redesigned; its known weaknesses are listed in 0038.
+others: share a link only with people you trust with that. A link does not carry the workspace's
+secret: the device that lets its holder in gives it, and removing a device makes a new one, so the
+removed device can no longer find the others
+([0050](docs/decisions/0050-networking-review.md)). The trust model is to be redesigned; its known
+weaknesses are listed in 0038.
+
+Joining in the app says how it is going: looking for a computer the workspace is on, being let in,
+copying, opening; and, on a network that makes direct connections take a few tries, that it may take
+a minute or two. The joined workspace goes on with the connection the join made. Devices tell each other whom they
+are connected to: a device reached through another shows as "online, through" it, its work reaching
+you that way, and while one is missing the workspace is looked up again, less and less often
+([0049](docs/decisions/0049-joining-on-slow-networks.md)).
+
+Two computers whose networks keep them from connecting directly (some office, campus and phone
+networks) connect through another device of the workspace that reaches both, which passes on what
+it cannot read, or through a relay: the workspace's other computers on ordinary networks offer one.
+**Devices** says how each device is connected (on this network, by its address, through another
+device), when an offline one was last seen, and when this computer's network is the problem
+([0053](docs/decisions/0053-reaching-each-other.md)). A workspace on only two computers needs one run elsewhere: `pnpm host relay`
+runs one and prints its key, to name in Preferences (Other computers › Advanced) or with
+`--relay`. Computers on the same local network find each other there too, with or without the
+internet. All the workspaces on a computer share one connection to the DHT, which remembers the
+nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
 
 In the app, the menu's **Devices** section lists who is in the workspace, by person and computer,
 online or offline, with **Remove…** (for good; they keep their copy) and **Rename this
@@ -248,9 +301,6 @@ computer", and keeps the keys under **Advanced**: copy your identity there to a 
 (it replaces the one made there), or revoke a lost computer's key. From the command line, `pnpm
 host person [create | export | import | revoke <key>]`; `pnpm host signing-key` prints this
 computer's signing key, to add to GitHub as a signing key.
-
-To sync every workspace, turn on **Sync every workspace with the other computers it is on** in
-Preferences (or pass `--peer`); workspaces you invited people to, or joined, always sync.
 
 Devices running different versions of kuraa can work together. Each tells the others how it merges
 (a version, and the document types that merge on their own); where two differ, only the one with
@@ -374,11 +424,11 @@ leaving out the server address and access code, which it manages itself.
 
 ## Package the desktop app
 
-The app packages as one file that runs where it is, with nothing to install, not even git:
+The app packages as one file to install or run, needing nothing else, not even git:
 
 ```sh
 pnpm --filter @kuraa/desktop dist:mac     # dist/kuraa-<version>-mac-{arm64,x64}.{dmg,zip}
-pnpm --filter @kuraa/desktop dist:win     # dist/kuraa-<version>-windows-x64.exe (portable)
+pnpm --filter @kuraa/desktop dist:win     # dist/kuraa-<version>-windows-x64-setup.exe
 pnpm --filter @kuraa/desktop dist:linux   # dist/kuraa-<version>-linux-x86_64.AppImage
 ```
 
@@ -403,12 +453,83 @@ xcrun notarytool store-credentials kuraa --apple-id <apple id> --team-id <team i
 APPLE_KEYCHAIN_PROFILE=kuraa pnpm --filter @kuraa/desktop dist:mac
 ```
 
-**Windows.** One `.exe`, x64 (it also runs on Arm under emulation), unsigned: Windows SmartScreen
-warns before its first run. It unpacks itself each time it starts, so it takes a few seconds to
-open. It builds on a Mac as well as on Windows.
+**Windows.** An installer, x64 (it also runs on Arm under emulation), for the person installing it
+alone (no administrator), unsigned: Windows SmartScreen warns before its first run. It builds on a
+Mac as well as on Windows.
 
 **Linux.** An AppImage: `chmod +x` it and run it. Some distributions need FUSE (`libfuse2`) for
 AppImages.
+
+### Updates
+
+The app updates itself ([decision 0051](docs/decisions/0051-the-app-updates-itself.md)): it looks for
+a newer release a minute after starting and every four hours (and from **Check for Updates…** in
+its menu), downloads it in the background, only the parts that changed where it can (a code change
+is a few megabytes of a 130 MB app), and puts it in place when it quits; the page offers **Restart
+now**. It also looks at once when a device of a workspace runs a newer kuraa, as the two do not
+sync until this one is updated (**Devices** says "newer kuraa" or "older kuraa").
+
+Where it looks is set when it is built, with `KURAA_UPDATES`: `github:<owner>/<repo>` for GitHub
+Releases, or an https URL of a folder holding what `dist/` has. Without it, the app built does not
+update itself.
+
+### Releasing
+
+```sh
+pnpm release 0.2.0              # or 0.3.0-beta.1 for a pre-release; --dry-run says what it would do
+```
+
+From `main`, with nothing uncommitted, it sets the app's version, commits, tags `v0.2.0`, and
+pushes both. It says so when the protocol devices speak changed since the last release: then the
+release notes should say that every device must be updated to go on syncing. The tag starts the
+**Release** workflow (`.github/workflows/release.yml`):
+
+1. **check**: lint, typecheck and the unit tests, and the tag is the app's version.
+2. **draft**: a draft GitHub release, with notes from the commits since the last (a pre-release for
+   a tag with a `-`: installed apps never update to one).
+3. **build**: builds for macOS (Apple silicon and Intel, signed and notarized), Windows (signed) and
+   Linux, and adds each to the draft; **server**: the server on its own
+   ([above](#a-server-that-updates-itself)), signed with the release key.
+4. **publish**: once everything is in it, the release is published, and installed apps and servers
+   update to it within hours. If a build fails, the release stays a draft: fix, and release the next version
+   (or publish the draft by hand).
+
+Every push to `main`, and every pull request, runs the same checks (`.github/workflows/check.yml`).
+
+**Setting up the repository, once:**
+
+- **Settings › Environments › New environment** `release`, its deployment tags limited to `v*`
+  (add yourself as a required reviewer to approve each release before it is built). Its secrets
+  and variables:
+
+  | Secret | What |
+  |---|---|
+  | `MAC_CERTIFICATE_P12` | Your *Developer ID Application* certificate and key, exported from Keychain Access as a `.p12`, base64: `base64 -i cert.p12 \| pbcopy` |
+  | `MAC_CERTIFICATE_PASSWORD` | The password it was exported with |
+  | `APPLE_API_KEY_P8` | An App Store Connect API key (Users and Access › Integrations › Team Keys, *Developer* access): the `.p8` file's text |
+  | `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | That key's id, and the issuer id shown above the list |
+  | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | An Entra app registration with the *Trusted Signing Certificate Profile Signer* role on the signing account |
+  | `SERVER_SIGNING_KEY` | The release key that signs the server's archive, from `node scripts/server-signing-key.mjs` (keep a copy: servers built with it take only updates signed with it) |
+
+  | Variable | What |
+  |---|---|
+  | `AZURE_SIGNING_ENDPOINT` | The Trusted Signing account's endpoint, for its region (`https://eus.codesigning.azure.net`, say) |
+  | `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` | The account's name, and its public-trust certificate profile's |
+  | `WIN_PUBLISHER_NAME` | The publisher exactly as the certificate names it (its CN): the installed app takes only updates signed by it |
+
+  Without the Azure ones, the Windows build is made unsigned.
+- **Settings › Rules › Rulesets**: a tag ruleset for `v*` that only you may create, update or
+  delete, so no one else can start a release.
+- **Windows signing**: an Azure subscription, a *Trusted Signing* account (Basic plan) with a
+  public-trust certificate profile, after Microsoft has verified who you are (an organisation, or
+  an individual where Microsoft offers that). electron-builder signs with it from the Windows
+  runner. Until then, Windows SmartScreen warns before the app's first run, and its updates are
+  checked only against the checksums the release lists.
+
+On macOS, a release must be signed with the same Developer ID as the app installed, or it is not
+put in place; the first update after installing from the DMG is downloaded whole. To release from
+a computer instead, set `KURAA_UPDATES` and `GH_TOKEN`, and run `pnpm --filter @kuraa/desktop
+release:mac` (or `:win`, `:linux`) after the tag is pushed and its draft release made.
 
 The packaged app turns off what it does not need (Electron's fuses): Node's inspector and
 `NODE_OPTIONS`, so nothing can attach to it, and loading code from outside its signed archive. It

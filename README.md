@@ -439,7 +439,7 @@ The app packages as one file to install or run, needing nothing else, not even g
 ```sh
 pnpm --filter @kuraa/desktop dist:mac     # dist/kuraa-<version>-mac-{arm64,x64}.{dmg,zip}
 pnpm --filter @kuraa/desktop dist:win     # dist/kuraa-<version>-windows-x64-setup.exe
-pnpm --filter @kuraa/desktop dist:linux   # dist/kuraa-<version>-linux-x86_64.AppImage
+pnpm --filter @kuraa/desktop dist:linux   # dist/kuraa-<version>-linux-{x86_64,arm64}.AppImage, .deb and .rpm (the .rpm needs rpmbuild)
 ```
 
 It ships its own git: GitHub Desktop's builds of it ([dugite-native](https://github.com/desktop/dugite-native)),
@@ -467,8 +467,19 @@ APPLE_KEYCHAIN_PROFILE=kuraa pnpm --filter @kuraa/desktop dist:mac
 alone (no administrator), unsigned: Windows SmartScreen warns before its first run. It builds on a
 Mac as well as on Windows.
 
-**Linux.** An AppImage: `chmod +x` it and run it. Some distributions need FUSE (`libfuse2`) for
-AppImages.
+**Linux.** x64 and arm64, three ways, each updating itself:
+
+- **`.deb`** (Debian, Ubuntu, Mint, Pop!_OS, …) and **`.rpm`** (Fedora, RHEL and its rebuilds,
+  openSUSE, …): installed with the system's own tool (`sudo apt install ./kuraa-….deb`,
+  `sudo dnf install ./kuraa-….rpm`), into `/opt/kuraa`, with kuraa in the app menu and Chromium's
+  sandbox set up for the system (an AppArmor profile on Ubuntu 24 and later). An update asks for an
+  administrator's password when you choose **Restart now**, not when kuraa quits.
+- **AppImage**, for anything else: `chmod +x` it and run it. Some distributions need FUSE
+  (`libfuse2`) for AppImages, and Ubuntu 24 and later may need it run with `--no-sandbox`; the
+  packages need neither.
+
+It needs glibc 2.33 or later (Ubuntu 22.04, Debian 12, Fedora 34, RHEL 9 and later), as its
+networking library does; not musl (Alpine).
 
 ### Updates
 

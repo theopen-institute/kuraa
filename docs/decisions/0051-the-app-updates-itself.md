@@ -28,8 +28,10 @@ syncing makes that worse: devices running different versions may not understand 
   from the second update on: the first after installing from the DMG has no earlier download to
   compare with), and puts the update in place when the app quits. The page shows "kuraa x.y.z is
   ready" with **Restart now**, which saves every workspace, quits, and starts the new version. Not
-  in a build without a place to look, run from the repository, or a Linux build not run as an
-  AppImage.
+  in a build without a place to look, run from the repository, or a Linux build that is neither an
+  AppImage nor installed from a `.deb` or `.rpm`. A package is installed with dpkg or rpm, as root,
+  so it asks for an administrator's password: only on **Restart now** (not when the app quits), and
+  before anything is stopped, so refusing leaves the app running as it was, and is said.
 - **Where it looks is set at build time**, by `KURAA_UPDATES`: `github:<owner>/<repo>` (GitHub
   Releases) or an https URL of a folder (any web server). electron-builder writes it into the app
   (`app-update.yml`), and `release:mac|win|linux` publish the builds, their blockmaps and

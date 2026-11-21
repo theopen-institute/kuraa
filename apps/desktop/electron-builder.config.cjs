@@ -90,11 +90,26 @@ module.exports = {
   // (A portable .exe cannot update itself.)
   win: { target: [{ target: 'nsis', arch: ['x64'] }], files: ['build/native/win32-${arch}/**'], azureSignOptions: windowsSigning() },
   nsis: { oneClick: true, perMachine: false, artifactName: '${productName}-${version}-windows-${arch}-setup.${ext}' },
+  // Linux: an AppImage, which runs on most distributions as it is, and packages for the two
+  // families most use, which install through the system's own tool (no FUSE needed), put kuraa in
+  // the app menu, and set up Chromium's sandbox for the system (an AppArmor profile on Ubuntu 24+).
+  // Each updates itself: a package through dpkg or rpm, asking for an administrator's password.
+  // git is in the app (its resources), so the packages need no git from the system.
   linux: {
-    target: [{ target: 'AppImage', arch: ['x64'] }],
+    target: ['AppImage', 'deb', 'rpm'].map((target) => ({ target, arch: ['x64', 'arm64'] })),
     category: 'Office',
     syncDesktopName: true,
     files: ['build/native/linux-${arch}/**'],
     artifactName: '${productName}-${version}-linux-${arch}.${ext}',
+    maintainer: 'kuraa',
   },
+  deb: {
+    packageCategory: 'editors',
+    // electron-builder's own list, and ALSA, which Electron needs to start (a desktop has it; a
+    // minimal system may not). Ubuntu 24.04 calls it libasound2t64.
+    depends: ['libgtk-3-0', 'libnotify4', 'libnss3', 'libxss1', 'libxtst6', 'xdg-utils', 'libatspi2.0-0', 'libuuid1', 'libsecret-1-0', 'libasound2t64 | libasound2'],
+  },
+  // gzip: rpmbuild 4.18 (Debian 12, Ubuntu 24.04: where releases are built) fails, saying nothing,
+  // with electron-builder's xz on many threads (and it gives xz only so). Electron barely compresses anyway.
+  rpm: { packageCategory: 'Applications/Editors', compression: 'gzip' },
 };

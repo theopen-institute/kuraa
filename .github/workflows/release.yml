@@ -122,6 +122,11 @@ jobs:
           WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
         run: pnpm --filter @kuraa/desktop release:win
 
+      # The .rpm is made with rpmbuild (the .deb and the AppImage need nothing more).
+      - name: rpmbuild, for the .rpm
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q rpm
+
       - name: Build for Linux
         if: matrix.platform == 'linux'
         run: pnpm --filter @kuraa/desktop release:linux

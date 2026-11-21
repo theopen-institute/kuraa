@@ -10,10 +10,16 @@
 // (Check for Updates…), and when a device of a workspace runs a newer kuraa
 // than this one (they do not sync until this one is updated).
 //
+// On Linux, an AppImage replaces itself; a .deb or .rpm package is installed
+// with dpkg or rpm, as root, so it asks for an administrator's password (pkexec):
+// only when the person says so (Restart now), never on quitting, and before
+// anything is stopped, so saying no leaves the app as it was.
+//
 // Not in a build without a feed (no app-update.yml: run from the repo, or built
-// without KURAA_UPDATES), nor in a Linux build not run as an AppImage.
+// without KURAA_UPDATES), nor in a Linux build that is neither an AppImage nor
+// installed from a package.
 import { app } from 'electron';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import electronUpdater from 'electron-updater';
 
@@ -37,11 +43,26 @@ export type UpdateCheck =
   | { kind: 'ready'; version: string }
   | { kind: 'failed'; message: string };
 
+/**
+ * How this Linux build was installed, if from a package (electron-builder
+ * writes which, in its resources, and electron-updater reads the same file):
+ * null for an AppImage, or not Linux.
+ */
+export function linuxPackage(): 'deb' | 'rpm' | null {
+  if (process.platform !== 'linux' || process.env.APPIMAGE) return null;
+  try {
+    const kind = readFileSync(join(process.resourcesPath, 'package-type'), 'utf8').trim();
+    return kind === 'deb' || kind === 'rpm' ? kind : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether this build can update itself, and if not, why. */
 export function updatable(): string | null {
   if (!app.isPackaged) return 'run from the repository';
   if (!existsSync(join(process.resourcesPath, 'app-update.yml'))) return 'built without a place to look for updates (KURAA_UPDATES)';
-  if (process.platform === 'linux' && !process.env.APPIMAGE) return 'not run as an AppImage';
+  if (process.platform === 'linux' && !process.env.APPIMAGE && !linuxPackage()) return 'neither an AppImage nor installed from a .deb or .rpm';
   return null;
 }
 
@@ -55,7 +76,9 @@ export function startUpdates(o: { log(m: string): void; ready(version: string): 
   const { autoUpdater } = electronUpdater;
   autoUpdater.logger = { info: (m: unknown) => o.log(`[updates] ${String(m)}`), warn: (m: unknown) => o.log(`[updates] ${String(m)}`), error: (m: unknown) => o.log(`[updates] ${String(m)}`), debug: () => undefined };
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // A package asks for a password to install: not as the app quits, only when asked (Restart now).
+  const pkg = linuxPackage();
+  autoUpdater.autoInstallOnAppQuit = !pkg;
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
   let ready: string | null = null;
@@ -96,6 +119,25 @@ export function startUpdates(o: { log(m: string): void; ready(version: string): 
     },
     async restart(before) {
       if (!ready) return;
+      if (pkg) {
+        // Installed first, the app running as ever (the password asked for meanwhile): if that is
+        // refused or fails, nothing was stopped. Once in place, the app quits as it always does
+        // (saving every workspace first) and starts again.
+        o.log(`[updates] installing ${ready} with ${pkg === 'deb' ? 'dpkg' : 'rpm'}: the system asks for an administrator's password`);
+        // The install runs as it is called (and says an error as it happens): a refusal is said to the person.
+        let failed: Error | null = null;
+        const onError = (e: Error) => {
+          failed = e;
+        };
+        autoUpdater.on('error', onError);
+        try {
+          autoUpdater.quitAndInstall(true, true);
+        } finally {
+          autoUpdater.off('error', onError);
+        }
+        if (failed) throw new Error(`kuraa ${ready} was not installed (the password was not given, or the package could not be installed): ${(failed as Error).message}`);
+        return;
+      }
       await before();
       // Quietly on Windows (no installer window), and start again once in place.
       autoUpdater.quitAndInstall(true, true);

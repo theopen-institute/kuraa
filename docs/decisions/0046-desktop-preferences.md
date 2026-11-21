@@ -5,6 +5,9 @@
 > host listens only on this computer, applied by the hub reopening its workspaces in place. The
 > Podman program is a flag again, `--allow-invites`, `--manage-online` and `--manage-person` are gone,
 > and `pnpm host` alone serves your workspaces as the desktop app does.
+>
+> Superseded in part by [0048](0048-shared-workspaces-always-sync.md): `--peer` and its preference
+> are gone; a shared workspace always syncs, and one that is not has nothing to sync with.
 
 A host is configured by flags ([0018](0018-untrusted-users.md)): whoever starts it is its operator,
 and people using the app cannot change what it allows. The desktop app is the one case where the

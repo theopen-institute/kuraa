@@ -17,9 +17,16 @@
 //                 [--allow-write] [--allow-network] [--no-allow-installs] [--data-dir path]
 //                 [--memory 4g] [--cpus 2] [--disk 2g]
 //                 [--r-image <image>]...   base images a workspace may name for R (besides the default)
-//   devices:      [--peer] [--bootstrap host:port]...   sync every workspace with its other computers
+//   devices:      [--bootstrap host:port]...   servers to find other computers through (shared workspaces always sync)
+//                 [--relay <key>]...           relays to go through to computers that cannot be reached directly
+//                                              (kuraa-host relay runs one; members offer each other theirs anyway)
+//   a server's:   [--peer-port N] [--public-address host[:port]]   take devices' connections over TCP, for
+//                                              networks that block UDP; told to members, and put in invite links
+//                 [--dht-port N]               its DHT node on a fixed port, for members to start from
+//                 [--no-serve-dht]             never serve the public DHT (a public address does, by default)
 //                 (see peers/cli.ts for invite, join, devices, online, fork)
 //   saving:       [--flush-ms N] [--commit-ms N]
+//   updating:     [--auto-update]   a released server (server.ts) updates itself and restarts (0052)
 //
 // Flags only, because they choose what code runs with your rights (0046, 0047):
 //   --component <path or package>...   more run components; @kuraa/run-components always loads
@@ -80,9 +87,14 @@ const { values } = parseArgs({
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
     static: { type: 'string' },
-    peer: { type: 'boolean' },
     bootstrap: { type: 'string', multiple: true },
+    relay: { type: 'string', multiple: true },
+    'peer-port': { type: 'string' },
+    'public-address': { type: 'string' },
+    'dht-port': { type: 'string' },
+    'serve-dht': { type: 'boolean' },
     'flush-ms': { type: 'string' },
+    'auto-update': { type: 'boolean', default: false },
     'commit-ms': { type: 'string' },
   },
 });
@@ -105,8 +117,8 @@ const cpus = numberFlag('cpus', values.cpus, { min: 0.1, whole: false });
 
 // The settings the flags give: they win over the saved ones, and the app says so.
 const flags: Partial<Settings> = Object.fromEntries(Object.entries({
-  syncDevices: values.peer,
   bootstrap: values.bootstrap,
+  relays: values.relay,
   runCode: values.engine ? values.engine.some((e) => e !== 'none') : undefined,
   environment: values.env,
   rImages: values['r-image'],
@@ -149,7 +161,13 @@ const hub = await startHub({
       options: { podman: { podman: values.podman } },
     },
   },
-  peers: {},
+  // A server's ways in (0053).
+  peers: Object.fromEntries(Object.entries({
+    peerPort: numberFlag('peer-port', values['peer-port'], { min: 1, whole: true }),
+    publicAddress: values['public-address'],
+    dhtPort: numberFlag('dht-port', values['dht-port'], { min: 1, whole: true }),
+    serveDht: values['serve-dht'],
+  }).filter(([, v]) => v !== undefined)),
   log: (m) => console.log(`[kuraa] ${m}`),
 });
 const close = () => hub.close();
@@ -187,6 +205,17 @@ const stop = (signal: string) => {
     },
   );
 };
+// A released server updating itself (selfupdate.ts): it stops, saving everything, for its service to start the new version.
+const released = (globalThis as { kuraaServer?: { here: string; build: import('./selfupdate.js').ServerBuild } }).kuraaServer;
+if (values['auto-update']) {
+  if (!released) console.log('[kuraa] --auto-update: this server runs from the repository; update it with git pull');
+  else {
+    const { autoUpdate } = await import('./selfupdate.js');
+    const { onNewerVersion } = await import('./index.js');
+    autoUpdate({ ...released, log: (m) => console.log(`[kuraa] ${m}`), restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn) });
+  }
+}
+
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
 // An error nothing caught: said, everything saved that can be, and the server goes on (lastresort.ts).

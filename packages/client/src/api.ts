@@ -67,8 +67,10 @@ export type PeersInfo =
       canInvite: boolean;
       /** This device, and whose it is (null if no identity says). */
       device: { name: string; key: string; person: string | null };
+      /** What this computer's network is like for connecting (0053). */
+      network?: { kind: 'starting' | 'open' | 'router' | 'hard' | 'unreachable'; tcp: string | null; lan: boolean };
       workspace: { id: string; forkedFrom: string | null };
-      devices: { name: string; key: string; person: string | null; online: boolean; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean }[];
+      devices: { name: string; key: string; person: string | null; online: boolean; /** Not connected here, but to these devices (keys), which say so. */ through: string[]; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean; /** It runs a kuraa that does not sync with this one until one of them is updated. */ kuraa?: 'newer' | 'older' | null; /** How it is connected here (0053). */ via?: 'lan' | 'tcp' | 'tunnel' | 'internet' | null; /** When it was last connected here (ms since 1970). */ lastSeen?: number | null }[];
     };
 
 /** A git server this workspace keeps a copy on and syncs with (the host's backups.ts). */
@@ -257,6 +259,18 @@ export interface HubWorkspace {
   error?: string;
 }
 
+/**
+ * How a join is going (the host's hub.ts, JoinStatus): waiting for the hub to
+ * finish adding another workspace; looking for a computer the workspace is on;
+ * connected to one and being let in; copying the workspace from it; opening it.
+ * `slowNetwork`: this computer's network makes direct connections take a few tries.
+ */
+export interface JoinStatus {
+  step: 'waiting' | 'looking' | 'letting-in' | 'copying' | 'opening';
+  slowNetwork: boolean;
+  from?: string;
+}
+
 /** A hub's workspaces, and what people may do with them. */
 export interface HubList {
   workspaces: HubWorkspace[];
@@ -274,8 +288,9 @@ export interface HubList {
 
 /** The owner's settings (the host's settings.ts), as the Preferences dialog edits them. */
 export interface HubSettings {
-  syncDevices: boolean;
   bootstrap: string[];
+  /** Relays to go through to computers that cannot be reached directly, by key. */
+  relays: string[];
   runCode: boolean;
   environment: string | null;
   rImages: string[];
@@ -341,9 +356,19 @@ export class HubApi extends HostApi {
     return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name }) })).workspace;
   }
 
-  /** A workspace joined from an invite link. */
-  async join(invitation: string, name: string): Promise<HubWorkspace> {
-    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name }) })).workspace;
+  /** A workspace joined from an invite link; `progress`: an id to ask how it is going by (joinStatus) meanwhile. */
+  async join(invitation: string, name: string, progress?: string): Promise<HubWorkspace> {
+    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name, progress }) })).workspace;
+  }
+
+  /** How a join is going, by the id given to join; null if it is not under way (yet, or any more). */
+  async joinStatus(progress: string): Promise<JoinStatus | null> {
+    try {
+      return await this.json<JoinStatus>(`/hub/api/joins/${encodeURIComponent(progress)}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
   }
 
   /**

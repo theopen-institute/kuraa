@@ -22,12 +22,15 @@
 //   --allow-unsandboxed  allow an environment that is not sandboxed: flag only, see 0047
 //   --podman <path>      the Podman program (also KURAA_PODMAN): flag only, see 0047
 //   --r-image <image>... base images a workspace may name for R (besides the default)
-//   --peer               sync with the folder's paired devices (pair them with kuraa-host invite / join)
 // The components that ship (@kuraa/run-components: R, Podman containers) are loaded.
 //
 // It runs the git it ships with (vendor/git, see scripts/fetch-git.mjs), so the
 // computer needs none, and every device runs the same one. Run from the repo
 // without it fetched, it uses the computer's git.
+//
+// It updates itself from the releases it was built to look at (updates.ts,
+// decision 0051): in the background, put in place when it quits, or at once
+// from the page's Restart now.
 //
 // The window shows only the app's own pages: it does not navigate elsewhere or
 // open other windows (web links open in the browser), and the bridge answers
@@ -37,10 +40,12 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, SettingsStore, startHub, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, onNewerVersion, SettingsStore, startHub, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 import { D } from './strings.js';
+import { startUpdates, updatable, type Updates } from './updates.js';
+import { keepLog, logFile } from './log.js';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
@@ -53,7 +58,7 @@ const { values: flags } = parseArgs({
   options: {
     open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
     engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true },
-    component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' }, peer: { type: 'boolean' },
+    component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' },
     workspaces: { type: 'string' },
     'r-image': { type: 'string', multiple: true },
     podman: { type: 'string' },
@@ -89,6 +94,8 @@ useBundledGit();
 
 // Tests keep the app's own data (preferences, the list of workspaces) apart from the person's.
 if (process.env.KURAA_USER_DATA) app.setPath('userData', process.env.KURAA_USER_DATA);
+// The log, in a file: with its data when that is given (tests), else where the system keeps apps' logs.
+keepLog(process.env.KURAA_USER_DATA ? join(app.getPath('userData'), 'logs') : undefined);
 // Tests run the app out of sight: its windows are never shown, and on a Mac it stays out of the
 // Dock and never comes to the front, so it does not take the screen from whoever is working.
 const HIDDEN = process.env.KURAA_HIDDEN_WINDOWS === '1';
@@ -109,7 +116,6 @@ const PREFERENCES_FILE = join(app.getPath('userData'), 'preferences.json');
 function flagSettings(): Partial<Settings> {
   const engines = list(flags.engine);
   return {
-    ...(flags.peer === true ? { syncDevices: true } : {}),
     ...(engines ? { runCode: engines.some((e) => e !== 'none') } : {}),
     ...(list(flags['r-image']) ? { rImages: list(flags['r-image']) } : {}),
     ...(list(flags.format) ? { formats: list(flags.format) } : {}),
@@ -124,6 +130,7 @@ const defaultWorkspaces = () => join(app.getPath('documents'), 'kuraa');
 let window: BrowserWindow | null = null;
 let hub: RunningHub | null = null;
 let quitting = false;
+let updates: Updates | null = null;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
 
@@ -258,8 +265,27 @@ function showHelp(): void {
   if (config && window) window.webContents.send('kuraa:help');
 }
 
+/** Check for Updates… in the app's menu: look now, and say what was found. */
+async function checkForUpdates(): Promise<void> {
+  const why = updatable();
+  const r = updates ? await updates.check(true) : { kind: 'off' as const };
+  const message = r.kind === 'off' ? D.updates.off(why ?? '') : r.kind === 'none' ? D.updates.latest(app.getVersion()) : r.kind === 'downloading' ? D.updates.downloading(r.version) : r.kind === 'ready' ? D.updates.ready(r.version) : D.updates.failed(r.message);
+  const buttons = r.kind === 'ready' ? [D.updates.restart, D.updates.later] : [D.updates.ok];
+  const { response } = await dialog.showMessageBox(window ?? undefined as unknown as BrowserWindow, { type: r.kind === 'failed' ? 'warning' : 'info', message, buttons, defaultId: 0 });
+  if (r.kind === 'ready' && response === 0) await restartToUpdate();
+}
+
+/** Save every workspace, quit, put the update in place, and start again. */
+async function restartToUpdate(): Promise<void> {
+  await updates?.restart(async () => {
+    quitting = true;
+    await stopHub();
+  });
+}
+
 function buildMenu(): void {
   const isMac = process.platform === 'darwin';
+  const updatesItem = { label: D.menu.checkUpdates, click: () => void checkForUpdates().catch((e: Error) => dialog.showErrorBox(D.updates.title, e.message)) };
   // Not "Settings", which in the client are the person's own (name, email, colour). ⌘, is the
   // page's own (its menu, which holds your settings), so Preferences takes ⌥⌘, (decision 0044);
   // the in-app menu also opens it (Preferences…). Both open the client's dialog.
@@ -268,7 +294,7 @@ function buildMenu(): void {
     ...(isMac ? [{
       label: app.name,
       submenu: [
-        { role: 'about' as const }, { type: 'separator' as const }, preferencesItem, { type: 'separator' as const },
+        { role: 'about' as const }, updatesItem, { type: 'separator' as const }, preferencesItem, { type: 'separator' as const },
         { role: 'services' as const }, { type: 'separator' as const },
         { role: 'hide' as const }, { role: 'hideOthers' as const }, { role: 'unhide' as const }, { type: 'separator' as const }, { role: 'quit' as const },
       ],
@@ -297,12 +323,28 @@ function buildMenu(): void {
     },
     { role: 'windowMenu' },
     // ⌘/ is the page's own key for the sheet: shown here, not taken from the page.
-    { role: 'help', label: D.menu.help, submenu: [{ label: D.menu.shortcuts, accelerator: 'CmdOrCtrl+/', registerAccelerator: false, click: () => showHelp() }] },
+    { role: 'help', label: D.menu.help, submenu: [
+      { label: D.menu.shortcuts, accelerator: 'CmdOrCtrl+/', registerAccelerator: false, click: () => showHelp() },
+      // What the app said, connecting to other devices above all (log.ts).
+      { label: D.menu.showLog, click: () => {
+        const f = logFile();
+        if (f) shell.showItemInFolder(f);
+      } },
+      ...(isMac ? [] : [{ type: 'separator' as const }, updatesItem]),
+    ] },
   ]));
 }
 
 /** Whether a bridge call comes from one of the app's own pages (not a page that got into the window somehow). */
 const fromOwnPage = (e: IpcMainEvent | IpcMainInvokeEvent) => !!e.senderFrame && isOwnPage(e.senderFrame.url);
+
+// An update downloaded: the page asks when it starts (a reload, another workspace), and is told when it is.
+ipcMain.on('kuraa:update-ready?', (e) => {
+  if (fromOwnPage(e) && updates?.ready) e.sender.send('kuraa:update-ready', updates.ready);
+});
+ipcMain.on('kuraa:restart-to-update', (e) => {
+  if (fromOwnPage(e)) void restartToUpdate().catch((err: Error) => dialog.showErrorBox(D.updates.title, err.message));
+});
 
 ipcMain.on('kuraa:config', (e) => {
   e.returnValue = fromOwnPage(e) ? config : null;
@@ -408,6 +450,9 @@ function showContextMenu(contents: WebContents, params: ContextMenuParams): void
 
 app.whenReady().then(async () => {
   buildMenu();
+  updates = startUpdates({ log: (m) => console.log(m), ready: (version) => window?.webContents.send('kuraa:update-ready', version) });
+  // A device of a workspace runs a newer kuraa: this one does not sync with it until updated, so look now.
+  void onNewerVersion(() => void updates?.check());
   window = new BrowserWindow({
     width: 1280,
     height: 820,

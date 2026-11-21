@@ -9,10 +9,17 @@ export { lastResort, type LastResortOptions } from './lastresort.js';
 export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
-export type { JoinOptions } from './peers/join.js';
+export type { JoinOptions, JoinProgress, Joined } from './peers/join.js';
 export { Hub, startHub, slugOf, isLoopback, OWNER_OFF, type HubOptions, type HubWorkspace, type HubList, type FolderListing, type RunningHub } from './hub.js';
 export { SettingsStore, DEFAULT_SETTINGS, DATA_MARKER, settingsFrom, readSettings, writeSettings, checkDataDir, fromSettings, type Settings, type SettingsView } from './settings.js';
 export type { PeerOptions, PeersStatus, DeviceInfo, LinkInfo } from './peers/peers.js';
+
+/** Call `fn` when a device of a workspace runs a newer kuraa than this one (it will not sync until this one is updated). */
+export async function onNewerVersion(fn: () => void): Promise<() => void> {
+  const { versionNews } = await import('./peers/node.js');
+  versionNews.on('newer', fn);
+  return () => versionNews.off('newer', fn);
+}
 
 /** A person's key on this computer: make, read, export, import (peers/person.ts; loaded only when called). */
 export function personKeys() {

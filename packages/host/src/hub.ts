@@ -14,8 +14,8 @@
 // default Documents/kuraa). People may invite others to its workspaces from the
 // app (invitations and subscription links), which turns syncing on for that
 // workspace. A workspace syncs once it is shared (joined, invited from, forked:
-// its repository has a workspace id and secret, peers/identity.ts), or with
-// --peer (or the setting), every one.
+// its repository has a workspace id and secret, peers/identity.ts), and always
+// from then on; one on this computer alone has nothing to sync with (0048).
 //
 // Whoever has the access code of a hub listening only on this computer is its
 // owner (decision 0047): they change its settings (settings.ts), which the hub
@@ -40,6 +40,8 @@ import { serialQueue } from './serial.js';
 import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from './http.js';
 import { initWorkspace, inspectFolder } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
+import type { JoinProgress } from './peers/join.js';
+import type { PeerNode } from './peers/node.js';
 import { startHost, joinWorkspace, type RunningHost } from './index.js';
 import { loadRunComponents } from './components.js';
 import type { RunOptions } from './runner.js';
@@ -79,12 +81,8 @@ export interface HubOptions {
     /** Running code. With settings, only what flags set: engines here (--engine) win over the setting. */
     run?: Partial<RunOptions>;
   };
-  /**
-   * Syncing with other devices: for workspaces joined from an invitation or link,
-   * or that invited someone (always), and for the others while `everywhere` is
-   * set (--peer, or the desktop app's preference).
-   */
-  peers?: PeerOptions & { everywhere?: boolean };
+  /** Syncing with other devices, for the workspaces that are shared: joined from an invite link, or that invited someone. */
+  peers?: PeerOptions;
   log?: (m: string) => void;
 }
 
@@ -96,6 +94,9 @@ interface Entry {
   added: string;
 }
 
+/** The id the app gives a join, to ask how it is going by. */
+const JOIN_ID = /^[A-Za-z0-9_-]{8,64}$/;
+
 /** Whether a repository is a workspace shared between devices: it has a workspace id and secret (peers/identity.ts). */
 async function shared(dir: string): Promise<boolean> {
   const git = new Git(dir);
@@ -104,6 +105,17 @@ async function shared(dir: string): Promise<boolean> {
 }
 
 /** A workspace as the API shows it. */
+/**
+ * How a join from the app is going (GET /hub/api/joins/<id>): waiting for the
+ * hub to finish adding another workspace, the join's own steps (join.ts), then
+ * opening the workspace it made.
+ */
+export interface JoinStatus {
+  step: 'waiting' | JoinProgress['step'] | 'opening';
+  slowNetwork: boolean;
+  from?: string;
+}
+
 export interface HubWorkspace {
   id: string;
   name: string;
@@ -163,6 +175,8 @@ export class Hub {
   private readonly tunnels = new Set<import('node:net').Socket>();
   /** Adding and removing, one at a time. */
   private readonly serial = serialQueue();
+  /** Joins under way, by the id the app gave to ask how each is going. */
+  private readonly joins = new Map<string, JoinStatus>();
   address: AddressInfo | null = null;
 
   constructor(readonly o: HubOptions) {
@@ -281,15 +295,11 @@ export class Hub {
     await renameOver(tmp, this.registry);
   }
 
-  private async syncs(e: Entry): Promise<boolean> {
-    return !!this.peerOptions().everywhere || shared(e.dir);
-  }
-
-  /** Syncing: the settings (syncing everywhere, servers to find computers through), else `peers`. */
-  private peerOptions(): PeerOptions & { everywhere?: boolean } {
+  /** Syncing: the settings (servers to find computers through), else `peers`. */
+  private peerOptions(): PeerOptions {
     if (!this.o.settings) return this.o.peers ?? {};
     const s = fromSettings(this.o.settings.current).peers;
-    return { ...this.o.peers, everywhere: s.everywhere, ...(s.bootstrap ? { bootstrap: s.bootstrap } : {}) };
+    return { ...this.o.peers, ...(s.bootstrap ? { bootstrap: s.bootstrap } : {}), ...(s.relays ? { relays: s.relays } : {}) };
   }
 
   /** Every workspace's host options: `hosts`, with the settings applied where there are any. */
@@ -320,13 +330,17 @@ export class Hub {
     await Promise.all([...this.hosts.values()].map((h) => h.host.peers?.node.signingKey().catch(() => undefined)));
   }
 
-  /** Start a workspace's host. A workspace that cannot open is listed with why. */
-  private async open(e: Entry, init = false): Promise<void> {
+  /**
+   * Start a workspace's host. A workspace that cannot open is listed with why.
+   * `joined`: the node that just joined it, still connected, for its host to go on with.
+   */
+  private async open(e: Entry, init = false, joined?: PeerNode): Promise<void> {
     try {
       if (!init && !existsSync(e.dir)) throw new Error(`Its folder is gone: ${e.dir}`);
-      const { everywhere: _, ...peerOptions } = this.peerOptions();
+      const peerOptions = this.peerOptions();
+      const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
-        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers: (await this.syncs(e)) ? peerOptions : undefined, log: (m) => this.log(`[${e.id}] ${m}`),
+        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers, log: (m) => this.log(`[${e.id}] ${m}`),
         // People may invite others to a hub's workspaces from the app (every member has the same say, 0038);
         // the first invitation turns syncing on, for good (the workspace is shared from then on).
         invites: { peers: peerOptions },
@@ -338,6 +352,8 @@ export class Hub {
       this.hosts.set(e.id, h);
       this.errors.delete(e.id);
     } catch (err) {
+      // Its host never took the joined node: let it go (the next start connects anew).
+      await joined?.close();
       this.errors.set(e.id, (err as Error).message);
       this.log(`[${e.id}] could not open: ${(err as Error).message}`);
     }
@@ -366,10 +382,10 @@ export class Hub {
     return id;
   }
 
-  private async add(e: Entry): Promise<HubWorkspace> {
+  private async add(e: Entry, joined?: PeerNode): Promise<HubWorkspace> {
     this.entries.push(e);
     await this.save();
-    await this.open(e);
+    await this.open(e, false, joined);
     this.log(`added workspace ${e.name} (${e.dir})`);
     return this.list().find((w) => w.id === e.id)!;
   }
@@ -388,23 +404,42 @@ export class Hub {
     });
   }
 
-  /** A workspace joined from an invitation or subscription link, into a new folder in the hub's folder. */
-  join(invitation: string, name: string): Promise<HubWorkspace> {
-    return this.serial(async () => {
-      this.mayAdd();
-      const label = name.trim() || 'Shared workspace';
-      const id = this.freeId(label);
-      const dir = join(this.root, id);
-      try {
-        await joinWorkspace({ dir, invitation, bootstrap: this.o.peers?.bootstrap, log: (m) => this.log(`[${id}] ${m}`) });
-      } catch (err) {
-        // Leave nothing half-made behind.
-        // (On Windows a process that has just ended may hold a file in it for a moment.)
-        await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch((e: Error) => this.log(`[${id}] could not remove ${dir}: ${e.message}`));
-        throw new HttpError(400, (err as Error).message);
-      }
-      return this.add({ id, name: label, dir, added: new Date().toISOString() });
-    });
+  /**
+   * A workspace joined from an invite link, into a new folder in the hub's
+   * folder. Its host goes on with the connections the join made. `progress`: an
+   * id the app asks how it is going by (joinStatus) until it is done.
+   */
+  async join(invitation: string, name: string, progress?: string): Promise<HubWorkspace> {
+    const tell = (s: JoinStatus) => {
+      if (progress) this.joins.set(progress, s);
+    };
+    tell({ step: 'waiting', slowNetwork: false });
+    try {
+      return await this.serial(async () => {
+        this.mayAdd();
+        const label = name.trim() || 'Shared workspace';
+        const id = this.freeId(label);
+        const dir = join(this.root, id);
+        let joined;
+        try {
+          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`) });
+        } catch (err) {
+          // Leave nothing half-made behind.
+          // (On Windows a process that has just ended may hold a file in it for a moment.)
+          await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch((e: Error) => this.log(`[${id}] could not remove ${dir}: ${e.message}`));
+          throw new HttpError(400, (err as Error).message);
+        }
+        tell({ step: 'opening', slowNetwork: false, from: joined.inviter });
+        return this.add({ id, name: label, dir, added: new Date().toISOString() }, joined.node);
+      });
+    } finally {
+      if (progress) this.joins.delete(progress);
+    }
+  }
+
+  /** How a join from the app is going, by the id it gave; null once it is over, or if there is none. */
+  joinStatus(progress: string): JoinStatus | null {
+    return this.joins.get(progress) ?? null;
   }
 
   /**
@@ -600,9 +635,15 @@ export class Hub {
       if (b.kind === 'new') return send(res, 201, { workspace: await this.create(String(b.name ?? '')) });
       if (b.kind === 'join') {
         if (typeof b.invitation !== 'string' || !b.invitation.trim()) throw new HttpError(400, 'Paste an invitation or subscription link');
-        return send(res, 201, { workspace: await this.join(b.invitation, String(b.name ?? '')) });
+        const progress = typeof b.progress === 'string' && JOIN_ID.test(b.progress) ? b.progress : undefined;
+        return send(res, 201, { workspace: await this.join(b.invitation, String(b.name ?? ''), progress) });
       }
       throw new HttpError(400, 'Add a new workspace (kind: new) or join one (kind: join)');
+    }
+    const joining = /^\/hub\/api\/joins\/([^/]+)$/.exec(url.pathname);
+    if (joining && req.method === 'GET') {
+      const status = JOIN_ID.test(joining[1]!) ? this.joinStatus(joining[1]!) : null;
+      return status ? send(res, 200, status) : send(res, 404, { error: 'No join under way by that id' });
     }
     const one = /^\/hub\/api\/workspaces\/([a-z0-9-]+)$/.exec(url.pathname);
     if (one && req.method === 'DELETE') {

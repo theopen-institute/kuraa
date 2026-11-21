@@ -65,7 +65,7 @@ export interface HostOptions {
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   /**
-   * Be one of the workspace's devices (--peer): sync git and live rooms with
+   * Be one of the workspace's devices: sync git and live rooms with
    * the devices paired with this repository (docs/decisions/0028-peers.md).
    * The first device to do so makes the repository a shared workspace.
    */
@@ -1136,7 +1136,7 @@ export class Host {
   // -------------------------------------------------------------------------
   // Merging
 
-  /** Start syncing with this workspace's devices (at start with --peer, or when the first invitation is made). */
+  /** Start syncing with this workspace's devices (at start, for a shared workspace, or when the first invitation is made). */
   async startPeers(options: PeerOptions): Promise<Peers> {
     if (this.peers) return this.peers;
     // Loaded only when on: it brings Hyperswarm and its native parts.

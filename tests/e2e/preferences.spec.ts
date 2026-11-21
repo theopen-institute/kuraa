@@ -50,12 +50,15 @@ test('Preferences in the browser: a wrong value refused, a kind of document turn
 
     await prefs.getByTestId('pref-memory').fill('3g');
     await prefs.getByTestId('pref-format-rmarkdown').uncheck();
+    // A relay to connect through, named by its key (kuraa-host relay prints it).
+    await prefs.getByTestId('pref-network-advanced').locator('summary').click();
+    await prefs.getByTestId('pref-relays').fill('ab'.repeat(32));
     // The hub reopens every workspace with them, then the page reloads.
     const reloaded = page.waitForEvent('load', { timeout: 30_000 });
     await prefs.getByTestId('pref-save').click();
     await reloaded;
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
-    expect(JSON.parse(readFileSync(join(app, 'settings.json'), 'utf8'))).toMatchObject({ memory: '3g', formats: expect.not.arrayContaining(['rmarkdown']) });
+    expect(JSON.parse(readFileSync(join(app, 'settings.json'), 'utf8'))).toMatchObject({ memory: '3g', relays: ['ab'.repeat(32)], formats: expect.not.arrayContaining(['rmarkdown']) });
 
     // R Markdown is off now: the Components panel says so, and the file opens as plain text.
     await page.getByTestId('menu-button').click();

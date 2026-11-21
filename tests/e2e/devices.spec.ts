@@ -61,6 +61,12 @@ test('people on two devices edit one document, and any member renames its device
     await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device online');
     await expect(ada.getByTestId('device:laptop')).toContainText('online');
     await expect(ada.getByTestId('devices')).not.toContainText(/[0-9a-f]{8}/);
+    // A device Ada's cannot reach, which the laptop says it is connected to: online, through the laptop.
+    const phone = 'e'.repeat(64);
+    await a.host.peers!.node.identity.addMember(phone, 'phone');
+    b.host.peers!.node.links.get(a.host.peers!.node.myKey)!.send({ type: 'present', keys: [phone] });
+    await expect(ada.getByTestId('through:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
+    await expect(ada.getByTestId('devices')).toContainText('2 of 2 other devices online');
     await ada.keyboard.press('Escape');
 
     // On Bo's device, the one that joined last: rename it, then remove Ada's device. It is permanent, and she keeps her copy.

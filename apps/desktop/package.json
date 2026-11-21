@@ -12,7 +12,10 @@
     "fetch-git": "node scripts/fetch-git.mjs",
     "dist:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && electron-builder --config electron-builder.config.cjs --mac",
     "dist:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && electron-builder --config electron-builder.config.cjs --win",
-    "dist:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 && electron-builder --config electron-builder.config.cjs --linux"
+    "dist:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 && electron-builder --config electron-builder.config.cjs --linux",
+    "release:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && electron-builder --config electron-builder.config.cjs --mac --publish always",
+    "release:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && electron-builder --config electron-builder.config.cjs --win --publish always",
+    "release:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 && electron-builder --config electron-builder.config.cjs --linux --publish always"
   },
   "devDependencies": {
     "@electron/fuses": "1.8.0",
@@ -23,6 +26,7 @@
     "@kuraa/run-kit": "workspace:*",
     "electron": "45.3.2",
     "electron-builder": "26.18.1",
+    "electron-updater": "6.8.9",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.36.0",
     "hyperswarm": "^4.17.2"

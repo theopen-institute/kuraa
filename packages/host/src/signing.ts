@@ -156,5 +156,7 @@ export async function writeAllowedSigners(git: Git, file: string, devices: { nam
   const lines = devices.map((d) => `${d.name.replace(/\s/g, '-')} namespaces="git" ${sshPublicKey(Buffer.from(d.key, 'hex'))}`);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, `${lines.join('\n')}\n`);
-  await git.run(['config', 'gpg.ssh.allowedSignersFile', file]);
+  // Written once: the config is not rewritten on every change to the members.
+  const now = await git.run(['config', '--get', 'gpg.ssh.allowedSignersFile'], { allowFail: true });
+  if (now.stdout.trim() !== file) await git.run(['config', 'gpg.ssh.allowedSignersFile', file]);
 }

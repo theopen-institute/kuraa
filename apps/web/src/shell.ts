@@ -34,6 +34,9 @@ export function resolveShell(): ResolvedShell {
         ...(bridge.onPreferences ? { onPreferences: (show: () => void) => bridge.onPreferences!(show) } : {}),
         ...(bridge.onOpenFolder ? { onOpenFolder: (show: () => void) => bridge.onOpenFolder!(show) } : {}),
         ...(bridge.onHelp ? { onHelp: (show: () => void) => bridge.onHelp!(show) } : {}),
+        // The app updating itself (decision 0051): Restart now, once an update is downloaded.
+        ...(bridge.onUpdateReady ? { onUpdateReady: (show: (version: string) => void) => bridge.onUpdateReady!(show) } : {}),
+        ...(bridge.restartToUpdate ? { restartToUpdate: () => bridge.restartToUpdate!() } : {}),
       },
       overrides: config ? { hostUrl: config.hostUrl, token: config.token } : {},
       defaults: config ? { name: config.name, email: config.email } : {},

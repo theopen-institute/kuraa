@@ -25,6 +25,12 @@ const bridge: ShellBridge = {
   onHelp: (show) => {
     ipcRenderer.on('kuraa:help', () => show());
   },
+  // An update downloaded (updates.ts): the page says so, with Restart now.
+  onUpdateReady: (show) => {
+    ipcRenderer.on('kuraa:update-ready', (_e, version: unknown) => show(String(version)));
+    ipcRenderer.send('kuraa:update-ready?');
+  },
+  restartToUpdate: () => ipcRenderer.send('kuraa:restart-to-update'),
 };
 contextBridge.exposeInMainWorld('kuraa', bridge);
 

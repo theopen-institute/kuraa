@@ -18,7 +18,7 @@ const emit = defineEmits<{ close: []; saved: [] }>();
 
 /** The flag that sets each setting, said where a flag overrides it. */
 const FLAGS: Partial<Record<keyof HubSettings, string>> = {
-  syncDevices: '--peer', bootstrap: '--bootstrap', formats: '--format', runCode: '--engine', environment: '--env',
+  bootstrap: '--bootstrap', relays: '--relay', formats: '--format', runCode: '--engine', environment: '--env',
   allowInstalls: '--allow-installs', memory: '--memory', cpus: '--cpus', disk: '--disk', allowWrite: '--allow-write',
   allowNetwork: '--allow-network', rImages: '--r-image', dataDir: '--data-dir', workspaces: '--workspaces',
   saveSeconds: '--flush-ms', versionSeconds: '--commit-ms',
@@ -29,7 +29,7 @@ const loadError = shallowRef<unknown>(null);
 const error = ref('');
 const busy = ref(false);
 const f = reactive({
-  syncDevices: false, bootstrap: '', runCode: true, environment: '', allowInstalls: true,
+  bootstrap: '', relays: '', runCode: true, environment: '', allowInstalls: true,
   memory: '', cpus: '', disk: '', allowWrite: false, allowNetwork: false, rImages: '',
   dataDir: null as string | null, workspaces: null as string | null, saveSeconds: '', versionSeconds: '',
   formats: [] as string[],
@@ -38,7 +38,7 @@ const f = reactive({
 props.hub.settings().then((v) => {
   const p = v.settings;
   Object.assign(f, {
-    syncDevices: p.syncDevices, bootstrap: p.bootstrap.join('\n'), runCode: p.runCode, environment: p.environment ?? '',
+    bootstrap: p.bootstrap.join('\n'), relays: p.relays.join('\n'), runCode: p.runCode, environment: p.environment ?? '',
     allowInstalls: p.allowInstalls, memory: p.memory ?? '', cpus: p.cpus === null ? '' : String(p.cpus), disk: p.disk ?? '',
     allowWrite: p.allowWrite, allowNetwork: p.allowNetwork, rImages: p.rImages.join('\n'), dataDir: p.dataDir, workspaces: p.workspaces,
     saveSeconds: p.saveSeconds === null ? '' : String(p.saveSeconds), versionSeconds: p.versionSeconds === null ? '' : String(p.versionSeconds),
@@ -83,8 +83,8 @@ async function save() {
   busy.value = true;
   try {
     await props.hub.saveSettings({
-      syncDevices: f.syncDevices,
       bootstrap: lines(f.bootstrap),
+      relays: lines(f.relays),
       runCode: f.runCode,
       environment: f.environment || null,
       rImages: lines(f.rImages),
@@ -123,16 +123,18 @@ useDialog(root, () => {
       <template v-if="view">
         <fieldset class="pref-group">
           <legend>{{ S.preferences.network }}</legend>
-          <label class="pref-check"><input v-model="f.syncDevices" type="checkbox" data-testid="pref-sync"> {{ S.preferences.sync }}
-            <span class="pref-hint">{{ S.preferences.syncHint }}</span>
-            <span v-if="flagged('syncDevices')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.syncDevices!) }}</span>
-          </label>
+          <p class="pref-note" data-testid="pref-sync">{{ S.preferences.syncHint }}</p>
           <details data-testid="pref-network-advanced">
             <summary>{{ S.preferences.advanced }}</summary>
             <div>
               <label for="pref-bootstrap" class="pref-note">{{ S.preferences.bootstrap }}</label>
               <textarea id="pref-bootstrap" v-model="f.bootstrap" data-testid="pref-bootstrap" spellcheck="false" placeholder="node.example.org:49737" />
               <span v-if="flagged('bootstrap')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.bootstrap!) }}</span>
+            </div>
+            <div>
+              <label for="pref-relays" class="pref-note">{{ S.preferences.relays }}</label>
+              <textarea id="pref-relays" v-model="f.relays" data-testid="pref-relays" spellcheck="false" />
+              <span v-if="flagged('relays')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.relays!) }}</span>
             </div>
           </details>
         </fieldset>

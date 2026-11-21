@@ -15,18 +15,25 @@
 // own), and this one no longer is (revoke-key, with their identity's
 // signature; 0035). Any member may pass these on.
 //
+// Finding each other (0050): an invite link a member made, and the topic its
+// holders look the workspace up by (link: no secret in it, so a link revoked or
+// expired says nothing of where the devices are), which every member announces
+// while the link lets people in; and the workspace's secret, made anew (secret)
+// when a device is removed, so the removed device can no longer find the
+// others. The latest secret counts. Never passed to a removed device.
+//
 // The git config this layer has always used (remotes, kuraa.removed,
 // kuraa.revokedlinks) stays: it is what the records taken say, applied.
 import crypto from 'hypercore-crypto';
 
-export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key';
+export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret';
 
 export interface MemberRecord {
   v: 1;
   kind: RecordKind;
   /** The workspace it is about (a record of one workspace means nothing in another, or in a fork). */
   workspace: string;
-  /** add, remove: a device key. revoke-link: a link id. signs, vouch, revoke-key: a signing key. */
+  /** add, remove: a device key. revoke-link, link: a link id. signs, vouch, revoke-key: a signing key. secret: the workspace's secret. */
   subject: string;
   /** add: what the device is called. vouch: what the person is called. revoke-link: 'used', for a link for one person that let them in. */
   name?: string;
@@ -36,6 +43,10 @@ export interface MemberRecord {
   proof?: string;
   /** vouch: the signing key's own signature over the same (vouchMessage). Hex. */
   keyProof?: string;
+  /** link: the topic the link's holders look the workspace up by, hex. */
+  topic?: string;
+  /** link: when it stops letting people in (ms since 1970); 0: never. */
+  expires?: number;
   /** The device that made it, hex key. */
   by: string;
   /** When (ms), as the device that made it says: which key a device last said it signs with, and a person's latest name. */
@@ -47,7 +58,9 @@ export interface MemberRecord {
 const hexKey = /^[0-9a-f]{64}$/;
 
 function message(r: Omit<MemberRecord, 'sig'>): Buffer {
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? ''].join('\0'));
+  // A link's topic and expiry only where there are any: records made before them are signed as they were.
+  const link = r.topic !== undefined ? [r.topic, r.expires ?? 0] : [];
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
@@ -74,7 +87,7 @@ export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { 
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key'];
+  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret'];
   if (r.v !== 1 || !kinds.includes(r.kind as RecordKind) || typeof r.workspace !== 'string' || typeof r.subject !== 'string'
     || typeof r.by !== 'string' || !hexKey.test(r.by) || typeof r.at !== 'number' || typeof r.sig !== 'string' || !/^[0-9a-f]{128}$/.test(r.sig)) return null;
   if (r.name !== undefined && typeof r.name !== 'string') return null;
@@ -82,8 +95,12 @@ export function readRecord(v: unknown): MemberRecord | null {
   if (r.person !== undefined && (typeof r.person !== 'string' || !hexKey.test(r.person))) return null;
   if (r.keyProof !== undefined && (typeof r.keyProof !== 'string' || !/^[0-9a-f]{128}$/.test(r.keyProof))) return null;
   const kind = r.kind as RecordKind;
-  if (kind !== 'revoke-link' && !hexKey.test(r.subject)) return null;
-  if (kind === 'revoke-link' && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
+  const aboutLink = kind === 'revoke-link' || kind === 'link';
+  if (!aboutLink && !hexKey.test(r.subject)) return null;
+  if (aboutLink && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
+  if (r.topic !== undefined && (kind !== 'link' || typeof r.topic !== 'string' || !hexKey.test(r.topic))) return null;
+  if (r.expires !== undefined && (kind !== 'link' || typeof r.expires !== 'number' || !Number.isSafeInteger(r.expires) || r.expires < 0)) return null;
+  if (kind === 'link' && r.topic === undefined) return null;
   if ((kind === 'signs' || byPerson(kind)) && typeof r.proof !== 'string') return null;
   if (byPerson(kind) && typeof r.person !== 'string') return null;
   if (kind === 'vouch' && (typeof r.name !== 'string' || typeof r.keyProof !== 'string')) return null;
@@ -93,6 +110,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(r.proof !== undefined ? { proof: r.proof as string } : {}),
     ...(r.person !== undefined ? { person: r.person as string } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
+    ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
   };
   const { sig, ...body } = rec;
   if (!crypto.verify(message(body), Buffer.from(sig, 'hex'), Buffer.from(rec.by, 'hex'))) return null;

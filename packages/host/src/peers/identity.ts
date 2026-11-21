@@ -45,9 +45,24 @@ export const KURAA_SCHEME = 'kuraa://';
 
 const hex = /^[0-9a-f]+$/;
 
-/** The swarm topic for a workspace: derived from its secret, so only devices that know it find each other. */
-export function topicFor(secret: string): Buffer {
-  return createHash('sha256').update(`kuraa workspace topic\0${secret}`).digest();
+/** How long a workspace's topic lasts before the next (topicsFor). */
+export const TOPIC_WEEK = 7 * 24 * 3600_000;
+
+/**
+ * The swarm topics for a workspace: derived from its secret, so only devices
+ * that know it find each other, and from the week, so the DHT nodes that keep
+ * who announces a topic cannot tell from it that the same workspace is still
+ * there weeks later. This week's and last week's: two devices whose clocks are
+ * apart by less than a week always share one.
+ */
+export function topicsFor(secret: string, now = Date.now()): Buffer[] {
+  const week = Math.floor(now / TOPIC_WEEK);
+  return [week, week - 1].map((w) => createHash('sha256').update(`kuraa workspace topic\0${secret}\0${w}`).digest());
+}
+
+/** The key a device's announcements on the local network are made with (lan.ts): from the secret, so only devices that know it can tell them. */
+export function lanKeyFor(secret: string): Buffer {
+  return createHash('sha256').update(`kuraa local network\0${secret}`).digest();
 }
 
 /** A name a git remote can have: letters, digits, dots, dashes; not empty. */
@@ -223,26 +238,29 @@ export class Identity {
     return best;
   }
 
-  private async keepRecord(r: MemberRecord): Promise<void> {
+  /** Keep a record; false if it is not kept (had already, or one that says the same is newer). */
+  private async keepRecord(r: MemberRecord): Promise<boolean> {
     let list = await this.records();
-    if (list.some((x) => x.sig === r.sig)) return;
+    if (list.some((x) => x.sig === r.sig)) return false;
     if (aboutItself(r.kind)) {
       // Only the latest of what a device says about itself is kept.
       const now = this.latest(r.kind, r.by, list);
-      if (now && (now.at > r.at || (now.at === r.at && now.sig > r.sig))) return;
+      if (now && (now.at > r.at || (now.at === r.at && now.sig > r.sig))) return false;
       list = list.filter((x) => !(x.kind === r.kind && x.by === r.by));
     }
     // What a person says about a key, once, whoever passed it on (a vouch: the latest).
     if (byPerson(r.kind)) {
       const same = list.filter((x) => x.kind === r.kind && x.person === r.person && x.subject === r.subject);
-      if (r.kind === 'revoke-key' && same.length) return;
-      if (same.some((x) => x.at > r.at || (x.at === r.at && x.sig > r.sig))) return;
+      if (r.kind === 'revoke-key' && same.length) return false;
+      if (same.some((x) => x.at > r.at || (x.at === r.at && x.sig > r.sig))) return false;
       list = list.filter((x) => !same.includes(x));
     }
     list.push(r);
     await mkdir(this.stateDir, { recursive: true });
-    await writeFile(this.recordsFile, JSON.stringify(list, null, 1));
+    // Readable only by this computer's user: they hold the workspace's secret (records.ts, secret).
+    await writeFile(this.recordsFile, JSON.stringify(list, null, 1), { mode: 0o600 });
     this.recordsCache = null;
+    return true;
   }
 
   /**
@@ -332,6 +350,97 @@ export class Identity {
     };
   }
 
+  /**
+   * Make the config say what the records say (the records are what counts; the
+   * config is them applied): a device removed on record is removed here, one
+   * paired on record is a remote here, a link revoked on record is revoked here.
+   * Run when this device starts, and after a record could not be applied, so a
+   * record kept but not applied (stopped in between, or git config could not be
+   * written) is applied in the end. Remotes added by hand, or for a device not
+   * on record (joining: the link's maker), are left as they are.
+   */
+  reconcile(): Promise<void> {
+    return this.serial(() => this.reconcileNow());
+  }
+
+  private unapplied = false;
+
+  private async reconcileNow(): Promise<void> {
+    const list = await this.records();
+    const ws = await this.workspace();
+    if (!ws) return;
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const mine = list.filter((r) => r.workspace === ws.id);
+    const removed = new Set(await this.removed());
+    const members = new Set((await this.members()).map((m) => m.key));
+    for (const r of mine) if (r.kind === 'remove' && (!removed.has(r.subject) || members.has(r.subject))) {
+      await this.removeMemberNow(r.subject);
+      removed.add(r.subject);
+      members.delete(r.subject);
+    }
+    for (const r of mine) if (r.kind === 'add' && r.subject !== self && !removed.has(r.subject) && !members.has(r.subject)) {
+      await this.addMemberNow(r.subject, r.name ?? 'device');
+      members.add(r.subject);
+    }
+    const revoked = new Set(await this.revokedLinks());
+    for (const r of mine) if (r.kind === 'revoke-link' && !revoked.has(r.subject)) {
+      await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
+      revoked.add(r.subject);
+    }
+    await this.applySecret();
+    this.unapplied = false;
+  }
+
+  /** The workspace's secret as the latest record of it says (made anew when a device is removed), into the config; null if none says. */
+  private async applySecret(): Promise<void> {
+    const ws = await this.workspace();
+    if (!ws) return;
+    let latest: MemberRecord | undefined;
+    for (const r of await this.records()) if (r.kind === 'secret' && r.workspace === ws.id && (!latest || r.at > latest.at || (r.at === latest.at && r.sig > latest.sig))) latest = r;
+    if (latest && latest.subject !== ws.secret) await this.git.run(['config', 'kuraa.secret', latest.subject]);
+  }
+
+  /**
+   * Make the workspace's secret anew, on record (passed on to the members, never
+   * to a removed device): devices find each other by it, so a device removed,
+   * which knew the old one, can no longer find them. The new one is the secret
+   * from now on, here and on each member as the record reaches it.
+   */
+  async newSecret(): Promise<string> {
+    const secret = randomBytes(32).toString('hex');
+    await this.decide('secret', secret);
+    return secret;
+  }
+
+  /**
+   * The topics of the invite links members made that still let people in (not
+   * revoked or used, and not expired): every member announces them, so the
+   * link's holder finds one, whichever is online. With when the soonest expires.
+   */
+  async linkTopics(now = Date.now()): Promise<{ topics: string[]; next: number }> {
+    const ws = await this.workspace();
+    const revoked = new Set(await this.revokedLinks());
+    const topics = new Set<string>();
+    let next = 0;
+    for (const r of await this.records()) {
+      if (r.kind !== 'link' || r.workspace !== ws?.id || !r.topic || revoked.has(r.subject)) continue;
+      if (r.expires && r.expires <= now) continue;
+      topics.add(r.topic);
+      if (r.expires && (!next || r.expires < next)) next = r.expires;
+    }
+    return { topics: [...topics], next };
+  }
+
+  /** Apply a record taken; if it cannot be now, it will be (reconcile) before the next change. */
+  private async applyOrLater(r: MemberRecord, o: { rethrow: boolean }): Promise<void> {
+    try {
+      await this.apply(r);
+    } catch (e) {
+      this.unapplied = true;
+      if (o.rethrow) throw e;
+    }
+  }
+
   /** Apply a record taken. */
   private async apply(r: MemberRecord): Promise<void> {
     const self = (await this.deviceKey()).publicKey.toString('hex');
@@ -340,20 +449,22 @@ export class Identity {
     if (r.kind === 'add') await this.addMemberNow(r.subject, r.name ?? 'device');
     else if (r.kind === 'remove') await this.removeMemberNow(r.subject);
     else if (r.kind === 'revoke-link' && !(await this.revokedLinks()).includes(r.subject)) await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
-    // signs, vouch, revoke-key: kept as they are, and read from the records.
+    else if (r.kind === 'secret') await this.applySecret();
+    // signs, vouch, revoke-key, link: kept as they are, and read from the records.
   }
 
   /**
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
+      if (this.unapplied) await this.reconcileNow();
       const r = signRecord({ kind, workspace: ws.id, subject, ...extra }, await this.deviceKey());
       await this.keepRecord(r);
-      await this.apply(r);
+      await this.applyOrLater(r, { rethrow: true });
       return r;
     });
   }
@@ -365,6 +476,7 @@ export class Identity {
    */
   takeRecords(list: unknown[]): Promise<MemberRecord[]> {
     return this.serial(async () => {
+      if (this.unapplied) await this.reconcileNow();
       const known = new Set((await this.records()).map((r) => r.sig));
       let waiting = list.map(readRecord).filter((r): r is MemberRecord => !!r && !known.has(r.sig));
       const taken: MemberRecord[] = [];
@@ -377,8 +489,9 @@ export class Identity {
         for (const r of waiting) {
           const verdict = judge(r, standing);
           if (verdict === 'take') {
-            await this.keepRecord(r);
-            await this.apply(r);
+            // One that says what a newer record says already is passed over: nothing changes.
+            if (!(await this.keepRecord(r))) continue;
+            await this.applyOrLater(r, { rethrow: false });
             if (r.kind === 'add' && r.subject !== standing.self && !standing.removed.has(r.subject)) standing.members.add(r.subject);
             else if (r.kind === 'remove') {
               standing.members.delete(r.subject);
@@ -390,6 +503,8 @@ export class Identity {
         }
         waiting = next;
       }
+      // One could not be applied: try again now, and if that fails too, before the next change.
+      if (this.unapplied) await this.reconcileNow().catch(() => undefined);
       return taken;
     });
   }
@@ -415,7 +530,7 @@ export class Identity {
    * person: the first device it lets in uses it up. Signed with this device's
    * key, so any member can check it and let them in.
    */
-  async createLink(hours: number | null, once: boolean): Promise<string> {
+  async createLink(hours: number | null, once: boolean, hints: LinkHints = { relays: [], tcp: [] }): Promise<string> {
     const ws = await this.workspace();
     if (!ws) throw new Error('This repository is not a workspace shared between devices');
     const key = await this.deviceKey();
@@ -423,12 +538,16 @@ export class Identity {
     const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
     const issuer = key.publicKey.toString('hex');
     const through = await this.cameInThrough();
-    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through), key.secretKey).toString('hex');
+    // Its own topic, not the workspace's secret: whoever holds the link finds the members by it
+    // while it lets people in (every member announces it, from the link record), and nothing after.
+    const topic = randomBytes(32).toString('hex');
+    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic), key.secretKey).toString('hex');
     const list = await this.links();
     list.push({ id, expires, once, created: Date.now() });
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
-    return encodeLink({ workspace: ws, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature });
+    await this.decide('link', id, { topic, expires });
+    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints });
   }
 
   /**
@@ -498,9 +617,22 @@ export interface IssuedLink {
   created: number;
 }
 
-/** What an invite link carries: the workspace, the device that made it, and its signature. */
+/**
+ * What an invite link carries: the workspace (its id; not its secret, which the
+ * device that lets the holder in gives it), the topic to find the members by,
+ * the device that made it, and its signature. Links made before 0050 carry the
+ * secret instead of a topic.
+ */
 export interface InviteLink {
-  workspace: WorkspaceIdentity;
+  workspace: { id: string; secret: string | null; forkedFrom: string | null };
+  /** The topic the members announce while the link lets people in, hex; null in a link made before 0050. */
+  topic: string | null;
+  /**
+   * Ways in besides the DHT (0053): relays named, and servers that take TCP
+   * (`key@host:port`). Not signed: a link changed to name others gets its holder
+   * nowhere, as every connection proves the key it reaches.
+   */
+  hints?: LinkHints;
   issuer: Member;
   /** The devices the issuer came into the workspace through, back to the first (Identity.cameInThrough). */
   through: string[];
@@ -512,24 +644,48 @@ export interface InviteLink {
   signature: string;
 }
 
-const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[]) =>
-  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}`);
+/** Ways into a workspace besides the DHT, as an invite link carries them. */
+export interface LinkHints { relays: string[]; tcp: string[] }
+
+const HINT_TCP = /^[0-9a-f]{64}@[^\s,;|]{3,300}$/;
+
+function encodeHints(h: LinkHints | undefined): string {
+  if (!h || (!h.relays.length && !h.tcp.length)) return '';
+  return `r:${h.relays.join(',')};t:${h.tcp.join(',')}`;
+}
+
+function decodeHints(s: string | undefined): LinkHints | undefined {
+  if (!s) return undefined;
+  const m = /^r:([^;]*);t:(.*)$/.exec(s);
+  if (!m) return undefined;
+  return { relays: m[1]!.split(',').filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 8), tcp: m[2]!.split(',').filter((a) => HINT_TCP.test(a)).slice(0, 8) };
+}
+
+/** What a link's maker signs: all it says but the secret (a link before 0050 has one, and no topic). */
+const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[], topic: string | null) =>
+  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}${topic ? `\0${topic}` : ''}`);
 
 export function encodeLink(l: InviteLink): string {
-  const payload = [l.workspace.id, l.workspace.secret, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(',')].join('|');
+  // The second field: the topic, as `t:<topic>`; in a link before 0050, the workspace's secret.
+  const where = l.topic ? `t:${l.topic}` : l.workspace.secret ?? '';
+  const hints = encodeHints(l.hints);
+  const payload = [l.workspace.id, where, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(','), ...(hints ? [hints] : [])].join('|');
   return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
 }
 
 export function decodeLink(code: string): InviteLink {
   const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
   if (!m) throw new Error('Not an invite link (it starts with kuraa-invite:)');
-  const [id, secret, forkedFrom, key, name, linkId, expires, once, signature, throughField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
+  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
   const through = throughField ? throughField.split(',') : [];
-  if (!id || !secret || !key || !name || !linkId || !signature || throughField === undefined || !hex.test(id) || !hex.test(secret) || !hex.test(key) || !/^[0-9a-f]{16}$/.test(linkId) || !/^\d+$/.test(expires ?? '') || (once !== '0' && once !== '1') || !hex.test(signature)
+  const topic = where?.startsWith('t:') ? where.slice(2) : null;
+  const secret = topic === null ? where : null;
+  if (!id || !where || !key || !name || !linkId || !signature || throughField === undefined || !hex.test(id) || (topic !== null ? !/^[0-9a-f]{64}$/.test(topic) : !hex.test(secret!)) || !hex.test(key) || !/^[0-9a-f]{16}$/.test(linkId) || !/^\d+$/.test(expires ?? '') || (once !== '0' && once !== '1') || !hex.test(signature)
     || through.some((k) => !/^[0-9a-f]{64}$/.test(k))) {
     throw new Error('This invite link is damaged');
   }
-  return { workspace: { id, secret, forkedFrom: forkedFrom || null }, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature };
+  const hints = decodeHints(hintsField);
+  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}) };
 }
 
 /**
@@ -548,5 +704,5 @@ export function checkLink(l: InviteLink, o: { workspace: string; members: string
 
 /** Whether a link is as the device it names made it: its signature over all it says but the workspace's secret. */
 export function linkSigned(l: InviteLink): boolean {
-  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
+  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
 }

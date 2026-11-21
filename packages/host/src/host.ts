@@ -674,7 +674,8 @@ export class Host {
     rec.usedAt = Date.now();
     // Only the host creates room content: from saved state, or a fresh seed.
     if (rec.state) return { state: rec.state };
-    rec.state = seedState(rec.type, rec.seedText ?? rec.previous.text);
+    // The file as the room was made from it is already parsed (rec.previous), unless it changed since: not parsed again.
+    rec.state = seedState(rec.type, rec.seedText ?? rec.previous.text, rec.previous);
     // The file changed after the room was named (an outside change): start from the blob, then make that change.
     if (rec.seedText !== null && rec.seedText !== rec.previous.text) rec.state = patchState(rec.state, rec.previous.doc);
     rec.seedText = null;
@@ -1719,10 +1720,15 @@ export function blobId(text: string): string {
   return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
 
-/** The starting state of a room for a file's text: the same on every device for the same text and type version. */
-export function seedState(type: DocumentType, text: string): Uint8Array {
+/**
+ * The starting state of a room for a file's text: the same on every device for
+ * the same text and type version. `parsed`: that text already parsed by the type
+ * (parsing is a function of the text alone, so the state is the same).
+ */
+export function seedState(type: DocumentType, text: string, parsed?: ParsedDocument): Uint8Array {
   const id = createHash('sha1').update(`${blobId(text)}\0${type.id}@${type.version}`).digest().readUInt32BE(0);
-  return encodeSeed(type.parse(text).doc, id || 1);
+  const doc = parsed && parsed.text === text ? parsed.doc : type.parse(text).doc;
+  return encodeSeed(doc, id || 1);
 }
 
 /** A room as other devices know it. */

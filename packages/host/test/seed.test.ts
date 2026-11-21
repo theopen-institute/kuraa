@@ -19,6 +19,13 @@ describe('seeding rooms', () => {
     expect(Buffer.from(seedState(rmarkdown, NOTES))).not.toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
   });
 
+  it('gives the same state from a text already parsed, and parses again a parse of another text', () => {
+    const parsed = pandocMarkdown.parse(NOTES);
+    expect(Buffer.from(seedState(pandocMarkdown, NOTES, parsed))).toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
+    const other = pandocMarkdown.parse(NOTES.replace('The tide was out.', 'Not this text.'));
+    expect(Buffer.from(seedState(pandocMarkdown, NOTES, other))).toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
+  });
+
   it('lets two rooms seeded apart, each edited, combine with both edits and no duplicate text', () => {
     const edit = (find: string, replace: string) => {
       const doc = pandocMarkdown.parse(NOTES.replace(find, replace)).doc;

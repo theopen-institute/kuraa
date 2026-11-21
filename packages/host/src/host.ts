@@ -145,6 +145,12 @@ interface RoomRecord {
   timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout };
 }
 
+/** What a new room starts from, read apart from the queue (Host.prepareRecord). */
+interface PreparedRecord extends Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'previous' | 'state' | 'seedText' | 'generation' | 'baseCommit' | 'lastHash' | 'lastCommit' | 'lastCommitAt' | 'dirty' | 'needsOutsideCheck'> {
+  /** The file's text as read. */
+  text: string;
+}
+
 /**
  * Where git is in the working tree: the branch checked out (null: none, an
  * earlier version is), and a git operation under way outside the app, if any.
@@ -205,6 +211,8 @@ export class Host {
   readonly workspace: string;
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
+  /** Rooms being opened apart from the queue, by path: two asking at once share one. */
+  private readonly opening = new Map<string, Promise<RoomRecord>>();
   private relay!: Relay;
   runner!: Runner;
   /** Documents rendered to HTML, Word and PDF (renders.ts). */
@@ -490,12 +498,59 @@ export class Host {
     return join(this.cacheDir, createHash('sha1').update(key).digest('hex') + '.json');
   }
 
-  /** The current room for a file, creating or resuming it. */
+  /**
+   * The current room for a file, creating or resuming it. Not behind the host's
+   * other work (saving, merging) when it need not be: a room already open is
+   * given at once, and a new one is read and parsed apart from the queue, then
+   * taken only if nothing changed meanwhile (else it is made in the queue, as
+   * ever). Only a file changed outside since its room was last kept needs the
+   * queue, to merge that change in.
+   */
   async room(path: string): Promise<RoomRecord> {
-    const rec = await this.serial(() => this.ensureRecord(this.relPath(path)));
+    const rel = this.relPath(path);
+    let rec = await this.warmRecord(rel);
+    if (!rec) {
+      let opening = this.opening.get(rel);
+      if (!opening) {
+        opening = this.openApart(rel).finally(() => this.opening.delete(rel));
+        this.opening.set(rel, opening);
+      }
+      rec = await opening;
+    }
     // Asked for, and nobody in it yet (they are on their way, or it was asked for ahead): it closes if nobody comes.
     if (!this.relay.clients(rec.room)) this.scheduleDrop(rec);
     return rec;
+  }
+
+  /** The room for a file on the branch checked out, if it is open (or kept warm): nothing to read or write. */
+  private async warmRecord(path: string): Promise<RoomRecord | null> {
+    const st = await this.readGitState();
+    if (!st.branch) return null;
+    const rec = this.records.get(`${st.branch}:${path}`);
+    if (!rec) return null;
+    if (rec.timers.drop) clearTimeout(rec.timers.drop);
+    rec.timers.drop = undefined;
+    rec.usedAt = Date.now();
+    return rec;
+  }
+
+  private async openApart(path: string): Promise<RoomRecord> {
+    const st = await this.readGitState();
+    const prep = st.branch ? await this.prepareRecord(path, st.branch).catch(() => null) : null;
+    if (prep && !prep.needsOutsideCheck) {
+      const now = await this.readGitState();
+      const existing = this.records.get(prep.key);
+      if (existing) return existing;
+      // Taken only if the branch and the file are as they were read: else made in the queue, read again.
+      const text = now.branch === prep.branch ? await this.readText(this.resolvePath(path), path).catch(() => null) : null;
+      if (text !== null && hashText(text) === hashText(prep.text) && !this.records.has(prep.key)) {
+        const rec = this.installRecord(prep);
+        this.noteCommitted(rec, prep.text);
+        return rec;
+      }
+    }
+    // Errors (no such file, a link, no branch) are said from here, as they always were.
+    return this.serial(() => this.ensureRecord(path));
   }
 
   private async ensureRecord(path: string): Promise<RoomRecord> {
@@ -511,33 +566,58 @@ export class Host {
       existing.usedAt = Date.now();
       return existing;
     }
+    const prep = await this.prepareRecord(path, branch);
+    const rec = this.installRecord(prep);
+    if (rec.needsOutsideCheck) await this.applyOutside(rec, prep.text);
+    else this.noteCommitted(rec, prep.text);
+    return rec;
+  }
+
+  /**
+   * What a new room for a file starts from: the file read, and its cached room
+   * (if it is for the same type version) or the file parsed. Only reads: safe
+   * apart from the queue.
+   */
+  private async prepareRecord(path: string, branch: string): Promise<PreparedRecord> {
+    const key = `${branch}:${path}`;
     const type = this.typeFor(path);
     if (!type) throw new HttpError(415, `No document type for ${path}`);
     const abs = this.resolvePath(path);
     if (!existsSync(abs)) throw new HttpError(404, `No such file: ${path}`);
     const text = await this.readText(abs, path);
     const head = await this.git.head();
-
     // Resume the cached generation if it is for the same type version.
     const cached = await this.readCache(key);
-    let rec: RoomRecord;
     if (cached && cached.typeId === type.id && cached.typeVersion === type.version) {
-      rec = this.newRecord({ key, path, branch, type, generation: cached.generation, baseCommit: cached.baseCommit, previous: type.parse(cached.text), lastHash: cached.lastHash, state: Buffer.from(cached.state, 'base64') });
-      rec.lastCommit = cached.lastCommit;
-      rec.lastCommitAt = cached.lastCommitAt;
-      // Edits in the cached state that never reached the file are unflushed edits.
-      rec.dirty = type.serialize(decodeDoc(rec.state!, type.schema), rec.previous) !== cached.text;
-      // The file changed while the host was away: an outside change against the cache.
-      rec.needsOutsideCheck = hashText(text) !== cached.lastHash;
-    } else {
-      const previous = type.parse(text);
-      rec = this.newRecord({ key, path, branch, type, generation: blobId(text), baseCommit: head, previous, lastHash: hashText(text), state: null });
-      rec.seedText = text;
+      const previous = type.parse(cached.text);
+      const state = Buffer.from(cached.state, 'base64');
+      return {
+        key, path, branch, type, text, previous, state, seedText: null,
+        generation: cached.generation, baseCommit: cached.baseCommit, lastHash: cached.lastHash,
+        lastCommit: cached.lastCommit, lastCommitAt: cached.lastCommitAt,
+        // Edits in the cached state that never reached the file are unflushed edits.
+        dirty: type.serialize(decodeDoc(state, type.schema), previous) !== cached.text,
+        // The file changed while the host was away: an outside change against the cache.
+        needsOutsideCheck: hashText(text) !== cached.lastHash,
+      };
     }
-    this.records.set(key, rec);
+    return {
+      key, path, branch, type, text, previous: type.parse(text), state: null, seedText: text,
+      generation: blobId(text), baseCommit: head, lastHash: hashText(text),
+      lastCommit: null, lastCommitAt: null, dirty: false, needsOutsideCheck: false,
+    };
+  }
+
+  /** A prepared room, taken as the file's room. */
+  private installRecord(p: PreparedRecord): RoomRecord {
+    const rec = this.newRecord({ key: p.key, path: p.path, branch: p.branch, type: p.type, generation: p.generation, baseCommit: p.baseCommit, previous: p.previous, lastHash: p.lastHash, state: p.state });
+    rec.seedText = p.seedText;
+    rec.lastCommit = p.lastCommit;
+    rec.lastCommitAt = p.lastCommitAt;
+    rec.dirty = p.dirty;
+    rec.needsOutsideCheck = p.needsOutsideCheck;
+    this.records.set(p.key, rec);
     this.byRoom.set(rec.room, rec);
-    if (rec.needsOutsideCheck) await this.applyOutside(rec, text);
-    else this.noteCommitted(rec, text);
     return rec;
   }
 

@@ -212,6 +212,37 @@ describe('host safety', () => {
     expect(records().has('main:f0.md')).toBe(false);
   });
 
+  it('opens a room without waiting behind the host’s other work, unless an outside change must be merged into it', async () => {
+    await start({ ...FAST, dropMs: 600_000 });
+    const host = running.host as unknown as { serial<T>(f: () => Promise<T>): Promise<T> };
+    const busy = (ms: number) => void host.serial(() => sleep(ms));
+    const timed = async (path: string) => {
+      const t = Date.now();
+      const res = await api(`/api/rooms?path=${encodeURIComponent(path)}`);
+      expect(res.status).toBe(200);
+      return Date.now() - t;
+    };
+    // A new room, and one kept warm, while the queue is busy for 3s.
+    busy(3000);
+    expect(await timed('notes.md')).toBeLessThan(1500);
+    expect(await timed('notes.md')).toBeLessThan(1500);
+    // Errors are said as before.
+    expect((await api('/api/rooms?path=missing.md')).status).toBe(404);
+    // Its edits reach the file as ever.
+    const a = await connect('notes.md');
+    a.write(insertAt(a.read(), 'Light rain', 'Apart: '));
+    await until(() => file().includes('Apart: Light rain'), 15_000, 'the edit written');
+
+    // A room kept from before, whose file changed while the host was away: merged in the queue, then given.
+    await connect('other.md');
+    for (const c of clients.splice(0)) c.destroy();
+    await running.close();
+    writeFileSync(join(dir, 'other.md'), '# Other\n\nChanged while away.\n');
+    await start({ ...FAST, dropMs: 600_000 });
+    const b = await connect('other.md');
+    expect(b.read().textContent).toContain('Changed while away.');
+  });
+
   it('merges an outside save it was not told of before writing over it', async () => {
     await start({ ...FAST, flushMs: 600_000, idleCommitMs: 600_000 });
     const a = await connect('notes.md');

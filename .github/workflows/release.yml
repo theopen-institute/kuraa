@@ -74,7 +74,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # The current macOS image (GitHub retires older ones), Apple silicon; it builds for Intel too.
+          - os: macos-latest
             platform: mac
           - os: windows-latest
             platform: win

@@ -4,3 +4,5 @@ packages:
 allowBuilds:
   electron: true
   esbuild: true
+  # electron-builder's, for Squirrel.Windows installers, which the app does not make (it ships NSIS).
+  electron-winstaller: false

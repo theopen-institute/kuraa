@@ -169,6 +169,8 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 }
 .toolbar-spacer { flex: 1; }
 .editor-scroll { flex: 1; overflow: auto; cursor: text; }
+/* The file from disk while its room connects: read, not yet typed in. */
+.editor-preview { cursor: default; }
 .chunk-output, .code-node-header { cursor: default; }
 .editor-mount { max-width: 46rem; margin: 0 auto; padding: 28px 32px 30vh; }
 .past-version .toolbar { background: var(--accent-soft); }

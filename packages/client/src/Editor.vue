@@ -21,6 +21,7 @@ import { ChunkRunner, collectChunks } from './runs.js';
 import { defaultBlock } from './blocks.js';
 import { locateMatch, replaceWithText, selectionFor, type MatchTarget } from './docActions.js';
 import FindBar from './FindBar.vue';
+import ReadOnlyDoc from './ReadOnlyDoc.vue';
 import OutlinePanel from './OutlinePanel.vue';
 import { findPlugin } from './find.js';
 import { dialogOpen } from './focus.js';
@@ -72,6 +73,12 @@ const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 const view = shallowRef<EditorView | null>(null);
 const error = shallowRef<unknown>(null);
 const loading = ref(true);
+/** While the room connects: the file as it is on disk, shown as it will look (read-only), so there is something to read at once. */
+const preview = shallowRef<string | null>(null);
+/** Opening has taken long enough, with nothing to show, to say so. */
+const slow = ref(false);
+/** How long opening may take, showing nothing, before "Opening…" is said. */
+const SLOW_MS = 250;
 /** Goes up with every change to the document: Document settings tells by it that the header changed meanwhile. */
 const docVersion = ref(0);
 /** Goes up with every transaction: the find bar and the outline follow the document by it. */
@@ -174,8 +181,15 @@ function open(): () => void {
   loading.value = true;
   error.value = null;
   view.value = null;
+  preview.value = null;
+  slow.value = false;
   status = fresh();
   emit('status', status);
+  const slowTimer = setTimeout(() => (slow.value = true), SLOW_MS);
+  // The file from disk, apart from the room (which can wait behind the host's other work): shown until the room is ready.
+  api.fileText(path).then((text) => {
+    if (!cancelled && loading.value) preview.value = text;
+  }, () => undefined);
 
   const hints = type.editor?.nodeViews ?? {};
   const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
@@ -274,20 +288,33 @@ function open(): () => void {
       update({ runner });
       runner.load().catch(() => report({ notice: { kind: 'warn', text: S.editor.outputsFailed } }));
     }
-    view.value = markRaw(pmView);
+    // The live editor is shown (in place of the preview) before anything is told it is ready:
+    // what follows (go to a conflict, a search match, the title) scrolls and focuses it.
     loading.value = false;
-    reportTitle(pmView.state.doc, true);
-    reportConflicts(pmView.state.doc, true);
+    preview.value = null;
+    clearTimeout(slowTimer);
+    await nextTick();
+    if (cancelled) return;
+    view.value = markRaw(pmView);
+    // The title and conflicts are read from the whole document: after it is on the screen.
+    const shown = pmView;
+    requestAnimationFrame(() => setTimeout(() => {
+      if (cancelled || shown.isDestroyed) return;
+      reportTitle(shown.state.doc, true);
+      reportConflicts(shown.state.doc, true);
+    }, 0));
   })().catch((err: unknown) => {
     if (!cancelled) {
       error.value = err;
       loading.value = false;
+      preview.value = null;
     }
   });
 
   return () => {
     disposeFiles();
     cancelled = true;
+    clearTimeout(slowTimer);
     clearTimeout(chunkTimer);
     clearTimeout(conflictTimer);
     pmView?.destroy();
@@ -434,10 +461,13 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
 <template>
   <div class="editor-pane">
     <ErrorBanner v-if="error" :error="error" :lead="S.editor.couldNotOpen(name)" />
-    <div v-if="loading && !error" class="loading">{{ S.editor.opening(name) }}</div>
+    <div v-if="loading && !error && preview === null && slow" class="loading">{{ S.editor.opening(name) }}</div>
+    <div v-if="loading && !error && preview !== null" class="editor-scroll editor-preview" aria-busy="true" data-testid="editor-preview">
+      <ReadOnlyDoc :text="preview" :type="type" :path="path" :format-editor="formatEditor" />
+    </div>
     <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
     <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
-    <div v-show="!showSource" class="editor-scroll" @mousedown="onBlankMouseDown">
+    <div v-show="!showSource && !(loading && preview !== null)" class="editor-scroll" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
     </div>
     <div v-if="showSource && view" ref="sourceMount" class="source-view" />

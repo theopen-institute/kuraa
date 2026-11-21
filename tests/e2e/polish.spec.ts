@@ -76,6 +76,31 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await expect(sheet).toHaveCount(0);
 });
 
+test('a file shows at once from disk while its room connects; then it can be typed in', async ({ page }) => {
+  const path = `runs/preview-${Date.now().toString(36)}.md`;
+  await create(path, '# Preview\n\nRead before the room is ready.\n');
+  await openApp(page);
+  // The host is slow to give the room (busy with other work): held back here until released.
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route('**/api/rooms?**', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByTestId(`file:${path}`).click();
+  const previewed = page.getByTestId('editor-preview');
+  await expect(previewed).toContainText('Read before the room is ready.');
+  await expect(page.getByText('Opening')).toHaveCount(0);
+  await expect(page.getByTestId('editor')).toBeHidden();
+  release();
+  await expect(page.getByTestId('editor')).toBeVisible();
+  await expect(previewed).toHaveCount(0);
+  await page.getByTestId('editor').getByText('Read before').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Typed.');
+  await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('Read before the room is ready. Typed.');
+});
+
 test('offline: a banner says what is kept and not yet sent, and Try again reconnects', async ({ page }) => {
   const path = `runs/offline-${Date.now().toString(36)}.md`;
   await create(path, '# Offline\n\nBefore the outage.\n');

@@ -45,10 +45,10 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
     expect(existsSync(join(root, 'field-notes', '.git'))).toBe(true);
     await page.getByRole('button', { name: 'New file', exact: true }).click();
-    await page.getByTestId('new-file').getByLabel('Title').fill('Day one');
-    await page.getByTestId('new-file').getByRole('button', { name: 'Create' }).click();
-    await expect(page.getByTestId('file:day-one.md')).toContainText('Day one');
-    expect(existsSync(join(root, 'field-notes', 'day-one.md'))).toBe(true);
+    await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
+    await page.keyboard.type('Day one');
+    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
+    expect(existsSync(join(root, 'field-notes', 'untitled.md'))).toBe(true);
 
     // Another, joined from Bo's link.
     await page.getByTestId('workspace-switcher').click();
@@ -71,7 +71,8 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await page.getByTestId('workspace-switcher').click();
     await page.getByTestId('workspace:field-notes').click();
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
-    await expect(page.getByTestId('file:day-one.md')).toBeVisible();
+    // The new document kept its name: it was left for another workspace, not for a file beside it.
+    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
     await expect(page.getByTestId('file:plan.md')).toHaveCount(0);
     // A reload stays in it.
     await page.reload();

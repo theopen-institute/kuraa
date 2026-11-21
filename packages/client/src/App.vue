@@ -168,6 +168,8 @@ const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
 const fileTree = useTemplateRef<InstanceType<typeof FileTree>>('fileTree');
 /** A file to show at its first conflict once open (its count in the file list was clicked). */
 const conflictJump = ref<string | null>(null);
+/** A new document, to open with the cursor in its title. */
+const titleFocus = ref<string | null>(null);
 function showConflicts(next: string) {
   select(next);
   view(null);
@@ -546,6 +548,7 @@ function useSettings(s: Settings) {
         :workspace-name="workspace?.name ?? S.app.files"
         @select="select"
         @document-settings="openDocumentSettings"
+        @created="(p) => (titleFocus = p)"
         @conflicts="showConflicts"
         @changed="refreshTree"
         @error="fail"
@@ -631,6 +634,8 @@ function useSettings(s: Settings) {
               :format-editor="editorFor(type.id)"
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
+              :focus-title="titleFocus === path"
+              @title-focused="titleFocus = null"
               @status="(s) => (status = s)"
               @title="(t) => (liveTitle = { path: path!, title: t })"
               @conflicts="(n) => (liveConflicts = { path: path!, count: n })"

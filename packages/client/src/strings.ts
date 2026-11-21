@@ -152,6 +152,8 @@ export const S = {
     editSource: 'Edit the source',
     showDocument: 'Show the document',
     documentSettings: 'Document settings…',
+    /** What a new document's file is called until it has a title. */
+    untitledName: 'untitled',
     documentSettingsTitle: 'Document settings',
     history: 'History',
     hideHistory: 'Hide history',
@@ -280,10 +282,14 @@ export const S = {
     newFile: 'New file',
     newFileIn: (name: string) => `New file in ${name}`,
     newFolderIn: (name: string) => `New folder in ${name}`,
-    newFileMenu: (where: string) => `New file${where}…`,
+    newFileMenu: (where: string) => `New file${where}`,
+    /** The space below the files, with none yet: its menu has a new file or folder. */
+    space: 'New file or folder…',
     newFolderMenu: (where: string) => `New folder${where}…`,
     inFolder: (name: string) => ` in ${name}`,
     documentSettings: 'Document settings…',
+    /** What a new document's file is called until it has a title. */
+    untitledName: 'untitled',
     renameTo: 'Rename to',
     renameFolderTo: 'Rename folder to',
     newFolder: 'New folder',
@@ -294,20 +300,10 @@ export const S = {
     untitled: (path: string) => `${path}: no title yet (Rename… or Document settings… gives it one)`,
   },
 
-  newFile: {
-    title: 'New file',
-    type: 'File type',
-    titleLabel: 'Title',
-    titlePlaceholder: 'Field notes from the harbour',
-    savedAs: 'Saved as',
-    name: 'Name',
-    needsTitle: 'A document needs a title.',
-    needsName: 'A file needs a name.',
-    exists: (p: string) => `${p} already exists.`,
-  },
 
   rename: {
     title: 'Rename',
+    type: 'File type',
     titleLabel: 'Title',
     filename: 'Filename',
     stays: 'The filename stays as it is when the title changes.',

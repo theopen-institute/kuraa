@@ -127,9 +127,11 @@ pressed, from the same tables the editor binds its keys from
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;
 text and source files by filename, each with a small icon its type defines (a page, code, data,
-settings, a bibliography, …: [decision 0023](docs/decisions/0023-file-icons.md)). A new document is asked for its title, and its filename is made
-from it (`Tidal notes: Café` → `tidal-notes-cafe.md`); **Rename…** changes a document's title and
-its filename, together or apart ([decision 0022](docs/decisions/0022-titles-and-filenames.md)). Drag a file or folder onto a folder to move it there, or onto the
+settings, a bibliography, …: [decision 0023](docs/decisions/0023-file-icons.md)). **＋** makes an untitled Markdown document at
+once and opens it with the cursor in its title; when you leave it, its filename is made from the title you typed
+(`Tidal notes: Café` → `tidal-notes-cafe.md`). **Rename…** changes a document's title and its filename, together or
+apart ([decision 0022](docs/decisions/0022-titles-and-filenames.md)), and any file's kind: Markdown, R Markdown, a text
+file ([decision 0056](docs/decisions/0056-new-files-at-once.md)). Drag a file or folder onto a folder to move it there, or onto the
 workspace name to move it to the top level; each move is committed. Right-click a file for
 **Document settings…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it and
 **Rename…** (everything in it goes with it). The list works from the keyboard as a tree: arrows move and open folders,

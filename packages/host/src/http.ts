@@ -288,8 +288,9 @@ const fileRoutes: Route[] = [
     const absTo = host.resolvePath(to);
     if (!lexists(absFrom)) throw new HttpError(404, 'No such file or folder');
     if (title !== undefined) {
-      await host.checkTitle(from, title);
+      // Checked as the kind of file it will be (a text file renamed to a document gets its first title).
       if (!host.typeFor(to)?.title) throw new HttpError(400, `${to} would not be a document with a title`);
+      await host.checkTitle(from, title, to);
     }
     if (to === from) {
       if (title === undefined) throw new HttpError(400, 'Nothing to change');

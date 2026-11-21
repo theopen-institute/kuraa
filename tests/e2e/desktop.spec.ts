@@ -109,8 +109,11 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
 
     // New and Rename ask in in-app dialogs (Electron has no window.prompt).
     await page.getByRole('button', { name: 'New file', exact: true }).click();
-    await page.getByTestId('new-file').getByLabel('Title').fill('Day one');
-    await page.getByTestId('new-file').getByRole('button', { name: 'Create' }).click();
+    await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
+    await page.keyboard.type('Day one');
+    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
+    // Left: its filename is made from its title.
+    await page.getByTestId('file:notes.md').click();
     await expect(page.getByTestId('file:day-one.md')).toContainText('Day one');
     await expect.poll(() => existsSync(join(dir, 'day-one.md'))).toBe(true);
     const row = page.locator('li.tree-file', { has: page.getByTestId('file:day-one.md') });

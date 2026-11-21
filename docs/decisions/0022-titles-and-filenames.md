@@ -2,7 +2,8 @@
 
 Every document (Pandoc markdown, R Markdown) has a title: the `title` field of its header. The
 sidebar, the window and the menu show it; text and source files are shown by filename. A document
-is created with a title, and its filename is made from the title.
+is created with a title, and its filename is made from the title. (New file now makes an untitled document at
+once, named after its title when it is left: [0056](0056-new-files-at-once.md).)
 
 **Titles.**
 

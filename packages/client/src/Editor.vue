@@ -3,7 +3,7 @@
 // format's editor module, chunk running, and the editable Source view. The
 // header (for formats with one) is edited in Document settings, through the view
 // this exposes.
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import { connectRoom, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
 import { EditorState, Selection, TextSelection } from 'prosemirror-state';
@@ -44,6 +44,8 @@ const props = defineProps<{
   formatEditor?: FormatEditor;
   /** Go to the document's first conflict once it is open (its conflict count was clicked). */
   jumpToConflict?: boolean;
+  /** Put the cursor in the document's title once it is open (New file made it), if the page shows one. */
+  focusTitle?: boolean;
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -58,6 +60,8 @@ const emit = defineEmits<{
   toolsChanged: [];
   /** It went to the first conflict, as asked. */
   jumped: [];
+  /** It put the cursor in the title, as asked (or there is none to put it in). */
+  titleFocused: [];
   /** Someone changed the file outside the app as it was edited here: their version is kept beside it, at this path. */
   outsideConflict: [savedAs: string];
 }>();
@@ -393,6 +397,16 @@ watch([() => props.jumpToConflict, view], ([jump, v]) => {
     v.focus();
   }
   emit('jumped');
+}, { immediate: true });
+
+// Asked to start in the title (a new document).
+watch([() => props.focusTitle, view], async ([want, v]) => {
+  if (!want || !v) return;
+  await nextTick();
+  const title = mount.value?.querySelector<HTMLElement>('.doc-title[contenteditable="true"]');
+  if (title) title.focus();
+  else v.focus();
+  emit('titleFocused');
 }, { immediate: true });
 
 defineExpose({ openFind, toggleOutline, command, view, docVersion, ...documentActions });

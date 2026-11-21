@@ -43,8 +43,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   // Nothing open: the empty state offers a new document and the shortcuts.
   await expect(page.getByTestId('no-document')).toContainText('Nothing open yet');
   await page.getByTestId('new-document').click();
-  await expect(page.getByRole('dialog', { name: 'New file' })).toBeVisible();
-  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
 
   await openFile(page, path);
   const placeholder = page.getByTestId('editor').locator('.empty-placeholder');
@@ -193,7 +192,7 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   // A folder's menu has what goes in it.
   await row(`${dir}/inner`).focus();
   await page.keyboard.press('Shift+F10');
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner…', 'New folder in inner…', 'Rename…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner', 'New folder in inner…', 'Rename…']);
   await page.keyboard.press('Escape');
 });
 
@@ -225,16 +224,17 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
   await expect(editor).toBeFocused();
 
   // A dialog from the sidebar gives focus back to what opened it.
-  const newFile = page.getByRole('button', { name: 'New file', exact: true });
-  await newFile.click();
-  const dialog = page.getByRole('dialog', { name: 'New file' });
+  const row = page.locator(`[role="treeitem"][data-path="${path}"]`);
+  await row.focus();
+  await page.keyboard.press('F2');
+  const dialog = page.getByRole('dialog', { name: 'Rename' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel('Title')).toBeFocused();
   for (let i = 0; i < 8; i++) await page.keyboard.press('Tab');
   expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect(newFile).toBeFocused();
+  await expect(row).toBeFocused();
 
   // A question (ask.ts) is a dialog on the same stack: Escape closes it.
   await page.getByTestId('menu-button').click();

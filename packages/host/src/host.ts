@@ -1467,11 +1467,13 @@ export class Host {
 
   /**
    * Check that a document can take this title: it has titles, the title is not
-   * empty, and its header can be edited. Throws an HttpError (400) if not.
+   * empty, and its header can be edited. Throws an HttpError (400) if not. `as`:
+   * the path it will have, when a rename makes it another kind of file (a text
+   * file becoming a document, given its first title).
    */
-  async checkTitle(path: string, title: string): Promise<void> {
-    const type = this.typeFor(path);
-    if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
+  async checkTitle(path: string, title: string, as = path): Promise<void> {
+    const type = this.typeFor(as);
+    if (!type?.title) throw new HttpError(400, `${as} is not a document with a title`);
     try {
       type.title.write(await this.readText(this.resolvePath(path), path), title);
     } catch (e) {

@@ -1,6 +1,6 @@
-// New files: a document is made from its title (its filename from that), other
-// files by name. Renaming a document changes its title and its filename. The
-// sidebar: folders, moving by dragging, renaming folders.
+// New files: an untitled document, its title typed in the page and its filename
+// made from that. Renaming a document changes its title and its filename, and
+// any file's kind. The sidebar: folders, moving by dragging, renaming folders.
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,55 +14,75 @@ async function openApp(page: Page): Promise<void> {
 
 const dialog = (page: Page) => page.getByTestId('ask');
 
-test('a new document is made from its title, its filename from that; other files by name', async ({ page }) => {
-  await openApp(page);
+test('New file makes an untitled document at once: its title is typed in the page, and its filename follows; Rename changes its kind', async ({ page }) => {
   const stamp = Date.now().toString(36);
-  const newFile = page.getByTestId('new-file');
-  const type = newFile.getByLabel('File type');
-  const savedAs = newFile.getByTestId('new-file-path');
+  const other = `runs/other-${stamp}.md`;
+  expect((await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path: other, content: '# Other\n' }),
+  })).status).toBe(201);
+  await openApp(page);
 
-  // Default: Markdown, asked for a title.
+  // No dialog: an untitled Markdown document, open, with the cursor in its title.
   await page.getByRole('button', { name: 'New file', exact: true }).click();
+  const current = page.locator('[role="treeitem"][aria-current="page"]');
+  await expect(current).toHaveAttribute('data-path', /^untitled(-\d+)?\.md$/);
+  const untitled = (await current.getAttribute('data-path'))!;
+  expect(readFileSync(join(E2E.dir, untitled), 'utf8')).toBe('');
+  const title = page.getByTestId('editor').locator('h1.doc-title');
+  await expect(title).toBeFocused();
+
+  // The title, typed in the page: the header has it, and the sidebar shows it.
+  await page.keyboard.type(`Tidal notes: Café ${stamp}`);
+  await expect(page.getByTestId(`file:${untitled}`)).toContainText(`Tidal notes: Café ${stamp}`);
+  await expect.poll(() => readFileSync(join(E2E.dir, untitled), 'utf8')).toContain(`title: "Tidal notes: Café ${stamp}"`);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Body.');
+  await expect.poll(() => readFileSync(join(E2E.dir, untitled), 'utf8')).toContain('Body.');
+
+  // Left for another file: its filename is made from its title.
+  await page.getByTestId(`file:${other}`).click();
+  const named = `tidal-notes-cafe-${stamp}.md`;
+  await expect(page.getByTestId(`file:${named}`)).toContainText(`Tidal notes: Café ${stamp}`);
+  expect(existsSync(join(E2E.dir, untitled))).toBe(false);
+  expect(readFileSync(join(E2E.dir, named), 'utf8')).toBe(`---\ntitle: "Tidal notes: Café ${stamp}"\n---\n\nBody.\n`);
+
+  // Rename… has the file's kind: another kind changes the extension.
+  const rename = page.getByTestId('rename');
+  const type = rename.getByLabel('File type');
+  const filename = rename.getByLabel('Filename');
+  await page.getByTestId(`file:${named}`).click({ button: 'right' });
+  await page.getByTestId('context:rename').click();
   await expect(type).toHaveValue('pandoc-markdown');
   await expect(type.locator('optgroup')).toHaveCount(2);
   await expect(type.locator('option')).toHaveText(['Pandoc markdown (.md)', 'R Markdown (.Rmd)', 'Text file (.txt)']);
-  await expect(savedAs).toHaveText(/untitled\.md$/);
-  // No title, no document.
-  await newFile.getByRole('button', { name: 'Create' }).click();
-  await expect(newFile.getByRole('alert')).toHaveText('A document needs a title.');
-
-  // The filename is made from the title, and the type's extension.
-  await newFile.getByLabel('Title').fill(`Tidal notes: Café ${stamp}`);
-  await expect(savedAs).toHaveText(new RegExp(`tidal-notes-cafe-${stamp}\\.md$`));
   await type.selectOption('rmarkdown');
-  const path = `tidal-notes-cafe-${stamp}.Rmd`;
-  await expect(savedAs).toHaveText(new RegExp(`${path.replace('.', '\\.')}$`));
-  await newFile.getByRole('button', { name: 'Create' }).click();
+  await expect(filename).toHaveValue(`tidal-notes-cafe-${stamp}.Rmd`);
+  await rename.getByRole('button', { name: 'Rename' }).click();
+  const rmd = `tidal-notes-cafe-${stamp}.Rmd`;
+  await expect(page.getByTestId(`file:${rmd}`)).toContainText(`Tidal notes: Café ${stamp}`);
 
-  // Shown by its title; the file has it in its header.
-  await expect(page.getByTestId(`file:${path}`)).toContainText(`Tidal notes: Café ${stamp}`);
-  await expect(page.getByTestId('editor')).toBeVisible();
-  expect(readFileSync(join(E2E.dir, path), 'utf8')).toBe(`---\ntitle: "Tidal notes: Café ${stamp}"\n---\n`);
-
-  // The same title again: a numbered filename, whatever the extension.
-  await page.getByRole('button', { name: 'New file', exact: true }).click();
-  await newFile.getByLabel('Title').fill(`Tidal notes: Café ${stamp}`);
-  await expect(savedAs).toHaveText(new RegExp(`tidal-notes-cafe-${stamp}-2\\.md$`));
-
-  // A text file is made by name: its extension and type follow each other.
+  // A text file has no title: only its name.
+  await page.getByTestId(`file:${rmd}`).click({ button: 'right' });
+  await page.getByTestId('context:rename').click();
   await type.selectOption('text');
-  const name = newFile.getByLabel('Name');
-  await expect(name).toHaveValue(/untitled\.txt$/);
-  await name.fill(`runs/new-${stamp}.py`);
-  await expect(type).toHaveValue('text');
-  await name.fill(`runs/data-${stamp}`);
-  await newFile.getByRole('button', { name: 'Create' }).click();
-  await expect(page.getByTestId(`file:runs/data-${stamp}.txt`)).toContainText(`data-${stamp}.txt`);
+  await expect(rename.getByLabel('Title')).toHaveCount(0);
+  await expect(filename).toHaveValue(`tidal-notes-cafe-${stamp}.txt`);
+  await rename.getByRole('button', { name: 'Rename' }).click();
+  const txt = `tidal-notes-cafe-${stamp}.txt`;
+  await expect(page.getByTestId(`file:${txt}`)).toContainText(txt);
 
-  // Escape cancels.
-  await page.getByRole('button', { name: 'New file', exact: true }).click();
-  await page.keyboard.press('Escape');
-  await expect(newFile).toHaveCount(0);
+  // And back to a document, given a title: the header (kept in the text, as text) gets it, its quoting as it was.
+  await page.getByTestId(`file:${txt}`).click({ button: 'right' });
+  await page.getByTestId('context:rename').click();
+  await type.selectOption('pandoc-markdown');
+  await rename.getByLabel('Title').fill(`Tides again ${stamp}`);
+  await filename.fill(`tides-${stamp}.md`);
+  await expect(type).toHaveValue('pandoc-markdown');
+  await rename.getByRole('button', { name: 'Rename' }).click();
+  await expect(page.getByTestId(`file:tides-${stamp}.md`)).toContainText(`Tides again ${stamp}`);
+  expect(readFileSync(join(E2E.dir, `tides-${stamp}.md`), 'utf8')).toBe(`---\ntitle: "Tides again ${stamp}"\n---\n\nBody.\n`);
 });
 
 test('renaming a document changes its title, and its filename with it or apart', async ({ page }) => {
@@ -131,8 +151,7 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.locator('[data-testid$="/.gitkeep"]')).toHaveCount(0);
   await row.hover();
   await row.getByRole('button', { name: /^New file in/ }).click();
-  await expect(page.getByTestId('new-file-path')).toHaveText(new RegExp(`${folder}/untitled\\.md$`));
-  await page.keyboard.press('Escape');
+  await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', `${folder}/untitled.md`);
 
   // ⌘, (Ctrl+, elsewhere) opens and closes the menu.
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');

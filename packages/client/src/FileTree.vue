@@ -5,13 +5,13 @@
 // is a tree for the keyboard too: one
 // row in the Tab order, arrows to move and open folders, Enter to open, F2 to
 // rename, Delete to delete, Shift+F10 for the menu (tree.ts, treeKey).
-import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, toRef, useTemplateRef } from 'vue';
+import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, toRef, useTemplateRef, watch } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
 import { askConfirm, askText } from './ask.js';
 import { buildTree, fileTypeChoices, TREE, treeKey, visibleItems } from './tree.js';
+import { pathForTitle } from './filenames.js';
 import { S } from './strings.js';
-import NewFileDialog from './NewFileDialog.vue';
 import RenameDialog from './RenameDialog.vue';
 import TreeFolder from './TreeFolder.vue';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
@@ -32,6 +32,8 @@ const emit = defineEmits<{
   error: [error: unknown];
   /** Open this file and its Document settings. */
   documentSettings: [path: string];
+  /** A new document was made by New file: it opens with the cursor in its title. */
+  created: [path: string];
   /** Open this file at its first conflict. */
   conflicts: [path: string];
 }>();
@@ -66,23 +68,51 @@ const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')
 /** The folder of the open file: where new things go unless a folder is named. */
 const here = () => (props.selected?.includes('/') ? props.selected.slice(0, props.selected.lastIndexOf('/') + 1) : '');
 
-// New files: a document is made with its title (its header), its filename made from that.
-const creating = ref<string | null>(null);
+// New files: an untitled Markdown document, made at once and opened, its title
+// typed in the page. Its filename follows the title it is given (when it is
+// left), as long as it has the name it was made with. Another kind of file is
+// a Rename… away (the dialog has the file's type).
 const paths = computed(() => props.files.map((f) => f.path));
 const typeChoices = computed(() => fileTypeChoices(props.registry));
 const typeOf = (p: string) => props.registry.resolve(p)?.id ?? null;
+/** The kind of document New file makes. */
+const NEW_TYPE = 'pandoc-markdown';
+/** Documents New file made here, by path: their title as last seen while open, and the workspace they are in. */
+const fresh = new Map<string, { title: string | null; api: HostApi }>();
 
-/** A new file: in `folder` ('' for the top level), or beside the open file. */
-function create(folder?: string) {
-  creating.value = folder !== undefined ? (folder ? `${folder}/` : '') : here();
+/** A new document: in `folder` ('' for the top level), or beside the open file. */
+async function create(folder?: string) {
+  const dir = folder !== undefined ? (folder ? `${folder}/` : '') : here();
+  const type = typeChoices.value.find((t) => t.id === NEW_TYPE) ?? typeChoices.value.find((t) => t.titled) ?? typeChoices.value[0];
+  if (!type) return;
+  const path = pathForTitle(S.tree.untitledName, type.extension, dir, paths.value);
+  if (dir) expand(dir.replace(/\/$/, ''));
+  if (type.titled) fresh.set(path, { title: null, api: props.api });
+  emit('created', path);
+  await act(() => props.api.createFile(path, ''), path);
 }
 defineExpose({ create });
 
-async function made(file: { path: string; type: string; title: string | null }) {
-  creating.value = null;
-  const type = props.registry.get(file.type);
-  const content = file.title && type?.title ? type.title.write('', file.title) : '';
-  await act(() => props.api.createFile(file.path, content), file.path);
+// A new document's title, while it is open; once it is left, its filename is made from that title.
+watch(() => [props.selected, props.files] as const, ([selected, files], [before]) => {
+  const made = selected ? fresh.get(selected) : undefined;
+  if (made?.api === props.api) made.title = files.find((f) => f.path === selected)?.title ?? null;
+  if (before && before !== selected && fresh.has(before)) void nameAfterTitle(before);
+});
+
+async function nameAfterTitle(path: string) {
+  const made = fresh.get(path);
+  // Left for another workspace: it keeps its name (this list is the other workspace's now).
+  if (!made?.title || made.api !== props.api) return;
+  const title = made.title;
+  fresh.delete(path);
+  const folder = path.slice(0, path.lastIndexOf('/') + 1);
+  const name = path.slice(folder.length);
+  const extension = name.slice(name.lastIndexOf('.'));
+  const to = pathForTitle(title, extension, folder, paths.value, path);
+  if (to === path || !paths.value.includes(path)) return;
+  if (tabStop.value === path) tabStop.value = to;
+  await act(() => props.api.renameFile(path, to), props.selected);
 }
 
 async function newFolder(inside?: string) {
@@ -98,8 +128,8 @@ const renaming = ref<TreeFile | null>(null);
 
 async function rename(from: string) {
   const file = props.files.find((f) => f.path === from);
-  const type = file?.type ? props.registry.get(file.type) : undefined;
-  if (file && type?.title) {
+  // A file of a kind kuraa opens: its title (for a document), its name, and its kind.
+  if (file?.type && typeChoices.value.some((t) => t.id === file.type)) {
     renaming.value = file;
     return;
   }
@@ -107,10 +137,12 @@ async function rename(from: string) {
   if (to && to !== from) await act(() => props.api.renameFile(from, to), props.selected === from ? to : props.selected);
 }
 
-async function renamed(change: { to: string; title: string }) {
+async function renamed(change: { to: string; title?: string }) {
   const file = renaming.value!;
   renaming.value = null;
-  const title = change.title !== file.title ? change.title : undefined;
+  // Named by hand: no longer named after its title when it is left.
+  fresh.delete(file.path);
+  const title = change.title !== undefined && change.title !== file.title ? change.title : undefined;
   if (change.to === file.path && title === undefined) return;
   await act(() => props.api.renameFile(file.path, change.to, title), props.selected === file.path ? change.to : props.selected);
 }
@@ -361,23 +393,23 @@ provide(TREE, {
         data-testid="tree-space"
         :tabindex="items.length ? -1 : 0"
         :role="items.length ? undefined : 'button'"
-        :aria-label="items.length ? undefined : S.tree.newFileMenu('')"
+        :aria-label="items.length ? undefined : S.tree.space"
         @keydown="onSpaceKey"
         @contextmenu="contextMenu($event, '', 'top')"
       />
     </div>
     <div v-if="$slots.footer" class="pane-footer"><slot name="footer" /></div>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" />
-    <NewFileDialog
-      v-if="creating !== null"
-      :folder="creating"
-      :types="typeChoices"
-      default-type="pandoc-markdown"
+    <RenameDialog
+      v-if="renaming"
+      :path="renaming.path"
+      :title="renaming.title ?? null"
       :paths="paths"
+      :types="typeChoices"
+      :type="renaming.type!"
       :type-of="typeOf"
-      @create="made"
-      @cancel="creating = null"
+      @rename="renamed"
+      @cancel="renaming = null"
     />
-    <RenameDialog v-if="renaming" :path="renaming.path" :title="renaming.title ?? null" :paths="paths" @rename="renamed" @cancel="renaming = null" />
   </nav>
 </template>

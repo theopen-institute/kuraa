@@ -65,7 +65,7 @@ test('a past version is compared with now, and restored as an edit everyone sees
   await expect.poll(async () => (await api(`/api/files?path=${encodeURIComponent(path)}`)).text(), { timeout: 10_000 }).toBe(NOTES);
 
   // An edit like any other: undo brings the newer text back.
-  await ada.getByTestId('editor').locator('h1').click();
+  await ada.getByTestId('editor').locator('h1:not(.doc-title)').click();
   await ada.keyboard.press(`${MOD}+z`);
   await expect(ada.getByTestId('editor')).toContainText('Clearer by noon.');
   await expect(bo.getByTestId('editor')).toContainText('Clearer by noon.');

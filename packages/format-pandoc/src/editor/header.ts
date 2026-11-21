@@ -1,14 +1,18 @@
 // The document's header: the YAML metadata block at the top of a Pandoc file.
-// It is edited in the client's Document settings, not in the page: here it is drawn
-// as nothing, the cursor is kept out of it, and typing cannot change it. The
-// Source view shows it as text, and edits there (and Document settings') go through.
+// It is edited in the client's Document settings, not in the page: the page
+// shows only its title, as the document's top heading, which can be edited
+// there; what is typed in it is written to the header's `title` field and to
+// nothing else. The cursor is kept out of the header block, and typing in the
+// page cannot change it. The Source view shows it as text, and edits there (and
+// Document settings') go through.
 //
 // pandocHeaderFields is what Document settings offers to add: Pandoc's own metadata
 // fields and the template variables people most often set in the header.
 import { DELIBERATE_EDIT, type EditorContext, type HeaderField, type HeaderSpec } from '@kuraa/editor-kit';
 import type { Node as PMNode, NodeType, Schema } from 'prosemirror-model';
-import { AllSelection, NodeSelection, Plugin, Selection, TextSelection } from 'prosemirror-state';
-import type { NodeViewConstructor } from 'prosemirror-view';
+import { AllSelection, NodeSelection, Plugin, PluginKey, Selection, TextSelection } from 'prosemirror-state';
+import { Decoration, DecorationSet, type EditorView, type NodeViewConstructor } from 'prosemirror-view';
+import { titleOfHeader, withTitle } from '../title.js';
 
 const HEADER_NODE = 'front_matter';
 
@@ -96,14 +100,178 @@ export function headerSpec(extra: HeaderField[] = []): HeaderSpec {
   return { node: HEADER_NODE, fields: [...pandocHeaderFields.filter((f) => !keys.has(f.key)), ...extra], required: ['title'] };
 }
 
-/** The header block, drawn as nothing. */
-const hidden: NodeViewConstructor = () => {
+/** What the title says while empty. */
+const TITLE_PLACEHOLDER = 'Title';
+
+/**
+ * Write a title typed in the page to the header's `title` field: only the
+ * characters that changed, so someone else's edit elsewhere in the header
+ * merges with it. With no header yet, one is made (holding only the title).
+ */
+function writeTitle(view: EditorView, type: NodeType, typed: string): void {
+  const title = typed.replace(/\s+/g, ' ').trim();
+  const { state } = view;
+  const first = state.doc.firstChild;
+  const tr = state.tr;
+  if (first?.type === type) {
+    const yaml = first.textContent;
+    let next: string;
+    try {
+      next = withTitle(yaml, title);
+    } catch {
+      return;
+    }
+    if (next === yaml) return;
+    let pre = 0;
+    while (pre < yaml.length && pre < next.length && yaml[pre] === next[pre]) pre++;
+    let suf = 0;
+    while (suf < yaml.length - pre && suf < next.length - pre && yaml[yaml.length - 1 - suf] === next[next.length - 1 - suf]) suf++;
+    // The block's text starts one past its own position (0, at the top).
+    tr.insertText(next.slice(pre, next.length - suf), 1 + pre, 1 + yaml.length - suf);
+  } else {
+    if (!title) return;
+    tr.insert(0, type.create(null, state.schema.text(withTitle('', title))));
+  }
+  view.dispatch(tr.setMeta(DELIBERATE_EDIT, true));
+}
+
+/** Put the cursor at the end of an element that can be edited, and focus it. */
+function focusEnd(el: HTMLElement): void {
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
+/** The page's title heading, if it shows one. */
+const titleIn = (view: EditorView) => view.dom.querySelector<HTMLElement>('.doc-title[contenteditable="true"]');
+
+/** To the text below the title: the cursor at its start. */
+function toText(view: EditorView, type: NodeType): void {
+  const start = Selection.findFrom(view.state.doc.resolve(headerEnd(view.state.doc, type)), 1) ?? Selection.atStart(view.state.doc);
+  view.focus();
+  view.dispatch(view.state.tr.setSelection(start).scrollIntoView());
+}
+
+/**
+ * The title heading: the header's title, editable unless the page is read-only
+ * (or the header is not a list of fields). It is not part of ProseMirror's
+ * document: typing in it goes to the header through writeTitle.
+ */
+function titleBlock(view: EditorView, type: NodeType, editable: boolean, initial: string | null) {
   const dom = document.createElement('div');
-  dom.className = 'doc-header-hidden';
-  dom.hidden = true;
+  dom.className = 'doc-title-block';
   dom.contentEditable = 'false';
-  return { dom, ignoreMutation: () => true, stopEvent: () => true };
-};
+  const h1 = document.createElement('h1');
+  h1.className = 'doc-title';
+  h1.dataset.placeholder = TITLE_PLACEHOLDER;
+  h1.textContent = initial ?? '';
+  h1.contentEditable = editable ? 'true' : 'false';
+  h1.spellcheck = true;
+  h1.setAttribute('role', 'textbox');
+  h1.setAttribute('aria-label', TITLE_PLACEHOLDER);
+  dom.append(h1);
+  if (!editable) return { dom, h1 };
+
+  let composing = false;
+  const write = () => {
+    // The heading this was typed in may be replaced (the first title makes the header): focus follows to the new one.
+    writeTitle(view, type, h1.textContent ?? '');
+    if (!h1.isConnected) {
+      const next = titleIn(view);
+      if (next && next !== h1) {
+        next.textContent = h1.textContent;
+        focusEnd(next);
+      }
+    }
+  };
+  h1.addEventListener('compositionstart', () => (composing = true));
+  h1.addEventListener('compositionend', () => {
+    composing = false;
+    write();
+  });
+  h1.addEventListener('input', () => {
+    if (!composing) write();
+  });
+  h1.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'Enter' || e.key === 'Tab' || (e.key === 'ArrowDown' && !e.shiftKey)) {
+      e.preventDefault();
+      toText(view, type);
+    }
+  });
+  // One line of plain text.
+  h1.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData?.getData('text/plain') ?? '').replace(/\s+/g, ' ');
+    document.execCommand('insertText', false, text);
+  });
+  h1.addEventListener('drop', (e) => e.preventDefault());
+  return { dom, h1 };
+}
+
+/** The header block, drawn as its title heading. */
+function headerView(type: NodeType, editable: boolean): NodeViewConstructor {
+  return (node, view) => {
+    let yaml = node.textContent;
+    const fields = () => {
+      try {
+        withTitle(yaml, '');
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const { dom, h1 } = titleBlock(view, type, editable && fields(), titleOfHeader(yaml));
+    return {
+      dom,
+      update(next) {
+        if (next.type !== type) return false;
+        if (next.textContent === yaml) return true;
+        yaml = next.textContent;
+        if (editable) h1.contentEditable = fields() ? 'true' : 'false';
+        // While it is being typed in, what is typed stays as it is (the header follows it, not the other way round).
+        if (document.activeElement !== h1) h1.textContent = titleOfHeader(yaml) ?? '';
+        return true;
+      },
+      ignoreMutation: () => true,
+      stopEvent: () => true,
+    };
+  };
+}
+
+const titleKey = new PluginKey('doc-title');
+
+/**
+ * The title for a document with no header yet (an empty heading to type it in),
+ * and ↑ at the start of the text going up into the title.
+ */
+function titlePlugin(type: NodeType): Plugin {
+  return new Plugin({
+    key: titleKey,
+    props: {
+      decorations(state) {
+        if (state.doc.firstChild?.type === type) return null;
+        const widget = Decoration.widget(0, (view) => titleBlock(view, type, true, null).dom, { side: -1, key: 'doc-title', stopEvent: () => true, ignoreSelection: true });
+        return DecorationSet.create(state.doc, [widget]);
+      },
+      handleKeyDown(view, e) {
+        if (e.key !== 'ArrowUp' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;
+        const { selection, doc } = view.state;
+        const start = Selection.findFrom(doc.resolve(headerEnd(doc, type)), 1);
+        if (!selection.empty || !start || selection.from !== start.from) return false;
+        const h1 = titleIn(view);
+        if (!h1) return false;
+        e.preventDefault();
+        focusEnd(h1);
+        return true;
+      },
+    },
+  });
+}
 
 /** Where the page's content starts: after the header, or 0 without one. */
 const headerEnd = (doc: PMNode, type: NodeType): number => (doc.firstChild?.type === type ? doc.firstChild.nodeSize : 0);
@@ -135,9 +303,12 @@ function headerGuard(type: NodeType, ctx: EditorContext): Plugin {
   });
 }
 
-/** What the header needs in the editor: its plugin and its (empty) node view. */
+/** What the header needs in the editor: its plugins, and its node view (the title heading). */
 export function headerBehaviour(schema: Schema, ctx: EditorContext): { plugins: Plugin[]; nodeViews: Record<string, NodeViewConstructor> } {
   const type = schema.nodes[HEADER_NODE];
   if (!type) return { plugins: [], nodeViews: {} };
-  return { plugins: ctx.readOnly ? [] : [headerGuard(type, ctx)], nodeViews: { [HEADER_NODE]: hidden } };
+  return {
+    plugins: ctx.readOnly ? [] : [headerGuard(type, ctx), titlePlugin(type)],
+    nodeViews: { [HEADER_NODE]: headerView(type, !ctx.readOnly) },
+  };
 }

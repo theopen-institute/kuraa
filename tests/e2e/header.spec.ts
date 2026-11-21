@@ -36,19 +36,20 @@ async function openHeader(page: Page, file: string) {
   await expect(page.getByTestId('header')).toBeVisible();
 }
 
-test('the header is edited in its dialog, not in the page', async ({ page }) => {
+test('the header is edited in Document settings; the page shows only its title', async ({ page }) => {
   const { host, dir } = await ownHost();
   try {
     await page.goto(`${host.url}/?token=${host.token}&name=Owner`);
     await page.getByTestId('file:paper.md').click();
     const editor = page.getByTestId('editor');
     await expect(editor).toContainText('Introduction');
-    await expect(editor).not.toContainText('Old title');
+    // The title is the page's top heading; the rest of the header is not in the page.
+    await expect(editor.locator('h1.doc-title')).toHaveText('Old title');
+    await expect(editor).not.toContainText('Ada Lovelace');
 
-    // Typing at the very start of the page goes into the text, not the header.
+    // Typing at the very start of the text goes into the text, not the header.
     await editor.getByText('Introduction').click();
     await page.keyboard.press('ControlOrMeta+ArrowUp');
-    await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Home');
     await page.keyboard.type('An ');
     await expect.poll(onDisk(dir, 'paper.md')).toContain('# An Introduction');
@@ -77,7 +78,7 @@ test('the header is edited in its dialog, not in the page', async ({ page }) => 
     await expect.poll(onDisk(dir, 'paper.md')).toBe(
       '---\n# Set by the journal\ntitle: "A better title: with a colon"\nauthor:\n  - Ada Lovelace\n  - Grace Hopper\nbibliography:\n  - refs.bib\nlink-citations: true\n---\n\n# An Introduction\n\nThe text.\n',
     );
-    await expect(editor).not.toContainText('better title');
+    await expect(editor.locator('h1.doc-title')).toHaveText('A better title: with a colon');
     // The sidebar shows the document by its new title.
     await expect(page.getByTestId('file:paper.md')).toContainText('A better title: with a colon');
 
@@ -131,6 +132,43 @@ test('a document needs a title; YAML that does not parse cannot be saved', async
     await dialog.getByRole('button', { name: 'Remove Language' }).click();
     await dialog.getByTestId('header-save').click();
     await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Fresh\n---\n\n# Plain\n\nNo header.\n');
+  } finally {
+    await host.close();
+  }
+});
+
+test('the title is typed in the page: only the header’s title changes', async ({ page }) => {
+  const { host, dir } = await ownHost();
+  try {
+    await page.goto(`${host.url}/?token=${host.token}&name=Owner`);
+    await page.getByTestId('file:paper.md').click();
+    const editor = page.getByTestId('editor');
+    const title = editor.locator('h1.doc-title');
+    await expect(title).toHaveText('Old title');
+
+    // ↑ at the start of the text goes up into the title; what is typed there is the header's title.
+    await editor.getByText('Introduction').click();
+    await page.keyboard.press('ControlOrMeta+ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    await expect(title).toBeFocused();
+    await page.keyboard.type(': revised');
+    await expect.poll(onDisk(dir, 'paper.md')).toBe('---\n# Set by the journal\ntitle: "Old title: revised"\nauthor: Ada Lovelace\n---\n\n# Introduction\n\nThe text.\n');
+    await expect(page.getByTestId('file:paper.md')).toContainText('Old title: revised');
+    // Enter goes down to the text.
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Now ');
+    await expect.poll(onDisk(dir, 'paper.md')).toContain('# Now Introduction');
+
+    // A document with no header: an empty title to type in, which makes the header.
+    await page.getByTestId('file:plain.md').click();
+    const empty = editor.locator('h1.doc-title');
+    await expect(empty).toHaveText('');
+    await expect(empty).toHaveAttribute('data-placeholder', 'Title');
+    await empty.click();
+    await page.keyboard.type('Plain words');
+    await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Plain words\n---\n\n# Plain\n\nNo header.\n');
+    await expect(editor.locator('h1.doc-title')).toBeFocused();
+    await expect(editor.locator('h1.doc-title')).toHaveText('Plain words');
   } finally {
     await host.close();
   }

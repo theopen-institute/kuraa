@@ -410,8 +410,10 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button:focus-visible, .context-menu button:hover { background: var(--selected); outline: none; }
 .context-menu button.danger { color: var(--warn); }
 
-/* The document's header: not drawn in the page (Document settings edits it). */
-.doc-header-hidden { display: none; }
+/* The document's title, from its header: the page's top heading, typed in to change it (the rest of the header is in Document settings). */
+.doc-title-block { cursor: default; }
+.prose h1.doc-title { margin: 0 0 0.6em; font-size: 2em; cursor: text; outline: none; overflow-wrap: anywhere; }
+.prose h1.doc-title:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
 
 /* The header, in Document settings: a label column, the value, and a button to remove the field. */
 .header-form { display: grid; gap: 10px; }

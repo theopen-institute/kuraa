@@ -136,7 +136,9 @@ workspace name to move it to the top level; each move is committed. Right-click 
 Enter opens, F2 renames, Delete deletes, Shift+F10 shows the menu.
 
 A Markdown or R Markdown document's **header** (the YAML block at the top: title, authors, date,
-bibliography, PDF and HTML settings, …) is not shown in the page. **Document settings** shows it as fields
+bibliography, PDF and HTML settings, …) is not shown in the page, except its **title**, which is the page's top
+heading and is typed there (↑ at the top of the text goes up to it, Enter comes back down; [decision 0055](docs/decisions/0055-title-in-the-page.md)).
+**Document settings** shows the whole header as fields
 to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 

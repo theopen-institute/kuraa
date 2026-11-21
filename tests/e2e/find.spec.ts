@@ -71,7 +71,7 @@ test('the outline lists the headings, follows the document and goes to them', as
   await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('status')).toContainText('Connected');
   const editor = page.getByTestId('editor');
-  await editor.locator('h1').click();
+  await editor.locator('h1:not(.doc-title)').click();
   await page.keyboard.press(`${MOD}+Alt+o`);
   const outline = page.getByTestId('outline');
   await expect(outline.locator('button.outline-entry')).toHaveText(['Introduction', 'Methods', 'Results']);

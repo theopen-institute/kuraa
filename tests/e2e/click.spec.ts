@@ -30,14 +30,14 @@ test('a click below the text puts the cursor at the end; beside a line, on that 
 
   await clickBlank(page, 0.5, 40);
   await page.keyboard.type(' and more');
-  await expect(editor.locator('h1')).toHaveText('One line and more');
+  await expect(editor.locator('h1:not(.doc-title)')).toHaveText('One line and more');
 
   // The left margin, level with the heading: the start of that line.
-  const h1 = (await editor.locator('h1').boundingBox())!;
+  const h1 = (await editor.locator('h1:not(.doc-title)').boundingBox())!;
   const scroll = (await page.locator('.editor-scroll').boundingBox())!;
   await page.mouse.click(scroll.x + 8, h1.y + h1.height / 2);
   await page.keyboard.type('Just ');
-  await expect(editor.locator('h1')).toHaveText('Just One line and more');
+  await expect(editor.locator('h1:not(.doc-title)')).toHaveText('Just One line and more');
 
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('# Just One line and more\n');
 });

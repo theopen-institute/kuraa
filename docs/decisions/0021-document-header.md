@@ -1,6 +1,6 @@
 # 0021 · The document header is edited in its own dialog
 
-(The dialog is now part of Document settings, and the right-click menu changed: [0054](0054-document-settings.md).)
+(The dialog is now part of Document settings, and the right-click menu changed: [0054](0054-document-settings.md). The page shows the title, and it is typed there: [0055](0055-title-in-the-page.md).)
 
 A Pandoc document's header (the YAML metadata block at the top: title, authors, date, bibliography,
 output settings) is not drawn in the page. It is edited in the **Header** dialog, opened by

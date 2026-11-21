@@ -99,7 +99,10 @@ export interface HostOptions {
 /** How many files the file list reads at once. */
 const TREE_READS = 16;
 
-export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 60_000, onlineMs: 30_000, onlineSyncMs: 5 * 60_000, gitPollMs: 1000 };
+/** Rooms kept warm with nobody in them, at most (Host.scheduleDrop). */
+const MAX_IDLE_ROOMS = 24;
+
+export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 15 * 60_000, onlineMs: 30_000, onlineSyncMs: 5 * 60_000, gitPollMs: 1000 };
 
 interface RoomRecord {
   key: string;
@@ -137,6 +140,8 @@ interface RoomRecord {
   needsOutsideCheck: boolean;
   /** Writes or commits that failed in a row; retried with a growing wait. */
   failures: number;
+  /** When it was last asked for (Date.now()): the idle rooms used longest ago are closed first. */
+  usedAt: number;
   timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout };
 }
 
@@ -487,7 +492,10 @@ export class Host {
 
   /** The current room for a file, creating or resuming it. */
   async room(path: string): Promise<RoomRecord> {
-    return this.serial(() => this.ensureRecord(this.relPath(path)));
+    const rec = await this.serial(() => this.ensureRecord(this.relPath(path)));
+    // Asked for, and nobody in it yet (they are on their way, or it was asked for ahead): it closes if nobody comes.
+    if (!this.relay.clients(rec.room)) this.scheduleDrop(rec);
+    return rec;
   }
 
   private async ensureRecord(path: string): Promise<RoomRecord> {
@@ -499,6 +507,8 @@ export class Host {
     const existing = this.records.get(key);
     if (existing) {
       if (existing.timers.drop) clearTimeout(existing.timers.drop);
+      existing.timers.drop = undefined;
+      existing.usedAt = Date.now();
       return existing;
     }
     const type = this.typeFor(path);
@@ -558,6 +568,7 @@ export class Host {
       lastCommit: null,
       needsOutsideCheck: false,
       failures: 0,
+      usedAt: Date.now(),
       timers: {},
     };
     rec.room = this.roomName(rec);
@@ -579,6 +590,8 @@ export class Host {
       if (rec.room !== room) return null;
     }
     if (rec.timers.drop) clearTimeout(rec.timers.drop);
+    rec.timers.drop = undefined;
+    rec.usedAt = Date.now();
     // Only the host creates room content: from saved state, or a fresh seed.
     if (rec.state) return { state: rec.state };
     rec.state = seedState(rec.type, rec.seedText ?? rec.previous.text);
@@ -613,19 +626,37 @@ export class Host {
       await this.flushNow(rec);
       await this.commitNow(rec);
     }).catch((e) => this.log(`teardown failed: ${e}`));
+    rec.usedAt = Date.now();
+    this.scheduleDrop(rec);
+  }
+
+  /**
+   * Close a room nobody is in after a while (dropMs). Until then it is kept
+   * warm: opening its file again needs no reading, parsing or seeding. At most
+   * MAX_IDLE_ROOMS are kept so; past that, the one used longest ago closes now.
+   */
+  private scheduleDrop(rec: RoomRecord): void {
     if (rec.timers.drop) clearTimeout(rec.timers.drop);
-    rec.timers.drop = setTimeout(() => {
-      if (this.relay.clients(rec.room) > 0) return;
-      this.serial(async () => {
-        // Not if it was taken up again meanwhile, or still has edits to save (they are tried again).
-        if (this.relay.clients(rec.room) > 0 || this.records.get(rec.key) !== rec) return;
-        await this.saveCache(rec);
-        if (rec.dirty || rec.uncommitted) return;
-        this.clearTimers(rec);
-        this.records.delete(rec.key);
-        this.byRoom.delete(rec.room);
-      }).catch((e) => this.log(`could not close ${rec.path}'s room: ${e}`));
-    }, this.timings.dropMs);
+    rec.timers.drop = setTimeout(() => this.drop(rec), this.timings.dropMs);
+    const idle = [...this.records.values()].filter((r) => r.timers.drop && !this.relay.clients(r.room));
+    if (idle.length <= MAX_IDLE_ROOMS) return;
+    const oldest = idle.reduce((a, b) => (b.usedAt < a.usedAt ? b : a));
+    clearTimeout(oldest.timers.drop);
+    this.drop(oldest);
+  }
+
+  private drop(rec: RoomRecord): void {
+    rec.timers.drop = undefined;
+    if (this.relay.clients(rec.room) > 0) return;
+    this.serial(async () => {
+      // Not if it was taken up again meanwhile, or still has edits to save (they are tried again).
+      if (this.relay.clients(rec.room) > 0 || this.records.get(rec.key) !== rec) return;
+      await this.saveCache(rec);
+      if (rec.dirty || rec.uncommitted) return;
+      this.clearTimers(rec);
+      this.records.delete(rec.key);
+      this.byRoom.delete(rec.room);
+    }).catch((e) => this.log(`could not close ${rec.path}'s room: ${e}`));
   }
 
   private clearTimers(rec: RoomRecord): void {

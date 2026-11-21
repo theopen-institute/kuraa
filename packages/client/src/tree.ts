@@ -148,6 +148,8 @@ export interface TreeContext {
   select(path: string): void;
   /** Open a file at its first conflict. */
   showConflicts(path: string): void;
+  /** The pointer rests on a file (null: it left): its room is asked for ahead, so it opens sooner. */
+  prefetch(path: string | null, now?: boolean): void;
   toggle(folder: string): void;
   create(folder?: string): void;
   newFolder(inside?: string): void;

@@ -193,6 +193,25 @@ describe('host safety', () => {
     expect(git(dir, 'show', 'HEAD:other.md')).toContain('Changed before.');
   });
 
+  it('keeps rooms nobody is in warm for a while, at most so many, and closes one asked for ahead that nobody joined', async () => {
+    for (let i = 0; i < 30; i++) writeFileSync(join(dir, `f${i}.md`), `# File ${i}\n`);
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'More files');
+    const records = () => (running.host as unknown as { records: Map<string, unknown> }).records;
+    // Asked for ahead (the pointer rested on the file), never joined: closed after dropMs.
+    await start({ ...FAST, dropMs: 300 });
+    expect((await api('/api/rooms?path=f0.md')).status).toBe(200);
+    expect(records().has('main:f0.md')).toBe(true);
+    await until(() => !records().has('main:f0.md'), 15_000, 'the room asked for ahead closed');
+    await running.close();
+    // Kept warm long after (dropMs), but no more than 24 with nobody in them: the ones used longest ago close.
+    await start({ ...FAST, dropMs: 600_000 });
+    for (let i = 0; i < 30; i++) expect((await api(`/api/rooms?path=f${i}.md`)).status).toBe(200);
+    await until(() => records().size === 24, 15_000, 'the idle rooms past 24 closed');
+    expect(records().has('main:f29.md')).toBe(true);
+    expect(records().has('main:f0.md')).toBe(false);
+  });
+
   it('merges an outside save it was not told of before writing over it', async () => {
     await start({ ...FAST, flushMs: 600_000, idleCommitMs: 600_000 });
     const a = await connect('notes.md');

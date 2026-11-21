@@ -345,6 +345,28 @@ function onSpaceKey(e: KeyboardEvent) {
   }
 }
 
+// Asking for a file's room ahead (the pointer rests on it, or is pressed on it): the host gets it
+// ready, and keeps it a while, so opening it needs no waiting for that. Once a minute at most per file.
+const PREFETCH_HOVER_MS = 150;
+const PREFETCH_AGAIN_MS = 60_000;
+const prefetched = new Map<string, number>();
+let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+function prefetch(path: string | null, now = false) {
+  clearTimeout(prefetchTimer);
+  if (!path || path === props.selected) return;
+  const go = () => {
+    const at = prefetched.get(path);
+    if (at !== undefined && Date.now() - at < PREFETCH_AGAIN_MS) return;
+    prefetched.set(path, Date.now());
+    props.api.room(path).catch(() => prefetched.delete(path));
+  };
+  if (now) go();
+  else prefetchTimer = setTimeout(go, PREFETCH_HOVER_MS);
+}
+onBeforeUnmount(() => clearTimeout(prefetchTimer));
+// Another workspace: its files are other files.
+watch(() => props.api, () => prefetched.clear());
+
 provide(TREE, {
   selected: toRef(props, 'selected'),
   collapsed,
@@ -356,6 +378,7 @@ provide(TREE, {
   over,
   select: (path) => emit('select', path),
   showConflicts: (path) => emit('conflicts', path),
+  prefetch,
   toggle,
   create: (folder) => create(folder),
   newFolder: (inside) => void newFolder(inside),

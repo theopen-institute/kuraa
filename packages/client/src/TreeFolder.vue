@@ -77,6 +77,9 @@ const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.con
     @dragend="t.dragEnd()"
     @contextmenu="t.contextMenu($event, f.path, 'file')"
     @click="f.type && t.select(f.path)"
+    @mouseenter="f.type && t.prefetch(f.path)"
+    @mouseleave="t.prefetch(null)"
+    @mousedown="f.type && t.prefetch(f.path, true)"
   >
     <div class="tree-row" :style="indent" :title="tip(f)" :data-testid="`file:${f.path}`">
       <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>

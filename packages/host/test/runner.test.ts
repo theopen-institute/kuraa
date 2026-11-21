@@ -14,7 +14,8 @@ import { startHost, type RunningHost } from '../src/index.js';
 import { podmanWorks } from '@kuraa/env-podman';
 import { standardRunComponents } from '@kuraa/run-components';
 
-const PODMAN_OK = podmanWorks();
+// Not on CI (GitHub's machines have Podman, but no R image yet: pulling it outlasts any test) unless KURAA_TEST_PODMAN=1.
+const PODMAN_OK = !(process.env.CI && process.env.KURAA_TEST_PODMAN !== '1') && podmanWorks();
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const DOC = 'reports/analysis.Rmd';
 

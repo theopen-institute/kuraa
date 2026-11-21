@@ -13,7 +13,8 @@ import { startHost, type RunningHost } from '../src/index.js';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const READY = (() => {
-  if (!podmanWorks()) return false;
+  // Not on CI unless KURAA_TEST_PODMAN=1 (runner.test.ts).
+  if ((process.env.CI && process.env.KURAA_TEST_PODMAN !== '1') || !podmanWorks()) return false;
   try {
     execFileSync('curl', ['-sSf', '--max-time', '10', '-o', '/dev/null', 'https://cloud.r-project.org/web/packages/hellno/index.html'], { stdio: 'ignore' });
     return true;

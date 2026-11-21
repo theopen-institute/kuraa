@@ -11,6 +11,8 @@ export interface GitResult { stdout: string; stderr: string; code: number; /** s
 const OWN_GROUP = process.platform !== 'win32';
 /** git's word for a config file another writer holds (`.git/config.lock`): nothing was written. */
 const CONFIG_LOCKED = /could not lock config file/;
+/** How long a change to a locked config is tried again for. */
+const CONFIG_LOCK_WAIT_MS = 2000;
 
 /** The git to run, and what it needs in its environment. */
 let program: { command: string; env: Record<string, string> } = { command: 'git', env: {} };
@@ -86,12 +88,15 @@ export class Git {
   /**
    * Run git. A change to the repository's config that finds it locked (another
    * process, or this one, writing it at that moment) is tried again a little
-   * later: git wrote nothing, and the lock is held only for a moment.
+   * later, for up to two seconds (by the clock, not a count of tries: on a busy
+   * computer each try takes longer): git wrote nothing, and the lock is held only
+   * for a moment.
    */
   async run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
-    for (let attempt = 0; ; attempt++) {
+    const until = Date.now() + CONFIG_LOCK_WAIT_MS;
+    for (;;) {
       const r = await this.runOnce(args, { ...opts, allowFail: true });
-      if (r.code !== 0 && attempt < 40 && CONFIG_LOCKED.test(r.stderr)) {
+      if (r.code !== 0 && Date.now() < until && CONFIG_LOCKED.test(r.stderr)) {
         await new Promise((res) => setTimeout(res, 25 + Math.random() * 50));
         continue;
       }

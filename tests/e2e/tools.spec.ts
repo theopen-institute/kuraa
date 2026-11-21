@@ -78,6 +78,7 @@ test('the preview offers the tool a PDF needs, and renders it once downloaded', 
     await page.goto(`${host.url}/?token=${host.token}&name=Owner&email=owner%40example.org`);
     await page.getByTestId('file:paper.md').click();
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-document').click();
     await page.getByTestId('menu-preview').click();
     const panel = page.getByTestId('preview-panel');
     await panel.getByTestId('save-pdf').click();

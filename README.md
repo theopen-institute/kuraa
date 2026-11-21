@@ -130,21 +130,26 @@ text and source files by filename, each with a small icon its type defines (a pa
 settings, a bibliography, …: [decision 0023](docs/decisions/0023-file-icons.md)). A new document is asked for its title, and its filename is made
 from it (`Tidal notes: Café` → `tidal-notes-cafe.md`); **Rename…** changes a document's title and
 its filename, together or apart ([decision 0022](docs/decisions/0022-titles-and-filenames.md)). Drag a file or folder onto a folder to move it there, or onto the
-workspace name to move it to the top level, or use **Move to…** in its right-click menu; each move is
-committed. Right-click a file for **Open**, **Header…**, **Rename…**, **Move to…**, a new file or folder
-beside it and **Delete…**, or a folder for a new file or folder in it, **Rename…** (everything in it goes
-with it) and **Move to…**. The list works from the keyboard as a tree: arrows move and open folders,
+workspace name to move it to the top level; each move is committed. Right-click a file for
+**Document settings…**, **Rename…** and **Delete…**, or a folder for a new file or folder in it and
+**Rename…** (everything in it goes with it). The list works from the keyboard as a tree: arrows move and open folders,
 Enter opens, F2 renames, Delete deletes, Shift+F10 shows the menu.
 
 A Markdown or R Markdown document's **header** (the YAML block at the top: title, authors, date,
-bibliography, PDF and HTML settings, …) is not shown in the page. **Header…** opens it as fields
+bibliography, PDF and HTML settings, …) is not shown in the page. **Document settings** shows it as fields
 to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 
+**Document settings** (right-click a file, or **Document settings…** in the menu) is everything
+about one document: its **Source** (the markdown, which you can edit there too, alongside others
+editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
+**Save version**, **Preview** (below), **Find and replace…**, **Outline**, **Insert table**, when it
+was last saved and kept in the history, its code session, and its header
+([decision 0054](docs/decisions/0054-document-settings.md)).
+
 Everything else is in the **menu**, from the bottom of the sidebar or
-⌘, (Ctrl+,), which takes the keyboard's focus as every dialog does: the document's **Source** (the markdown, which you can edit there too, alongside
-others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
-**Header…**, **Save version**, **Preview** (below), when it was last saved and kept in the history; the code session; the workspace,
+⌘, (Ctrl+,), which takes the keyboard's focus as every dialog does: the way into the open document's
+**Document settings**; the workspace,
 **Search…** (⇧⌘F: every text file, and open documents as they are being typed; a result opens the
 file at the match, [0042](docs/decisions/0042-search.md)), **Sync** (offered once there is an online
 copy or another device; it says "Up to date" or how many changes it brought in) and who is here;

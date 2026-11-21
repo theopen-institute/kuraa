@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The live editor for one file: a ProseMirror view bound to the file's room, the
-// format's editor module, chunk running, the editable Source view, and the
-// Header dialog (for formats with a header).
+// format's editor module, chunk running, and the editable Source view. The
+// header (for formats with one) is edited in Document settings, through the view
+// this exposes.
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import { connectRoom, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
@@ -19,7 +20,6 @@ import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
 import { defaultBlock } from './blocks.js';
 import { locateMatch, replaceWithText, selectionFor, type MatchTarget } from './docActions.js';
-import HeaderDialog from './HeaderDialog.vue';
 import FindBar from './FindBar.vue';
 import OutlinePanel from './OutlinePanel.vue';
 import { findPlugin } from './find.js';
@@ -42,15 +42,12 @@ const props = defineProps<{
   run: RunInfo | null;
   /** What the type does in the editor (cues, keys, behaviour), if it has an editor module. */
   formatEditor?: FormatEditor;
-  /** Show the Header dialog (if the format has a header). */
-  headerOpen?: boolean;
   /** Go to the document's first conflict once it is open (its conflict count was clicked). */
   jumpToConflict?: boolean;
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
   committed: [];
-  closeHeader: [];
   /** The document's title as it is now, for a type with titles (null: none). */
   title: [title: string | null];
   /** How many conflicts the document keeps now, for a type that counts them. */
@@ -71,7 +68,7 @@ const sourceMount = useTemplateRef<HTMLDivElement>('sourceMount');
 const view = shallowRef<EditorView | null>(null);
 const error = shallowRef<unknown>(null);
 const loading = ref(true);
-/** Goes up with every change to the document while the Header dialog is open. */
+/** Goes up with every change to the document: Document settings tells by it that the header changed meanwhile. */
 const docVersion = ref(0);
 /** Goes up with every transaction: the find bar and the outline follow the document by it. */
 const tick = ref(0);
@@ -254,7 +251,7 @@ function open(): () => void {
         this.updateState(this.state.apply(tr));
         tick.value++;
         source?.documentChanged(tr); // the source view follows the live document
-        if (tr.docChanged && props.headerOpen) docVersion.value++;
+        if (tr.docChanged) docVersion.value++;
         // The title is in the header, the first block: read it again when that changes.
         if (tr.docChanged && tr.doc.firstChild !== tr.before.firstChild && touchesHeader(tr.before, tr.doc)) reportTitle(tr.doc);
         if (tr.docChanged) reportConflicts(tr.doc);
@@ -398,7 +395,7 @@ watch([() => props.jumpToConflict, view], ([jump, v]) => {
   emit('jumped');
 }, { immediate: true });
 
-defineExpose({ openFind, toggleOutline, command, ...documentActions });
+defineExpose({ openFind, toggleOutline, command, view, docVersion, ...documentActions });
 
 // The editable Source view, while it is shown. It starts from the file as it is
 // on disk, so blocks nobody has touched show exactly as written.
@@ -430,13 +427,5 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
     </div>
     <div v-if="showSource && view" ref="sourceMount" class="source-view" />
-    <HeaderDialog
-      v-if="headerOpen && view && formatEditor?.header"
-      :view="view"
-      :spec="formatEditor.header"
-      :path="path"
-      :version="docVersion"
-      @close="emit('closeHeader')"
-    />
   </div>
 </template>

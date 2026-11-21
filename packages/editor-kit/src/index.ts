@@ -88,7 +88,7 @@ export interface FormatEditor {
   nodeViews?(ctx: EditorContext): Record<string, NodeViewConstructor>;
   /**
    * The document's header (YAML metadata at the top), if the format has one. The
-   * client edits it in its Header dialog; the format keeps it out of the page
+   * client edits it in Document settings; the format keeps it out of the page
    * (only the Source view shows it as text).
    */
   header?: HeaderSpec;
@@ -116,7 +116,7 @@ export interface HelpItem {
 
 /**
  * Transactions that change the document's text on purpose rather than by typing
- * in the page (the Source view, the Header dialog) carry this meta, set to true,
+ * in the page (the Source view, Document settings) carry this meta, set to true,
  * so a format's guards (keeping its header out of reach of typing) let them through.
  */
 export const DELIBERATE_EDIT = 'kuraa:deliberate-edit';

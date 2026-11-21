@@ -103,7 +103,8 @@ unchanged, and its log lines stay technical.
   same). Files no format opens are rows like any other: focusable, renamable, deletable, just not
   opened. **Move to…** in the right-click menu moves a file or folder by naming its folder: the
   keyboard's way to do what dragging does. A file's menu also has **New file here…** and **New
-  folder here…**, so the top level is reachable from the keyboard; the space below the files (right-click
+  folder here…**, so the top level is reachable from the keyboard (all three since taken out of the
+  menu: [0054](0054-document-settings.md)); the space below the files (right-click
   for the top level) is a stable target (`tree-space`) and takes focus itself when there are no files.
   The right-click menu gives focus back to its row when it closes.
 - **Contrast** (WCAG AA): muted text is #635f58 (light) and #a5a198 (dark), at least 4.5:1 on every

@@ -128,7 +128,10 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
     await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('last-commit')).not.toContainText('—');
+    // Escape goes back from Document settings to the menu, and closes the menu.
+    await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
 
     // M5 (a): another program edits elsewhere in the file while the user types.
@@ -255,6 +258,7 @@ test('runs R chunks in a Podman container by default', async () => {
     await page.locator('.code-node-code_chunk').getByRole('button', { name: '▶ Run' }).click();
     await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   } finally {
     await app.close();
@@ -272,7 +276,9 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await page.getByTestId('file:analysis.Rmd').click();
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('r-state')).toHaveCount(0);
+    await page.getByTestId('menu-back').click();
     await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
     const components = page.getByTestId('components');
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();

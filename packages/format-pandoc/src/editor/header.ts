@@ -1,9 +1,9 @@
 // The document's header: the YAML metadata block at the top of a Pandoc file.
-// It is edited in the client's Header dialog, not in the page: here it is drawn
+// It is edited in the client's Document settings, not in the page: here it is drawn
 // as nothing, the cursor is kept out of it, and typing cannot change it. The
-// Source view shows it as text, and edits there (and the dialog's) go through.
+// Source view shows it as text, and edits there (and Document settings') go through.
 //
-// pandocHeaderFields is what the dialog offers to add: Pandoc's own metadata
+// pandocHeaderFields is what Document settings offers to add: Pandoc's own metadata
 // fields and the template variables people most often set in the header.
 import { DELIBERATE_EDIT, type EditorContext, type HeaderField, type HeaderSpec } from '@kuraa/editor-kit';
 import type { Node as PMNode, NodeType, Schema } from 'prosemirror-model';

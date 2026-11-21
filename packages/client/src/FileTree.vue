@@ -1,15 +1,15 @@
 <script setup lang="ts">
 // The sidebar: the workspace's name, its files and folders, new files and
-// folders, renaming, deleting, and moving (by dragging, or Move to… in the
-// right-click menu). Right-click a file or folder for what can be done with it
-// (a document's header, among others). It is a tree for the keyboard too: one
+// folders, renaming, deleting, and moving (by dragging). Right-click a file or
+// folder for what can be done with it (a document's settings, among others). It
+// is a tree for the keyboard too: one
 // row in the Tab order, arrows to move and open folders, Enter to open, F2 to
 // rename, Delete to delete, Shift+F10 for the menu (tree.ts, treeKey).
 import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, toRef, useTemplateRef } from 'vue';
 import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
 import { askConfirm, askText } from './ask.js';
-import { buildTree, fileTypeChoices, TREE, treeKey, visibleItems, type Folder } from './tree.js';
+import { buildTree, fileTypeChoices, TREE, treeKey, visibleItems } from './tree.js';
 import { S } from './strings.js';
 import NewFileDialog from './NewFileDialog.vue';
 import RenameDialog from './RenameDialog.vue';
@@ -24,16 +24,14 @@ const props = defineProps<{
   registry: TypeRegistry;
   /** The workspace folder's name, shown at the top. */
   workspaceName: string;
-  /** Types whose documents have a header to edit (their format's editor module says so). */
-  headerTypes?: string[];
 }>();
 const emit = defineEmits<{
   select: [path: string];
   /** Something changed: refresh, and open this file afterwards (null: none; omitted: as is). */
   changed: [selectPath?: string | null];
   error: [error: unknown];
-  /** Open this file and its Header dialog. */
-  header: [path: string];
+  /** Open this file and its Document settings. */
+  documentSettings: [path: string];
   /** Open this file at its first conflict. */
   conflicts: [path: string];
 }>();
@@ -144,8 +142,8 @@ async function remove(path: string) {
 }
 
 // Moving: by dragging a file or folder onto a folder (or anywhere in it), or
-// onto the workspace name or the top level; or Move to… from the keyboard. A
-// move is a rename (saved, as everything is).
+// onto the workspace name or the top level. A move is a rename (saved, as
+// everything is).
 const dragging = ref<string | null>(null);
 const over = ref<string | null>(null);
 let opening: { folder: string; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -160,26 +158,6 @@ async function move(from: string, folder: string) {
   if (folder) expand(folder);
   if (tabStop.value === from) tabStop.value = to;
   await act(() => props.api.renameFile(from, to), follow);
-}
-
-/** Every folder of the workspace, for Move to…. */
-function allFolders(dir: Folder = tree.value): string[] {
-  return [...dir.folders.values()].flatMap((f) => [f.path, ...allFolders(f)]);
-}
-
-/** Move to…: the keyboard's way to move a file or folder, by naming the folder it goes in. */
-async function moveTo(from: string) {
-  const name = props.files.find((f) => f.path === from)?.title || from.slice(from.lastIndexOf('/') + 1);
-  const answer = await askText(S.tree.moveAsk(name), folderOf(from), S.tree.move);
-  if (answer === null) return;
-  const folder = answer.trim().replace(/^\/+|\/+$/g, '');
-  if (folder === folderOf(from)) return;
-  if (folder && !allFolders().includes(folder)) {
-    emit('error', S.tree.noFolder(folder));
-    return;
-  }
-  if (!canDrop(from, folder)) return;
-  await move(from, folder);
 }
 
 function dragStart(e: DragEvent, path: string) {
@@ -231,21 +209,18 @@ function drop(e: DragEvent, folder: string) {
   void move(from, folder);
 }
 
-// The right-click menu (also Shift+F10 or the menu key on a row).
+// The right-click menu (also Shift+F10 or the menu key on a row). A file has
+// what is done to that file (opening it is a click); a folder or the top level,
+// what goes in it.
 const menu = shallowRef<{ x: number; y: number; items: ContextItem[] } | null>(null);
 
 function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[] {
   const name = path.slice(path.lastIndexOf('/') + 1);
   if (kind === 'file') {
     const file = props.files.find((f) => f.path === path);
-    const folder = folderOf(path);
     return [
-      ...(file?.type ? [{ label: S.tree.open, run: () => emit('select', path), testid: 'context:open' }] : []),
-      ...(file?.type && props.headerTypes?.includes(file.type) ? [{ label: S.tree.header, run: () => emit('header', path), testid: 'context:header' }] : []),
+      ...(file?.type ? [{ label: S.tree.documentSettings, run: () => emit('documentSettings', path), testid: 'context:document-settings' }] : []),
       { label: S.common.renameEllipsis, run: () => void rename(path), testid: 'context:rename' },
-      { label: S.tree.moveTo, run: () => void moveTo(path), testid: 'context:move' },
-      { label: S.tree.newFileMenu(S.tree.here), run: () => create(folder), testid: 'context:new-file-here' },
-      { label: S.tree.newFolderMenu(S.tree.here), run: () => void newFolder(folder), testid: 'context:new-folder-here' },
       { label: S.common.deleteEllipsis, run: () => void remove(path), danger: true, testid: 'context:delete' },
     ];
   }
@@ -255,7 +230,6 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
     { label: S.tree.newFolderMenu(where), run: () => void newFolder(path), testid: 'context:new-folder' },
     ...(kind === 'folder' ? [
       { label: S.common.renameEllipsis, run: () => void renameFolder(path), testid: 'context:rename-folder' },
-      { label: S.tree.moveTo, run: () => void moveTo(path), testid: 'context:move-folder' },
     ] : []),
   ];
 }

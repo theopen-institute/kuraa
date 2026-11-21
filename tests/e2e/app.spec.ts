@@ -68,6 +68,7 @@ test('a named version is committed; a past version reads as rendered or source',
   await page.keyboard.type(' Clearer by noon.');
 
   await page.getByTestId('menu-button').click();
+  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu').getByRole('button', { name: 'Save version…' }).click();
   await page.getByTestId('ask').locator('input').fill('Checkpoint');
   await page.getByTestId('ask').getByRole('button', { name: 'Save version' }).click();
@@ -75,6 +76,7 @@ test('a named version is committed; a past version reads as rendered or source',
   expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe('Checkpoint');
 
   await page.getByTestId('menu-button').click();
+  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu').getByRole('button', { name: 'History' }).click();
   const history = page.getByTestId('history').locator('li');
   await expect(history.first()).toContainText('Checkpoint');

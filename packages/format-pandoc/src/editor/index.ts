@@ -2,7 +2,7 @@
 // markdown for a construct turns it into that construct (Backspace straight
 // afterwards turns it back); key bindings for marks, headings and lists;
 // footnotes as a word processor has them (./notes.ts); the YAML header kept out
-// of the page, for the client's Header dialog (./header.ts).
+// of the page, for the header in the client's Document settings (./header.ts).
 //
 // `createPandocEditor` is the extension point, as `createPandocType` is for the
 // format: R Markdown adds its chunks through it.

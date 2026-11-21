@@ -32,7 +32,7 @@ const onDisk = (dir: string, file: string) => () => readFileSync(join(dir, file)
 
 async function openHeader(page: Page, file: string) {
   await page.getByTestId(`file:${file}`).click({ button: 'right' });
-  await page.getByTestId('context:header').click();
+  await page.getByTestId('context:document-settings').click();
   await expect(page.getByTestId('header')).toBeVisible();
 }
 
@@ -83,6 +83,7 @@ test('the header is edited in its dialog, not in the page', async ({ page }) => 
 
     // The Source view shows it as text.
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-document').click();
     await page.getByTestId('toggle-source').click();
     await expect(page.locator('.source-view')).toContainText('title: "A better title: with a colon"');
   } finally {
@@ -126,7 +127,7 @@ test('a document needs a title; YAML that does not parse cannot be saved', async
 
     // Other fields can be removed; the title stays.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-header').click();
+    await page.getByTestId('menu-document').click();
     await dialog.getByRole('button', { name: 'Remove Language' }).click();
     await dialog.getByTestId('header-save').click();
     await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Fresh\n---\n\n# Plain\n\nNo header.\n');

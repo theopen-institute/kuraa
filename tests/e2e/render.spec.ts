@@ -36,6 +36,7 @@ test('the Preview panel renders the document as it is now, and saves Word', asyn
   await expect(page.getByTestId('status')).toContainText('Connected');
 
   await page.getByTestId('menu-button').click();
+  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu-preview').click();
   const panel = page.getByTestId('preview-panel');
   await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 240_000 });

@@ -20,7 +20,7 @@ import ErrorBanner from './ErrorBanner.vue';
 import FileTree from './FileTree.vue';
 import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
-import Menu from './Menu.vue';
+import Menu, { type MenuPanel } from './Menu.vue';
 import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
@@ -88,8 +88,8 @@ const syncing = ref(false);
 const historyOpen = ref(false);
 const showSource = ref(false);
 const menuOpen = ref(false);
-/** The menu's part to open at: the menu itself, or its Server panel (to change the access code). */
-const menuPanel = ref<'menu' | 'access'>('menu');
+/** The menu's part to open at: the menu itself, Document settings, or its Server panel (to change the access code). */
+const menuPanel = ref<MenuPanel>('menu');
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 const componentsOpen = ref(false);
@@ -128,7 +128,7 @@ function openSearch() {
   sidePanel.value = 'search';
   searchAsked.value++;
 }
-function openMenu(panel: 'menu' | 'access' = 'menu') {
+function openMenu(panel: MenuPanel = 'menu') {
   menuPanel.value = panel;
   menuOpen.value = true;
 }
@@ -163,8 +163,6 @@ async function restoreVersion() {
   notice.value = { kind: 'info', text: date ? S.versions.restored(date) : S.versions.usedOutside };
 }
 
-/** The Header dialog is open for the open file. */
-const headerOpen = ref(false);
 /** The live editor: its find bar, outline and format commands, for the menu. */
 const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
 const fileTree = useTemplateRef<InstanceType<typeof FileTree>>('fileTree');
@@ -294,8 +292,12 @@ async function removeWorkspace(id: string) {
 // Each format's editor module, unless this person turned it off (Components).
 const editorsOff = ref(loadEditorsOff());
 const editorFor = (typeId: string) => (editorsOff.value.includes(typeId) ? undefined : props.editors[typeId]);
-// Types whose documents have a header to edit: their editor module (if on) says so.
-const headerTypes = computed(() => props.types.filter((t) => editorFor(t.id)?.header).map((t) => t.id));
+/** The open document's header, for Document settings to edit: its format's editor module (if on) says how, through the live editor. */
+const header = computed(() => {
+  const spec = type.value ? editorFor(type.value.id)?.header : undefined;
+  const e = editor.value;
+  return spec && e?.view ? { view: e.view, spec, version: e.docVersion } : null;
+});
 /** The editor modules that are on: their cues and keys are on the Markdown and shortcuts sheet. */
 const editorsOn = computed(() => Object.fromEntries(Object.entries(props.editors).filter(([id]) => !editorsOff.value.includes(id))));
 function setEditorsOff(ids: string[]) {
@@ -352,7 +354,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
 function select(next: string | null) {
   if (next === path.value) return;
-  headerOpen.value = false;
   liveTitle.value = null;
   liveConflicts.value = null;
   view(null);
@@ -362,11 +363,11 @@ function select(next: string | null) {
   path.value = next;
 }
 
-/** Open a file (if it is not open) and its Header dialog. */
-function openHeader(next: string) {
+/** Open a file (if it is not open) and its Document settings. */
+function openDocumentSettings(next: string) {
   select(next);
   view(null);
-  headerOpen.value = true;
+  openMenu('document');
 }
 
 // Refreshes overlap (a file made here, work arriving from another device): an
@@ -543,9 +544,8 @@ function useSettings(s: Settings) {
         :selected="path"
         :registry="hostRegistry"
         :workspace-name="workspace?.name ?? S.app.files"
-        :header-types="headerTypes"
         @select="select"
-        @header="openHeader"
+        @document-settings="openDocumentSettings"
         @conflicts="showConflicts"
         @changed="refreshTree"
         @error="fail"
@@ -629,11 +629,9 @@ function useSettings(s: Settings) {
               :show-source="showSource"
               :run="workspace?.run ?? null"
               :format-editor="editorFor(type.id)"
-              :header-open="headerOpen"
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
               @status="(s) => (status = s)"
-              @close-header="headerOpen = false"
               @title="(t) => (liveTitle = { path: path!, title: t })"
               @conflicts="(n) => (liveConflicts = { path: path!, count: n })"
               @files-changed="refreshTree()"
@@ -694,7 +692,7 @@ function useSettings(s: Settings) {
       :host-url="settings.hostUrl"
       :viewing="!!viewing"
       :show-source="showSource"
-      :has-header="!!type && headerTypes.includes(type.id)"
+      :header="header"
       :history-open="historyOpen"
       :syncing="syncing"
       :settings="settings"
@@ -705,7 +703,6 @@ function useSettings(s: Settings) {
       :owner-off="ownerOff"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
-      @header="headerOpen = true"
       @find="editor?.openFind()"
       @outline="editor?.toggleOutline()"
       @insert-table="editor?.command('insertTable')"

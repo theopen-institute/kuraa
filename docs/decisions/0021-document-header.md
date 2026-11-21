@@ -1,8 +1,10 @@
 # 0021 · The document header is edited in its own dialog
 
+(The dialog is now part of Document settings, and the right-click menu changed: [0054](0054-document-settings.md).)
+
 A Pandoc document's header (the YAML metadata block at the top: title, authors, date, bibliography,
 output settings) is not drawn in the page. It is edited in the **Header** dialog, opened by
-right-clicking the file in the sidebar (**Header…**) or from the menu. The Source view still shows
+right-clicking the file in the sidebar (**Header…**, now **Document settings…**) or from the menu. The Source view still shows
 it as text, and it can be edited there.
 
 **Who knows what.**
@@ -31,6 +33,6 @@ saving, so someone else's change to another field is kept, as are comments, orde
 Saving YAML typed in the dialog writes the whole header, and asks first if someone changed it
 meanwhile. Either is one edit, undone with ⌘Z.
 
-**The sidebar's right-click menu** has Open, Header… (for files whose format has a header), Rename…
+**The sidebar's right-click menu** had Open, Header… (for files whose format has a header), Rename…
 and Delete… for a file; a new file or folder for a folder or the top level, and Rename… for a
 folder (with everything in it; the open file follows, committed as a rename).

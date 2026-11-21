@@ -84,6 +84,7 @@ test('the outline lists the headings, follows the document and goes to them', as
 
   // From the menu too.
   await page.getByTestId('menu-button').click();
+  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu-outline').click();
   await expect(outline).toBeVisible();
 });

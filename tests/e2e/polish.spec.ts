@@ -3,7 +3,7 @@
 // connection shows a banner with what is not yet sent, the file list is a tree
 // for the keyboard, and dialogs keep focus while open and give it back.
 import { expect, test, type Page } from '@playwright/test';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
 
@@ -116,7 +116,7 @@ test('offline: a banner says what is kept and not yet sent, and Try again reconn
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('Typed while offline.');
 });
 
-test('the file list is a tree for the keyboard: arrows, Enter, F2, Shift+F10 and Move to…', async ({ page }) => {
+test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10', async ({ page }) => {
   const dir = `kb-${Date.now().toString(36)}`;
   await create(`${dir}/a.md`, '---\ntitle: Alpha\n---\n\nAlpha body.\n');
   await create(`${dir}/b.md`, '---\ntitle: Beta\n---\n\nBeta body.\n');
@@ -176,22 +176,25 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2, Shift+F10 and
   await page.keyboard.press('Escape');
   await expect(row(`${dir}/zz.unknownkind`)).toBeFocused();
 
-  // Shift+F10 is the right-click menu; Move to… moves without dragging.
+  // Shift+F10 is the right-click menu. A file's has what is done to the file:
+  // its settings, renaming and deleting (new files go in folders).
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Shift+F10');
   const menu = page.getByTestId('context-menu');
   await expect(menu).toBeVisible();
-  await expect(menu.getByTestId('context:move')).toBeVisible();
-  for (let i = 0; i < 10 && !(await menu.getByTestId('context:move').evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Document settings…', 'Rename…', 'Delete…']);
+  for (let i = 0; i < 10 && !(await menu.getByTestId('context:document-settings').evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  const ask = page.getByTestId('ask');
-  await expect(ask).toContainText('Move “Beta” to which folder?');
-  await ask.locator('input').fill(`${dir}/inner`);
-  await page.keyboard.press('Enter');
-  await expect(row(`${dir}/inner/b.md`)).toBeVisible();
-  expect(existsSync(join(E2E.dir, dir, 'inner', 'b.md'))).toBe(true);
-  // The open file followed it.
-  await expect(row(`${dir}/inner/b.md`)).toHaveAttribute('aria-current', 'page');
+  // Document settings: the menu's panel for the document, with its header.
+  await expect(page.getByTestId('menu')).toHaveAccessibleName('Document settings');
+  await expect(page.getByTestId('header').getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Beta');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('menu')).toBeHidden();
+  // A folder's menu has what goes in it.
+  await row(`${dir}/inner`).focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner…', 'New folder in inner…', 'Rename…']);
+  await page.keyboard.press('Escape');
 });
 
 test('dialogs keep focus while open, close on Escape, and give focus back; the menu takes focus', async ({ page }) => {
@@ -235,8 +238,10 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
 
   // A question (ask.ts) is a dialog on the same stack: Escape closes it.
   await page.getByTestId('menu-button').click();
-  await expect(menu).toBeVisible();
-  await menu.getByRole('button', { name: 'Save version…' }).click();
+  await page.getByTestId('menu-document').click();
+  const documentSettings = page.getByRole('dialog', { name: 'Document settings' });
+  await expect(documentSettings).toBeVisible();
+  await documentSettings.getByRole('button', { name: 'Save version…' }).click();
   const ask = page.getByRole('dialog', { name: 'Name this version' });
   await expect(ask).toBeVisible();
   await page.keyboard.press('Escape');

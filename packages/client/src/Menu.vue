@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // The menu: everything that is not the document. Opened from the bottom of the
-// sidebar (or ⌘,). Sections: this document (views, versions, saving), code (the
-// session, packages), the workspace (sync, connection, who is here), and you
-// (your settings, you on this computer, and the shell's own actions). The server
-// and its access code, where the shell does not run the host, is a panel of its
-// own, opened from You. It is a modal dialog: focus moves into it, and Escape
-// closes it (or goes back from the Server panel).
+// sidebar (or ⌘,). Sections: the workspace (sync, connection, who is here), its
+// devices and online copy, components, and you (your settings, you on this
+// computer, and the shell's own actions). The open document's own settings are
+// a panel of their own, Document settings (also opened by right-clicking a file
+// in the sidebar): its views, versions and saving, its header, and its code
+// session. So is the server and its access code, where the shell does not run
+// the host, opened from You. It is a modal dialog: focus moves into it, and
+// Escape closes it (or goes back from a panel opened from the menu).
 import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
+import type { HeaderSpec } from '@kuraa/editor-kit';
+import type { EditorView } from 'prosemirror-view';
 import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
@@ -20,13 +24,17 @@ import { connectionLabel, S } from './strings.js';
 import { useDialog } from './vue.js';
 import CodeSection from './CodeSection.vue';
 import DevicesSection from './DevicesSection.vue';
+import HeaderForm from './HeaderForm.vue';
 import OnlineCopySection from './OnlineCopySection.vue';
 import SettingsForm from './SettingsForm.vue';
 import PersonKey from './PersonKey.vue';
 
+/** The menu's parts: the menu itself, Document settings, and the Server panel. */
+export type MenuPanel = 'menu' | 'document' | 'access';
+
 const props = defineProps<{
-  /** Where it opens: the menu, or its Server panel (to change the access code). */
-  panel?: 'menu' | 'access';
+  /** Where it opens: the menu, its Document settings, or its Server panel (to change the access code). */
+  panel?: MenuPanel;
   path: string | null;
   /** What the open file is called: its title, or its filename. */
   name: string | null;
@@ -36,8 +44,8 @@ const props = defineProps<{
   hostUrl: string;
   viewing: boolean;
   showSource: boolean;
-  /** The document has a header to edit. */
-  hasHeader: boolean;
+  /** The open document's header, to edit, if its format has one: the live editor's view, and how the format reads it. */
+  header: { view: EditorView; spec: HeaderSpec; version: number } | null;
   historyOpen: boolean;
   syncing: boolean;
   settings: Settings;
@@ -53,7 +61,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   toggleSource: [];
   toggleHistory: [];
-  header: [];
   saveVersion: [];
   sync: [];
   saveSettings: [settings: Settings];
@@ -77,11 +84,14 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-/** The menu itself, or its Host panel. */
-const panel = ref<'menu' | 'access'>(props.panel === 'access' && !props.shell.managesHost ? 'access' : 'menu');
+/** The menu itself, its Document settings, or its Server panel. */
+const panel = ref<MenuPanel>(props.panel === 'access' ? (props.shell.managesHost ? 'menu' : 'access') : props.panel === 'document' && props.path ? 'document' : 'menu');
 const root = useTemplateRef<HTMLElement>('root');
+const headerForm = useTemplateRef<InstanceType<typeof HeaderForm>>('headerForm');
 useDialog(root, () => {
-  if (panel.value === 'access' && props.panel !== 'access') panel.value = 'menu';
+  if (panel.value === 'document' && headerForm.value?.escape()) return;
+  // A panel opened from the menu goes back to it; one the menu opened at closes.
+  if (panel.value !== 'menu' && props.panel !== panel.value) panel.value = 'menu';
   else emit('close');
 });
 
@@ -112,7 +122,7 @@ const runner = computed(() => props.status?.runner ?? null);
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('close')">
-    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :aria-label="panel === 'access' ? S.menu.server : S.menu.label" data-testid="menu">
+    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :class="{ 'menu-document': panel === 'document' && header }" :aria-label="panel === 'access' ? S.menu.server : panel === 'document' ? S.menu.documentSettingsTitle : S.menu.label" data-testid="menu">
       <template v-if="panel === 'access'">
         <div class="menu-panel-head">
           <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">{{ S.menu.backToMenu }}</button>
@@ -125,7 +135,11 @@ const runner = computed(() => props.status?.runner ?? null);
         </section>
         <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
       </template>
-      <template v-else>
+      <template v-else-if="panel === 'document'">
+        <div class="menu-panel-head">
+          <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">{{ S.menu.backToMenu }}</button>
+          <h2>{{ S.menu.documentSettingsTitle }}</h2>
+        </div>
         <section v-if="path" class="menu-section">
           <h3>{{ name }}</h3>
           <div v-if="doc" class="menu-actions">
@@ -139,7 +153,6 @@ const runner = computed(() => props.status?.runner ?? null);
             >
               {{ showSource ? S.menu.showDocument : S.menu.editSource }}
             </button>
-            <button v-if="hasHeader" type="button" data-testid="menu-header" @click="emit('header'); emit('close')">{{ S.menu.header }}</button>
             <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="emit('toggleHistory'); emit('close')">
               {{ historyOpen ? S.menu.hideHistory : S.menu.history }}
             </button>
@@ -165,6 +178,20 @@ const runner = computed(() => props.status?.runner ?? null);
         </section>
 
         <CodeSection v-if="doc && runner" :runner="runner" @packages="(engine) => { emit('packages', runner!, engine); emit('close'); }" />
+
+        <section v-if="doc && header" class="menu-section">
+          <HeaderForm ref="headerForm" :view="header.view" :spec="header.spec" :path="path!" :version="header.version" @saved="emit('close')" />
+        </section>
+
+        <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
+      </template>
+      <template v-else>
+        <section v-if="path && type" class="menu-section" data-testid="menu-this-document">
+          <h3>{{ name }}</h3>
+          <div class="menu-actions">
+            <button type="button" data-testid="menu-document" @click="panel = 'document'">{{ S.menu.documentSettings }}</button>
+          </div>
+        </section>
 
         <section class="menu-section">
           <h3>{{ workspace?.name ?? S.app.workspace }}</h3>

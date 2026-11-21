@@ -124,6 +124,11 @@ interface RoomRecord {
   dirty: boolean;
   /** Flushed but not committed. */
   uncommitted: boolean;
+  /**
+   * The hash of the file's text (as `lastHash`) when it was known to be the
+   * branch's committed version: committing then has nothing to do. Null: not known.
+   */
+  committedHash: string | null;
   contributors: Map<string, PresenceUser>;
   editingSince: number | null;
   lastFlushAt: string | null;
@@ -522,7 +527,20 @@ export class Host {
     this.records.set(key, rec);
     this.byRoom.set(rec.room, rec);
     if (rec.needsOutsideCheck) await this.applyOutside(rec, text);
+    else this.noteCommitted(rec, text);
     return rec;
+  }
+
+  /**
+   * Find out, apart from the queue (it only reads), whether the file as opened is
+   * the branch's committed version: then closing it, or saving it with nothing
+   * changed, needs no git at all (commitNow).
+   */
+  private noteCommitted(rec: RoomRecord, text: string): void {
+    const hash = hashText(text);
+    void this.git.run(['rev-parse', '-q', '--verify', `refs/heads/${rec.branch}:${rec.path}`], { allowFail: true }).then((r) => {
+      if (r.code === 0 && r.stdout.trim() === blobId(text) && rec.lastHash === hash && !rec.uncommitted) rec.committedHash = hash;
+    }, () => undefined);
   }
 
   private newRecord(init: Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'generation' | 'baseCommit' | 'previous' | 'lastHash' | 'state'>): RoomRecord {
@@ -532,6 +550,7 @@ export class Host {
       seedText: null,
       dirty: false,
       uncommitted: false,
+      committedHash: null,
       contributors: new Map(),
       editingSince: null,
       lastFlushAt: null,
@@ -733,6 +752,8 @@ export class Host {
       t[k] = undefined;
     }
     rec.editingSince = null;
+    // Nothing written since the file was last known to be committed: nothing to commit (and no git to run for it).
+    if (message === undefined && st.branch === rec.branch && !rec.dirty && !rec.uncommitted && rec.committedHash === rec.lastHash) return null;
     const people = [...rec.contributors.values()];
     const extra = message === undefined ? [AUTOSAVE_TRAILER] : [];
     let committed: string | null;
@@ -762,6 +783,8 @@ export class Host {
     }
     this.saveRecovered(rec);
     rec.uncommitted = false;
+    // On the branch checked out, the file is now as committed (a commit, or nothing to commit).
+    if (st.branch === rec.branch) rec.committedHash = rec.lastHash;
     if (!committed) return null;
     rec.contributors.clear();
     rec.baseCommit = committed;

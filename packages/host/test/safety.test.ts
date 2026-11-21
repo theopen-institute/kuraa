@@ -156,6 +156,43 @@ describe('host safety', () => {
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('Links');
   });
 
+  it('saving a room with nothing changed since it was committed runs no git; anything changed is still committed', async () => {
+    // Changed before the host started: not the committed version, so it is committed like any change.
+    writeFileSync(join(dir, 'other.md'), '# Other\n\nChanged before.\n');
+    await start({ ...FAST, idleCommitMs: 600_000, maxCommitMs: 600_000 });
+    const host = running.host as unknown as { git: { run: (args: string[], o?: object) => Promise<unknown> } };
+    const ran: string[] = [];
+    const run = host.git.run.bind(host.git);
+    host.git.run = (args, o) => {
+      ran.push(args[0]!);
+      return run(args, o);
+    };
+    const a = await connect('notes.md');
+    await until(() => record().committedHash !== null, 15_000, 'the file known to be committed');
+    ran.length = 0;
+    expect(await running.host.commitRoom(record())).toBeNull();
+    expect(ran).toEqual([]);
+
+    // An outside change: committed.
+    writeFileSync(join(dir, 'notes.md'), NOTES.replace('The tide', 'Outside: The tide'));
+    await until(() => a.read().textContent.includes('Outside: The tide'), 15_000, 'the outside change in the room');
+    expect(await running.host.commitRoom(record())).not.toBeNull();
+    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Outside: The tide');
+    ran.length = 0;
+    expect(await running.host.commitRoom(record())).toBeNull();
+    expect(ran).toEqual([]);
+
+    // An edit: committed.
+    a.write(insertAt(a.read(), 'Light rain', 'Live: '));
+    await until(() => record().dirty, 15_000, 'the edit at the host');
+    expect(await running.host.commitRoom(record())).not.toBeNull();
+    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Live: Light rain');
+
+    await connect('other.md');
+    expect(await running.host.commitRoom(record('other.md'))).not.toBeNull();
+    expect(git(dir, 'show', 'HEAD:other.md')).toContain('Changed before.');
+  });
+
   it('merges an outside save it was not told of before writing over it', async () => {
     await start({ ...FAST, flushMs: 600_000, idleCommitMs: 600_000 });
     const a = await connect('notes.md');

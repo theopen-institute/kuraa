@@ -215,7 +215,8 @@ and the web client in one folder, needing only Node 24 and git (and Podman to ru
 it updates itself ([decision 0052](docs/decisions/0052-the-server-updates-itself.md)):
 
 ```sh
-curl -L https://github.com/<owner>/<repo>/releases/latest/download/kuraa-server.tar.gz | tar xz
+v=$(curl -sLo /dev/null -w '%{url_effective}' https://github.com/<owner>/<repo>/releases/latest); v=${v##*/v}
+curl -L https://github.com/<owner>/<repo>/releases/download/v$v/kuraa-server-$v.tar.gz | tar xz
 node kuraa-server-*/kuraa-host.mjs install --service -- --workspaces ~/kuraa
 # Installed kuraa in ~/.kuraa/server, with a service (systemd on Linux, launchd on macOS) that runs
 # ~/.kuraa/server/kuraa-host --auto-update --workspaces ~/kuraa, with an access code of its own.

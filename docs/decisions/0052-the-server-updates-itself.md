@@ -16,7 +16,7 @@ devices speak changes, such a server stops syncing with updated apps until someo
   is the `release` environment's secret `SERVER_SIGNING_KEY`) signs the archive, and its public half
   is built into each server, which takes an update only if signed with it: GitHub, or whoever
   breaks into the repository's releases, cannot push code to servers without the key. A server
-  built without a key checks only the checksum the release lists (`.sha256`). Losing the key
+  built without a key checks only the checksum GitHub lists for the archive. Losing the key
   means servers stop updating, and must be installed again by hand.
 - **Installed in a folder of its own** (`kuraa-host install [--to dir]`, default
   `~/.kuraa/server`): `versions/<version>/` for each, `current` naming the one to run, and

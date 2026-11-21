@@ -40,6 +40,7 @@ export interface Release {
   version: string;
   archive: string;
   signature: string | null;
+  /** The archive's SHA-256 (hex), as GitHub lists it for the asset. */
   checksum: string | null;
 }
 
@@ -71,13 +72,14 @@ export async function latestRelease(repo: string): Promise<Release | null> {
   const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'kuraa-server' } });
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`GitHub answered ${r.status} when asked for the latest release`);
-  const body = (await r.json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
+  const body = (await r.json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string; digest?: string | null }[] };
   const version = String(body.tag_name ?? '').replace(/^v/, '');
   if (!SEMVER.test(version)) return null;
-  const asset = (name: string) => body.assets?.find((a) => a.name === name)?.browser_download_url ?? null;
+  const asset = (name: string) => body.assets?.find((a) => a.name === name);
   const archive = asset(archiveName(version));
   if (!archive) return null;
-  return { version, archive, signature: asset(`${archiveName(version)}.sig`), checksum: asset(`${archiveName(version)}.sha256`) };
+  const digest = /^sha256:([0-9a-f]{64})$/i.exec(archive.digest ?? '');
+  return { version, archive: archive.browser_download_url, signature: asset(`${archiveName(version)}.sig`)?.browser_download_url ?? null, checksum: digest ? digest[1]! : null };
 }
 
 async function download(url: string): Promise<Buffer> {
@@ -99,8 +101,7 @@ export function checkArchive(archive: Buffer, o: { publicKey: string | null; sig
     return ok ? null : 'its signature is not the release key’s';
   }
   if (!o.checksum) return 'the release lists no checksum';
-  const want = o.checksum.trim().split(/\s+/)[0]!.toLowerCase();
-  return createHash('sha256').update(archive).digest('hex') === want ? null : 'its checksum does not match';
+  return createHash('sha256').update(archive).digest('hex') === o.checksum.trim().toLowerCase() ? null : 'its checksum does not match';
 }
 
 /** An installed server's folder, if this build runs from one (versions/<version>/ under it). */
@@ -167,7 +168,7 @@ export async function updateFrom(o: {
   const why = checkArchive(archive, {
     publicKey: o.build.publicKey,
     signature: r.signature ? await get(r.signature) : null,
-    checksum: r.checksum ? (await get(r.checksum)).toString('utf8') : null,
+    checksum: r.checksum,
   });
   if (why) throw new Error(`Not updating to ${r.version}: ${why}`);
   installArchive(o.root, archive, r.version);

@@ -1,12 +1,11 @@
 // Builds the server as released (decision 0052): kuraa-host (packages/host/src/
 // server.ts) bundled into one file, with the web client beside it, and
 // Hyperswarm's native parts for every platform it ships on, in one folder that
-// needs only Node 24 and git; then that folder as an archive, its checksum, and,
-// with the release key, its signature.
+// needs only Node 24 and git; then that folder as an archive and, with the
+// release key, its signature. (Its checksum is the one GitHub lists for it.)
 //
 //   node scripts/build-server.mjs       → dist/server/kuraa-server-<version>.tar.gz
-//                                         (.sha256; .sig with SERVER_SIGNING_KEY), and
-//                                         kuraa-server.tar.gz, the same, to install the latest from
+//                                         (and .sig, with SERVER_SIGNING_KEY)
 //
 // The version is the app's (apps/desktop/package.json). KURAA_UPDATES
 // (github:<owner>/<repo>) is where the server looks for newer releases;
@@ -15,7 +14,7 @@
 // takes only updates signed with it. Build the web client first (pnpm web:build).
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -97,8 +96,5 @@ writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server
 const archive = join(out, `${name}.tar.gz`);
 execFileSync('tar', ['-czf', archive, '-C', out, name]);
 const bytes = readFileSync(archive);
-writeFileSync(`${archive}.sha256`, `${createHash('sha256').update(bytes).digest('hex')}  ${name}.tar.gz\n`);
 if (key) writeFileSync(`${archive}.sig`, `${sign(null, bytes, key).toString('base64')}\n`);
-// The same under a name that stays, so the latest is always at …/releases/latest/download/kuraa-server.tar.gz.
-cpSync(archive, join(out, 'kuraa-server.tar.gz'));
 process.stdout.write(`server: ${archive}${key ? ' (signed)' : ' (not signed: no SERVER_SIGNING_KEY)'}${gh ? `, updating from ${gh[1]}` : ', not updating itself (no KURAA_UPDATES)'}\n`);

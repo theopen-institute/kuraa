@@ -84,7 +84,8 @@ module.exports = {
     files: ['build/native/darwin-${arch}/**'],
     artifactName: '${productName}-${version}-mac-${arch}.${ext}',
   },
-  dmg: { artifactName: '${productName}-${version}-mac-${arch}.${ext}' },
+  // The dmg is for installing; updates on macOS come from the zip, so the dmg needs no blockmap.
+  dmg: { artifactName: '${productName}-${version}-mac-${arch}.${ext}', writeUpdateInfo: false },
   // An installer for this user alone (no administrator), which updates are put in place with.
   // (A portable .exe cannot update itself.)
   win: { target: [{ target: 'nsis', arch: ['x64'] }], files: ['build/native/win32-${arch}/**'], azureSignOptions: windowsSigning() },

@@ -33,7 +33,7 @@ function releaseDir(version: string): string {
   return dir;
 }
 
-/** A release as published: its archive, signed (with the release key unless said), and its checksum. */
+/** A release as published: its archive, signed (with the release key unless said), and the checksum GitHub lists. */
 function published(version: string, key = privateKey): { release: Release; files: Map<string, Buffer> } {
   const dir = releaseDir(version);
   const archive = join(dir, '..', `kuraa-server-${version}.tar.gz`);
@@ -42,9 +42,8 @@ function published(version: string, key = privateKey): { release: Release; files
   const files = new Map<string, Buffer>([
     ['archive', bytes],
     ['sig', Buffer.from(sign(null, bytes, key).toString('base64'))],
-    ['sum', Buffer.from(`${createHash('sha256').update(bytes).digest('hex')}  x\n`)],
   ]);
-  return { release: { version, archive: 'archive', signature: 'sig', checksum: 'sum' }, files };
+  return { release: { version, archive: 'archive', signature: 'sig', checksum: createHash('sha256').update(bytes).digest('hex') }, files };
 }
 
 const build = (o: Partial<ServerBuild> = {}): ServerBuild => ({ version: '0.1.0', repo: 'someone/kuraa', publicKey: PUBLIC, ...o });
@@ -93,7 +92,7 @@ describe('a released server', () => {
     expect(existsSync(join(root, 'versions', '0.2.0'))).toBe(false);
     // Built without a key: the checksum the release lists, at least.
     expect(await update(root, published('0.2.0', other), build({ publicKey: null }))).toBe('0.2.0');
-    expect(checkArchive(Buffer.from('x'), { publicKey: null, signature: null, checksum: '00 x' })).toBe('its checksum does not match');
+    expect(checkArchive(Buffer.from('x'), { publicKey: null, signature: null, checksum: '00' })).toBe('its checksum does not match');
   });
 
   it('refuses an archive that is not the version it says', async () => {

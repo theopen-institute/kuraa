@@ -59,7 +59,8 @@ them, and a file list only a mouse could use. This is the pass that fixes those.
   commit or that copy), reading it or compared with the document now, and **Use this version…** makes
   the document read as it, as an undoable edit, like restoring a version (0043).
 - **Run and Preview** where code cannot run (Podman missing or stopped): a chunk's Run is shown but
-  disabled, with the environment's own message beside it (`ChunkRunner.unavailable`); the menu's Code
+  disabled, with the environment's own message as its tooltip (`ChunkRunner.unavailable`; once beside
+  it too, which cluttered the chunk); the menu's Code
   section says the same and disables Run all. The Preview panel already disabled Render and Save as
   with the reason; Update when saved is disabled too.
 

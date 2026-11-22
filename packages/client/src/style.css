@@ -680,7 +680,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .menu-details summary { cursor: pointer; width: fit-content; }
 
 /* Code that cannot run here now: why, beside a Run that cannot be pressed. */
-.chunk-unavailable { color: var(--warn); font: 11.5px var(--font); padding: 0 6px; max-width: 32em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-unavailable { color: var(--warn); }
 
 /* Choosing a folder on the server's computer (FolderPicker.vue). */

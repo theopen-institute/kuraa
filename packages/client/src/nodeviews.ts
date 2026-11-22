@@ -175,12 +175,10 @@ class CodeView implements NodeView {
     if (pending && status && !pending.device) {
       this.actions.replaceChildren(status, this.button(S.code.stop, S.code.stopTitle, () => this.report(runner.interrupt()), 'stop'));
     } else if (runner.unavailable) {
-      // Where code runs is not there (Podman missing, say): Run is offered, but not to press, with why beside it.
+      // Where code runs is not there (Podman missing, say): Run is offered, but not to press, saying why as its tooltip.
       const run = this.button(S.code.run, runner.unavailable, () => undefined, 'run');
       run.disabled = true;
-      const why = Object.assign(document.createElement('span'), { className: 'chunk-unavailable', textContent: runner.unavailable, title: runner.unavailable });
-      why.dataset.testid = 'chunk-unavailable';
-      this.actions.replaceChildren(...(status ? [status] : []), why, run);
+      this.actions.replaceChildren(...(status ? [status] : []), run);
     } else {
       // Offered only when the session does not have the chunks above as they now read.
       const rebuild = runner.rebuild(pos);

@@ -73,7 +73,13 @@ const devicesOf = (i: Info, p: Someone) => i.devices.filter((d) => p.devices.inc
 /** Computers no person here is known to be: listed apart (all of them, where there is no policy). */
 const others = (i: Info) => i.devices.filter((d) => !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
 /** Whether you may remove a computer: an admin, or it is yours (0068). */
-const mayRemove = (i: Info, d: Device) => i.canInvite && !i.removed && (admin.value || !!whose(d)?.you);
+const mayRemove = (i: Info, d: Device) => {
+  if (!i.canInvite || i.removed) return false;
+  const p = whose(d);
+  if (p?.you) return true;
+  // An admin's (or the owner's) computer: the owner's to remove (0070).
+  return admin.value && (!p || p.role === 'member' || !!i.people?.assignsAdmins);
+};
 
 /** Whether you may invite and remove here: an admin, or anyone where there is no policy yet. */
 const admin = computed(() => (info.value?.enabled ? info.value.people?.admin ?? true : true));
@@ -82,6 +88,14 @@ const nameOf = (p: Someone) => p.name ?? S.people.unknown;
 
 async function setRole(p: Someone, role: 'admin' | 'member') {
   await act(() => props.api.setRole(p.id, role));
+}
+
+/** Whether you may change this person's role, or take them out: admins are the owner's to make and unmake (0070); the owner is no one's. */
+const mayManagePerson = (i: Info, p: Someone) => admin.value && i.canInvite && !i.removed && !p.you && p.role !== 'owner' && (p.role === 'member' || !!i.people?.assignsAdmins);
+
+async function makeOwner(p: Someone) {
+  const ok = await askConfirm(S.people.makeOwnerAsk(nameOf(p)), S.people.makeOwner, true);
+  if (ok) await act(() => props.api.makeOwner(p.id));
 }
 
 async function removePerson(p: Someone) {
@@ -131,11 +145,12 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
       <li v-for="p in info.people.people" :key="p.id" class="person-block" :data-testid="`person:${nameOf(p)}`">
         <div class="person-line">
           <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template><span v-if="p.emails?.length" class="muted"> · {{ p.emails.join(', ') }}</span></span>
-          <span class="device-tag" :title="p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'admin' ? S.people.admin : S.people.member }}</span>
-          <template v-if="admin && info.canInvite && !info.removed && !p.you">
-            <button type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
+          <span class="device-tag" :title="p.role === 'owner' ? S.people.ownerTitle : p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'owner' ? S.people.owner : p.role === 'admin' ? S.people.admin : S.people.member }}</span>
+          <template v-if="mayManagePerson(info, p)">
+            <button v-if="info.people?.assignsAdmins" type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
             <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.people.removeEllipsis }}</button>
           </template>
+          <button v-if="info.people?.owner && info.people.owner === info.people.people.find((x) => x.you)?.id && !p.you && info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`make-owner:${nameOf(p)}`" @click="makeOwner(p)">{{ S.people.makeOwner }}…</button>
         </div>
         <ul class="menu-devices person-devices">
           <li v-if="p.you" data-testid="device-self">

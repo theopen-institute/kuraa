@@ -185,6 +185,9 @@ export interface Standing {
   managers: Set<string> | null;
   /** The person each device is (as its signing key's vouch says), where known: a person removes their own computers (0068). */
   persons?: Map<string, string>;
+  /** Devices whose person is an admin; and those whose person makes and unmakes admins (the owner): only they remove an admin's computer (0070). */
+  adminDevices?: Set<string>;
+  assigners?: Set<string>;
 }
 
 /** Records only an admin's device may make (0066), or, for a device, one of the same person's (0068): removing a device. */
@@ -201,9 +204,13 @@ export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' 
   if (s.removed.has(r.by)) return 'refuse';
   if (!s.members.has(r.by)) return 'wait';
   // Not (yet) an admin's, nor the same person's as the device it removes: it may be, once the policy or vouch that says so is taken.
-  if (forAdmins(r.kind) && s.managers && !s.managers.has(r.by)) {
+  if (forAdmins(r.kind) && s.managers) {
     const whose = s.persons?.get(r.by);
-    if (!whose || whose !== s.persons?.get(r.subject)) return 'wait';
+    const own = !!whose && whose === s.persons?.get(r.subject);
+    // An admin's (or the owner's) computer: only the owner removes it, or its own person (0070).
+    const ofAdmin = !!s.adminDevices?.has(r.subject);
+    const may = own || (s.managers.has(r.by) && (!ofAdmin || !!s.assigners?.has(r.by)));
+    if (!may) return 'wait';
   }
   return 'take';
 }

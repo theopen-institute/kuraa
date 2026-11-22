@@ -1,7 +1,7 @@
 // A workspace's policy: groups of admins and members, the same on every device (policy.ts, decision 0066).
 import { describe, expect, it } from 'vitest';
 import crypto from 'hypercore-crypto';
-import { evaluate, grantMessage, makeOp, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
+import { evaluate, grantMessage, hashedPath, makeOp, pathsAbove, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
 
 const WS = 'ab'.repeat(16);
 type Key = ReturnType<typeof crypto.keyPair>;
@@ -46,8 +46,12 @@ describe('a workspace’s policy', () => {
     h.add(grant(ada, 'member'), ada);
     h.add({ t: 'revoke', group: 'workspace', who: ada.id }, ada);
     expect(h.now().role(ada.id)).toBe('admin');
-    // Once Bo is an admin too, Ada may leave.
+    // Ada, the owner, may not leave; once she has given Bo the role, she may (0070).
     h.add(grant(bo, 'admin'), ada);
+    h.add({ t: 'revoke', group: 'workspace', who: ada.id }, ada);
+    expect(h.now().role(ada.id)).toBe('admin');
+    h.add({ t: 'owner', who: bo.id }, ada);
+    expect(h.now().owner).toBe(bo.id);
     h.add({ t: 'revoke', group: 'workspace', who: ada.id }, ada);
     expect(h.now().role(ada.id)).toBeNull();
     expect(h.now().people()).toEqual([{ id: bo.id, role: 'admin' }]);
@@ -158,10 +162,10 @@ describe('a workspace’s policy', () => {
     expect(p.mayWrite(ada.id, 'chapters/one.md')).toBe(false);
     expect(p.mayWrite(bo.id, 'chapters/bo.md')).toBe(true);
     expect(p.mayWrite(cy.id, 'chapters/bo.md')).toBe(false);
-    expect(p.ruleFor('chapters/sub/x.md')).toEqual({ path: 'chapters/', by: ['group:editors'] });
+    expect(p.ruleFor('chapters/sub/x.md')).toMatchObject({ path: 'chapters/', by: ['group:editors'] });
     // A rule naming no one is taken away.
     h.add({ t: 'rule', path: 'chapters/', by: [] }, ada);
-    expect(h.now().ruleFor('chapters/one.md')).toEqual({ path: '', by: ['admins'] });
+    expect(h.now().ruleFor('chapters/one.md')).toMatchObject({ path: '', by: ['admins'] });
   });
 
   describe('changes made at the same time (step 4)', () => {
@@ -195,11 +199,10 @@ describe('a workspace’s policy', () => {
       expect(p.role(cy.id)).toBe('member');
     });
 
+    // Equal admins: a workspace from before, with no owner yet (0070).
     it('two admins taking each other out at once are both out, if an admin is left', () => {
-      const h = history();
-      h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
-      h.add(grant(bo, 'admin'), ada);
-      h.add(grant(cy, 'admin'), ada);
+      const h = history(false);
+      h.add({ t: 'genesis', admins: [ada.id, bo.id, cy.id], legacy: true }, ada);
       const base = h.now().heads;
       h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
       h.add({ t: 'revoke', group: 'workspace', who: ada.id }, bo, base);
@@ -211,7 +214,10 @@ describe('a workspace’s policy', () => {
     });
 
     it('if that would leave no admin, neither stands, and the conflict is on record', () => {
-      const { h, base } = start();
+      const h = history(false);
+      h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
+      h.add(grant(cy, 'member'), ada);
+      const base = h.now().heads;
       h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
       h.add({ t: 'revoke', group: 'workspace', who: ada.id }, bo, base);
       const p = h.now();
@@ -230,5 +236,79 @@ describe('a workspace’s policy', () => {
       h.add(grant(cy, 'member'), ada);
       expect(h.now().cutoffs.has(cy.id)).toBe(false);
     });
+  });
+
+  it('has permissions on files and folders: who may change, who reads what is made there; nearest first; private paths by their hash (0069)', () => {
+    const h = history();
+    h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+    h.add(grant(bo, 'member'), ada);
+    h.add(grant(cy, 'member'), ada);
+    // A member may not; an admin may.
+    h.add({ t: 'perm', path: 'plans/', write: [bo.id] }, bo);
+    expect(h.now().perms.size).toBe(0);
+    h.add({ t: 'perm', path: 'plans/', write: [ada.id], read: [ada.id, bo.id] }, ada);
+    // A private file's permission, by its hash.
+    const secret = hashedPath(WS, 'plans/party.md');
+    h.add({ t: 'perm', path: secret, write: [bo.id] }, ada);
+    const p = h.now();
+    expect(p.ruleFor('plans/budget.md')).toMatchObject({ path: 'plans/', by: [ada.id] });
+    expect(p.ruleFor('plans/party.md')).toMatchObject({ path: 'plans/party.md', by: [bo.id], key: secret });
+    expect(p.mayWrite(bo.id, 'plans/party.md')).toBe(true);
+    expect(p.mayWrite(bo.id, 'plans/budget.md')).toBe(false);
+    // Who reads what is made there: the folder's audience, for its files and folders (and its own).
+    expect(p.readFor('plans/new.md')).toMatchObject({ path: 'plans/', audience: [ada.id, bo.id] });
+    expect(p.readFor('plans/sub/new.md')?.path).toBe('plans/');
+    expect(p.readFor('plans/')?.path).toBe('plans/');
+    expect(p.readFor('notes.md')).toBeNull();
+    // A rule made as before is the same as a perm's write, keeping what the perm says of reading.
+    h.add({ t: 'rule', path: 'plans/', by: [cy.id] }, ada);
+    expect(h.now().permAt('plans/')?.perm).toEqual({ write: [cy.id], read: [ada.id, bo.id] });
+    h.add({ t: 'perm', path: 'plans/' }, ada);
+    expect(h.now().permAt('plans/')).toBeNull();
+    expect(pathsAbove('a/b/c.md')).toEqual(['a/b/c.md', 'a/b/', 'a/', '']);
+  });
+
+  it('has an owner above the admins: only the owner makes and unmakes admins, and gives the role away (0070)', () => {
+    const h = history();
+    h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+    expect(h.now().owner).toBe(ada.id);
+    h.add(grant(bo, 'admin'), ada);
+    h.add(grant(cy, 'member'), ada);
+    // Bo, an admin, may put people in and take members out, but not make or unmake admins.
+    h.add(grant(dee, 'member'), bo);
+    expect(h.now().role(dee.id)).toBe('member');
+    h.add(grant(cy, 'admin'), bo);
+    expect(h.now().role(cy.id)).toBe('member');
+    h.add(grant(ada, 'member'), bo);
+    h.add({ t: 'revoke', group: 'workspace', who: ada.id }, bo);
+    expect(h.now().role(ada.id)).toBe('admin');
+    h.add({ t: 'revoke', group: 'workspace', who: dee.id }, bo);
+    expect(h.now().role(dee.id)).toBeNull();
+    // Nor give the owner's role, which is not his.
+    h.add({ t: 'owner', who: bo.id }, bo);
+    expect(h.now().owner).toBe(ada.id);
+    // Ada makes Cy an admin, and Bo a member.
+    h.add(grant(cy, 'admin'), ada);
+    h.add(grant(bo, 'member'), ada);
+    expect(h.now().role(cy.id)).toBe('admin');
+    expect(h.now().role(bo.id)).toBe('member');
+    // She gives the role to Bo (a member): he is the owner and an admin; she stays an admin.
+    h.add({ t: 'owner', who: bo.id }, ada);
+    const p = h.now();
+    expect(p.owner).toBe(bo.id);
+    expect(p.role(bo.id)).toBe('admin');
+    expect(p.role(ada.id)).toBe('admin');
+    expect(p.mayAssignAdmins(ada.id)).toBe(false);
+    expect(p.mayAssignAdmins(bo.id)).toBe(true);
+  });
+
+  it('in a workspace from before: whoever seals it is its owner', () => {
+    const h = history(false);
+    h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
+    expect(h.now().owner).toBeNull();
+    expect(h.now().mayAssignAdmins(bo.id)).toBe(true);
+    h.add({ t: 'seal', geneses: h.now().geneses }, bo);
+    expect(h.now().owner).toBe(bo.id);
+    expect(h.now().mayAssignAdmins(ada.id)).toBe(false);
   });
 });

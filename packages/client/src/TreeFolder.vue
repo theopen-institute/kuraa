@@ -15,6 +15,8 @@ const { selected, collapsed, dragging, over, tabStop } = t;
 
 const folders = computed(() => foldersOf(props.folder));
 const indent = computed(() => ({ paddingLeft: `${8 + props.depth * 14}px` }));
+/** A folder's own permissions, in words (0069), if it has any. */
+const markOf = (path: string) => t.folderMarks.value.get(path) ?? {};
 /** A document still without a title shows its filename, dimmed. */
 const untitled = (f: TreeFile) => f.title === null;
 const tip = (f: TreeFile) => {
@@ -53,6 +55,10 @@ const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.con
     >
       <span class="tree-row tree-folder" :style="indent">
         <span class="tree-icon" aria-hidden="true">{{ collapsed.has(f.path) ? '▸' : '▾' }}</span>{{ f.name }}
+        <template v-if="t.folderMarks.value.has(f.path)">
+          <svg v-if="markOf(f.path).readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers.title(markOf(f.path).readers ?? '')" :data-testid="`readers:${f.path + '/'}`"><title>{{ S.readers.title(markOf(f.path).readers ?? '') }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
+          <svg v-if="markOf(f.path).writers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.permissions.writersTitle(markOf(f.path).writers ?? '')" :data-testid="`writers:${f.path + '/'}`"><title>{{ S.permissions.writersTitle(markOf(f.path).writers ?? '') }}</title><path d="M2 10l.6-2.4L8 2.2 9.8 4 4.4 9.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M2 10.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
+        </template>
       </span>
       <span class="tree-actions">
         <button type="button" tabindex="-1" :title="S.tree.newFileIn(f.name)" :aria-label="S.tree.newFileIn(f.name)" @click.stop="t.create(f.path)">＋</button>
@@ -84,6 +90,7 @@ const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.con
     <div class="tree-row" :style="indent" :title="tip(f)" :data-testid="`file:${f.path}`">
       <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>
       <svg v-if="f.readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers.title(f.readers)" :data-testid="`readers:${f.path}`"><title>{{ S.readers.title(f.readers) }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
+      <svg v-if="f.writers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.permissions.writersTitle(f.writers)" :data-testid="`writers:${f.path}`"><title>{{ S.permissions.writersTitle(f.writers) }}</title><path d="M2 10l.6-2.4L8 2.2 9.8 4 4.4 9.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M2 10.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
       <span
         v-if="f.conflicts"
         class="tree-conflict"

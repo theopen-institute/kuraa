@@ -9,6 +9,7 @@ import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{ api: HostApi }>();
+const emit = defineEmits<{ permissions: [path: string] }>();
 const rules = shallowRef<RulesInfo | null>(null);
 const people = shallowRef<PeopleInfo | null>(null);
 const busy = ref(false);
@@ -47,15 +48,13 @@ const choices = computed(() => [
 const nameOf = (w: string) => choices.value.find((c) => c.value === w)?.label ?? (w.startsWith('group:') ? w.slice(6) : `${w.slice(0, 8)}…`);
 
 const newPath = ref('');
-const newBy = ref<string[]>([]);
-function addRule() {
-  if (!newBy.value.length) return;
-  void act(async () => {
-    await props.api.setRule(newPath.value.trim(), newBy.value);
-    newPath.value = '';
-    newBy.value = [];
-  });
-}
+/** The permissions to list: every file's and folder's, but the whole workspace's (its own row). */
+const listed = computed(() => (rules.value?.permissions ?? []).filter((p) => p.path !== ''));
+/** What the whole workspace's permission says (who may change anything; anyone, where it says nothing). */
+const everythingWords = computed(() => {
+  const own = rules.value?.permissions?.find((p) => p.path === '');
+  return own?.write ? S.rules.says(null, own.write.map(nameOf)) : S.rules.none;
+});
 
 const newVerifier = ref('');
 function addVerifier() {
@@ -80,24 +79,24 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
   <section v-if="rules && people?.founded" class="menu-section" data-testid="rules">
     <h3>{{ S.rules.title }}</h3>
     <p class="menu-facts">{{ S.rules.about }}</p>
-    <p v-if="!rules.rules.length" class="menu-facts" data-testid="no-rules">{{ S.rules.none }}</p>
-    <ul v-else class="menu-devices" data-testid="rule-list">
-      <li v-for="r in rules.rules" :key="r.path" :data-testid="`rule:${r.path || '*'}`">
-        <code class="device-who">{{ r.path || S.rules.everything }}</code>
-        <span class="device-state">{{ S.rules.by(r.by.map(nameOf)) }}</span>
-        <button v-if="rules.admin" type="button" :disabled="busy" :data-testid="`remove-rule:${r.path || '*'}`" @click="act(() => api.setRule(r.path, []))">{{ S.rules.remove }}</button>
+    <!-- Every permission (0069): the whole workspace's first, then by path; each changed in its Permissions… -->
+    <ul class="menu-devices permissions-list" data-testid="permission-list">
+      <li data-testid="permission:*">
+        <span class="device-who">{{ S.rules.everything }}</span>
+        <span class="device-state">{{ everythingWords }}</span>
+        <button type="button" data-testid="change:*" @click="emit('permissions', '')">{{ S.rules.change }}</button>
+      </li>
+      <li v-for="(p, i) in listed" :key="p.path ?? `private-${i}`" :data-testid="`permission:${p.path ?? 'private'}`">
+        <code v-if="p.path" class="device-who">{{ p.path }}</code>
+        <span v-else class="device-who muted">{{ S.rules.private }}</span>
+        <span class="device-state">{{ S.rules.says(p.read?.map(nameOf) ?? null, p.write?.map(nameOf) ?? null) }}</span>
+        <button v-if="p.path" type="button" :data-testid="`change:${p.path}`" @click="emit('permissions', p.path)">{{ S.rules.change }}</button>
       </li>
     </ul>
-    <form v-if="rules.admin" class="rule-form" @submit.prevent="addRule">
-      <label class="field">
-        <span>{{ S.rules.path }}</span>
-        <input v-model="newPath" :placeholder="S.rules.pathHint" spellcheck="false" data-testid="rule-path">
-      </label>
-      <fieldset class="rule-who">
-        <legend>{{ S.rules.who }}</legend>
-        <label v-for="c in choices" :key="c.value"><input v-model="newBy" type="checkbox" :value="c.value" :data-testid="`rule-by:${c.label}`"> {{ c.label }}</label>
-      </fieldset>
-      <div class="menu-actions"><button type="submit" :disabled="busy || !newBy.length" data-testid="rule-add">{{ S.rules.add }}</button></div>
+    <p v-if="!listed.length" class="menu-facts" data-testid="no-rules">{{ S.rules.none }}</p>
+    <form v-if="rules.admin" class="person-row rule-new-group" @submit.prevent="emit('permissions', newPath.trim())">
+      <input v-model="newPath" :placeholder="S.rules.pathHint" spellcheck="false" data-testid="rule-path">
+      <button type="submit" :disabled="!newPath.trim()" data-testid="rule-open">{{ S.rules.setFor }}</button>
     </form>
 
     <h3>{{ S.rules.groups }}</h3>

@@ -418,7 +418,7 @@ describe('equal members, and forks', () => {
     const dirA = repo();
     const a = await start(dirA, { person: ada });
     // A workspace made now: its genesis names Ada its admin, and is pinned.
-    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'admin', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true, emails: [] }]);
+    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'owner', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true, emails: [] }]);
     const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
     dirs.push(parent);
     const dirB = join(parent, 'notes');
@@ -431,17 +431,21 @@ describe('equal members, and forks', () => {
     // A member may not invite, nor remove a device, nor make himself an admin.
     await expect(b.host.peers!.inviteLink({ hours: 1, once: true })).rejects.toThrow('Only an admin');
     await expect(b.host.peers!.removeDevice(a.host.peers!.node.myKey)).rejects.toThrow('Only an admin');
-    await expect(b.host.peers!.setRole(bo.id, 'admin')).rejects.toThrow('Only an admin');
+    await expect(b.host.peers!.setRole(bo.id, 'admin')).rejects.toThrow('owner');
     expect((await api(b, `/api/peers/devices/${a.host.peers!.node.myKey}`, { method: 'DELETE' })).status).toBe(403);
-    // Ada makes him an admin: then he may invite, and his links may make admins.
+    // Ada, the owner, makes him an admin: then he may invite, but only as members (admins are the owner's to make: 0070).
+    expect((await a.host.peers!.people()).people.find((p) => p.id === ada.id)?.role).toBe('owner');
     await a.host.peers!.setRole(bo.id, 'admin');
     await until(async () => (await role(b, bo.id)) === 'admin', 15_000, 'Bo an admin on his device');
-    expect(decodeLink(await b.host.peers!.inviteLink({ hours: 1, once: true, role: 'admin' })).grant).toMatchObject({ group: 'workspace', role: 'admin' });
-    // The workspace keeps an admin: Ada takes Bo out, with his device.
+    expect(decodeLink(await b.host.peers!.inviteLink({ hours: 1, once: true })).grant).toMatchObject({ group: 'workspace', role: 'member' });
+    await expect(b.host.peers!.inviteLink({ hours: 1, once: true, role: 'admin' })).rejects.toThrow('owner');
+    await expect(b.host.peers!.setRole(ada.id, 'member')).rejects.toThrow('owner');
+    await expect(b.host.peers!.removePerson(ada.id)).rejects.toThrow('owner');
+    // The owner stays: she cannot take herself out; she takes Bo out, with his device.
+    await expect(a.host.peers!.removePerson(ada.id)).rejects.toThrow('owner');
     await a.host.peers!.removePerson(bo.id);
     expect(await role(a, bo.id)).toBeNull();
     await until(async () => (await b.host.peers!.status()).removed, 15_000, 'Bo’s device removed');
-    await expect(a.host.peers!.removePerson(ada.id)).rejects.toThrow('needs an admin');
   });
 
   it('keep what someone may not change as it was, with their change on record as a suggestion (0066)', async () => {
@@ -618,6 +622,57 @@ describe('equal members, and forks', () => {
     await laptop.host.peers!.removeDevice(deskKey);
     await until(async () => (await a.host.peers!.node.identity.removed()).includes(deskKey), 20_000, 'Ada’s device took the removal');
     await until(async () => (await desk.host.peers!.status()).removed, 20_000, 'the desk knows');
+  });
+
+  it('keep permissions on files and folders: a private folder’s new files in its space, never public; rules go with renames (0069)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const bo = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const dirA = repo();
+    const a = await start(dirA, { person: ada });
+    const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+    dirs.push(parent);
+    const dirB = join(parent, 'notes');
+    signingKeys.set(dirB, crypto.keyPair());
+    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: bo, signing: signingKeys.get(dirB) });
+    const b = await start(dirB, { person: bo });
+    await until(async () => (await a.host.peers!.people()).people.length === 2, 15_000, 'Bo in');
+
+    // Ada: plans/ is read by her and Bo, and changed by her alone.
+    await a.host.peers!.setPermissions('plans/', { read: [ada.id, bo.id], write: [ada.id] });
+    const policy = await a.host.peers!.node.identity.policy();
+    // Private: named by its hash, though Ada's overview names it.
+    expect([...policy.perms.keys()]).toEqual([expect.stringMatching(/^h:[0-9a-f]{64}$/)]);
+    expect((await a.host.peers!.permissions('plans/')).own).toEqual({ write: [ada.id], read: [ada.id, bo.id].sort() });
+    // A new file in it goes into the space at once: never onto the workspace's branch.
+    expect((await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plans/party.md', content: '# Party\n' }) })).status).toBe(201);
+    expect(git(dirA, 'log', '--all', '--format=%H', '--', 'plans/party.md').split('\n').filter(Boolean).every((c) => !git(dirA, 'branch', '--contains', c))).toBe(true);
+    expect(a.host.spaceOf('plans/party.md')).not.toBeNull();
+    expect((await a.host.peers!.rules()).permissions).toEqual([{ path: 'plans/', private: true, write: [ada.id], read: [ada.id, bo.id].sort() }]);
+    await until(() => existsSync(join(dirB, 'plans', 'party.md')), 20_000, 'the plan on Bo’s device');
+
+    // Renamed, it stays in its space.
+    expect((await api(a, '/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'plans/party.md', to: 'plans/fiesta.md' }) })).status).toBe(200);
+    expect(a.host.spaceOf('plans/fiesta.md')).not.toBeNull();
+    expect(git(dirA, 'ls-tree', '-r', '--name-only', 'HEAD')).not.toContain('plans/');
+    await until(() => existsSync(join(dirB, 'plans', 'fiesta.md')) && !existsSync(join(dirB, 'plans', 'party.md')), 20_000, 'renamed on Bo’s device');
+
+    // A file with a permission of its own: Bo may not move it (it would be left behind); Ada's move takes it along.
+    await a.host.peers!.setPermissions('notes.md', { write: [ada.id] });
+    await until(async () => !!(await b.host.peers!.node.identity.policy()).permAt('notes.md'), 15_000, 'the permission on Bo’s device');
+    const refused = await api(b, '/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'notes.md', to: 'field.md' }) });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toMatch(/only an admin can move it/);
+    expect((await api(a, '/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'notes.md', to: 'field.md' }) })).status).toBe(200);
+    const after = await a.host.peers!.node.identity.policy();
+    expect(after.permAt('notes.md')).toBeNull();
+    expect(after.permAt('field.md')?.perm).toEqual({ write: [ada.id] });
+
+    // A file moved into plans/ reads as plans/ says: into its space.
+    expect((await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'budget.md', content: '# Budget\n' }) })).status).toBe(201);
+    expect((await api(a, '/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'budget.md', to: 'plans/budget.md' }) })).status).toBe(200);
+    expect(a.host.spaceOf('plans/budget.md')).toBe(a.host.spaceOf('plans/fiesta.md'));
   });
 
   it('take any member’s work, and name it by the person whose it is', async () => {

@@ -1,18 +1,17 @@
 <script setup lang="ts">
-// A document's permissions, from its ⋯ menu or its right-click menu (0066, 0067):
-// who can read it, and who can change it, in one place, beside the rules for
-// the whole workspace in Workspace settings.
+// A file's or folder's permissions (0066, 0067, 0069), from its ⋯ menu or its
+// right-click menu, or Workspace settings' overview: who can read it, and who
+// can change it, in one place. Each is either its own, or what the folder it is
+// in (or the whole workspace) says: the nearest up the tree counts.
 //
-// - Who can read: everyone in the workspace, only you, or the people and groups
-//   chosen (always with you). The file moves to that audience's space: only its
-//   readers' devices are ever sent it; its history stays with whoever could read
-//   it then. Whoever may change the file says.
-// - Who can change: as its folder or the workspace says (no rule of its own),
-//   only you, or the people, groups or admins chosen: a rule for this file,
-//   which counts over its folder's. The workspace's admins say (rules are
-//   theirs); anyone else sees who can, and why.
+// - Who can read: a file's is who it is sent to (its space): everyone, only
+//   you, or people and groups, always with you; whoever may change it says. A
+//   folder's is who reads what is made in it, and its files that followed it;
+//   the workspace's admins say.
+// - Who can change: its own (only you, or people, groups, admins), or as its
+//   folder says; the workspace's admins say. Anyone else sees who can, and why.
 import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
-import type { FileAccess, HostApi, PeopleInfo, RulesInfo } from './api.js';
+import type { HostApi, PeopleInfo, PermissionsInfo, RulesInfo } from './api.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import ErrorBanner from './ErrorBanner.vue';
@@ -23,31 +22,32 @@ const root = useTemplateRef<HTMLElement>('root');
 useDialog(root, () => emit('close'));
 
 const people = shallowRef<PeopleInfo | null>(null);
-const rules = shallowRef<RulesInfo | null>(null);
-const access = shallowRef<FileAccess | null>(null);
+const groups = shallowRef<RulesInfo['groups']>([]);
+const info = shallowRef<PermissionsInfo | null>(null);
 const loaded = ref(false);
 const busy = ref(false);
 const error = shallowRef<unknown>(null);
 const me = computed(() => people.value?.people.find((p) => p.you)?.id ?? null);
+const folder = computed(() => !!info.value?.folder);
+const everything = computed(() => props.path === '');
 
+/** 'all': a file read by everyone, or (a folder's, or changing) as the folder above says; 'me'; 'chosen'. */
 type Mode = 'all' | 'me' | 'chosen';
 const read = ref<{ mode: Mode; chosen: string[] }>({ mode: 'all', chosen: [] });
 const write = ref<{ mode: Mode; chosen: string[] }>({ mode: 'all', chosen: [] });
-/** As they were when opened: saved only if changed. */
 let readWas = '';
 let writeWas = '';
 const key = (x: { mode: Mode; chosen: string[] }) => `${x.mode}:${[...x.chosen].sort().join(',')}`;
+const modeOf = (list: string[] | null) => (!list ? { mode: 'all' as Mode, chosen: [] } : list.length === 1 && list[0] === me.value ? { mode: 'me' as Mode, chosen: [] } : { mode: 'chosen' as Mode, chosen: list });
 
 onMounted(async () => {
   try {
-    const [peers, r, a] = await Promise.all([props.api.peers(), props.api.rules(), props.api.access(props.path)]);
+    const [peers, r, p] = await Promise.all([props.api.peers(), props.api.rules(), props.api.permissions(props.path)]);
     people.value = peers.enabled ? peers.people ?? null : null;
-    rules.value = r;
-    access.value = a;
-    const audience = a.readers?.audience ?? null;
-    read.value = !audience ? { mode: 'all', chosen: [] } : audience.length === 1 && audience[0] === me.value ? { mode: 'me', chosen: [] } : { mode: 'chosen', chosen: audience };
-    const own = a.rule && a.rule.path === props.path ? a.rule.who : null;
-    write.value = !own ? { mode: 'all', chosen: [] } : own.length === 1 && own[0] === me.value ? { mode: 'me', chosen: [] } : { mode: 'chosen', chosen: own };
+    groups.value = r.groups;
+    info.value = p;
+    read.value = modeOf(p.folder ? p.own?.read ?? null : p.readers);
+    write.value = modeOf(p.own?.write ?? null);
     readWas = key(read.value);
     writeWas = key(write.value);
   } catch (e) {
@@ -57,9 +57,9 @@ onMounted(async () => {
   }
 });
 
-// You are always among those who read it: no one makes a file they cannot read themselves.
+// A file is always read by whoever says who reads it: no one makes a file they cannot read themselves.
 watch([() => read.value.mode, me], () => {
-  if (read.value.mode === 'chosen' && me.value && !read.value.chosen.includes(me.value)) read.value.chosen = [me.value, ...read.value.chosen];
+  if (!folder.value && read.value.mode === 'chosen' && me.value && !read.value.chosen.includes(me.value)) read.value.chosen = [me.value, ...read.value.chosen];
 });
 
 const nameOf = (w: string) => {
@@ -68,42 +68,59 @@ const nameOf = (w: string) => {
   const p = people.value?.people.find((x) => x.id === w);
   return p ? `${p.name ?? `${w.slice(0, 8)}…`}${p.you ? S.permissions.you : ''}` : `${w.slice(0, 8)}…`;
 };
+/** Who can be chosen: groups first (they last as people come and go), then the admins, then people. */
+const choices = computed(() => [
+  ...groups.value.map((g) => ({ value: `group:${g.name}`, label: g.name, group: true })),
+  { value: 'admins', label: S.permissions.admins, group: true },
+  ...(people.value?.people ?? []).map((p) => ({ value: p.id, label: nameOf(p.id), group: false })),
+]);
 
-/** The rule this file has from its folder or the workspace, were it to have none of its own: the most specific holding it. */
-const inherited = computed(() => {
-  let best: { path: string; by: string[] } | null = null;
-  for (const r of rules.value?.rules ?? []) {
-    if (r.path === props.path) continue;
-    const holds = r.path === '' || (r.path.endsWith('/') && props.path.startsWith(r.path));
-    if (holds && (!best || r.path.length > best.path.length)) best = r;
-  }
-  return best;
+const writeFromAbove = computed(() => (info.value?.fromAbove.write ? S.permissions.fromRule(info.value.fromAbove.write.path, info.value.fromAbove.write.by.map(nameOf)) : S.permissions.anyone));
+const readFromAbove = computed(() => (info.value?.fromAbove.read ? S.permissions.readFromRule(info.value.fromAbove.read.path, info.value.fromAbove.read.audience.map(nameOf)) : S.readers.everyone.toLowerCase()));
+const canRead = computed(() => (folder.value ? !!info.value?.admin : !!info.value?.canWrite) && !everything.value);
+const canRule = computed(() => !!info.value?.admin);
+/** Who can change it now, for someone who may not say. */
+const writersNow = computed(() => {
+  const own = info.value?.own?.write;
+  if (own) return S.permissions.fromRule(props.path, own.map(nameOf));
+  return writeFromAbove.value;
 });
-const inheritedWords = computed(() => (inherited.value ? S.permissions.fromRule(inherited.value.path, inherited.value.by.map(nameOf)) : S.permissions.anyone));
-const canRead = computed(() => !!access.value?.canWrite);
-const canRule = computed(() => !!access.value?.admin);
-/** Who may change it now, in words, for someone who may not say. */
-const writersNow = computed(() => (access.value?.rule ? S.permissions.fromRule(access.value.rule.path, access.value.rule.who.map(nameOf)) : S.permissions.anyone));
+
+/** People who could change it but not read it (as chosen here): to say so before saving. */
+const cannotRead = computed(() => {
+  if (read.value.mode === 'all' || write.value.mode === 'all') return [];
+  const readers = new Set(read.value.mode === 'me' ? [me.value] : read.value.chosen);
+  const writers = write.value.mode === 'me' ? [me.value!] : write.value.chosen;
+  return writers.filter((w) => w && !readers.has(w) && !w.startsWith('group:') && w !== 'admins');
+});
 
 async function save() {
   const you = me.value;
   if (!you) return;
+  const change: { write?: string[] | null; read?: string[] | null } = {};
+  if (canRule.value && key(write.value) !== writeWas) {
+    if (write.value.mode === 'chosen' && !write.value.chosen.length) {
+      error.value = new Error(S.permissions.chooseSomeone);
+      return;
+    }
+    change.write = write.value.mode === 'all' ? null : write.value.mode === 'me' ? [you] : [...new Set(write.value.chosen)];
+  }
+  if (canRead.value && key(read.value) !== readWas) {
+    if (read.value.mode === 'chosen' && !read.value.chosen.length) {
+      error.value = new Error(S.permissions.chooseSomeone);
+      return;
+    }
+    change.read = read.value.mode === 'all' ? null : read.value.mode === 'me' ? [you] : [...new Set(folder.value ? read.value.chosen : [you, ...read.value.chosen])];
+  }
+  if (!('write' in change) && !('read' in change)) {
+    emit('saved', S.permissions.unchanged);
+    return;
+  }
   busy.value = true;
   error.value = null;
-  const done: string[] = [];
   try {
-    if (canRule.value && key(write.value) !== writeWas) {
-      const by = write.value.mode === 'all' ? [] : write.value.mode === 'me' ? [you] : [...new Set(write.value.chosen)];
-      if (write.value.mode === 'chosen' && !by.length) throw new Error(S.permissions.chooseSomeone);
-      await props.api.setRule(props.path, by);
-      done.push(S.permissions.writeSaved);
-    }
-    if (canRead.value && key(read.value) !== readWas) {
-      const audience = read.value.mode === 'all' ? null : read.value.mode === 'me' ? [you] : [...new Set([you, ...read.value.chosen])];
-      const a = await props.api.setAudience(props.path, audience);
-      done.push(S.readers.saved(a.readers?.words ?? ''));
-    }
-    emit('saved', done.join(' ') || S.permissions.unchanged);
+    await props.api.setPermissions(props.path, change);
+    emit('saved', S.permissions.saved);
   } catch (e) {
     error.value = e;
   } finally {
@@ -115,36 +132,33 @@ async function save() {
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('close')">
     <form ref="root" class="modal naming readers permissions" role="dialog" aria-modal="true" aria-labelledby="permissions-title" data-testid="permissions-dialog" @submit.prevent="save">
-      <h2 id="permissions-title">{{ S.permissions.title(name) }}</h2>
+      <h2 id="permissions-title">{{ everything ? S.permissions.titleEverything : folder ? S.permissions.titleFolder(name) : S.permissions.title(name) }}</h2>
       <p v-if="loaded && !people?.founded" class="naming-hint">{{ S.readers.notShared }}</p>
-      <template v-else-if="people && access">
-        <fieldset class="permissions-part" :disabled="!canRead" data-testid="permissions-read">
+      <template v-else-if="people && info">
+        <fieldset v-if="!everything" class="permissions-part" :disabled="!canRead" data-testid="permissions-read">
           <legend>{{ S.permissions.read }}</legend>
-          <p class="naming-hint">{{ canRead ? S.readers.about : S.permissions.readOnlyRead }}</p>
-          <label class="check"><input v-model="read.mode" type="radio" value="all" data-testid="read-everyone"> {{ S.readers.everyone }}</label>
+          <p class="naming-hint">{{ folder ? S.permissions.folderReadAbout : canRead ? S.readers.about : S.permissions.readOnlyRead }}</p>
+          <label class="check"><input v-model="read.mode" type="radio" value="all" data-testid="read-everyone"> {{ folder ? S.permissions.asAbove : S.readers.everyone }} <span v-if="folder" class="muted">({{ readFromAbove }})</span></label>
           <label class="check"><input v-model="read.mode" type="radio" value="me" data-testid="read-me"> {{ S.readers.onlyMe }}</label>
           <label class="check"><input v-model="read.mode" type="radio" value="chosen" data-testid="read-chosen"> {{ S.readers.chosen }}</label>
           <div v-if="read.mode === 'chosen'" class="readers-who">
-            <label v-for="p in people.people" :key="p.id" class="check">
-              <input v-model="read.chosen" type="checkbox" :value="p.id" :disabled="p.you" :data-testid="`read-person:${p.name ?? p.id.slice(0, 8)}`"> {{ nameOf(p.id) }}
+            <label v-for="c in choices" :key="c.value" class="check">
+              <input v-model="read.chosen" type="checkbox" :value="c.value" :disabled="!folder && c.value === me" :data-testid="`read-${c.group ? 'group' : 'person'}:${c.label.replace(S.permissions.you, '')}`"> {{ c.label }}
             </label>
-            <label v-for="g in rules?.groups ?? []" :key="g.name" class="check"><input v-model="read.chosen" type="checkbox" :value="`group:${g.name}`"> {{ g.name }}</label>
-            <label class="check"><input v-model="read.chosen" type="checkbox" value="admins"> {{ S.permissions.admins }}</label>
           </div>
+          <p v-if="!folder && !canRead" class="naming-hint">{{ S.permissions.readOnlyRead }}</p>
         </fieldset>
 
         <fieldset class="permissions-part" data-testid="permissions-write">
           <legend>{{ S.permissions.write }}</legend>
           <template v-if="canRule">
-            <label class="check"><input v-model="write.mode" type="radio" value="all" data-testid="write-inherit"> {{ S.permissions.inherit }} <span class="muted">({{ inheritedWords }})</span></label>
+            <label class="check"><input v-model="write.mode" type="radio" value="all" data-testid="write-inherit"> {{ everything ? S.permissions.anyoneChoice : S.permissions.inherit }} <span v-if="!everything" class="muted">({{ writeFromAbove }})</span></label>
             <label class="check"><input v-model="write.mode" type="radio" value="me" data-testid="write-me"> {{ S.readers.onlyMe }}</label>
             <label class="check"><input v-model="write.mode" type="radio" value="chosen" data-testid="write-chosen"> {{ S.readers.chosen }}</label>
             <div v-if="write.mode === 'chosen'" class="readers-who">
-              <label v-for="p in people.people" :key="p.id" class="check">
-                <input v-model="write.chosen" type="checkbox" :value="p.id" :data-testid="`write-person:${p.name ?? p.id.slice(0, 8)}`"> {{ nameOf(p.id) }}
+              <label v-for="c in choices" :key="c.value" class="check">
+                <input v-model="write.chosen" type="checkbox" :value="c.value" :data-testid="`write-${c.group ? 'group' : 'person'}:${c.label.replace(S.permissions.you, '')}`"> {{ c.label }}
               </label>
-              <label v-for="g in rules?.groups ?? []" :key="g.name" class="check"><input v-model="write.chosen" type="checkbox" :value="`group:${g.name}`"> {{ g.name }}</label>
-              <label class="check"><input v-model="write.chosen" type="checkbox" value="admins" data-testid="write-admins"> {{ S.permissions.admins }}</label>
             </div>
             <p class="naming-hint">{{ S.permissions.writeAbout }}</p>
           </template>
@@ -153,6 +167,7 @@ async function save() {
             <p class="naming-hint">{{ S.permissions.adminsSay }}</p>
           </template>
         </fieldset>
+        <p v-if="cannotRead.length" class="naming-hint warn" data-testid="permissions-contradiction">{{ S.permissions.cannotRead(cannotRead.map(nameOf)) }}</p>
       </template>
       <ErrorBanner v-if="error" :error="error" inline class="naming-error" />
       <div class="modal-actions">

@@ -49,6 +49,9 @@ describe('signed membership records', () => {
     // A person removes their own computer, admin or not (0068): Bo's device removes Cy's only if both are the same person's.
     expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p1']]) }))).toBe('take');
     expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p2']]) }))).toBe('wait');
+    // An admin's computer (Cy's): an admin removes it only as the owner (0070).
+    expect(judge(remove, standing({ managers: new Set([hex(bo), hex(cy)]), adminDevices: new Set([hex(bo), hex(cy)]), assigners: new Set() }))).toBe('wait');
+    expect(judge(remove, standing({ managers: new Set([hex(bo), hex(cy)]), adminDevices: new Set([hex(bo), hex(cy)]), assigners: new Set([hex(bo)]) }))).toBe('take');
     // The new secret that goes with a removal is any member's to make.
     expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
   });

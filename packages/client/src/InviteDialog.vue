@@ -27,6 +27,8 @@ const asAdmin = ref(false);
 const forEmail = ref('');
 /** Whether this workspace counts any server's email checks: only then is a place kept for an address (0066, step 6). */
 const checksEmail = ref(false);
+/** Whether you may invite people as admins: the owner (0070). */
+const assignsAdmins = ref(false);
 const made = shallowRef<{ code: string; once: boolean; expires: number } | null>(null);
 const links = shallowRef<InviteLinkInfo[]>([]);
 const busy = ref(false);
@@ -43,6 +45,7 @@ async function loadLinks() {
 onMounted(() => {
   void loadLinks();
   void props.api.rules().then((r) => (checksEmail.value = !!r.verifiers?.length), () => undefined);
+  void props.api.peers().then((p) => (assignsAdmins.value = p.enabled ? p.people?.assignsAdmins ?? true : true), () => undefined);
 });
 
 async function create() {
@@ -105,7 +108,7 @@ const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.s
             <option v-for="(e, i) in EXPIRY" :key="e.label" :value="i">{{ e.label }}</option>
           </select>
         </label>
-        <label class="check">
+        <label v-if="assignsAdmins" class="check">
           <input v-model="asAdmin" type="checkbox" data-testid="invite-admin">
           <span>{{ S.invite.asAdmin }}</span>
         </label>

@@ -3,7 +3,7 @@
 // leaves the third person's. On a local DHT, so nothing leaves this machine.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,6 +82,63 @@ test('a document only two people read: on their devices, marked so, and gone fro
     await expect(cy.getByTestId('file:notes.md')).toBeVisible();
   } finally {
     await c.close();
+    await b.close();
+    await a.close();
+    await testnet.destroy();
+  }
+});
+
+test('a folder’s permissions, from its right-click menu: only she reads it, and its files leave the other’s device', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const testnet = await createTestnet(3);
+  const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-folder-a-'));
+  git(dirA, 'init', '-q', '-b', 'main');
+  git(dirA, 'config', 'user.name', 'Ada');
+  git(dirA, 'config', 'user.email', 'ada@example.org');
+  writeFileSync(join(dirA, 'notes.md'), '---\ntitle: Field notes\n---\n\nThe tide was out.\n');
+  mkdirSync(join(dirA, 'plans'));
+  writeFileSync(join(dirA, 'plans', 'party.md'), '---\ntitle: The party\n---\n\nOn Friday.\n');
+  git(dirA, 'add', '-A');
+  git(dirA, 'commit', '-q', '-m', 'Initial');
+  const peers = { bootstrap: testnet.bootstrap as never };
+  const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-folder-keys-'));
+  const as = async (name: string) => ({ ...peers, person: await createPerson(name, join(keys, name, 'person.json')), signing: await keptKey(join(keys, name, 'signing.json')) });
+  const asAda = await as('Ada');
+  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const asBo = await as('Bo');
+  const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-folder-b-')), 'notes');
+  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'bo-laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: asBo.person, signing: asBo.signing });
+  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  try {
+    const open = async (h: typeof a, name: string) => {
+      const page = await (await browser.newContext()).newPage();
+      await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
+      await page.getByTestId('file:notes.md').click();
+      await expect(page.getByTestId('editor')).toContainText('The tide was out.');
+      return page;
+    };
+    const ada = await open(a, 'Ada');
+    const bo = await open(b, 'Bo');
+    await expect(bo.getByTestId('file:plans/party.md')).toBeVisible();
+    await expect.poll(async () => (await a.host.peers!.people()).people.length, { timeout: 20_000 }).toBe(2);
+
+    // Ada: plans/ is hers alone to read, from its right-click menu.
+    await ada.getByTestId('folder:plans').click({ button: 'right' });
+    await ada.getByTestId('context:folder-permissions').click();
+    const dialog = ada.getByTestId('permissions-dialog');
+    await expect(dialog).toContainText('Permissions for the folder plans');
+    await dialog.getByTestId('read-me').check();
+    await dialog.getByTestId('permissions-save').click();
+    await expect(dialog).toBeHidden();
+    // Marked in her file list, the folder and its file.
+    await expect(ada.getByTestId('readers:plans/')).toBeVisible({ timeout: 15_000 });
+    await expect(ada.getByTestId('readers:plans/party.md')).toBeVisible();
+
+    // Bo: the folder's file is gone from his list and his folder.
+    await expect(bo.getByTestId('file:plans/party.md')).toHaveCount(0, { timeout: 30_000 });
+    expect(existsSync(join(dirB, 'plans', 'party.md'))).toBe(false);
+  } finally {
     await b.close();
     await a.close();
     await testnet.destroy();

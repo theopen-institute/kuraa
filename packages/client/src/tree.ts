@@ -157,6 +157,8 @@ export interface TreeContext {
   remove(path: string): void;
   /** A file's icon, as its type defines it. */
   iconFor(file: TreeFile): FileIcon | undefined;
+  /** Folders with permissions of their own (0069), by path (no trailing slash): who reads, who may change, in words. */
+  folderMarks: Ref<Map<string, { readers?: string; writers?: string }>>;
   /** The right-click menu for a file, a folder, or the top level (''). */
   contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top'): void;
   dragStart(e: DragEvent, path: string): void;

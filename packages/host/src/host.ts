@@ -1842,6 +1842,39 @@ export class Host {
     });
   }
 
+  /**
+   * A rename or move of files in spaces (0069): each stays in its space, at its
+   * new path (taken away at the old one), as a commit there. Before the
+   * workspace's own commit of the move, which then leaves them be. Call inside serial().
+   */
+  async carrySpaces(from: string, to: string, isFolder: boolean): Promise<void> {
+    const moved = this.spaces?.entries().filter(([p]) => (isFolder ? p.startsWith(`${from}/`) : p === from)) ?? [];
+    if (!moved.length) return;
+    const branch = await this.git.branch();
+    if (!branch) return;
+    const bySpace = new Map<string, { path: string; content?: null }[]>();
+    for (const [p, id] of moved) {
+      const next = isFolder ? `${to}/${p.slice(from.length + 1)}` : to;
+      bySpace.set(id, [...(bySpace.get(id) ?? []), { path: p, content: null }, { path: next }]);
+    }
+    const message = withTrailers(isFolder ? `Move ${from}/ to ${to}/` : `Rename ${from} to ${to}`, [], await this.policyTrailer());
+    for (const [id, changes] of bySpace) await this.spaces.commit(id, branch, changes, message, (raw) => this.signRaw(raw));
+    await this.spaces.refresh(branch);
+    this.refsChanged();
+  }
+
+  /** Commit new files into a space (0069: made in a folder fewer read), never onto the workspace's own branch. Call inside serial(). */
+  async commitIntoSpace(id: string, paths: string[], message: string): Promise<string | null> {
+    await this.requireWritable();
+    const branch = await this.git.branch();
+    if (!branch) throw new Error('No branch is checked out');
+    const commit = await this.spaces.commit(id, branch, paths.map((path) => ({ path })), withTrailers(message, [], await this.policyTrailer()), (raw) => this.signRaw(raw));
+    await this.spaces.refresh(branch);
+    this.refsChanged();
+    if (commit) this.log(`committed ${commit.slice(0, 7)} ${message} (in a space)`);
+    return commit;
+  }
+
   /** Take a file out of the workspace's own branch, as a signed commit, leaving it in the working tree (for a space to take). */
   private async commitRemoval(path: string, message: string): Promise<void> {
     const head = await this.git.head();

@@ -54,12 +54,19 @@ test('an admin says who can change a document; someone else suggests a change, a
     await ada.getByTestId('settings-button').click();
     await ada.getByTestId('settings-tab-workspace').click();
     const rules = ada.getByTestId('rules');
-    await expect(rules.getByTestId('no-rules')).toContainText('Anyone in the workspace can change everything');
-    await expect(rules.getByTestId('rule-by:Bo')).toBeVisible({ timeout: 15_000 });
+    await expect(rules.getByTestId('permission:*')).toContainText('Anyone in the workspace can change it');
+    await expect.poll(async () => (await a.host.peers!.people()).people.length, { timeout: 15_000 }).toBe(2);
+    // Another file's permissions, from the overview: the same dialog as a document's.
     await rules.getByTestId('rule-path').fill('notes.md');
-    await rules.getByTestId('rule-by:Ada').check();
-    await rules.getByTestId('rule-add').click();
-    await expect(rules.getByTestId('rule:notes.md')).toContainText('Ada');
+    await rules.getByTestId('rule-open').click();
+    const perms = ada.getByTestId('permissions-dialog');
+    await perms.getByTestId('write-me').check();
+    await perms.getByTestId('permissions-save').click();
+    await expect(perms).toBeHidden();
+    // The overview lists it.
+    await ada.getByTestId('settings-button').click();
+    await ada.getByTestId('settings-tab-workspace').click();
+    await expect(ada.getByTestId('rules').getByTestId('permission:notes.md')).toContainText('changed by Ada');
     await ada.keyboard.press('Escape');
 
     // On Bo's device: read only, saying who may change it.

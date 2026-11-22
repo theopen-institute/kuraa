@@ -17,7 +17,7 @@ import { keptKey } from '../../packages/host/src/keys.js';
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
 
-test('people on two devices edit one document; a member made an admin renames their device and removes another', async ({ browser }) => {
+test('people on two devices edit one document; a member made owner renames their device and removes another', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-a-'));
@@ -78,8 +78,8 @@ test('people on two devices edit one document; a member made an admin renames th
     b.host.peers!.node.links.get(a.host.peers!.node.myKey)!.send({ type: 'present', keys: [phone] });
     await expect(ada.getByTestId('through:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
     await expect(ada.getByTestId('devices')).toContainText('2 of 2 other devices online');
-    // The people, with their roles: Ada, who made the workspace, its admin; Bo, invited, a member.
-    await expect(ada.getByTestId('role:Ada')).toHaveText('admin');
+    // The people, with their roles: Ada, who made the workspace, its owner; Bo, invited, a member.
+    await expect(ada.getByTestId('role:Ada')).toHaveText('owner');
     await expect(ada.getByTestId('role:Bo')).toHaveText('member', { timeout: 15_000 });
 
     // On Bo's device: a member, he may rename his device, but not invite or remove anyone.
@@ -89,13 +89,19 @@ test('people on two devices edit one document; a member made an admin renames th
     await expect(bo.getByTestId('invite-button')).toHaveCount(0);
     await expect(bo.getByTestId('devices').getByRole('button', { name: 'Lost or no longer used…' })).toHaveCount(0);
 
-    // Ada makes him an admin.
+    // Ada makes him an admin, then the owner, giving up the role (she stays an admin: 0070).
     await ada.getByTestId('make-admin:Bo').click();
     await expect(ada.getByTestId('role:Bo')).toHaveText('admin');
+    await ada.getByTestId('make-owner:Bo').click();
+    await expect(ada.getByTestId('ask')).toContainText('You give up the role');
+    await ada.getByTestId('ask').getByRole('button', { name: 'Make owner' }).click();
+    await expect(ada.getByTestId('role:Bo')).toHaveText('owner');
+    await expect(ada.getByTestId('role:Ada')).toHaveText('admin');
+    await expect(ada.getByTestId('make-member:Bo')).toHaveCount(0);
     await ada.keyboard.press('Escape');
 
-    // Bo, an admin now: rename his device, then remove Ada's. It is permanent, and she keeps her copy.
-    await expect(bo.getByTestId('role:Bo')).toHaveText('admin', { timeout: 15_000 });
+    // Bo, the owner now: rename his device, then remove Ada's (an admin's: the owner's to remove). It is permanent, and she keeps her copy.
+    await expect(bo.getByTestId('role:Bo')).toHaveText('owner', { timeout: 15_000 });
     await expect(bo.getByTestId('invite-button')).toBeVisible();
     await bo.getByTestId('rename-device').click();
     await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');

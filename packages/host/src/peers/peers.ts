@@ -24,7 +24,7 @@ import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
-import { WORKSPACE, isGroupName, isRulePath, type PolicyOp, type Role } from './policy.js';
+import { WORKSPACE, hashedPath, isGroupName, isRulePath, isWriter, pathsAbove, type Perm, type Policy, type PolicyOp, type Role } from './policy.js';
 import { NotAllowed } from '../errors.js';
 import type { KeyPair } from '../keys.js';
 
@@ -156,6 +156,24 @@ export interface RulesInfo {
   groups: { name: string; entries: { who: string; role: Role; name: string | null }[] }[];
   /** Verifiers whose attestations count here (0066, step 6). */
   verifiers: { key: string; url: string }[];
+  /** Every file's and folder's permission (0069): its path (null: private, not one this device knows), who may change it, who reads what is made there. */
+  permissions: { path: string | null; private: boolean; write: string[] | null; read: string[] | null }[];
+}
+
+/** A file's or folder's permissions (0069), for its Permissions… dialog. */
+export interface PermissionsInfo {
+  path: string;
+  folder: boolean;
+  /** Its own: who may change it, and (a folder's) who reads what is made in it; null for none. */
+  own: { write: string[] | null; read: string[] | null } | null;
+  /** What it has from the folders above it, or the workspace: who may change it, who reads it. */
+  fromAbove: { write: { path: string; by: string[] } | null; read: { path: string; audience: string[] } | null };
+  /** A file's readers now: its space's audience; null for everyone. */
+  readers: string[] | null;
+  /** Whether this person is an admin (says who changes what, and who reads a folder). */
+  admin: boolean;
+  /** Whether this person may change it (a file: says who reads it). */
+  canWrite: boolean;
 }
 
 /** The workspace's people, by its policy (0066). */
@@ -164,7 +182,11 @@ export interface PeopleInfo {
   founded: boolean;
   /** Whether this person may invite people, remove devices and change who is in it. */
   admin: boolean;
-  people: { id: string; role: Role; name: string | null; devices: string[]; you: boolean; emails: string[] }[];
+  /** The workspace's owner (0070); null: one from before that has none yet. */
+  owner: string | null;
+  /** Whether this person makes, unmakes and takes out admins: the owner (any admin, where there is none yet). */
+  assignsAdmins: boolean;
+  people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean; emails: string[] }[];
   /** People invited by email who are not in yet (0066, step 6). */
   invited: { email: string; role: Role }[];
   /** Admins who took each other out at the same time, which would have left none, so neither removal stood: their names. */
@@ -559,7 +581,7 @@ export class Peers {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
     // An admin, or the same person: one's own lost or retired computer (0068).
-    if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace, or whoever it is, can remove a computer');
+    if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
     // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.
     const revoked = await this.revokeOwn(key);
     await this.node.identity.removeMember(key);
@@ -614,12 +636,20 @@ export class Peers {
     return {
       founded: policy.founded,
       admin: policy.founded ? policy.isAdmin(me) : true,
-      people: await Promise.all(policy.people().map(async (p) => ({ id: p.id, role: p.role, name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me, emails: await id.emailsOf(p.id) }))),
+      // The owner (0070), and whether this person makes and unmakes admins (the owner; any admin, where there is none yet).
+      owner: policy.owner,
+      assignsAdmins: policy.founded ? policy.mayAssignAdmins(me) : true,
+      people: await Promise.all(policy.people().map(async (p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me, emails: await id.emailsOf(p.id) }))),
       // Invited by email, and not in yet (no one attested to have that address): step 6.
       invited: policy.invited(),
       // Admins who took each other out at once, which would have left none: neither stood (step 4).
       disputes: policy.disputes.map((d) => d.people.map((id) => known.get(id)?.name ?? `${id.slice(0, 8)}…`)),
     };
+  }
+
+  /** Give the owner's role to someone in the workspace (the owner's to do, 0070): they stay an admin. */
+  async makeOwner(person: string): Promise<void> {
+    await this.adminOp({ t: 'owner', who: person });
   }
 
   /** Make a person of the workspace an admin, or a member (an admin's to do). */
@@ -684,6 +714,33 @@ export class Peers {
     return all.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
 
+  /**
+   * What the file list marks (0069): for each file, who reads it (if not
+   * everyone) and who may change it (if not anyone), in words; and each folder
+   * with permissions of its own.
+   */
+  async marks(paths: string[]): Promise<{ files: Map<string, { readers?: string; writers?: string }>; folders: { path: string; readers?: string; writers?: string }[] }> {
+    const { policy, me } = await this.node.policy();
+    const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    const words = (who: string[]) => audienceWords(who, me, names);
+    const readers = await this.readersInWords();
+    const files = new Map<string, { readers?: string; writers?: string }>();
+    const folders = new Set<string>();
+    for (const path of paths) {
+      const space = this.host.spaceOf(path);
+      const rule = policy.founded ? policy.ruleFor(path) : null;
+      const m = { ...(space ? { readers: readers.get(space) ?? '' } : {}), ...(rule ? { writers: words(rule.by) } : {}) };
+      if (m.readers !== undefined || m.writers !== undefined) files.set(path, m);
+      for (const f of pathsAbove(path).slice(1)) if (f) folders.add(f);
+    }
+    const marked: { path: string; readers?: string; writers?: string }[] = [];
+    for (const f of [...folders].sort()) {
+      const own = policy.permAt(f)?.perm;
+      if (own) marked.push({ path: f, ...(own.read ? { readers: words(own.read) } : {}), ...(own.write ? { writers: words(own.write) } : {}) });
+    }
+    return { files, folders: marked };
+  }
+
   /** Who reads each space, in words ("Only you", "Ada and Bo", "editors"), for the file list (0066). */
   async readersInWords(): Promise<Map<string, string>> {
     const { policy, me } = await this.node.policy();
@@ -704,20 +761,167 @@ export class Peers {
     const { policy, me } = await this.node.policy();
     if (!policy.founded || !me) throw new NotAllowed('Who reads what is for a workspace shared with other people, once it has a policy');
     if (!(await this.access(path)).canWrite) throw new NotAllowed('Only someone who may change this file says who reads it');
-    let target: string | null = null;
-    if (audience) {
-      const wanted = [...new Set(audience)].sort();
-      if (!wanted.length || !wanted.every((w) => /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/.test(w))) throw new NotAllowed('An audience names people, groups or admins');
-      const same = [...policy.spaces].find(([, s]) => s.audience.join() === wanted.join());
-      if (same) target = same[0];
-      else {
-        target = randomBytes(16).toString('hex');
-        await this.node.identity.makeSpace(target, wanted, await this.node.signingKeyNow());
-        await this.node.membersChanged();
-      }
-      if (!(await this.node.policy()).policy.mayRead(me, target)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
-    }
+    const target = await this.spaceFor(audience);
+    if (target && !(await this.node.policy()).policy.mayRead(me, target)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
     await this.host.moveToSpace(path, target);
+  }
+
+  /** The space for an audience (0066): one that has it, or one made for it now; null for everyone in the workspace. */
+  private async spaceFor(audience: string[] | null): Promise<string | null> {
+    if (!audience) return null;
+    const wanted = [...new Set(audience)].sort();
+    if (!wanted.length || !wanted.every(isWriter)) throw new NotAllowed('An audience names people, groups, admins or email addresses');
+    const { policy } = await this.node.policy();
+    const same = [...policy.spaces].find(([, s]) => s.audience.join() === wanted.join());
+    if (same) return same[0];
+    const id = randomBytes(16).toString('hex');
+    await this.node.identity.makeSpace(id, wanted, await this.node.signingKeyNow());
+    await this.node.membersChanged();
+    return id;
+  }
+
+  /** Who reads a file now: its space's audience; null for everyone in the workspace. */
+  private audienceOf(policy: Policy, path: string): string[] | null {
+    const space = this.host.spaceOf(path);
+    return space ? policy.spaces.get(space)?.audience ?? [] : null;
+  }
+
+  /** Every file this device holds (the workspace's and its spaces'), and every folder they are in (`dir/`). */
+  private async knownPaths(): Promise<{ files: string[]; folders: string[] }> {
+    const listed = (await this.host.git.run(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { allowFail: true })).stdout.split('\0').filter(Boolean);
+    const files = [...new Set([...listed, ...this.host.spaces.entries().map(([p]) => p)])];
+    const folders = new Set<string>();
+    for (const f of files) for (const p of pathsAbove(f).slice(1)) if (p) folders.add(p);
+    return { files, folders: [...folders] };
+  }
+
+  /**
+   * A file's or folder's permissions (0069), for its Permissions… dialog: its
+   * own (who may change it; a folder's, who reads what is made in it), what it
+   * has from above (the nearest folder's, or the workspace's), who reads it (a
+   * file: its space), and what this person may say.
+   */
+  async permissions(path: string): Promise<PermissionsInfo> {
+    const { policy, me } = await this.node.policy();
+    const folder = path === '' || path.endsWith('/');
+    const parent = path === '' ? null : pathsAbove(path)[1] ?? null;
+    const own = policy.permAt(path);
+    const access = folder ? null : await this.access(path);
+    return {
+      path,
+      folder,
+      own: own ? { write: own.perm.write ?? null, read: own.perm.read ?? null } : null,
+      fromAbove: {
+        write: parent === null ? null : policy.ruleFor(parent),
+        read: parent === null ? null : folder ? policy.readFor(parent) : policy.readFor(path),
+      },
+      readers: folder ? null : this.audienceOf(policy, path),
+      admin: policy.founded && policy.isAdmin(me),
+      canWrite: access ? access.canWrite : policy.founded && policy.isAdmin(me),
+    };
+  }
+
+  /**
+   * Say a file's or folder's permissions (0069): who may change it (`write`:
+   * people, groups, admins; null takes its own away, so it follows its folder's),
+   * and who reads it (`read`: a file moves to that audience's space, whoever may
+   * change it says; a folder's is who reads what is made in it, its files that
+   * followed it moving with it). What it says of changing, and a folder's of
+   * reading, is an admin's to say. A private path is named by its hash.
+   */
+  async setPermissions(path: string, change: { write?: string[] | null; read?: string[] | null }): Promise<void> {
+    const { policy, me } = await this.node.policy();
+    if (!policy.founded || !me) throw new NotAllowed('Permissions are for a workspace shared with other people, once it has a policy');
+    if (path !== '' && !isRulePath(path)) throw new NotAllowed('Not a file or folder');
+    const folder = path === '' || path.endsWith('/');
+    const clean = (list: string[] | null | undefined) => (list === undefined ? undefined : list && list.length ? [...new Set(list)].sort() : null);
+    const write = clean(change.write);
+    const read = clean(change.read);
+    for (const l of [write, read]) if (l && !l.every(isWriter)) throw new NotAllowed('Name people, groups, admins or email addresses');
+    if (write !== undefined || (folder && read !== undefined)) {
+      if (!policy.isAdmin(me)) throw new NotAllowed('Only an admin of this workspace says who can change what, and who reads a folder');
+      const own = policy.permAt(path);
+      const nextWrite = write === undefined ? own?.perm.write : write ?? undefined;
+      const nextRead = folder ? (read === undefined ? own?.perm.read : read ?? undefined) : undefined;
+      const parent = path === '' ? null : pathsAbove(path)[1] ?? null;
+      // Named by its hash where it is private: in a space, under a folder fewer read, or a folder fewer read itself.
+      const hidden = !!this.host.spaceOf(path) || !!nextRead || (parent !== null && !!policy.readFor(folder ? parent : path));
+      const key = hidden && path !== '' ? hashedPath(policy.workspace, path) : path;
+      if (own && own.key !== key) await this.adminOp({ t: 'perm', path: own.key });
+      await this.adminOp({ t: 'perm', path: key, ...(nextWrite ? { write: nextWrite } : {}), ...(nextRead ? { read: nextRead } : {}) });
+      if (folder && read !== undefined) {
+        // Its files that followed it (who read them was who read the folder) follow it still.
+        const before = own?.perm.read ?? (parent !== null ? policy.readFor(parent)?.audience : undefined) ?? null;
+        const after = nextRead ?? (parent !== null ? (await this.node.policy()).policy.readFor(parent)?.audience : undefined) ?? null;
+        if ((before ?? []).join() !== (after ?? []).join()) {
+          const target = await this.spaceFor(after);
+          const now = (await this.node.policy()).policy;
+          for (const f of (await this.knownPaths()).files.filter((x) => x.startsWith(path))) {
+            if ((this.audienceOf(now, f) ?? []).join() !== (before ?? []).join() || !now.mayWrite(me, f)) continue;
+            await this.host.moveToSpace(f, target);
+          }
+        }
+      }
+    }
+    if (!folder && read !== undefined) await this.setAudience(path, read);
+  }
+
+  /**
+   * What a new file is made into (0069): the space of who reads what is made in
+   * its folder (made for that audience if none has it), or null for everyone.
+   * Not one this person could not read.
+   */
+  async spaceForNew(path: string): Promise<string | null> {
+    const { policy, me } = await this.node.policy();
+    const audience = policy.founded ? policy.readFor(path)?.audience ?? null : null;
+    if (!audience) return null;
+    const id = await this.spaceFor(audience);
+    return id && (await this.node.policy()).policy.mayRead(me, id) ? id : null;
+  }
+
+  /** The permissions of a path (a folder's, with those under it) that a move would take with it. */
+  private async ownPermissions(from: string, isFolder: boolean): Promise<{ path: string; key: string; perm: Perm }[]> {
+    const { policy } = await this.node.policy();
+    const known = await this.knownPaths();
+    const paths = isFolder ? [`${from}/`, ...known.files.filter((f) => f.startsWith(`${from}/`)), ...known.folders.filter((f) => f.startsWith(`${from}/`) && f !== `${from}/`)] : [from];
+    const out: { path: string; key: string; perm: Perm }[] = [];
+    for (const p of new Set(paths)) {
+      const at = policy.permAt(p);
+      if (at) out.push({ path: p, ...at });
+    }
+    return out;
+  }
+
+  /** Why a move may not be made (a path with permissions of its own, moved by someone who cannot carry them: 0069); null if it may. */
+  async whyNotMove(from: string, isFolder: boolean): Promise<string | null> {
+    const { policy, me } = await this.node.policy();
+    if (!policy.founded || policy.isAdmin(me) || !(await this.ownPermissions(from, isFolder)).length) return null;
+    return isFolder ? 'This folder, or something in it, has permissions of its own: only an admin can move it, so they go with it' : 'This file has permissions of its own: only an admin can move it, so they go with it';
+  }
+
+  /**
+   * After a move (0069): its permissions go with it (an admin's: whyNotMove
+   * refused anyone else's), and a file that read as its folder said reads as
+   * its new folder says.
+   */
+  async moved(from: string, to: string, isFolder: boolean): Promise<void> {
+    const before = (await this.node.policy()).policy;
+    const carried = await this.ownPermissions(from, isFolder);
+    for (const c of carried) {
+      const path = isFolder ? `${to}/${c.path.slice(from.length + 1)}`.replace(/\/\/$/, '/') : to;
+      const key = c.key.startsWith('h:') ? hashedPath(before.workspace, path) : path;
+      await this.adminOp({ t: 'perm', path: c.key });
+      await this.adminOp({ t: 'perm', path: key, ...c.perm });
+    }
+    if (isFolder) return;
+    const was = before.readFor(from)?.audience ?? null;
+    const now = (await this.node.policy()).policy;
+    const next = now.readFor(to)?.audience ?? null;
+    const has = this.audienceOf(now, to);
+    // It followed its old folder: it follows its new one.
+    if ((has ?? []).join() === (was ?? []).join() && (next ?? []).join() !== (has ?? []).join() && now.mayWrite((await this.node.policy()).me, to)) {
+      await this.host.moveToSpace(to, await this.spaceFor(next));
+    }
   }
 
   /** Suggest a text for a file this person may not change (Host.suggest); one they may, they change. */
@@ -741,11 +945,10 @@ export class Peers {
     await this.host.commitNote(`${accepted ? 'Took' : 'Left'} ${s.name ?? 'someone'}’s suggestion for ${path}`, [`${RESOLVED_TRAILER}: ${commit} ${path}`]);
   }
 
-  /** Say who may change a path (an admin's to do): people's IDs, `group:<name>`, or `admins`; none takes the rule away. */
+  /** Say who may change a path (an admin's to do): people's IDs, `group:<name>`, or `admins`; none takes the rule away (as setPermissions). */
   async setRule(path: string, by: string[]): Promise<void> {
     if (!isRulePath(path)) throw new NotAllowed('Not a path a rule can name: a file, a folder ending in /, or nothing for the whole workspace');
-    if (!by.every((w) => /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/.test(w))) throw new NotAllowed('A rule names people, groups or admins');
-    await this.adminOp({ t: 'rule', path, by: [...new Set(by)].sort() });
+    await this.setPermissions(path, { write: by.length ? by : null });
   }
 
   /** Put someone in a group, or take them out (role null): an admin's of the group, or the workspace's. */
@@ -758,9 +961,15 @@ export class Peers {
   async rules(): Promise<RulesInfo> {
     const { policy, me } = await this.node.policy();
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    // Private paths by their hash: shown as the path where this device knows it, else as private.
+    const known = await this.knownPaths();
+    const byHash = new Map(['', ...known.files, ...known.folders].map((p) => [hashedPath(policy.workspace, p), p]));
+    const shown = (key: string) => (key.startsWith('h:') ? byHash.get(key) ?? null : key);
     return {
       admin: policy.founded ? policy.isAdmin(me) : false,
-      rules: [...policy.rules].map(([path, by]) => ({ path, by })).sort((a, b) => (a.path < b.path ? -1 : 1)),
+      rules: [...policy.rules].map(([key, by]) => ({ path: shown(key) ?? key, by })).filter((r) => !r.path.startsWith('h:')).sort((a, b) => (a.path < b.path ? -1 : 1)),
+      permissions: [...policy.perms].map(([key, p]) => ({ path: shown(key), private: key.startsWith('h:'), write: p.write ?? null, read: p.read ?? null }))
+        .sort((a, b) => ((a.path ?? '\uffff') < (b.path ?? '\uffff') ? -1 : 1)),
       verifiers: [...policy.verifiers].map(([key, url]) => ({ key, url })),
       groups: [...policy.groups].filter(([g]) => g !== WORKSPACE).map(([name, entries]) => ({
         name,
@@ -790,7 +999,7 @@ export class Peers {
     return this.rules();
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' }>): Promise<void> {
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());

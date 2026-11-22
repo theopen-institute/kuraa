@@ -244,13 +244,13 @@ const fileRoutes: Route[] = [
     const paths = [...new Set([...out.split('\0').filter(Boolean), ...spaced])].sort();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
     const files = await host.treeEntries(paths, branch);
-    // Who reads each file in a space, in words (0066).
-    const readers = host.peers ? await host.peers.readersInWords() : new Map<string, string>();
+    // Who reads, and who may change, each file (where not everyone may), and folders with permissions of their own, in words (0066, 0069).
+    const marks = host.peers ? await host.peers.marks(paths) : { files: new Map<string, object>(), folders: [] };
     for (const f of files) {
-      const space = host.spaceOf(f.path);
-      if (space) Object.assign(f, { readers: readers.get(space) ?? '' });
+      const m = marks.files.get(f.path);
+      if (m) Object.assign(f, m);
     }
-    send(res, 200, { files });
+    send(res, 200, { files, folders: marks.folders });
   }),
 
   route('GET', '/api/files', ({ host, res, q }) => {
@@ -268,11 +268,13 @@ const fileRoutes: Route[] = [
     const abs = host.resolvePath(path);
     if (existsSync(abs)) throw new HttpError(409, 'File exists');
     const content = typeof body.content === 'string' ? body.content : '';
+    // Made in a folder fewer read: into their space, never onto the workspace's own branch (0069).
+    const space = host.peers ? await host.peers.spaceForNew(path) : null;
     const commit = await host.serial(async () => {
       await host.requireWritable();
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, content, { flag: 'wx' });
-      return host.commitPaths([path], `Create ${path}`);
+      return space ? host.commitIntoSpace(space, [path], `Create ${path}`) : host.commitPaths([path], `Create ${path}`);
     });
     send(res, 201, { path, commit });
   }),
@@ -286,11 +288,12 @@ const fileRoutes: Route[] = [
     checkPortable(path);
     const abs = host.resolvePath(path);
     if (existsSync(abs)) throw new HttpError(409, 'A file or folder with that name exists');
+    const space = host.peers ? await host.peers.spaceForNew(`${path}/.gitkeep`) : null;
     const commit = await host.serial(async () => {
       await host.requireWritable();
       await mkdir(abs, { recursive: true });
       await writeFile(join(abs, '.gitkeep'), '');
-      return host.commitPaths([`${path}/.gitkeep`], `Create folder ${path}`);
+      return space ? host.commitIntoSpace(space, [`${path}/.gitkeep`], `Create folder ${path}`) : host.commitPaths([`${path}/.gitkeep`], `Create folder ${path}`);
     });
     send(res, 201, { path, commit });
   }),
@@ -327,6 +330,9 @@ const fileRoutes: Route[] = [
     if (isFolder && to.startsWith(`${from}/`)) throw new HttpError(400, 'A folder cannot move into itself');
     // Only the folder changed: a move. Otherwise (the name changed too) a rename.
     const moveOnly = dirname(from) !== dirname(to) && basename(from) === basename(to);
+    // Its permissions go with it (0069): refused, rather than left behind, where this person cannot carry them.
+    const why = host.peers ? await host.peers.whyNotMove(from, isFolder) : null;
+    if (why) throw new HttpError(403, why);
     const commit = await host.serial(async () => {
       await host.requireWritable();
       if (isFolder) await host.dropRoomsUnder(from);
@@ -334,8 +340,11 @@ const fileRoutes: Route[] = [
       await mkdir(dirname(absTo), { recursive: true });
       await renameOver(absFrom, absTo);
       if (title !== undefined && !isFolder) await host.setTitle(to, title);
+      // Files of spaces stay in their spaces, at their new paths (0069).
+      await host.carrySpaces(from, to, isFolder);
       return host.commitPaths([from, to], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
+    if (host.peers) await host.peers.moved(from, to, isFolder);
     send(res, 200, { from, to, commit });
   }),
 
@@ -673,7 +682,7 @@ async function allowed<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (e) {
     if (e instanceof HttpError) throw e;
-    throw new HttpError(e instanceof NotAllowed || /^Only an admin/.test((e as Error).message) ? 403 : 400, (e as Error).message);
+    throw new HttpError(e instanceof NotAllowed || /^Only (an admin|the)/.test((e as Error).message) ? 403 : 400, (e as Error).message);
   }
 }
 
@@ -730,6 +739,12 @@ const peerRoutes: Route[] = [
     await allowed(() => peers.setRole(params[0]!, role));
     send(res, 200, await peers.people());
   }),
+  // The owner gives their role to someone in the workspace (0070), staying an admin.
+  route('POST', /^\/api\/peers\/owner\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+    const peers = await host.peersForInvites();
+    await allowed(() => peers.makeOwner(params[0]!));
+    send(res, 200, await peers.people());
+  }),
   route('DELETE', /^\/api\/peers\/people\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
     await allowed(() => peers.removePerson(params[0]!));
@@ -758,6 +773,25 @@ const peerRoutes: Route[] = [
     const path = str(b.path, 'path');
     await allowed(() => peers.resolveSuggestion(commit, path, b.accepted === true));
     send(res, 200, { ok: true });
+  }),
+  // A file's or folder's permissions (0069): who may change it, who reads it (a folder's: what is made in it).
+  route('GET', '/api/permissions', async ({ host, res, q }) => {
+    const peers = host.peers;
+    if (!peers) throw new HttpError(400, 'Permissions are for a workspace shared with other devices');
+    const raw = str(q.get('path'), 'path');
+    const path = raw === '' || raw === '/' ? '' : raw.endsWith('/') ? `${host.relPath(raw.slice(0, -1))}/` : host.relPath(raw);
+    send(res, 200, await peers.permissions(path));
+  }),
+  route('POST', '/api/permissions', async ({ host, req, res }) => {
+    const peers = host.peers;
+    if (!peers) throw new HttpError(400, 'Permissions are for a workspace shared with other devices');
+    const b = await readBody(req);
+    const raw = str(b.path, 'path');
+    const path = raw === '' || raw === '/' ? '' : raw.endsWith('/') ? `${host.relPath(raw.slice(0, -1))}/` : host.relPath(raw);
+    const list = (v: unknown) => (v === undefined ? undefined : v === null ? null : Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : (() => { throw new HttpError(400, 'Name people, groups or admins'); })());
+    const change = { write: list(b.write), read: list(b.read) };
+    await allowed(() => peers.setPermissions(path, change));
+    send(res, 200, await peers.permissions(path));
   }),
   // Who reads a file (0066): everyone in the workspace (null), or an audience; it moves to that audience's space.
   route('POST', '/api/audience', async ({ host, req, res }) => {

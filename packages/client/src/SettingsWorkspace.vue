@@ -21,7 +21,7 @@ const props = defineProps<{
   /** The server lets people take this workspace off its list. */
   canRemove: boolean;
 }>();
-const emit = defineEmits<{ rename: []; remove: []; invite: []; packages: [runner: ChunkRunner, engine: string] }>();
+const emit = defineEmits<{ rename: []; remove: []; invite: []; permissions: [path: string]; packages: [runner: ChunkRunner, engine: string] }>();
 
 // The engine whose packages the workspace's documents use, followed as the runner changes.
 const tick = ref(0);
@@ -51,7 +51,7 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
         </fieldset>
       </section>
       <DevicesSection :api="api" @invite="emit('invite')" />
-      <RulesSection :api="api" />
+      <RulesSection :api="api" @permissions="(p) => emit('permissions', p)" />
       <SyncsSection :api="api" />
       <details class="settings-part menu-details">
         <summary>{{ S.common.details }}</summary>

@@ -24,8 +24,10 @@ const props = defineProps<{
   registry: TypeRegistry;
   /** The workspace folder's name, shown at the top. */
   workspaceName: string;
-  /** The workspace is shared with other people's devices: Who can read… is offered (0066). */
+  /** The workspace is shared with other people's devices: Permissions… is offered (0066, 0067). */
   shared?: boolean;
+  /** Folders with permissions of their own (0069): their path (`dir/`), who reads and who may change, in words. */
+  folders?: { path: string; readers?: string; writers?: string }[];
 }>();
 const emit = defineEmits<{
   select: [path: string];
@@ -266,6 +268,7 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
     { label: S.tree.newFileMenu(where), run: () => create(path), testid: 'context:new-file' },
     { label: S.tree.newFolderMenu(where), run: () => void newFolder(path), testid: 'context:new-folder' },
     ...(kind === 'folder' ? [
+      ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', `${path}/`), testid: 'context:folder-permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void renameFolder(path), testid: 'context:rename-folder' },
     ] : []),
   ];
@@ -390,6 +393,7 @@ provide(TREE, {
   rename: (path) => void rename(path),
   remove: (path) => void remove(path),
   iconFor: (f) => (f.type ? props.registry.get(f.type)?.icon?.(f.path) : undefined),
+  folderMarks: computed(() => new Map((props.folders ?? []).map((m) => [m.path.replace(/\/$/, ''), m]))),
   contextMenu,
   dragStart,
   dragEnd,

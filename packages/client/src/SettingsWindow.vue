@@ -68,6 +68,8 @@ const emit = defineEmits<{
   renameWorkspace: [];
   removeWorkspace: [];
   invite: [];
+  /** A file's or folder's permissions, to open (0069). */
+  permissions: [path: string];
   packages: [runner: ChunkRunner, engine: string];
 }>();
 
@@ -193,6 +195,7 @@ useDialog(root, () => {
             @rename="emit('renameWorkspace')"
             @remove="thenClose(() => emit('removeWorkspace'))"
             @invite="thenClose(() => emit('invite'))"
+            @permissions="(p) => thenClose(() => emit('permissions', p))"
             @packages="(r, engine) => thenClose(() => emit('packages', r, engine))"
           />
           <SettingsServer

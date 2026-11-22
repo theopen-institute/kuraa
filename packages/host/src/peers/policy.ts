@@ -35,6 +35,23 @@
 //   by whoever made it, or by the workspace's admins. Files not in a space are
 //   the workspace's: everyone in it reads them.
 //
+// - perm: a file's or folder's permission (0069): who may change it (`write`,
+//   as a rule's), and, for a folder, who reads what is made in it (`read`, an
+//   audience: its files' space). Either may be absent; with neither, the
+//   permission is taken away. The nearest up the tree counts, for each. An
+//   admin's to make. A private path (in a space, or under a folder others may
+//   not read) is named by its hash (`h:<hex>`, hashedPath): those who know the
+//   path match it; others learn only that a permission exists. `rule` is the
+//   same as a perm's `write`, as made before perms.
+//
+// - owner (0070): one person above the admins. Only the owner makes someone an
+//   admin, makes an admin a member, or takes an admin out (an invite link that
+//   makes admins too); the owner cannot be made a member, taken out, or leave,
+//   but gives the role to someone in the workspace (`owner`), staying an admin.
+//   A workspace made since 0066 has its genesis's admin as its owner; one from
+//   before, the admin whose seal sealed its legacy geneses (the first to make an
+//   admin's change). Until it has one, its admins are equal, as they were.
+//
 // - verifier: a server whose attestations count here (attest.ts, step 6): its
 //   key and where it is; an admin's to add, or take away (with no address).
 //
@@ -58,7 +75,12 @@ export type PolicyOp =
   | { t: 'seal'; geneses: string[] }
   | { t: 'rule'; path: string; by: string[] }
   | { t: 'space'; id: string; audience: string[] }
-  | { t: 'verifier'; key: string; url: string };
+  | { t: 'verifier'; key: string; url: string }
+  | { t: 'perm'; path: string; write?: string[]; read?: string[] }
+  | { t: 'owner'; who: string };
+
+/** A file's or folder's permission (0069): who may change it, and (a folder's) who reads what is made in it. */
+export interface Perm { write?: string[]; read?: string[] }
 
 /** A policy operation as a record carries it (records.ts, kind `policy`). */
 export interface PolicyEntry {
@@ -90,6 +112,8 @@ function encodeOp(op: PolicyOp): string {
     case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
     case 'space': return ['space', op.id, op.audience.join(',')].join('\0');
     case 'verifier': return ['verifier', op.key, op.url].join('\0');
+    case 'perm': return ['perm', op.path, op.write ? op.write.join(',') : '-', op.read ? op.read.join(',') : '-'].join('\0');
+    case 'owner': return ['owner', op.who].join('\0');
   }
 }
 
@@ -123,6 +147,18 @@ const writerTest = new RegExp(`^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|ad
 
 /** Whether a string names someone in a group, rule or audience: an identity, a group, the admins, or an email (step 6). */
 export const isWriter = (w: string) => writerTest.test(w);
+
+/** A private path, as a permission names it: its hash, in this workspace (0069). */
+export const hashedPath = (workspace: string, path: string) => `h:${sha256(`kuraa-path\0${workspace}\0${path}`)}`;
+
+/** The paths whose permissions count for a file or folder, nearest first: itself, each folder it is in, and everything (''). */
+export function pathsAbove(path: string): string[] {
+  const out = [path];
+  const parts = path.replace(/\/$/, '').split('/');
+  for (let i = parts.length - 1; i > 0; i--) out.push(`${parts.slice(0, i).join('/')}/`);
+  if (path !== '') out.push('');
+  return [...new Set(out)];
+}
 
 /** Whether a path is one a rule can name: `''` (everything), `dir/` (a folder), or a file; relative, with no `.` or `..` parts. */
 export function isRulePath(path: string): boolean {
@@ -170,6 +206,15 @@ export function readOp(v: unknown): PolicyOp | null {
     case 'verifier':
       return typeof o.key === 'string' && hexKey.test(o.key) && typeof o.url === 'string' && o.url.length <= 500 && (o.url === '' || /^https?:\/\/\S+$/.test(o.url))
         ? { t: 'verifier', key: o.key, url: o.url } : null;
+    case 'owner':
+      return typeof o.who === 'string' && hexKey.test(o.who) ? { t: 'owner', who: o.who } : null;
+    case 'perm': {
+      if (typeof o.path !== 'string' || !(isRulePath(o.path) || /^h:[0-9a-f]{64}$/.test(o.path))) return null;
+      const write = o.write === undefined ? undefined : sortedUnique(o.write, writerTest);
+      const read = o.read === undefined ? undefined : sortedUnique(o.read, writerTest);
+      if (write === null || read === null || (write && !write.length) || (read && !read.length)) return null;
+      return { t: 'perm', path: o.path, ...(write ? { write } : {}), ...(read ? { read } : {}) };
+    }
     default:
       return null;
   }
@@ -209,8 +254,8 @@ export class Policy {
     readonly usedLinks: Set<string>,
     /** A workspace from before: an admin sealed its legacy geneses. */
     readonly sealed = false,
-    /** Who may write where: path → who (rule). */
-    readonly rules = new Map<string, string[]>(),
+    /** Files' and folders' permissions (0069): path (or its hash) → who may change it, and who reads what is made in it. */
+    readonly perms = new Map<string, Perm>(),
     /** Removals of admins made at the same time that would have left none, so none stood (step 4): who, and the operations. */
     readonly disputes: { people: string[]; ops: string[] }[] = [],
     /** People out of the workspace, and the commits they had made that still count (their removals' cutoffs, gate.ts). */
@@ -223,7 +268,19 @@ export class Policy {
     readonly claimsOf: (id: string) => string[] = () => [],
     /** Every email attested of anyone (by verifiers counted here). */
     readonly claimed = new Set<string>(),
+    /** The workspace's owner (0070); null: one from before that has none yet, its admins equal. */
+    readonly owner: string | null = null,
   ) {}
+
+  /** Whether a person is the workspace's owner. */
+  isOwner(id: string | null): boolean {
+    return !!id && id === this.owner;
+  }
+
+  /** Whether a person may make or unmake admins (0070): the owner; where there is none yet, any admin, as before. */
+  mayAssignAdmins(id: string | null): boolean {
+    return this.owner ? this.isOwner(id) : this.isAdmin(id);
+  }
 
   /** Whether an entry naming someone (`email:` included) names this person. */
   private names(entry: string, id: string): boolean {
@@ -253,14 +310,46 @@ export class Policy {
     return new Set([...(this.groups.get(WORKSPACE)?.keys() ?? [])].filter((id) => /^[0-9a-f]{64}$/.test(id) && this.mayRead(id, space)));
   }
 
-  /** The rule that counts for a file: the most specific path that holds it; null if none. */
-  ruleFor(path: string): { path: string; by: string[] } | null {
-    let best: string | null = null;
-    for (const r of this.rules.keys()) {
-      const holds = r === '' || r === path || (r.endsWith('/') && path.startsWith(r));
-      if (holds && (best === null || r.length > best.length)) best = r;
+  /** The workspace it is of: what private paths are hashed with (set as it is made). */
+  workspace = '';
+
+  /** Who may change where, as rules: path (or its hash) → who; the permissions that say who may change. */
+  get rules(): Map<string, string[]> {
+    return new Map([...this.perms].filter(([, p]) => p.write).map(([k, p]) => [k, p.write!]));
+  }
+
+  /** A path's own permission, named in the clear or by its hash; with which. */
+  permAt(path: string): { key: string; perm: Perm } | null {
+    const plain = this.perms.get(path);
+    if (plain) return { key: path, perm: plain };
+    const key = hashedPath(this.workspace, path);
+    const hashed = this.perms.get(key);
+    return hashed ? { key, perm: hashed } : null;
+  }
+
+  /** The nearest permission up the tree that says something of a kind: its path (in the clear, as the caller knows it), its key, and what it says. */
+  private nearest(path: string, kind: keyof Perm, from = 0): { path: string; key: string; who: string[] } | null {
+    for (const p of pathsAbove(path).slice(from)) {
+      const at = this.permAt(p);
+      if (at?.perm[kind]) return { path: p, key: at.key, who: at.perm[kind]! };
     }
-    return best === null ? null : { path: best, by: this.rules.get(best)! };
+    return null;
+  }
+
+  /** The rule that counts for a file or folder: the nearest permission up the tree that says who may change it; null if none. */
+  ruleFor(path: string): { path: string; by: string[]; key: string } | null {
+    const n = this.nearest(path, 'write');
+    return n && { path: n.path, by: n.who, key: n.key };
+  }
+
+  /**
+   * Who reads what is made at a path, as the folders above it say (0069): the
+   * nearest folder's read audience; null if none (everyone in the workspace).
+   * For a folder, its own counts.
+   */
+  readFor(path: string): { path: string; audience: string[]; key: string } | null {
+    const n = this.nearest(path, 'read', path.endsWith('/') ? 0 : 1);
+    return n && { path: n.path, audience: n.who, key: n.key };
   }
 
   /** Whether a person (null: no one's, as an unsigned commit) may change a file: by its rule, or anyone if it has none. */
@@ -351,9 +440,10 @@ function linearize(byId: Map<string, PolicyEntry>): PolicyEntry[] {
 /** What a policy is made of, as operations are applied to it. */
 interface State {
   groups: Map<string, Map<string, Role>>;
-  rules: Map<string, string[]>;
+  perms: Map<string, Perm>;
   spaces: Map<string, { audience: string[]; by: string }>;
   verifiers: Map<string, string>;
+  owner: string | null;
   usedLinks: Set<string>;
   seal: string[] | null;
   applied: string[];
@@ -369,12 +459,15 @@ interface Removal {
   wasAdmin: boolean;
 }
 
-const view = (s: State, claims?: (id: string) => string[]) => new Policy(s.groups, [], s.applied, [], s.usedLinks, !!s.seal, s.rules, [], new Map(), s.spaces, s.verifiers, claims);
+const view = (s: State, claims?: (id: string) => string[]) => new Policy(s.groups, [], s.applied, [], s.usedLinks, !!s.seal, s.perms, [], new Map(), s.spaces, s.verifiers, claims, undefined, s.owner);
 
 function freshState(order: PolicyEntry[], counted: Set<string>): State {
   const groups = new Map<string, Map<string, Role>>([[WORKSPACE, new Map()]]);
   for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) groups.get(WORKSPACE)!.set(id, 'admin');
-  return { groups, rules: new Map(), spaces: new Map(), verifiers: new Map(), usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
+  // A workspace's own genesis names its first admin, its owner (0070); legacy geneses name none.
+  const own = order.find((e) => counted.has(e.id) && e.op.t === 'genesis' && !e.op.legacy);
+  const owner = own && own.op.t === 'genesis' ? own.op.admins[0] ?? null : null;
+  return { groups, perms: new Map(), spaces: new Map(), verifiers: new Map(), owner, usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
 }
 
 const adminCount = (s: State) => [...s.groups.get(WORKSPACE)!].filter(([, r]) => r === 'admin').length;
@@ -392,23 +485,35 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
       // A new group is the workspace's admins' to make.
       const may = s.groups.has(op.group) ? now.isAdmin(by, op.group) : now.isAdmin(by);
       const demotesLast = op.group === WORKSPACE && ws.get(op.who) === 'admin' && op.role !== 'admin' && adminCount(s) === 1;
+      // Admins are the owner's to make and unmake; the owner is not made a member (0070).
+      if (op.group === WORKSPACE && (op.role === 'admin' || ws.get(op.who) === 'admin') && !now.mayAssignAdmins(by)) return false;
+      if (op.group === WORKSPACE && op.who === s.owner && op.role !== 'admin') return false;
       // Into another group, only someone in the workspace (or named by email: they come in by being attested).
       return may && !demotesLast && (op.group === WORKSPACE || nested || byEmail || ws.has(op.who));
     }
     case 'revoke': {
       const may = now.isAdmin(by, op.group) || op.who === by;
       const lastAdmin = op.group === WORKSPACE && ws.get(op.who) === 'admin' && adminCount(s) === 1;
+      // The owner does not leave, nor is taken out (they give the role first); an admin is taken out by the owner, or leaves (0070).
+      if (op.group === WORKSPACE && op.who === s.owner) return false;
+      if (op.group === WORKSPACE && ws.get(op.who) === 'admin' && op.who !== by && !now.mayAssignAdmins(by)) return false;
       return may && !lastAdmin && !!s.groups.get(op.group)?.has(op.who);
     }
     case 'join': {
       const grantOk = crypto.verify(grantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
       const granter = grantOk ? ctx.personOf(op.granter) : null;
+      // A link that makes admins of the workspace, only the owner's (0070).
+      if (op.group === WORKSPACE && op.role === 'admin' && !now.mayAssignAdmins(granter)) return false;
       return !!granter && s.groups.has(op.group) && now.isAdmin(granter, op.group) && !(op.once && s.usedLinks.has(op.link));
     }
+    case 'owner':
+      // The owner gives the role to someone in the workspace.
+      return !!s.owner && by === s.owner && op.who !== by && ws.has(op.who);
     case 'seal':
       return !s.seal && now.isAdmin(by);
     case 'rule':
     case 'verifier':
+    case 'perm':
       return now.isAdmin(by);
     case 'space': {
       // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
@@ -454,10 +559,24 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
     case 'seal':
       if (s.seal) return false;
       s.seal = op.geneses;
+      // A workspace from before: whoever sealed it is its owner (0070).
+      s.owner ??= by;
       return true;
-    case 'rule':
-      if (op.by.length) s.rules.set(op.path, op.by);
-      else s.rules.delete(op.path);
+    case 'owner':
+      s.owner = op.who;
+      ws.set(op.who, 'admin');
+      return true;
+    case 'rule': {
+      // As a perm's write, keeping what it says of reading.
+      const had = s.perms.get(op.path) ?? {};
+      const next: Perm = { ...(op.by.length ? { write: op.by } : {}), ...(had.read ? { read: had.read } : {}) };
+      if (next.write || next.read) s.perms.set(op.path, next);
+      else s.perms.delete(op.path);
+      return true;
+    }
+    case 'perm':
+      if (op.write || op.read) s.perms.set(op.path, { ...(op.write ? { write: op.write } : {}), ...(op.read ? { read: op.read } : {}) });
+      else s.perms.delete(op.path);
       return true;
     case 'space':
       s.spaces.set(op.id, { audience: op.audience, by: s.spaces.get(op.id)?.by ?? by });
@@ -598,5 +717,7 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
     if (!m || m.group !== WORKSPACE || m.kind !== 'out' || state.groups.get(WORKSPACE)!.has(m.person) || e.op.t !== 'revoke') continue;
     cutoffs.set(m.person, [...new Set([...(cutoffs.get(m.person) ?? []), ...(e.op.cutoff ?? [])])].sort());
   }
-  return { policy: new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.rules, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed), seal: state.seal };
+  const policy = new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.perms, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed, state.owner);
+  policy.workspace = ctx.workspace;
+  return { policy, seal: state.seal };
 }

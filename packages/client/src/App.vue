@@ -77,6 +77,8 @@ watch(() => [settings.value.name, ready.value] as const, ([name, isReady]) => {
 // The open workspace: what the host says of it, its files, and the file open.
 const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
+/** Folders with permissions of their own, for the file list to mark (0069). */
+const folderMarks = shallowRef<{ path: string; readers?: string; writers?: string }[]>([]);
 const path = ref<string | null>(null);
 const status = shallowRef<EditorStatus | null>(null);
 const historyKey = ref(0);
@@ -92,7 +94,8 @@ const access = shallowRef<FileAccess | null>(null);
 const permissionsFor = shallowRef<{ path: string; name: string } | null>(null);
 function openPermissions(p: string) {
   const f = files.value.find((x) => x.path === p);
-  permissionsFor.value = { path: p, name: (f && 'title' in f && f.title) || p.slice(p.lastIndexOf('/') + 1) };
+  const name = p === '' ? S.permissions.everything : p.endsWith('/') ? p.slice(0, -1).split('/').pop()! : (f && 'title' in f && f.title) || p.slice(p.lastIndexOf('/') + 1);
+  permissionsFor.value = { path: p, name };
 }
 
 /** Suggesting a change to the open document: its text as it is now. */
@@ -499,7 +502,8 @@ async function refreshTree(selectPath?: string | null) {
     if (n > treeShown) {
       treeShown = n;
       workspace.value = ws;
-      files.value = tree;
+      files.value = tree.files;
+      folderMarks.value = tree.folders ?? [];
       error.value = null;
     }
     if (selectPath !== undefined) select(selectPath);
@@ -683,6 +687,7 @@ function useSettings(s: Settings) {
         ref="fileTree"
         :api="api"
         :shared="sharedWithDevices"
+        :folders="folderMarks"
         :files="shownFiles"
         :selected="path"
         :registry="hostRegistry"
@@ -914,6 +919,7 @@ function useSettings(s: Settings) {
       @rename-workspace="renameWorkspace"
       @remove-workspace="chosen && removeWorkspace(chosen)"
       @invite="invite"
+      @permissions="openPermissions"
       @packages="(runner, engine) => (packages = { runner, engine })"
       @close="settingsOpen = false; void checkSyncable()"
     />

@@ -488,27 +488,33 @@ export class Identity {
    * policy yet), and the person each device is, where known: who may remove a
    * device (an admin, or the same person: 0068).
    */
-  private async managers(list?: MemberRecord[]): Promise<{ managers: Set<string> | null; persons: Map<string, string> }> {
+  private async managers(list?: MemberRecord[]): Promise<{ managers: Set<string> | null; persons: Map<string, string>; adminDevices: Set<string>; assigners: Set<string> }> {
     const records = list ?? (await this.records());
     const policy = await this.policy(records);
     const w = this.who(records);
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const persons = new Map<string, string>();
     const managers = new Set<string>();
+    const assigners = new Set<string>();
     for (const d of [self, ...(await this.members()).map((m) => m.key)]) {
       const id = w.personOf.get(w.signsWith.get(d) ?? '')?.key ?? null;
       if (id) persons.set(d, id);
       if (policy.isAdmin(id)) managers.add(d);
+      if (policy.mayAssignAdmins(id)) assigners.add(d);
     }
-    return { managers: policy.founded ? managers : null, persons };
+    return { managers: policy.founded ? managers : null, persons, adminDevices: new Set(managers), assigners };
   }
 
-  /** Whether a device may remove another (0068): with no policy, any; an admin's, any; else only one of the same person's. */
+  /**
+   * Whether a device may remove another (0068, 0070): with no policy, any; its
+   * own person, always; an admin, a member's computer; the owner, anyone's.
+   */
   async mayRemove(device: string, other: string): Promise<boolean> {
-    const { managers, persons } = await this.managers();
-    if (!managers || managers.has(device)) return true;
+    const { managers, persons, adminDevices, assigners } = await this.managers();
+    if (!managers) return true;
     const whose = persons.get(device);
-    return !!whose && whose === persons.get(other);
+    if (whose && whose === persons.get(other)) return true;
+    return managers.has(device) && (!adminDevices.has(other) || assigners.has(device));
   }
 
   /** The person (identity ID) a device is, as its signing key's vouch says; null if none. */
@@ -539,11 +545,22 @@ export class Identity {
    * In a workspace from before, the first seals its legacy geneses, so none
    * made later counts.
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
-    if (op.t === 'rule' || op.t === 'verifier') {
+    // The owner's (0070): giving the role; making, unmaking or taking out admins; the owner is never made a member or taken out.
+    if (op.t === 'owner' && !policy.isOwner(me)) throw new Error('Only the owner gives the owner’s role');
+    if ((op.t === 'grant' || op.t === 'revoke') && op.group === WORKSPACE) {
+      if (op.who === policy.owner && (op.t === 'revoke' || op.role !== 'admin')) throw new Error('The owner stays an admin and in the workspace: they give the owner’s role to someone else first');
+      const admin = policy.groups.get(WORKSPACE)?.get(op.who) === 'admin';
+      if (((op.t === 'grant' && (op.role === 'admin' || admin)) || (op.t === 'revoke' && admin && op.who !== me)) && !policy.mayAssignAdmins(me)) {
+        throw new Error('Only the workspace’s owner makes, unmakes or takes out admins');
+      }
+    }
+    if (op.t === 'owner') {
+      // Checked above.
+    } else if (op.t === 'rule' || op.t === 'verifier' || op.t === 'perm') {
       if (!policy.isAdmin(me)) throw new Error(op.t === 'rule' ? 'Only an admin of this workspace can say who may change what' : 'Only an admin of this workspace can say whose checks count here');
     } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
       throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
@@ -796,6 +813,7 @@ export class Identity {
       const signer = grant.key.publicKey.toString('hex');
       const who = this.who(await this.records()).personOf.get(signer)?.key ?? null;
       if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
+      if (group === WORKSPACE && role === 'admin' && !policy.mayAssignAdmins(who)) throw new Error('Only the workspace’s owner invites people as admins');
       const genesis = await this.pin();
       granted = { group, role, genesis, granter: signer, signature: crypto.sign(grantMessage(ws.id, genesis, id, group, role, once), grant.key.secretKey).toString('hex') };
     }

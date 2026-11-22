@@ -63,6 +63,8 @@ export interface TreeFile {
   cannotOpen?: string;
   /** Who reads it, in words, if not everyone in the workspace (a space's file, 0066). */
   readers?: string;
+  /** Who may change it, in words, if not anyone (a rule, 0069). */
+  writers?: string;
 }
 /** The workspace's devices, as the host reports them: every member has the same say. */
 export type PeersInfo =
@@ -108,6 +110,17 @@ export interface FileAccess {
   readers?: { audience: string[]; words: string } | null;
 }
 
+/** A file's or folder's permissions (0069), for its Permissions… dialog. */
+export interface PermissionsInfo {
+  path: string;
+  folder: boolean;
+  own: { write: string[] | null; read: string[] | null } | null;
+  fromAbove: { write: { path: string; by: string[] } | null; read: { path: string; audience: string[] } | null };
+  readers: string[] | null;
+  admin: boolean;
+  canWrite: boolean;
+}
+
 /** The workspace's write rules and groups (0066). */
 export interface RulesInfo {
   admin: boolean;
@@ -115,6 +128,8 @@ export interface RulesInfo {
   groups: { name: string; entries: { who: string; role: 'admin' | 'member'; name: string | null }[] }[];
   /** Verifiers whose checks count here (0066, step 6). */
   verifiers?: { key: string; url: string }[];
+  /** Every file's and folder's permission (0069): its path (null: private, not one you know). */
+  permissions?: { path: string | null; private: boolean; write: string[] | null; read: string[] | null }[];
 }
 
 /** The workspace's people, by its policy (0066). */
@@ -123,7 +138,11 @@ export interface PeopleInfo {
   founded: boolean;
   /** Whether you may invite people, remove devices and change who is in it. */
   admin: boolean;
-  people: { id: string; role: 'admin' | 'member'; name: string | null; devices: string[]; you: boolean; emails?: string[] }[];
+  /** The workspace's owner (0070); null: one from before with none yet. */
+  owner?: string | null;
+  /** Whether you make, unmake and take out admins: the owner (any admin, where there is none yet). */
+  assignsAdmins?: boolean;
+  people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean; emails?: string[] }[];
   /** People invited by email, not in yet (step 6). */
   invited?: { email: string; role: 'admin' | 'member' }[];
   /** Admins who took each other out at the same time, which would have left none, so neither removal stood. */
@@ -245,7 +264,11 @@ export class HostApi {
   async renameWorkspace(name: string, by: { name: string; email: string }) {
     return (await this.json<{ name: string }>('/api/workspace/name', { method: 'PATCH', body: JSON.stringify({ name, by }) })).name;
   }
-  tree() { return this.json<{ files: TreeFile[] }>('/api/tree').then((r) => r.files); }
+  tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[] }>('/api/tree'); }
+  /** A file's or folder's permissions (0069). */
+  permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }
+  /** Say a file's or folder's permissions: who may change it, who reads it (null: as its folder says; omitted: as it is). */
+  setPermissions(path: string, change: { write?: string[] | null; read?: string[] | null }) { return this.json<PermissionsInfo>('/api/permissions', { method: 'POST', body: JSON.stringify({ path, ...change }) }); }
   room(path: string) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
   /** A workspace file as it is (an image to show), with its type. */
@@ -305,6 +328,8 @@ export class HostApi {
   setGroupRole(group: string, who: string, role: 'admin' | 'member' | null) { return this.json<RulesInfo>(`/api/groups/${group}`, { method: 'POST', body: JSON.stringify({ who, role }) }); }
   /** Make someone of the workspace an admin or a member (an admin's to do, 0066). */
   setRole(id: string, role: 'admin' | 'member') { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'POST', body: JSON.stringify({ role }) }); }
+  /** Give the owner's role to someone in the workspace (the owner's to do, 0070). */
+  makeOwner(id: string) { return this.json<PeopleInfo>(`/api/peers/owner/${id}`, { method: 'POST' }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
   removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
   createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member'; email?: string }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }

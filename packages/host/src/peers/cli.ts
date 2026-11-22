@@ -41,7 +41,7 @@ import { createPerson, exportPerson, importPerson, personFile, readPerson, readR
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
 
-export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'remove-person', 'rules', 'rule', 'group', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
+export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'owner', 'remove-person', 'rules', 'rule', 'group', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
 
 /** The ways into a workspace besides the DHT this device knows (node.ts keeps them in hints.json), for an invite link. */
 async function storedHints(dir: string, id: Identity, relays: string[]): Promise<LinkHints> {
@@ -197,7 +197,7 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const named = await id.people();
       for (const p of policy.people()) {
         const n = named.find((x) => x.key === p.id);
-        say(`  ${n?.name ?? '(not yet known here)'} ${p.id.slice(0, 12)}…  ${p.role}${n?.devices.length ? `  devices ${n.devices.map((d) => d.slice(0, 8)).join(', ')}` : ''}`);
+        say(`  ${n?.name ?? '(not yet known here)'} ${p.id.slice(0, 12)}…  ${p.id === policy.owner ? 'owner' : p.role}${n?.devices.length ? `  devices ${n.devices.map((d) => d.slice(0, 8)).join(', ')}` : ''}`);
       }
       return;
     }
@@ -238,6 +238,14 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const person = await personNamed(id, who);
       await id.adminOp(action === 'remove' ? { t: 'revoke', group: arg, who: person } : { t: 'grant', group: arg, who: person, role: action === 'admin' ? 'admin' : 'member' }, key);
       return say(action === 'remove' ? `Took ${who} out of ${arg}.` : `${who} is ${action === 'admin' ? 'an admin' : 'a member'} of ${arg}.`);
+    }
+    case 'owner': {
+      // kuraa-host owner <person>: give the owner's role to someone in the workspace (0070); you stay an admin.
+      if (!arg) throw new Error('Usage: kuraa-host owner <person>');
+      const { git, id } = await identityAt(values.dir!);
+      const { key } = await asPerson(git, id, false);
+      await id.adminOp({ t: 'owner', who: await personNamed(id, arg) }, key);
+      return say(`${arg} is the workspace's owner now; you stay an admin. Other devices learn of it when they next meet this one.`);
     }
     case 'remove-person': {
       if (!arg) throw new Error('Usage: kuraa-host remove-person <person>');

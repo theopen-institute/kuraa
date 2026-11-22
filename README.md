@@ -283,11 +283,14 @@ pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
 pnpm host --dir ~/notes --static apps/web/dist
 ```
 
-**A workspace has admins and members** ([decision 0066](docs/decisions/0066-permissions-without-a-centre.md)):
+**A workspace has an owner, admins and members** ([decisions 0066](docs/decisions/0066-permissions-without-a-centre.md),
+[0070](docs/decisions/0070-an-owner.md)). The owner, whoever made the workspace, is the one admin
+who makes and unmakes admins; they hand the role to someone else with **Make owner…**, staying an
+admin.
 everyone reads everything; only admins invite people, remove devices, make others admins or
-members or take them out, and say who may change a file or folder (Workspace settings' **Who can
-change what**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists them, `group`
-manages groups). Where nothing is said, anyone may change it. A change by anyone else is kept out
+members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, a
+file's or folder's **Permissions…**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists
+them, `group` manages groups). Where nothing is said, anyone may change it. A change by anyone else is kept out
 where it comes in: every device's merge keeps its own version of the file and keeps the change on
 record, and those who may change the file see it above the document as a suggestion, to compare
 and **Accept** (as their edit) or **Dismiss**. A document you may not change opens read only, saying
@@ -298,12 +301,17 @@ would leave no admin (then neither is, and Workspace settings say so). What some
 a revoked or lost key, signs after that counts for nothing anywhere; merges are made again by
 every device that brings them in, so none can slip a change past the rules.
 
-A document's **Permissions…** (its ⋯ menu, or its right-click menu) say who can read it and who
-can change it, beside the rules for folders and the whole workspace in Workspace settings: who can
-change it is a rule for the file (as its folder says, only you, or people, groups and admins),
-which admins make ([0067](docs/decisions/0067-permissions-from-the-document.md)).
+**Permissions** are on files and folders ([0069](docs/decisions/0069-permissions-on-files-and-folders.md)):
+a file's or folder's **Permissions…** (its right-click menu, or a document's ⋯ menu) say who can
+read it and who can change it, each its own or as the folder above says (the nearest up the tree
+counts). Who can change anything is the admins' to say; who reads a file, whoever may change it;
+who reads a folder (and so what is made in it, which goes straight to its readers), the admins'.
+Permissions go with a file or folder when an admin moves it (anyone else is told they cannot move
+what has its own). The file list marks what fewer read (a lock) or fewer may change (a pen), and
+Workspace settings' **Permissions** lists them all. A permission about something private names it
+by a hash, so members who cannot see it do not learn its path.
 
-**Who can read a file** is chosen there too: everyone in the workspace, only you, or people and groups. A file read by fewer is kept in a *space*: a
+**Who can read a file**: everyone in the workspace, only you, or people and groups. A file read by fewer is kept in a *space*: a
 history of its own in the repository (`refs/spaces/…`), which devices send only to the devices
 of the people who may read it, so no one else's device ever has it, nor its history. On your
 device its files lie in the folder with the rest, marked with a lock in the file list, and kept

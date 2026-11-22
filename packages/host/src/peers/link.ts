@@ -1,6 +1,6 @@
 // One connection to another device, split into channels (protomux): control
-// messages (JSON), rooms (their changes as bytes), and git streams, any number
-// at once. A channel's messages sent before the other end opens it wait there
+// messages (JSON), rooms (their changes as bytes), run outputs as they happen
+// (outputs.ts, 0062), and git streams, any number at once. A channel's messages sent before the other end opens it wait there
 // until it does (protomux), and both ends open both as they connect.
 // The connection itself is Hyperswarm's: encrypted (Noise), and the other end
 // proved it holds the key it claims (`remotePublicKey`).
@@ -29,14 +29,24 @@ const GIT = 'kuraa/git/1';
  */
 const TUNNEL = 'kuraa/tunnel/1';
 const ROOMS = 'kuraa/rooms/1';
+/**
+ * Run outputs as they happen (outputs.ts, 0062). Sent on only once the other
+ * end has opened it too: a device running an older kuraa never does, and
+ * messages for a channel it never opens would wait there, holding the whole
+ * connection up once enough of them did (protomux).
+ */
+const OUTPUTS = 'kuraa/outputs/1';
 /** How much of a stream (git, a tunnel) may be sent and not yet taken by the reader at the other end, in bytes. */
 const GIT_WINDOW = 1024 * 1024;
 
 /** What a tunnel is asked for: a connection to device `to`, from device `from` (keys, hex). */
 export interface TunnelAsk { to: string; from: string }
 
-/** A room message on the rooms channel: its fields as JSON, less those that are bytes, which follow as they are. */
+/** A message on the rooms or outputs channel: its fields as JSON, less those that are bytes, which follow as they are. */
 interface RoomFrame { meta: Record<string, unknown> & { bin?: string[] }; data: Buffer[] }
+
+/** A message about run outputs (outputs.ts, LiveMessage): its fields, and bytes (plots) beside them. */
+export interface OutputsFrame { meta: Record<string, unknown>; data: Buffer[] }
 
 const buffers = c.array(c.buffer);
 const roomFrame: Encoding<RoomFrame> = {
@@ -108,7 +118,9 @@ export type ControlMessage =
   | { type: 'present'; keys: string[] }
   | { type: 'bye'; reason: string }
   /** Rooms: what this device has open, and changes to them (see rooms.ts). */
-  | { type: 'room'; [k: string]: unknown };
+  | { type: 'room'; [k: string]: unknown }
+  /** Run outputs as they happen (outputs.ts, 0062): only on their own channel. */
+  | { type: 'outputs'; frame: OutputsFrame };
 
 /** Branches as a device says they are, checked: name → commit; null if they are not. */
 export function readHeads(v: unknown): Record<string, string> | null {
@@ -143,6 +155,8 @@ export class PeerLink {
   private readonly send_: Message<unknown>;
   private readonly rooms: Channel;
   private readonly sendFrame: Message<RoomFrame>;
+  private readonly outputsChannel: Channel;
+  private readonly sendOutputsFrame: Message<RoomFrame>;
   private readonly listeners = new Set<(m: ControlMessage) => void>();
   private gitHandler: ((service: string, protocol: string, stream: Duplex) => void) | null = null;
   private tunnelHandler: ((ask: TunnelAsk, stream: Duplex) => void) | null = null;
@@ -167,15 +181,24 @@ export class PeerLink {
     this.control = this.mux.createChannel({ protocol: CONTROL, onclose: () => this.close() })!;
     this.send_ = this.control.addMessage({
       encoding: c.json,
-      // Room messages come only on their own channel.
+      // Room and outputs messages come only on their own channels.
       onmessage: (m) => {
-        if ((m as ControlMessage | null)?.type !== 'room') this.deliver(m as ControlMessage);
+        const type = (m as ControlMessage | null)?.type;
+        if (type !== 'room' && type !== 'outputs') this.deliver(m as ControlMessage);
       },
     });
     this.control.open();
     this.rooms = this.mux.createChannel({ protocol: ROOMS })!;
     this.sendFrame = this.rooms.addMessage({ encoding: roomFrame, onmessage: (f) => this.receiveFrame(f) });
     this.rooms.open();
+    this.outputsChannel = this.mux.createChannel({ protocol: OUTPUTS })!;
+    this.sendOutputsFrame = this.outputsChannel.addMessage({
+      encoding: roomFrame,
+      onmessage: (f) => {
+        if (f.meta && typeof f.meta === 'object' && Array.isArray(f.data)) this.deliver({ type: 'outputs', frame: { meta: f.meta, data: f.data } });
+      },
+    });
+    this.outputsChannel.open();
     this.mux.pair({ protocol: GIT }, (id) => this.acceptGit(id));
     this.mux.pair({ protocol: TUNNEL }, (id) => {
       if (id) this.byteChannel(TUNNEL, id, null);
@@ -205,6 +228,18 @@ export class PeerLink {
       } else meta[k] = v;
     }
     this.sendFrame.send({ meta: { ...meta, bin }, data });
+  }
+
+  /** Whether the other end takes run outputs as they happen: it runs a kuraa that has opened their channel. */
+  get takesOutputs(): boolean {
+    return !this.closed && this.outputsChannel.opened;
+  }
+
+  /** Send a message about run outputs (outputs.ts), if the other end takes them; returns whether it was sent. */
+  sendOutputs(f: OutputsFrame): boolean {
+    if (!this.takesOutputs) return false;
+    this.sendOutputsFrame.send({ meta: f.meta, data: f.data });
+    return true;
   }
 
   private receiveFrame(f: RoomFrame): void {

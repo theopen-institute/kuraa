@@ -18,9 +18,9 @@
 // access (writing the workspace, the network); it gets more access only where
 // the operator allows it. If the environment is unavailable, nothing runs.
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   DEFAULT_POLICY, parseSize,
   type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
@@ -597,18 +597,50 @@ export class Runner {
     }
   }
 
+  /** Cache files as last read, by name: read again only once changed (another device's publish asks for all of them). */
+  private readonly parsed = new Map<string, { mtimeMs: number; size: number; path: string; runs: RunRecord[] }>();
+
   /** Every document's cached runs (for sharing them with the workspace's other devices: peers/outputs.ts). */
   async cached(): Promise<{ path: string; runs: RunRecord[] }[]> {
     const dir = join(this.o.stateDir, 'outputs');
-    const names = await readdir(dir).catch(() => [] as string[]);
+    const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => n.endsWith('.json'));
     const out: { path: string; runs: RunRecord[] }[] = [];
-    for (const name of names.filter((n) => n.endsWith('.json'))) {
+    for (const name of names) {
       try {
-        const c = JSON.parse(await readFile(join(dir, name), 'utf8')) as { path?: unknown; runs?: unknown };
-        if (typeof c.path === 'string' && Array.isArray(c.runs)) out.push({ path: c.path, runs: c.runs as RunRecord[] });
+        const file = join(dir, name);
+        const { mtimeMs, size } = await stat(file);
+        let c = this.parsed.get(name);
+        if (!c || c.mtimeMs !== mtimeMs || c.size !== size) {
+          const v = JSON.parse(await readFile(file, 'utf8')) as { path?: unknown; runs?: unknown };
+          if (typeof v.path !== 'string' || !Array.isArray(v.runs)) continue;
+          c = { mtimeMs, size, path: v.path, runs: v.runs as RunRecord[] };
+          this.parsed.set(name, c);
+        }
+        out.push({ path: c.path, runs: c.runs });
       } catch { /* being written, or not one */ }
     }
+    for (const name of this.parsed.keys()) if (!names.includes(name)) this.parsed.delete(name);
     return out;
+  }
+
+  private readonly runListeners = new Set<(run: RunRecord) => void>();
+
+  /** Hear of every change to a run (queued, running, finished, cancelled), as people with its document open do. */
+  onRun(fn: (run: RunRecord) => void): () => void {
+    this.runListeners.add(fn);
+    return () => this.runListeners.delete(fn);
+  }
+
+  /** Tell people with the document open how a run stands, and whoever listens (peers/outputs.ts: the other devices). */
+  private tellRun(path: string, record: RunRecord): void {
+    this.o.broadcast(path, { type: 'run', run: record });
+    for (const fn of this.runListeners) {
+      try {
+        fn(record);
+      } catch (e) {
+        this.o.log(`telling of a run failed: ${(e as Error).message}`);
+      }
+    }
   }
 
   private readonly cacheListeners = new Set<(path: string) => void>();
@@ -632,6 +664,8 @@ export class Runner {
       const runs = change(before);
       if (runs.length === before.length && runs.every((r, i) => r === before[i])) return;
       const file = this.cacheFile(path);
+      // Read again next time, whatever its time and size say (a filesystem's times may be coarse).
+      this.parsed.delete(basename(file));
       if (!runs.length) await rm(file, { force: true });
       else {
         await mkdir(dirname(file), { recursive: true });
@@ -676,7 +710,7 @@ export class Runner {
     const queue = this.queues.get(path) ?? [];
     queue.push({ record, engine: req.engine, code: req.code, header: req.header, cancel, cancelled });
     this.queues.set(path, queue);
-    this.o.broadcast(path, { type: 'run', run: record });
+    this.tellRun(path, record);
     void this.pump(path);
     return record;
   }
@@ -780,7 +814,7 @@ export class Runner {
     this.active.set(path, job);
     const { record } = job;
     record.state = 'running';
-    this.o.broadcast(path, { type: 'run', run: record });
+    this.tellRun(path, record);
     const started = Date.now();
     try {
       await this.execute(path, job);
@@ -795,7 +829,7 @@ export class Runner {
     record.ms = Date.now() - started;
     record.finishedAt = new Date().toISOString();
     this.active.delete(path);
-    this.o.broadcast(path, { type: 'run', run: record });
+    this.tellRun(path, record);
     await this.remember(record).catch((e) => this.o.log(`could not cache outputs: ${e}`));
     void this.pump(path);
   }
@@ -867,7 +901,7 @@ export class Runner {
     for (const job of this.queues.get(path)?.splice(0) ?? []) {
       job.record.state = 'cancelled';
       job.record.finishedAt = new Date().toISOString();
-      this.o.broadcast(path, { type: 'run', run: job.record });
+      this.tellRun(path, job.record);
     }
     this.active.get(path)?.cancel();
     for (const s of this.sessionsOf(path)) s.session?.interrupt();

@@ -1,5 +1,10 @@
 # 0058 · Run outputs reach the other devices, on a git ref of each device's own
 
+*Since [0062](0062-outputs-as-they-happen.md): runs also go at once, as they happen, to the connected
+devices with the document open, on a channel of the connection; git is what every device ends up
+with. Outputs are fetched apart from the branches, in a queue of their own; publishing waits 100 ms
+after a first change (then a second between publishes), and telling the others 20 ms.*
+
 Outputs are never written into a document ([0011](0011-running-chunks.md)): each device caches the
 latest run of each chunk in `.git/kuraa/outputs/` and shows it to the people using it. In a shared
 workspace that meant a chunk run on one computer showed its output on that computer only. Now each

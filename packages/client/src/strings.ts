@@ -516,6 +516,9 @@ export const S = {
     stopTitle: 'Interrupt R, and drop queued runs',
     queued: 'Queued…',
     running: (secs: number) => `Running… ${secs > 0 ? `${secs} s` : ''}`,
+    /** A run on another device of the workspace, waiting or under way there (0062). */
+    queuedOn: (device: string) => `Queued on ${device}…`,
+    runningOn: (device: string, secs: number) => `Running on ${device}… ${secs > 0 ? `${secs} s` : ''}`,
     runAbove: 'Run above',
     rebuildAbove: 'Rebuild above',
     codeChanged: 'code changed since',

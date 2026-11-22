@@ -344,10 +344,13 @@ runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also say
 
 In a shared workspace, outputs reach the other devices too: each device publishes its latest
 outputs on a git ref of its own (`refs/kuraa/outputs/<device>`, not a branch, never merged, pushed
-to backups or to the online copy), and the others fetch it with their branches. An output from
+to backups or to the online copy), and the others fetch it. Devices connected with the document
+open are also sent each run as it happens, so it shows there within moments, and a run under way
+on another device shows where ("Running on ada-laptop… 3 s"). An output from
 another device says where it ran ("Ada · on ada-laptop · 14:02"); the newest output of a chunk is
 shown, whichever device it came from, dimmed as usual if the code has changed since. Clearing an
-output clears it on every device ([decision 0058](docs/decisions/0058-shared-outputs.md)).
+output clears it on every device ([decisions 0058](docs/decisions/0058-shared-outputs.md),
+[0062](docs/decisions/0062-outputs-as-they-happen.md)). `KURAA_TIMINGS=1` logs how long each step takes.
 
 Code runs through two kinds of component, which meet only through the contract in `@kuraa/run-kit`
 ([decision 0019](docs/decisions/0019-engine-and-environment-components.md)): **engines** are
@@ -608,7 +611,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | — | `packages/host/test/search.test.ts`, `tests/e2e/search.spec.ts`: search finds text in every text file and in what is being typed, and opens the match; `tests/e2e/versions.spec.ts`: past versions compared and restored |
 | — | `packages/client/test/polish.test.ts`, `packages/format-pandoc/test/editor-help.test.ts`, `tests/e2e/polish.spec.ts`: the shortcuts sheet lists what is bound, errors in plain words, the offline banner, the keyboard file tree, dialogs keeping focus |
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
-| — | `packages/host/test/outputs.test.ts`, `peers.test.ts` (run outputs between devices): outputs published on a signed ref of each device's own, taken by the others (passed on only if signed by the device they came from, the newest kept), shown with where they ran, and cleared everywhere from any device |
+| — | `packages/host/test/outputs.test.ts`, `peers.test.ts` (run outputs between devices): outputs published on a signed ref of each device's own, taken by the others (passed on only if signed by the device they came from, the newest kept), shown with where they ran, and cleared everywhere from any device; sent as they happen to devices with the document open, before any publish, believed only from the device that ran them, kept until its commit holds them, and cleared there at once; `link.test.ts`: never sent to a device whose kuraa does not open their channel |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
 | — | `packages/host/test/settings.test.ts`, `tests/e2e/preferences.spec.ts`: one settings model in the hub (read leniently, saved strictly, flags winning), applied by reopening every workspace at the same address; the owner's features only on loopback; Settings and Open a folder… in the browser, through the folder picker |

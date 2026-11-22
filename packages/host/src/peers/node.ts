@@ -32,7 +32,7 @@ import { dialTcp, listenTcp, parseAddress } from './tcp.js';
 import { traced } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
-import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type TunnelAsk } from './link.js';
+import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
 
 export interface NodeOptions {
   /** The repository's working tree. */
@@ -185,6 +185,8 @@ export interface NodeEvents {
   refs?(link: PeerLink): void;
   /** A message about rooms. */
   room?(link: PeerLink, m: Extract<ControlMessage, { type: 'room' }>): void;
+  /** Run outputs as they happen on the device (outputs.ts, 0062). */
+  outputs?(link: PeerLink, frame: OutputsFrame): void;
   /** The answer of the device that let this one in, when joining. */
   welcome?(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>): void;
   /** The members changed (a device paired or removed). */
@@ -1036,6 +1038,9 @@ export class PeerNode {
       this.events.refs?.(link);
     }
     else if (m.type === 'room') this.events.room?.(link, m);
+    else if (m.type === 'outputs') {
+      if (link.hello?.workspace === this.ws.id) this.events.outputs?.(link, m.frame);
+    }
     else if (m.type === 'records') {
       if (link.hello?.workspace === this.ws.id && Array.isArray(m.records)) await this.takeRecords(link, m.records);
     }
@@ -1266,21 +1271,34 @@ export class PeerNode {
 
   /** Fetch a paired device's branches into `<its remote>/…`, one fetch per device at a time. Returns whether it worked. */
   fetch(remote: string): Promise<boolean> {
-    const before = this.fetches.get(remote) ?? Promise.resolve(true);
-    const run = before.catch(() => false).then(() => this.fetchNow(remote));
-    this.fetches.set(remote, run);
+    return this.queueFetch(remote, `+refs/heads/*:refs/remotes/${remote}/*`);
+  }
+
+  /**
+   * Fetch the run outputs a paired device has (outputs.ts): not branches, and
+   * going nowhere else. In a queue of their own, beside its branches' (0062):
+   * other refs, so the two never touch the same ones.
+   */
+  fetchOutputs(remote: string): Promise<boolean> {
+    return this.queueFetch(remote, outputsRefspec(remote));
+  }
+
+  private queueFetch(remote: string, refspec: string): Promise<boolean> {
+    const queue = `${remote}\0${refspec}`;
+    const before = this.fetches.get(queue) ?? Promise.resolve(true);
+    const run = before.catch(() => false).then(() => this.fetchNow(remote, refspec));
+    this.fetches.set(queue, run);
     void run.finally(() => {
-      if (this.fetches.get(remote) === run) this.fetches.delete(remote);
+      if (this.fetches.get(queue) === run) this.fetches.delete(queue);
     });
     return run;
   }
 
-  private async fetchNow(remote: string): Promise<boolean> {
+  private async fetchNow(remote: string, refspec: string): Promise<boolean> {
     if (this.closing) return false;
     const r = await this.o.git.run([
       '-c', `core.hooksPath=${devNull}`, '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
-      // Its branches, and the run outputs it has (outputs.ts): these are not branches, and go nowhere else.
-      'fetch', '--prune', '--no-write-fetch-head', remote, `+refs/heads/*:refs/remotes/${remote}/*`, outputsRefspec(remote),
+      'fetch', '--prune', '--no-write-fetch-head', remote, refspec,
     ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: gitPath(this.bridge.binDir) } });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;

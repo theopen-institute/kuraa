@@ -16,15 +16,20 @@ import { isAncestor } from '../merging.js';
 import { PROTOCOL, type PeerLink } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
-import { SharedOutputs, outputRefs } from './outputs.js';
+import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
 import type { KeyPair } from '../keys.js';
+
+/** How soon this device tells the others its outputs changed, in ms: sooner than branches, which come in bursts. */
+const OUTPUTS_ANNOUNCE_MS = 20;
 
 export interface PeerOptions {
   /** DHT bootstrap nodes (`host:port`): a private network, or tests. Default: Hyperswarm's public ones. */
   bootstrap?: (string | { host: string; port: number })[];
   /** The most one fetch from a device may bring, in bytes. */
   maxFetchBytes?: number;
+  /** How long publishing run outputs waits after a change, in ms (outputs.ts; tests). */
+  outputsPublishMs?: number;
   /** This computer's person's identity (person.ts); default: the one this computer keeps, if any. Tests give their own. */
   person?: Person | null;
   /** This computer's signing key (person.ts); default: the one this computer keeps, made on first use. Tests give their own. */
@@ -132,6 +137,9 @@ export class Peers {
   private stopOutputs: (() => void) | null = null;
   private readonly fetching = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
+  /** Fetching run outputs from a device, beside its branches (0062); and asked again meanwhile. */
+  private readonly fetchingOutputs = new Map<string, Promise<void>>();
+  private readonly againOutputs = new Set<string>();
   /** Work waiting on a device that merges differently, already logged: `remote/branch`. */
   private readonly waiting = new Set<string>();
   private announceTimer: NodeJS.Timeout | undefined;
@@ -144,10 +152,18 @@ export class Peers {
     accepted: (link) => {
       this.rooms.connected(link);
       this.syncFrom(link);
+      this.syncOutputs(link);
     },
-    closed: (link) => this.rooms.disconnected(link),
-    refs: (link) => this.syncFrom(link),
+    closed: (link) => {
+      this.rooms.disconnected(link);
+      this.outputs?.disconnected(link.key);
+    },
+    refs: (link) => {
+      this.syncFrom(link);
+      this.syncOutputs(link);
+    },
     room: (link, m) => this.rooms.message(link, m),
+    outputs: (link, frame) => void this.outputs?.receive(link.key, frame),
   };
 
   constructor(private readonly host: Host, private readonly opts: PeerOptions, stateDir: string) {
@@ -171,6 +187,13 @@ export class Peers {
       ...this.memberOptions(),
     }, this.events);
     this.rooms = new Rooms(host, this.node);
+    // A device opened a document: the runs of it under way here, so it shows them as they go on.
+    this.rooms.onOpened = (link, path) => {
+      for (const run of this.host.runner.pending(path)) {
+        const frame = liveRun(run);
+        if (frame) link.sendOutputs(frame);
+      }
+    };
     this.stateDir = stateDir;
   }
 
@@ -206,10 +229,21 @@ export class Peers {
         for (const run of added) this.host.broadcastPath(path, { type: 'run', run });
         if (removed.length) this.host.broadcastPath(path, { type: 'runs-removed', path, ids: removed });
       },
-      announce: () => this.announce(),
+      announce: () => this.announce(OUTPUTS_ANNOUNCE_MS),
+      // As they happen (0062): about a run, to the devices with its document open; anything else, to every one.
+      live: (frame, path) => {
+        const links = path ? this.rooms.devicesWith(path) : [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id);
+        for (const link of links) link.sendOutputs(frame);
+      },
       log: (m) => this.host.log(m),
+      publishMs: this.opts.outputsPublishMs,
     });
-    this.stopOutputs = this.host.runner.onCacheChanged(() => this.outputs?.publish());
+    const stopCache = this.host.runner.onCacheChanged(() => this.outputs?.publish());
+    const stopRuns = this.host.runner.onRun((run) => this.outputs?.ran(run));
+    this.stopOutputs = () => {
+      stopCache();
+      stopRuns();
+    };
     await this.outputs.start();
   }
 
@@ -218,23 +252,29 @@ export class Peers {
    * and to what: a device that has those commits already (it brought them in
    * from another) does not fetch.
    */
-  private announce(): void {
+  private announce(ms = 200): void {
+    // One already due sooner stands.
+    if (this.announceTimer && this.announceAt <= Date.now() + ms) return;
     clearTimeout(this.announceTimer);
+    this.announceAt = Date.now() + ms;
     this.announceTimer = setTimeout(() => {
+      this.announceTimer = undefined;
       void Promise.all([this.node.heads(), outputRefs(this.host.git)]).then(([heads, outputs]) => this.node.broadcast({ type: 'refs', heads, outputs })).catch((e: Error) => this.host.log(`peers: ${e.message}`));
-    }, 200);
+    }, ms);
   }
+
+  /** When the announcement waiting is due (ms since 1970). */
+  private announceAt = 0;
 
   /**
    * Whether this device has every branch the device says it has, as far as it
-   * goes or further, and every run output it has (or a newer one): then
-   * fetching from it would bring nothing. Its tracking branches
-   * (`<device>/<branch>`) are moved to what it said, as a fetch would.
+   * goes or further: then fetching its branches would bring nothing. Its
+   * tracking branches (`<device>/<branch>`) are moved to what it said, as a
+   * fetch would. (Run outputs are fetched apart: syncOutputs.)
    */
   private async upToDate(link: PeerLink): Promise<boolean> {
     const theirs = link.heads;
     if (!theirs) return false;
-    if (await this.outputs?.lacks(link.outputs)) return false;
     const mine = await this.node.heads();
     for (const [branch, oid] of Object.entries(theirs)) {
       const here = mine[branch];
@@ -261,9 +301,10 @@ export class Peers {
       do {
         this.again.delete(remote);
         if (await this.upToDate(link)) continue;
+        const asked = Date.now();
         if (!(await this.node.fetch(remote))) return;
+        this.outputs?.timing(`fetched branches from ${remote} in ${Date.now() - asked} ms`);
         if (link.hello?.workspace !== this.node.ws.id) return; // a fork: fetched, never merged on its own
-        await this.outputs?.adopt(remote, link.key).catch((e: Error) => this.host.log(`peers: taking ${remote}’s run outputs failed: ${e.message}`));
         await this.rooms.settle(link);
         await this.bringIn(link);
       } while (this.again.has(remote) && !this.closed);
@@ -272,10 +313,38 @@ export class Peers {
     return run;
   }
 
+  /**
+   * Fetch the run outputs a device has that this one lacks, and take them: in a
+   * queue of their own (0062), so they never wait on its branches being
+   * brought in (a merge, rooms settling). One at a time per device, again if
+   * asked meanwhile.
+   */
+  syncOutputs(link: PeerLink): Promise<void> {
+    if (this.closed || !this.outputs || link.hello?.workspace !== this.node.ws.id) return Promise.resolve();
+    const remote = link.remote!;
+    const running = this.fetchingOutputs.get(remote);
+    if (running) {
+      this.againOutputs.add(remote);
+      return running;
+    }
+    const run = (async () => {
+      do {
+        this.againOutputs.delete(remote);
+        if (!(await this.outputs!.lacks(link.outputs))) continue;
+        const asked = Date.now();
+        if (!(await this.node.fetchOutputs(remote))) return;
+        this.outputs!.timing(`fetched outputs from ${remote} in ${Date.now() - asked} ms`);
+        await this.outputs!.adopt(remote, link.key);
+      } while (this.againOutputs.has(remote) && !this.closed);
+    })().catch((e: Error) => this.host.log(`peers: taking ${remote}’s run outputs failed: ${e.message}`)).finally(() => this.fetchingOutputs.delete(remote));
+    this.fetchingOutputs.set(remote, run);
+    return run;
+  }
+
   /** Sync with every connected device now. */
   async syncAll(): Promise<string> {
     const links = [...this.node.links.values()].filter((l) => l.accepted);
-    await Promise.all(links.map((l) => this.syncFrom(l)));
+    await Promise.all(links.flatMap((l) => [this.syncFrom(l), this.syncOutputs(l)]));
     return links.length ? `Synced with ${links.map((l) => l.remote).join(', ')}` : 'No other device is connected';
   }
 
@@ -412,7 +481,7 @@ export class Peers {
     this.outputs?.close();
     // Let fetches under way finish, but not hold closing up for long.
     let timer: NodeJS.Timeout | undefined;
-    await Promise.race([Promise.allSettled([...this.fetching.values()]), new Promise((r) => (timer = setTimeout(r, 5000)))]);
+    await Promise.race([Promise.allSettled([...this.fetching.values(), ...this.fetchingOutputs.values()]), new Promise((r) => (timer = setTimeout(r, 5000)))]);
     clearTimeout(timer);
     this.rooms.close();
     await this.node.close();

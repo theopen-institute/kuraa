@@ -78,7 +78,7 @@ function repo(): string {
 /** Each device's signing key: as if each were someone on a computer of their own (0035). */
 const signingKeys = new Map<string, { publicKey: Buffer; secretKey: Buffer }>();
 
-type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort'>;
+type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort' | 'outputsPublishMs'>;
 
 async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net } = {}): Promise<RunningHost> {
   const { person, node, dialMs, lookupsMs, bootstrap, net, ...rest } = extra;
@@ -252,6 +252,27 @@ describe('run outputs between devices (0058)', () => {
     expect((await runsOn(b)).some((r) => r.id === id)).toBe(false);
     await until(() => told.some((m) => m.type === 'runs-removed' && m.ids.includes(id)), 5000, 'Bo told it is gone');
     await until(async () => !(await runsOn(a)).some((r) => r.id === id), 20_000, 'gone from Ada’s device too');
+  });
+
+  it('show a run on a device with its document open as it goes, before any publish, and clear it there at once (0062)', async () => {
+    // Ada's device publishes nothing by git within the test: whatever reaches Bo's comes as it happened.
+    const { a, b, dirA } = await pair({ run: { engines: ['echo'], environment: 'fake', components: [ECHO, ENVS] }, net: { outputsPublishMs: 600_000 } });
+    const bo = await connect(b, BO);
+    await until(() => a.host.peers!.rooms.devicesWith('notes.md').length === 1, 15_000, 'Ada’s device to know Bo’s has the document open');
+    const res = await api(a, '/api/runs', { method: 'POST', body: JSON.stringify({ path: 'notes.md', engine: 'echo', code: 'gulls', chunk: { label: 'birds', index: 0, codeHash: hashText('gulls') }, by: ADA }) });
+    const { id } = (await res.json()) as RunRecord;
+    const told = (state: string) => bo.messages.find((m) => m.type === 'run' && m.run.id === id && m.run.state === state) as { run: RunRecord } | undefined;
+    await until(() => !!told('done'), 5000, 'Bo told the run is done');
+    // Told it was under way, saying where, then done, with its output.
+    expect(told('queued')?.run ?? told('running')?.run).toMatchObject({ device: expect.any(String), by: { name: 'Ada' } });
+    expect(told('done')!.run).toMatchObject({ device: expect.any(String), chunk: { label: 'birds' } });
+    expect(told('done')!.run.outputs[0]).toMatchObject({ type: 'text', text: expect.stringContaining('echo gulls') });
+    expect((await runsOn(b)).find((r) => r.id === id)).toMatchObject({ state: 'done' });
+    expect(git(dirA, 'for-each-ref', 'refs/kuraa/outputs/')).toBe('');
+    // Cleared on Ada's device: gone from Bo's at once, with nothing published.
+    expect((await api(a, '/api/runs/clear', { method: 'POST', body: JSON.stringify({ path: 'notes.md', chunk: told('done')!.run.chunk }) })).status).toBe(200);
+    await until(() => bo.messages.some((m) => m.type === 'runs-removed' && m.ids.includes(id)), 5000, 'Bo told it is gone');
+    expect((await runsOn(b)).some((r) => r.id === id)).toBe(false);
   });
 });
 

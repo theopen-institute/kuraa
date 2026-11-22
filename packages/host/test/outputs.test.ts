@@ -11,7 +11,8 @@ import crypto from 'hypercore-crypto';
 import type { RunRecord } from '@kuraa/session/model';
 import { Git } from '../src/git.js';
 import { commitSigner } from '../src/signing.js';
-import { MAX_SHARED_BYTES, OUTPUTS, SharedOutputs, fetchedFrom, outputsRefspec } from '../src/peers/outputs.js';
+import { MAX_LIVE_BYTES, MAX_SHARED_BYTES, OUTPUTS, SharedOutputs, fetchedFrom, outputsRefspec, type SharedOutputsDeps } from '../src/peers/outputs.js';
+import type { OutputsFrame } from '../src/peers/link.js';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const dirs: string[] = [];
@@ -38,6 +39,8 @@ interface Device {
   cache: { path: string; runs: RunRecord[] }[];
   changes: { path: string; added: RunRecord[]; removed: string[] }[];
   announced: number;
+  /** What it sent as it happened (0062), and to whom: devices with `path` open, or (null) every one. */
+  sent: { frame: OutputsFrame; path: string | null }[];
   out: SharedOutputs;
   members: { key: string; name: string }[];
 }
@@ -47,12 +50,16 @@ function device(name: string): Device {
   dirs.push(dir);
   git(dir, 'init', '-q', '-b', 'main');
   git(dir, '-c', 'user.name=T', '-c', 'user.email=t@example.org', 'commit', '-q', '--allow-empty', '-m', 'Initial');
-  const d = { dir, key: randomBytes(32).toString('hex'), signing: crypto.keyPair(), cache: [], changes: [], announced: 0, members: [] } as unknown as Device;
+  const d = { dir, key: randomBytes(32).toString('hex'), signing: crypto.keyPair(), cache: [], changes: [], announced: 0, members: [], sent: [] } as unknown as Device;
   return d;
 }
 
 /** Each device knows the others as members, signing with their keys. */
 function connect(...devices: Device[]): void {
+  connectWith({}, ...devices);
+}
+
+function connectWith(opts: Partial<SharedOutputsDeps>, ...devices: Device[]): void {
   for (const d of devices) {
     d.members = devices.filter((o) => o !== d).map((o) => ({ key: o.key, name: o === devices[0] ? 'ada-laptop' : `device-${o.key.slice(0, 4)}` }));
     d.out = new SharedOutputs({
@@ -74,10 +81,17 @@ function connect(...devices: Device[]): void {
       },
       changed: (path, added, removed) => d.changes.push({ path, added, removed }),
       announce: () => d.announced++,
+      live: (frame, path) => d.sent.push({ frame, path }),
       log: () => undefined,
       publishMs: 60_000,
+      ...opts,
     });
   }
+}
+
+/** What `from` sent as it happened, taken by `to` (as over the link: the link says who sent it), and forgotten. */
+async function deliver(from: Device, to: Device): Promise<void> {
+  for (const { frame } of from.sent.splice(0)) await to.out.receive(from.key, frame);
 }
 
 /** `to` fetches `from`'s outputs refs, as peers do (node.ts), under the remote name `as`. */
@@ -220,5 +234,135 @@ describe('shared run outputs', () => {
     }];
     const oid = (await a.out.publishNow())!;
     expect(git(a.dir, 'ls-tree', '-r', '--name-only', oid).split('\n').map((p) => p.split('/').pop()).sort()).toEqual(['new.json', 'small.json']);
+  });
+});
+
+describe('run outputs as they happen (0062)', () => {
+  const image = { type: 'image' as const, mime: 'image/png', data: PLOT, width: 4, height: 3 };
+
+  it('send a run as it goes, its plots as bytes, to the devices with its document open; shown there at once, with the device it runs on', async () => {
+    const [a, b] = [device('a'), device('b')];
+    connect(a, b);
+    const queued = run('r1', 'x', { state: 'queued', outputs: [], finishedAt: null, ms: null });
+    a.out.ran(queued);
+    a.out.ran({ ...queued, state: 'running' });
+    expect(a.sent.map((s) => [s.path, (s.frame.meta.run as RunRecord).state])).toEqual([[DOC, 'queued'], [DOC, 'running']]);
+    await deliver(a, b);
+    // Under way there: said, and listed among the document's runs waiting, never among its outputs.
+    expect(b.changes.map((c) => c.added.map((r) => [r.id, r.state, r.device]))).toEqual([[['r1', 'queued', 'ada-laptop']], [['r1', 'running', 'ada-laptop']]]);
+    expect((await b.out.pending(DOC)).map((r) => [r.id, r.device])).toEqual([['r1', 'ada-laptop']]);
+    expect(await b.out.runs(DOC)).toEqual([]);
+
+    const done = run('r1', 'x', { outputs: [{ type: 'text', text: 'hi' }, image, image] });
+    a.out.ran(done);
+    const { frame } = a.sent[0]!;
+    expect(frame.data).toHaveLength(1); // one plot, shown twice, sent once
+    expect(frame.data[0]!.toString('base64')).toBe(PLOT);
+    expect(JSON.stringify(frame.meta)).not.toContain(PLOT);
+    await deliver(a, b);
+    expect(await b.out.pending(DOC)).toEqual([]);
+    expect(await b.out.runs(DOC)).toEqual([{ ...done, device: 'ada-laptop' }]);
+    expect(b.changes.at(-1)).toEqual({ path: DOC, added: [{ ...done, device: 'ada-laptop' }], removed: [] });
+  });
+
+  it('keep what came as it happened until a commit of that device holds it, then show it once', async () => {
+    const [a, b] = [device('a'), device('b')];
+    connect(a, b);
+    const r1 = run('r1', 'x', { outputs: [image], finishedAt: new Date().toISOString() });
+    a.out.ran(r1);
+    await deliver(a, b);
+    expect(b.changes).toHaveLength(1);
+    // The commit holds it: nothing new to say, and shown once.
+    a.cache = [{ path: DOC, runs: [r1] }];
+    await a.out.publishNow();
+    fetchInto(b, a);
+    await b.out.adopt('peer', a.key);
+    expect(b.changes).toHaveLength(1);
+    expect(await b.out.runs(DOC)).toEqual([{ ...r1, device: 'ada-laptop' }]);
+    // A run that finished just after the commit was made, and came as it happened, stays until the next.
+    const r2 = run('r2', 'y', { chunk: { label: null, index: 1, codeHash: 'y' }, finishedAt: new Date(Date.now() + 5000).toISOString() });
+    a.out.ran(r2);
+    await deliver(a, b);
+    expect((await b.out.runs(DOC)).map((r) => r.id).sort()).toEqual(['r1', 'r2']);
+  });
+
+  it('let go of a run that came as it happened once a later commit shows it gone there', async () => {
+    const [a, b] = [device('a'), device('b')];
+    connect(a, b);
+    a.out.ran(run('old', 'x', { finishedAt: '2026-11-01T00:00:00.000Z' }));
+    await deliver(a, b);
+    a.cache = [{ path: DOC, runs: [run('other', 'y')] }];
+    await a.out.publishNow();
+    fetchInto(b, a);
+    await b.out.adopt('peer', a.key);
+    expect((await b.out.runs(DOC)).map((r) => r.id)).toEqual(['other']);
+    expect(b.changes.at(-1)).toMatchObject({ removed: ['old'] });
+  });
+
+  it('clear at once on the devices connected: a device’s own runs (gone), and another’s (hidden, and forgotten by the one that made it)', async () => {
+    const [a, b] = [device('a'), device('b')];
+    connect(a, b);
+    a.cache = [{ path: DOC, runs: [run('r1', 'x'), run('r2', 'y', { chunk: { label: null, index: 1, codeHash: 'y' } })] }];
+    await a.out.publishNow();
+    fetchInto(b, a);
+    await b.out.adopt('peer', a.key);
+    // A's person clears r1 there: B stops showing it at once, though A's commit still holds it.
+    a.out.cleared(['r1']);
+    expect(a.sent.at(-1)!.path).toBeNull();
+    await deliver(a, b);
+    expect((await b.out.runs(DOC)).map((r) => r.id)).toEqual(['r2']);
+    expect(b.changes.at(-1)).toEqual({ path: DOC, added: [], removed: ['r1'] });
+    // B's person clears r2: A forgets it at once.
+    expect(await b.out.hide(DOC, { label: null, index: 1, codeHash: 'y' })).toEqual(['r2']);
+    expect(b.sent.at(-1)).toEqual({ frame: { meta: { op: 'hide', ids: ['r2'] }, data: [] }, path: null });
+    await a.out.start();
+    await deliver(b, a);
+    expect(a.cache[0]!.runs.map((r) => r.id)).toEqual(['r1']);
+    expect(a.changes).toContainEqual({ path: DOC, added: [], removed: ['r2'] });
+  });
+
+  it('stop showing a device’s runs under way once it goes, or once cancelled', async () => {
+    const [a, b] = [device('a'), device('b')];
+    connect(a, b);
+    a.out.ran(run('r1', 'x', { state: 'running', outputs: [], finishedAt: null }));
+    a.out.ran(run('r2', 'y', { state: 'queued', outputs: [], finishedAt: null }));
+    await deliver(a, b);
+    a.out.ran(run('r2', 'y', { state: 'cancelled', outputs: [], finishedAt: null }));
+    await deliver(a, b);
+    expect(b.changes.at(-1)).toEqual({ path: DOC, added: [], removed: ['r2'] });
+    b.out.disconnected(a.key);
+    expect(b.changes.at(-1)).toEqual({ path: DOC, added: [], removed: ['r1'] });
+    expect(await b.out.pending(DOC)).toEqual([]);
+  });
+
+  it('take runs only from a member, about its own, well formed; and send by git alone a run too large', async () => {
+    const [a, b, stranger] = [device('a'), device('b'), device('s')];
+    connect(a, b);
+    // From a device not in the workspace: not taken.
+    await b.out.receive(stranger.key, { meta: { op: 'run', run: run('x1', 'x') }, data: [] });
+    // A plot it does not carry, or a state no run has: not taken.
+    await b.out.receive(a.key, { meta: { op: 'run', run: { ...run('x2', 'x'), outputs: [{ ...image, data: '', blob: 'f'.repeat(64) }] } }, data: [] });
+    await b.out.receive(a.key, { meta: { op: 'run', run: { ...run('x3', 'x'), state: 'exploded' } }, data: [] });
+    expect(await b.out.runs(DOC)).toEqual([]);
+    expect(b.changes).toEqual([]);
+    // Too large to send as it happened: left to git.
+    a.out.ran(run('big', 'x', { outputs: [{ type: 'text', text: 'x'.repeat(MAX_LIVE_BYTES) }] }));
+    expect(a.sent).toEqual([]);
+  });
+
+  it('publish soon after a first change, and then no sooner than a gap after the last', async () => {
+    const [a] = [device('a')];
+    connectWith({ publishMs: 20, gapMs: 400 }, a);
+    a.cache = [{ path: DOC, runs: [run('r1', 'x')] }];
+    a.out.publish();
+    await new Promise((r) => setTimeout(r, 300));
+    const first = git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`);
+    a.cache[0]!.runs.push(run('r2', 'y', { chunk: { label: null, index: 1, codeHash: 'y' } }));
+    a.out.publish();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`)).toBe(first);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`)).not.toBe(first);
+    a.out.close();
   });
 });

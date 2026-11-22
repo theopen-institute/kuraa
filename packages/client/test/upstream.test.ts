@@ -162,6 +162,22 @@ describe('outputs from another device (0058)', () => {
     expect(runner.state(a.pos).last?.id).toBe('old');
   });
 
+  it('shows another device’s run under way as such, but not as this device’s to stop, nor as a step of its session (0062)', () => {
+    const runner = new ChunkRunner({} as HostApi, 'doc.Rmd', { ...info, enabled: true }, () => ({ name: 'Ada', email: '', color: '#d33' }));
+    const next = chunk(1, 'y <- x', 'next');
+    runner.setChunks([a, next]);
+    const running = { ...theirs('r1', '2026-11-22T10:00:00.000Z'), state: 'running' as const, outputs: [], finishedAt: null, ms: null };
+    runner.receive({ type: 'run', run: running });
+    expect(runner.state(a.pos).pending).toMatchObject({ id: 'r1', device: 'bo-laptop' });
+    expect(runner.busy).toBe(false);
+    // Its session is another device's: this one's has still run nothing above.
+    expect(runner.rebuild(next.pos)).toMatchObject({ fresh: true, chunks: [a] });
+    // A run of this device's own, waiting, is the one shown as under way.
+    runner.receive({ type: 'run', run: { ...running, id: 'mine', device: undefined, queuedAt: '2026-11-22T09:00:00.000Z', state: 'queued' } });
+    expect(runner.state(a.pos).pending?.id).toBe('mine');
+    expect(runner.busy).toBe(true);
+  });
+
   it('says which device a run came from, and its day when not today', () => {
     const run = theirs('r', '2026-11-20T10:00:00.000Z');
     const label = describeRun(run, new Date('2026-11-22T12:00:00.000Z'));

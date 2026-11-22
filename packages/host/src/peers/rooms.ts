@@ -32,6 +32,12 @@ type RoomMessage =
   | { type: 'room'; op: 'want'; key: string }
   | { type: 'room'; op: 'state'; key: string; seed: string; state: Bytes; base?: string | null };
 
+/** The document a room is of, from its key (Host.roomKey: branch, path and type version, apart by NULs); null if it is not one. */
+export function pathOf(key: string): string | null {
+  const parts = key.split('\0');
+  return parts.length === 3 && parts[1] ? parts[1] : null;
+}
+
 /** A message's bytes, however they came; empty if they are not bytes at all. */
 export function bytesOf(v: unknown): Uint8Array {
   return v instanceof Uint8Array ? v : new Uint8Array();
@@ -49,6 +55,8 @@ export class Rooms {
    * as good as shared with it: its work must not also come into the room through git.
    */
   private readonly handedTo = new Map<string, string>();
+  /** Another device opened a document here not open there before (for run outputs under way: outputs.ts). */
+  onOpened: ((link: PeerLink, path: string) => void) | null = null;
 
   constructor(private readonly host: Host, private readonly node: PeerNode) {
     const relay = host.sessionRelay;
@@ -79,6 +87,11 @@ export class Rooms {
 
   private openMessage(room: RoomView): RoomMessage {
     return { type: 'room', op: 'open', key: room.key, seed: room.seed, sv: this.host.sessionRelay.stateVector(room.name) ?? EMPTY, people: this.host.roomContributors(room.name) };
+  }
+
+  /** The connected devices of this workspace with a document open, on any branch. */
+  devicesWith(path: string): PeerLink[] {
+    return [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id && [...(this.remote.get(l.key)?.keys() ?? [])].some((key) => pathOf(key) === path));
   }
 
   /** A device connected: tell it which rooms are open here. */
@@ -134,7 +147,10 @@ export class Rooms {
     switch (m.op) {
       case 'open':
       case 'sync': {
+        const path = pathOf(m.key);
+        const fresh = path !== null && ![...theirs.keys()].some((k) => pathOf(k) === path);
         theirs.set(m.key, String(m.seed));
+        if (fresh) this.onOpened?.(link, path);
         if (!room) return;
         if (m.seed === room.seed) {
           // A room handed over is theirs now too.

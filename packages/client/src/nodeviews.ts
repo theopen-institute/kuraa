@@ -161,14 +161,18 @@ class CodeView implements NodeView {
     }
     const { last, pending, stale, upstream } = runner.state(pos);
 
-    if (pending) {
-      const status = Object.assign(document.createElement('span'), { className: 'chunk-status' });
+    // How a run waiting or under way stands: here, or on another device (0062), which this one cannot stop.
+    const status = pending && Object.assign(document.createElement('span'), { className: 'chunk-status' });
+    if (pending && status) {
+      const where = pending.device;
       const tick = () => {
         const secs = Math.round((Date.now() - Date.parse(pending.queuedAt)) / 1000);
-        status.textContent = pending.state === 'queued' ? S.code.queued : S.code.running(secs);
+        status.textContent = pending.state === 'queued' ? (where ? S.code.queuedOn(where) : S.code.queued) : where ? S.code.runningOn(where, secs) : S.code.running(secs);
       };
       tick();
       if (pending.state === 'running') this.ticker = setInterval(tick, 1000);
+    }
+    if (pending && status && !pending.device) {
       this.actions.replaceChildren(status, this.button(S.code.stop, S.code.stopTitle, () => this.report(runner.interrupt()), 'stop'));
     } else if (runner.unavailable) {
       // Where code runs is not there (Podman missing, say): Run is offered, but not to press, with why beside it.
@@ -176,11 +180,12 @@ class CodeView implements NodeView {
       run.disabled = true;
       const why = Object.assign(document.createElement('span'), { className: 'chunk-unavailable', textContent: runner.unavailable, title: runner.unavailable });
       why.dataset.testid = 'chunk-unavailable';
-      this.actions.replaceChildren(why, run);
+      this.actions.replaceChildren(...(status ? [status] : []), why, run);
     } else {
       // Offered only when the session does not have the chunks above as they now read.
       const rebuild = runner.rebuild(pos);
       this.actions.replaceChildren(
+        ...(status ? [status] : []),
         ...(rebuild ? [this.button(rebuild.fresh ? S.code.runAbove : S.code.rebuildAbove, rebuildTitle(rebuild), () => this.report(runner.rebuildAbove(pos)), 'rebuild')] : []),
         this.button(S.code.run, S.code.runTitle, () => this.runChunk(), 'run'),
       );

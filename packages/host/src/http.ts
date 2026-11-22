@@ -198,7 +198,7 @@ const runRoutes: Route[] = [
 
   route('GET', '/api/runs', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
-    send(res, 200, { runs: await host.runsOf(path), pending: host.runner.pending(path), session: host.runner.session(path) });
+    send(res, 200, { runs: await host.runsOf(path), pending: await host.pendingOf(path), session: host.runner.session(path) });
   }),
 
   route('POST', '/api/runs', async ({ host, req, res }) => {

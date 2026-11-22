@@ -68,7 +68,7 @@ const PENDING = new Set(['queued', 'running']);
 export interface ChunkState {
   /** The latest finished run, whose outputs are shown. */
   last: RunRecord | null;
-  /** A run waiting or under way. */
+  /** A run waiting or under way: here, or else on another device of the workspace (its `device` says which: 0062). */
   pending: RunRecord | null;
   /** The chunk's code has changed since `last` ran. */
   stale: boolean;
@@ -145,8 +145,9 @@ export class ChunkRunner {
     return this.chunks.some((c) => this.canRun(c.engine));
   }
 
+  /** Whether this device runs or has queued anything for the document (another device's runs are its own to stop). */
   get busy(): boolean {
-    return [...this.runs.values()].some((r) => PENDING.has(r.state));
+    return [...this.runs.values()].some((r) => !r.device && PENDING.has(r.state));
   }
 
   subscribe(fn: () => void): () => void {
@@ -221,7 +222,7 @@ export class ChunkRunner {
     for (const c of this.chunks) {
       const list = (mine.get(c.pos) ?? []).sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
       const last = [...list].reverse().find((r) => FINISHED.has(r.state)) ?? null;
-      const pending = [...list].reverse().find((r) => PENDING.has(r.state)) ?? null;
+      const pending = [...list].reverse().find((r) => !r.device && PENDING.has(r.state)) ?? [...list].reverse().find((r) => PENDING.has(r.state)) ?? null;
       const upstream = last?.basis && last.engine ? behind(this.above(c, last.engine), last.basis.steps) : null;
       this.states.set(c.pos, { last, pending, stale: !!last && !last.chunk.partial && last.chunk.codeHash !== c.codeHash, upstream });
     }
@@ -264,7 +265,8 @@ export class ChunkRunner {
     let steps = this.stepsCache.get(engine);
     if (!steps) {
       const queued = [...this.runs.values()]
-        .filter((r) => PENDING.has(r.state) && r.engine === engine)
+        // This device's session's: another device's runs go to a session of its own.
+        .filter((r) => !r.device && PENDING.has(r.state) && r.engine === engine)
         .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))
         .map((r) => ({ label: r.chunk.label, index: r.chunk.index, codeHash: r.chunk.codeHash, complete: !r.chunk.partial }));
       steps = [...this.session.steps, ...queued];

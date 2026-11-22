@@ -1280,9 +1280,17 @@ export class Host {
     return shared ? [...own, ...(await shared.runs(path))] : own;
   }
 
+  /** Runs of a document waiting or under way: this device's, and other devices' as they tell (0062). */
+  async pendingOf(path: string): Promise<RunRecord[]> {
+    return [...this.runner.pending(path), ...((await this.peers?.outputs?.pending(path)) ?? [])];
+  }
+
   /** Clear one chunk's outputs, or all of a document's: this device's, and those other devices published (for every device). */
   async clearRuns(path: string, chunk?: ChunkRef): Promise<void> {
-    const ids = [...(await this.runner.clear(path, chunk)), ...((await this.peers?.outputs?.hide(path, chunk)) ?? [])];
+    const own = await this.runner.clear(path, chunk);
+    // The other devices connected stop showing this device's at once (0062); the rest, once it publishes.
+    this.peers?.outputs?.cleared(own);
+    const ids = [...own, ...((await this.peers?.outputs?.hide(path, chunk)) ?? [])];
     if (ids.length) this.broadcastPath(path, { type: 'runs-removed', path, ids });
   }
 

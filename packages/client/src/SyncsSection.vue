@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The Components dialog's syncs (decision 0059): places this workspace keeps a
+// Settings › Workspace's syncs (decisions 0059, 0064): places this workspace keeps a
 // copy on and syncs with, beyond its own devices, each from a component the host
 // loads. The online copy (@kuraa/sync-git) is the one that ships: a git server
 // (GitHub, GitLab, any) each save is pushed to, and Sync (and every few minutes)

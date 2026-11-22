@@ -110,7 +110,6 @@ test('chunks run on the host, and everyone sees the outputs', async ({ browser }
   await chunk(ada, 0).getByRole('button', { name: 'Stop' }).click();
   await expect(output(ada, 0)).toContainText('Interrupted.', { timeout: 10_000 });
   await ada.getByTestId('menu-button').click();
-  await ada.getByTestId('menu-document').click();
   await expect(ada.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   // Escape goes back from Document settings to the menu, and closes the menu.
   await ada.keyboard.press('Escape');
@@ -149,7 +148,6 @@ test('the Packages panel installs and removes packages for the workspace', async
   const page = await open(browser, 'Pat', path);
 
   await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu').getByRole('button', { name: 'Packages…' }).click();
   const dialog = page.getByTestId('packages');
   await expect(dialog.getByRole('heading')).toHaveText('R packages');
@@ -170,7 +168,6 @@ test('the Packages panel installs and removes packages for the workspace', async
 
   // A URL is not a package name: refused before anything is fetched.
   await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-document').click();
   await page.getByTestId('menu').getByRole('button', { name: 'Packages…' }).click();
   await dialog.getByLabel('Packages to install').fill('https://example.org/evil.tar.gz');
   await dialog.getByRole('button', { name: 'Install' }).click();

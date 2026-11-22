@@ -248,7 +248,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .settings-form { display: grid; gap: 10px; }
 .modal.menu > .modal-actions { padding-top: 12px; }
 /* Document settings, with a header to edit: room for its label column. */
-.modal.menu.menu-document { width: min(680px, 94vw); }
 
 /* What the status bar used to say in passing: a note in the editor's corner. */
 .notice-toast {
@@ -381,10 +380,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .packages-note { font-size: 12px; margin: 0; overflow-wrap: anywhere; }
 
 /* Components: one row per component, a box to turn it on, what it is beneath its name. */
-.modal.components { width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
 .components-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .components-group h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.components-group h4 { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .component { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; cursor: pointer; }
 .component > input[type='checkbox'] { margin: 3px 0 0; }
 .component:has(input:disabled), .component:has(input:disabled) .component-text { cursor: default; }
@@ -551,8 +548,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .person-advanced { display: grid; gap: 6px; font-size: 13px; }
 .person-advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .person-advanced[open] { gap: 6px; }
-.menu-panel-head { display: flex; align-items: center; gap: 12px; padding: 10px 0 4px; }
-.modal .menu-panel-head h2 { margin: 0; font-size: 15px; }
 .menu-back { padding: 2px 8px; }
 .person-row { display: flex; gap: 8px; }
 .person-row input { flex: 1; min-width: 0; }
@@ -708,6 +703,37 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .pref-status { grid-column: 2; font-size: 12.5px; }
 .pref-status.ok { color: var(--accent); }
 .pref-note { color: var(--muted); font-size: 12.5px; margin: 0; }
+/* Settings (decision 0064): the four sections on the left, the one shown on the right. */
+.modal.settings { width: min(880px, 94vw); height: min(700px, 90vh); max-height: none; overflow: hidden; padding: 0; gap: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 18px 10px; border-right: 1px solid var(--border); background: var(--bg); overflow: auto; border-radius: 10px 0 0 0; }
+.settings-nav h2 { font-size: 15px; margin: 0 10px 12px; }
+.settings-tab { display: grid; gap: 1px; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--text); font: inherit; min-width: 0; }
+.settings-tab:hover { background: var(--selected); }
+.settings-tab.active { background: var(--selected); }
+.settings-tab.active .settings-tab-label { font-weight: 600; }
+.settings-tab.idle .settings-tab-label { color: var(--muted); }
+.settings-tab-about { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-content { overflow: auto; padding: 20px 24px 16px; display: grid; align-content: start; gap: 4px; min-width: 0; }
+.settings-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+/* One line between parts: a part's first group draws none of its own, nor does the first part (the heading's line is above it). */
+.settings-content .settings-part > .pref-group:first-child, .settings-content .settings-part > form > .pref-group:first-child { border-top: 0; padding-top: 0; }
+.settings-content > div > .settings-part:first-child { border-top: 0; padding-top: 4px; }
+.settings-head h3 { margin: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; }
+.settings-scope { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.settings-none { padding: 12px 0; }
+.settings-value { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.settings .danger { color: var(--warn); }
+.pref-group h4, .components-group h4 { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+/* The workspace's devices and online copy, as in the rest of the window. */
+.settings-content .menu-section, .settings-content .components-group { padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 0; }
+.settings-content .menu-section h3, .settings-content .components-group h3 { font-size: 14px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.modal.settings > .settings-done { padding: 12px 24px; border-top: 1px solid var(--border); margin: 0; }
+@media (max-width: 640px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px; border-radius: 10px 10px 0 0; }
+  .settings-nav h2, .settings-tab-about { display: none; }
+}
 .settings-done { align-items: center; }
 .settings-done .pending { flex: 1; margin: 0; color: var(--text); }
 .pref-row { display: flex; gap: 6px; align-items: center; }

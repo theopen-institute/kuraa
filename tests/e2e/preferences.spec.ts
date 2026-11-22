@@ -36,8 +36,11 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
     await page.getByTestId('menu-button').click();
     await page.getByTestId('menu-settings').click();
-    // One window: you, then this computer's server (decision 0060).
+    // One window of four sections (decision 0064): opened at You; this computer's server is a section of its own.
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Owner');
+    await expect(page.getByTestId('settings-scope')).toContainText('Only you');
+    await page.getByTestId('settings-tab-server').click();
+    await expect(page.getByTestId('settings-scope')).toContainText('Only you, its owner, can change it');
     const prefs = page.getByTestId('preferences');
     await expect(prefs.getByTestId('pref-workspaces')).toHaveValue(/workspaces$/);
     await expect(prefs.getByTestId('pref-format-rmarkdown')).toBeChecked();
@@ -68,15 +71,17 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
     expect(JSON.parse(readFileSync(join(app, 'settings.json'), 'utf8'))).toMatchObject({ memory: '3g', relays: ['ab'.repeat(32)], formats: expect.not.arrayContaining(['rmarkdown']) });
 
-    // R Markdown is off now: the Components panel says so, and the file opens as plain text.
+    // R Markdown is off now, and the file opens as plain text.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
-    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'R Markdown' })).not.toBeChecked();
-    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'Pandoc markdown' })).toBeChecked();
+    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-tab-server').click();
+    await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
+    await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
 
     // Kept: the dialog opens with them, from the keyboard too (⌥⌘, as in the desktop app).
     await page.keyboard.press('ControlOrMeta+Alt+Comma');
+    await page.getByTestId('settings-tab-server').click();
     await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();
     await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');

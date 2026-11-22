@@ -1,5 +1,7 @@
 # 0060 · One Settings window
 
+*Since [0064](0064-four-kinds-of-settings.md): Settings has four sections, You, Document, Workspace and Server, opened at one from wherever it is opened.*
+
 *Since [0063](0063-settings-keep-what-you-change.md): no **Save server settings** or **Save connection**; closing Settings (**Done**, Escape, a click outside) applies what was changed, and says so first. **Join a shared server…** is gone from Settings and the menu.*
 
 > Changes the client's menu ([0044](0044-polish.md)) and where Preferences are shown

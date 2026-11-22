@@ -142,7 +142,7 @@ export const S = {
     upToDate: 'Up to date.',
     broughtIn: (n: number) => `Brought in ${count(n, 'change', 'changes')}.`,
     withConflicts: (n: number) => `${count(n, 'passage', 'passages')} changed both here and elsewhere: both versions are in the document, to choose between.`,
-    nothingToSync: 'Nothing to sync with yet. Add an online copy in Components, or invite people to work with you, and Sync brings in their work.',
+    nothingToSync: 'Nothing to sync with yet. Invite people, or add an online copy, in Workspace settings, and Sync brings in their work.',
   },
 
   /** Saving, as the server reports it (decision 0037). */
@@ -161,7 +161,6 @@ export const S = {
     documentSettings: 'Document settings…',
     /** What a new document's file is called until it has a title. */
     untitledName: 'untitled',
-    documentSettingsTitle: 'Document settings',
     history: 'History',
     hideHistory: 'Hide history',
     saveVersion: 'Save version…',
@@ -182,15 +181,12 @@ export const S = {
     removeWorkspaceTitle: 'Take this workspace off this list; its folder stays as it is',
     search: 'Search…',
     searchTitle: (key: string) => `Search every file (${key})`,
-    components: 'Components',
-    componentsAbout: 'What runs code and where, the document formats, the online copy, and your editing behaviour.',
-    componentsButton: 'Components…',
     help: 'Markdown and shortcuts',
     helpTitle: (key: string) => `Everything you can type, and the keys (${key})`,
     you: 'You',
     settings: 'Settings…',
-    settingsTitle: (key: string) => `Your name and colour, and this computer’s server: syncing, running code, where new workspaces go (${key})`,
-    backToMenu: '‹ Menu',
+    settingsTitle: (key: string) => `Settings: you, the document, the workspace, and the server (${key})`,
+    workspaceSettings: 'Workspace settings…',
   },
 
   settings: {
@@ -604,7 +600,7 @@ export const S = {
 
   header: {
     title: 'Header',
-    keptOnClose: 'Saved when you close Document settings',
+    keptOnClose: 'Saved when you close Settings',
     fixToKeep: 'Fix this to keep your changes',
     discardAsk: 'The header has something that is not valid, so your changes to it cannot be saved. Discard them?',
     discard: 'Discard changes',
@@ -660,6 +656,32 @@ export const S = {
     folders: 'Folders',
     path: 'Folder',
     go: 'Go',
+  },
+
+  /** The Settings window's four sections (decision 0064): what each is, and who it applies to. */
+  sections: {
+    label: 'Settings',
+    you: 'You',
+    document: 'Document',
+    workspace: 'Workspace',
+    server: 'Server',
+    /** Each section's first line: who it applies to, and where it is kept. */
+    youScope: 'Only you. Kept in this browser; your name and colour show beside what you type.',
+    documentScope: (name: string) => `Everyone who opens ${quote(name)}. Saved in the file.`,
+    workspaceScope: (name: string) => `Everyone in ${quote(name)}. Kept in the workspace.`,
+    serverScope: 'Everyone using it, and every workspace on it. Only you, its owner, can change it.',
+    serverElsewhere: 'Everyone using it, and every workspace on it. Only whoever runs it can change its settings.',
+    /** Beneath Server in the list: whose it is. */
+    thisComputer: 'This computer',
+    elsewhere: 'Shown only',
+    noDocument: 'Open a document to change its settings.',
+    documentNone: 'This kind of document has no settings of its own.',
+    noWorkspace: 'Open a workspace to change its settings.',
+    name: 'Name',
+    components: 'Components',
+    engines: 'Languages',
+    packages: 'Packages',
+    packagesAbout: 'The R packages this workspace’s documents use, recorded in the workspace.',
   },
 
   /** The Settings window (decision 0060): you, then this computer's server. */

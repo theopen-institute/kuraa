@@ -1,20 +1,17 @@
 <script setup lang="ts">
-// The menu: everything that is not the document. Opened from the bottom of the
-// sidebar (or ⌘,). Sections: the workspace (sync, connection, who is here), its
-// devices, components (with the online copy, 0059), and you: who you are here,
-// and Settings…, the window with your settings and this computer's server's
-// (decision 0060). The open document's own settings are a panel of their own,
-// Document settings (also opened by right-clicking a file in the sidebar): its
-// views, versions and saving, its header, and its code session. It is a modal
-// dialog: focus moves into it, and Escape closes it (or goes back from a panel
-// opened from the menu).
+// The menu: what to do, beside the document. Opened from the bottom of the
+// sidebar (or ⌘,). Sections: the open document (its views, versions, writing
+// and code session), the workspace (search, sync, who is here), and you. It
+// holds no settings: each section's settings are a section of the Settings
+// window (decision 0064), opened from here at that section (Document settings…,
+// Workspace settings…, Settings…). It is a modal dialog: focus moves into it,
+// and Escape closes it.
 import { computed, onMounted, ref, useTemplateRef } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
-import type { HeaderSpec } from '@kuraa/editor-kit';
-import type { EditorView } from 'prosemirror-view';
 import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
+import type { SettingsSection } from './settingsSections.js';
 import type { Shell } from './shell.js';
 import type { EditorStatus } from './types.js';
 import { time } from './labels.js';
@@ -22,15 +19,8 @@ import { APP_KEYS, keyLabel } from './keys.js';
 import { connectionLabel, S } from './strings.js';
 import { useDialog } from './vue.js';
 import CodeSection from './CodeSection.vue';
-import DevicesSection from './DevicesSection.vue';
-import HeaderForm from './HeaderForm.vue';
-
-/** The menu's parts: the menu itself, and Document settings. */
-export type MenuPanel = 'menu' | 'document';
 
 const props = defineProps<{
-  /** Where it opens: the menu, or its Document settings. */
-  panel?: MenuPanel;
   path: string | null;
   /** What the open file is called: its title, or its filename. */
   name: string | null;
@@ -40,8 +30,6 @@ const props = defineProps<{
   hostUrl: string;
   viewing: boolean;
   showSource: boolean;
-  /** The open document's header, to edit, if its format has one: the live editor's view, and how the format reads it. */
-  header: { view: EditorView; spec: HeaderSpec; version: number } | null;
   historyOpen: boolean;
   syncing: boolean;
   settings: Settings;
@@ -49,8 +37,6 @@ const props = defineProps<{
   api: HostApi;
   /** How many conflicts the open document keeps. */
   conflicts?: number;
-  /** The server lets people take this workspace off its list (its folder stays). */
-  canRemoveWorkspace?: boolean;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -58,9 +44,6 @@ const emit = defineEmits<{
   saveVersion: [];
   sync: [];
   packages: [runner: ChunkRunner, engine: string];
-  components: [];
-  /** Invite people to the workspace. */
-  invite: [];
   /** Find in the document, show its outline, put a table in, or go to its next conflict. */
   find: [];
   outline: [];
@@ -72,46 +55,19 @@ const emit = defineEmits<{
   search: [];
   /** The Markdown and shortcuts sheet. */
   help: [];
-  /** The Settings window: yours, and this computer's server's. */
-  settings: [];
-  /** Rename the workspace, for everyone in it (0061). */
-  renameWorkspace: [];
-  /** Take the workspace off this server's list (its folder stays as it is). */
-  removeWorkspace: [];
+  /** The Settings window, at a section. */
+  settings: [section: SettingsSection];
   close: [];
 }>();
 
-/** The menu itself, or its Document settings. */
-const panel = ref<MenuPanel>(props.panel === 'document' && props.path ? 'document' : 'menu');
 const root = useTemplateRef<HTMLElement>('root');
-const headerForm = useTemplateRef<InstanceType<typeof HeaderForm>>('headerForm');
-/**
- * Leaving Document settings, however: what was changed in its header is
- * written first, as one edit that can be undone (HeaderForm.commit). False:
- * stay (a field not valid, and the person chose to fix it).
- */
-async function leaveDocument(): Promise<boolean> {
-  return panel.value !== 'document' || !headerForm.value || headerForm.value.commit();
-}
+useDialog(root, () => emit('close'));
 
-/** Close the menu (then do `then`), keeping what was changed in Document settings. */
-async function close(then?: () => void) {
-  if (!(await leaveDocument())) return;
+/** Close the menu, then do something (the menu is out of the way first). */
+function then(fn: () => void) {
   emit('close');
-  then?.();
+  fn();
 }
-
-/** Back from Document settings to the menu, keeping what was changed there. */
-async function back() {
-  if (await leaveDocument()) panel.value = 'menu';
-}
-
-useDialog(root, () => {
-  if (panel.value === 'document' && headerForm.value?.escape()) return;
-  // A panel opened from the menu goes back to it; one the menu opened at closes.
-  if (panel.value !== 'menu' && props.panel !== panel.value) void back();
-  else void close();
-});
 
 /**
  * Whether Sync has anything to sync with: other devices, or an online copy.
@@ -130,126 +86,95 @@ onMounted(async () => {
 const doc = computed(() => !!props.path && !!props.type && !props.viewing);
 
 const runner = computed(() => props.status?.runner ?? null);
-
 </script>
 
 <template>
-  <div class="modal-backdrop" @mousedown.self="close()">
-    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :class="{ 'menu-document': panel === 'document' && header }" :aria-label="panel === 'document' ? S.menu.documentSettingsTitle : S.menu.label" data-testid="menu">
-      <template v-if="panel === 'document'">
-        <div class="menu-panel-head">
-          <button type="button" class="menu-back" data-testid="menu-back" @click="back()">{{ S.menu.backToMenu }}</button>
-          <h2>{{ S.menu.documentSettingsTitle }}</h2>
+  <div class="modal-backdrop" @mousedown.self="emit('close')">
+    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :aria-label="S.menu.label" data-testid="menu">
+      <section v-if="path && type" class="menu-section" data-testid="menu-this-document">
+        <h3>{{ name }}</h3>
+        <div v-if="doc" class="menu-actions">
+          <button
+            v-if="!type.editor?.layout"
+            type="button"
+            :class="{ active: showSource }"
+            :aria-pressed="showSource"
+            data-testid="toggle-source"
+            @click="then(() => emit('toggleSource'))"
+          >
+            {{ showSource ? S.menu.showDocument : S.menu.editSource }}
+          </button>
+          <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="then(() => emit('toggleHistory'))">
+            {{ historyOpen ? S.menu.hideHistory : S.menu.history }}
+          </button>
+          <button type="button" @click="then(() => emit('saveVersion'))">{{ S.menu.saveVersion }}</button>
+          <button v-if="!type.editor?.layout" type="button" :title="S.menu.previewTitle(keyLabel(APP_KEYS.preview))" data-testid="menu-preview" @click="then(() => emit('preview'))">{{ S.menu.preview }}</button>
         </div>
-        <section v-if="path" class="menu-section">
-          <h3>{{ name }}</h3>
-          <div v-if="doc" class="menu-actions">
-            <button
-              v-if="!type!.editor?.layout"
-              type="button"
-              :class="{ active: showSource }"
-              :aria-pressed="showSource"
-              data-testid="toggle-source"
-              @click="close(() => emit('toggleSource'))"
-            >
-              {{ showSource ? S.menu.showDocument : S.menu.editSource }}
-            </button>
-            <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="close(() => emit('toggleHistory'))">
-              {{ historyOpen ? S.menu.hideHistory : S.menu.history }}
-            </button>
-            <button type="button" @click="close(() => emit('saveVersion'))">{{ S.menu.saveVersion }}</button>
-            <button v-if="!type!.editor?.layout" type="button" :title="S.menu.previewTitle(keyLabel(APP_KEYS.preview))" data-testid="menu-preview" @click="close(() => emit('preview'))">{{ S.menu.preview }}</button>
-          </div>
-          <div v-if="doc && !type!.editor?.layout && !showSource" class="menu-actions" data-testid="menu-writing">
-            <button type="button" :title="keyLabel(APP_KEYS.find)" data-testid="menu-find" @click="close(() => emit('find'))">{{ S.menu.find }}</button>
-            <button type="button" :title="keyLabel(APP_KEYS.outline)" data-testid="menu-outline" @click="close(() => emit('outline'))">{{ S.menu.outline }}</button>
-            <button type="button" data-testid="menu-insert-table" @click="close(() => emit('insertTable'))">{{ S.menu.insertTable }}</button>
-            <button v-if="conflicts" type="button" :title="keyLabel('Mod-Alt-n')" data-testid="menu-next-conflict" @click="close(() => emit('nextConflict'))">{{ S.menu.nextConflict }}</button>
-          </div>
-          <p v-if="status" class="menu-facts">
-            <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
-            ·
-            <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
-            <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
-          </p>
-          <details v-if="status?.lastCommit" class="menu-details">
-            <summary>{{ S.common.details }}</summary>
-            <span class="menu-facts" data-testid="last-commit-id">{{ S.menu.versionDetails(status.lastCommit.slice(0, 7)) }}</span>
-          </details>
-        </section>
+        <div v-if="doc && !type.editor?.layout && !showSource" class="menu-actions" data-testid="menu-writing">
+          <button type="button" :title="keyLabel(APP_KEYS.find)" data-testid="menu-find" @click="then(() => emit('find'))">{{ S.menu.find }}</button>
+          <button type="button" :title="keyLabel(APP_KEYS.outline)" data-testid="menu-outline" @click="then(() => emit('outline'))">{{ S.menu.outline }}</button>
+          <button type="button" data-testid="menu-insert-table" @click="then(() => emit('insertTable'))">{{ S.menu.insertTable }}</button>
+          <button v-if="conflicts" type="button" :title="keyLabel('Mod-Alt-n')" data-testid="menu-next-conflict" @click="then(() => emit('nextConflict'))">{{ S.menu.nextConflict }}</button>
+        </div>
+        <p v-if="status" class="menu-facts">
+          <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
+          ·
+          <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
+          <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
+        </p>
+        <details v-if="status?.lastCommit" class="menu-details">
+          <summary>{{ S.common.details }}</summary>
+          <span class="menu-facts" data-testid="last-commit-id">{{ S.menu.versionDetails(status.lastCommit.slice(0, 7)) }}</span>
+        </details>
+        <div class="menu-actions">
+          <button type="button" data-testid="menu-document" @click="then(() => emit('settings', 'document'))">{{ S.menu.documentSettings }}</button>
+        </div>
+      </section>
 
-        <CodeSection v-if="doc && runner" :runner="runner" @packages="(engine) => close(() => emit('packages', runner!, engine))" />
+      <CodeSection v-if="doc && runner" :runner="runner" @packages="(engine) => then(() => emit('packages', runner!, engine))" />
 
-        <section v-if="doc && header" class="menu-section">
-          <HeaderForm ref="headerForm" :view="header.view" :spec="header.spec" :path="path!" :version="header.version" />
-        </section>
+      <section class="menu-section">
+        <h3>{{ workspace?.name ?? S.app.workspace }}</h3>
+        <p class="menu-facts">
+          <template v-if="!workspace">{{ hostUrl }}</template>
+          <template v-if="status">{{ workspace ? '' : ' · ' }}{{ connectionLabel(status.connection) }}</template>
+        </p>
+        <ul v-if="status && status.peers.length > 0" class="menu-peers">
+          <li v-for="x in status.peers" :key="x.clientId" :title="x.email || x.name">
+            <span class="menu-person" :style="{ background: x.color }" />{{ x.name || S.common.anonymous }}{{ x.self ? S.common.you : '' }}
+          </li>
+        </ul>
+        <div class="menu-actions">
+          <button type="button" :disabled="!workspace" :title="S.menu.searchTitle(keyLabel(APP_KEYS.search))" data-testid="menu-search" @click="then(() => emit('search'))">{{ S.menu.search }}</button>
+          <button
+            v-if="syncable !== false"
+            type="button"
+            :disabled="syncing || !workspace"
+            :title="S.sync.title"
+            data-testid="menu-sync"
+            @click="then(() => emit('sync'))"
+          >
+            {{ syncing ? S.sync.syncing : S.sync.sync }}
+          </button>
+          <button type="button" :disabled="!workspace" data-testid="menu-workspace-settings" @click="then(() => emit('settings', 'workspace'))">{{ S.menu.workspaceSettings }}</button>
+        </div>
+        <p v-if="syncable === false" class="menu-facts" data-testid="menu-sync-none">{{ S.sync.nothingToSync }}</p>
+        <details v-if="workspace" class="menu-details">
+          <summary>{{ S.common.details }}</summary>
+          <span class="menu-facts" data-testid="workspace-details">{{ S.menu.workspaceDetails(workspace.branch, workspace.head?.slice(0, 7) ?? null) }}</span>
+        </details>
+      </section>
 
-        <div class="modal-actions"><button type="button" class="primary" data-testid="document-done" @click="close()">{{ S.common.done }}</button></div>
-      </template>
-      <template v-else>
-        <section v-if="path && type" class="menu-section" data-testid="menu-this-document">
-          <h3>{{ name }}</h3>
-          <div class="menu-actions">
-            <button type="button" data-testid="menu-document" @click="panel = 'document'">{{ S.menu.documentSettings }}</button>
-          </div>
-        </section>
+      <section class="menu-section">
+        <h3>{{ S.menu.you }}</h3>
+        <p v-if="settings.name" class="menu-facts" data-testid="menu-you">{{ settings.email ? `${settings.name} · ${settings.email}` : settings.name }}</p>
+        <div class="menu-actions">
+          <button type="button" :title="S.menu.settingsTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-settings" @click="then(() => emit('settings', 'you'))">{{ S.menu.settings }}</button>
+          <button type="button" :title="S.menu.helpTitle(keyLabel(APP_KEYS.help))" data-testid="menu-help" @click="then(() => emit('help'))">{{ S.menu.help }}</button>
+        </div>
+      </section>
 
-        <section class="menu-section">
-          <h3>{{ workspace?.name ?? S.app.workspace }}</h3>
-          <p class="menu-facts">
-            <template v-if="!workspace">{{ hostUrl }}</template>
-            <template v-if="status">{{ workspace ? '' : ' · ' }}{{ connectionLabel(status.connection) }}</template>
-          </p>
-          <ul v-if="status && status.peers.length > 0" class="menu-peers">
-            <li v-for="x in status.peers" :key="x.clientId" :title="x.email || x.name">
-              <span class="menu-person" :style="{ background: x.color }" />{{ x.name || S.common.anonymous }}{{ x.self ? S.common.you : '' }}
-            </li>
-          </ul>
-          <div class="menu-actions">
-            <button type="button" :disabled="!workspace" :title="S.menu.searchTitle(keyLabel(APP_KEYS.search))" data-testid="menu-search" @click="emit('search'); emit('close')">{{ S.menu.search }}</button>
-            <button
-              v-if="syncable !== false"
-              type="button"
-              :disabled="syncing || !workspace"
-              :title="S.sync.title"
-              data-testid="menu-sync"
-              @click="emit('sync'); emit('close')"
-            >
-              {{ syncing ? S.sync.syncing : S.sync.sync }}
-            </button>
-          </div>
-          <p v-if="syncable === false" class="menu-facts" data-testid="menu-sync-none">{{ S.sync.nothingToSync }}</p>
-          <div v-if="workspace" class="menu-actions">
-            <button type="button" :title="S.menu.renameWorkspaceTitle" data-testid="menu-rename-workspace" @click="emit('close'); emit('renameWorkspace')">{{ S.menu.renameWorkspace }}</button>
-            <button v-if="canRemoveWorkspace" type="button" class="danger" :title="S.menu.removeWorkspaceTitle" data-testid="menu-remove-workspace" @click="emit('close'); emit('removeWorkspace')">{{ S.menu.removeWorkspace }}</button>
-          </div>
-          <details v-if="workspace" class="menu-details">
-            <summary>{{ S.common.details }}</summary>
-            <span class="menu-facts" data-testid="workspace-details">{{ S.menu.workspaceDetails(workspace.branch, workspace.head?.slice(0, 7) ?? null) }}</span>
-          </details>
-        </section>
-
-        <DevicesSection :api="api" @invite="emit('invite'); emit('close')" />
-
-        <section class="menu-section">
-          <h3>{{ S.menu.components }}</h3>
-          <p class="menu-facts">{{ S.menu.componentsAbout }}</p>
-          <div class="menu-actions">
-            <button type="button" @click="emit('components'); emit('close')">{{ S.menu.componentsButton }}</button>
-            <button type="button" :title="S.menu.helpTitle(keyLabel(APP_KEYS.help))" data-testid="menu-help" @click="emit('close'); emit('help')">{{ S.menu.help }}</button>
-          </div>
-        </section>
-
-        <section class="menu-section">
-          <h3>{{ S.menu.you }}</h3>
-          <p v-if="settings.name" class="menu-facts" data-testid="menu-you">{{ settings.email ? `${settings.name} · ${settings.email}` : settings.name }}</p>
-          <div class="menu-actions">
-            <button type="button" :title="S.menu.settingsTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-settings" @click="emit('close'); emit('settings')">{{ S.menu.settings }}</button>
-          </div>
-        </section>
-
-        <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
-      </template>
+      <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
     </div>
   </div>
 </template>

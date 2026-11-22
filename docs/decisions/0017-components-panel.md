@@ -1,5 +1,7 @@
 # 0017 · The Components panel
 
+*Since [0064](0064-four-kinds-of-settings.md): the Components dialog is gone. The server's engines, environments, formats and tools are in Settings › Server; your editing behaviour in Settings › You.*
+
 > Changed by [0018](0018-untrusted-users.md): the host's components are set by flags only. The panel
 > first let the owner of a host switch them; it now only shows them.
 

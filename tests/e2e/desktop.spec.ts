@@ -101,6 +101,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.getByTestId('menu-settings').click();
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Server address')).toHaveCount(0);
+    await page.getByTestId('settings-tab-server').click();
     await expect(page.getByTestId('preferences')).toBeVisible();
     await page.keyboard.press('Escape');
     // Opening a folder is one of the ways to add a workspace, as in a browser; the list of workspaces offers only that, apart.
@@ -134,7 +135,6 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
     await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('last-commit')).not.toContainText('—');
     // Escape goes back from Document settings to the menu, and closes the menu.
     await page.keyboard.press('Escape');
@@ -244,7 +244,6 @@ test('runs R chunks in a Podman container by default', async () => {
     await page.locator('.code-node-code_chunk').getByRole('button', { name: '▶ Run' }).click();
     await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   } finally {
     await app.close();
@@ -262,11 +261,11 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await page.getByTestId('file:analysis.Rmd').click();
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-document').click();
     await expect(page.getByTestId('r-state')).toHaveCount(0);
-    await page.getByTestId('menu-back').click();
-    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
-    const components = page.getByTestId('components');
+    // Settings › Server says what runs (decision 0064).
+    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-tab-server').click();
+    const components = page.getByTestId('settings-window');
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).toBeDisabled();
     await expect(components.getByRole('checkbox', { name: 'R Markdown', exact: true })).not.toBeChecked();
@@ -325,6 +324,8 @@ async function openPreferences(app: ElectronApplication, page: Page): Promise<Lo
     return { accelerator: preferences.accelerator };
   });
   expect(item.accelerator).toBe('CmdOrCtrl+Alt+,');
+  // Settings, at the section last shown: this computer's server is its own section (decision 0064).
+  await page.getByTestId('settings-tab-server').click();
   const prefs = page.getByTestId('preferences');
   await expect(prefs.getByTestId('pref-workspaces')).not.toHaveValue('');
   // No window of its own.
@@ -338,8 +339,9 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const rOn = async (page: Page) => {
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
-    const on = await page.getByTestId('components').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
+    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-tab-server').click();
+    const on = await page.getByTestId('components-run').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
     await page.keyboard.press('Escape');
     return on;
   };
@@ -369,11 +371,12 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({
       runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
     });
-    // R Markdown is off now: the Components panel says so.
+    // R Markdown is off now: Settings › Server says so.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
-    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'R Markdown' })).not.toBeChecked();
-    await expect(page.getByTestId('components-formats').getByRole('checkbox', { name: 'Pandoc markdown' })).toBeChecked();
+    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-tab-server').click();
+    await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
+    await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
 
     // The workspace is shared, so it syncs: git reaches other devices through git-remote-kuraa, which runs the app as Node.

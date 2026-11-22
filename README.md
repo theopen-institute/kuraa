@@ -147,20 +147,23 @@ heading and is typed there (↑ at the top of the text goes up to it, Enter come
 to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 
-**Document settings** (right-click a file, or **Document settings…** in the menu) is everything
-about one document: its **Source** (the markdown, which you can edit there too, alongside others
-editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)), **History**,
-**Save version**, **Preview** (below), **Find and replace…**, **Outline**, **Insert table**, when it
-was last saved and kept in the history, its code session, and its header
-([decision 0054](docs/decisions/0054-document-settings.md)).
-
-Everything else is in the **menu**, from the bottom of the sidebar or
-⌘, (Ctrl+,), which takes the keyboard's focus as every dialog does: the way into the open document's
-**Document settings**; the workspace,
+The **menu**, from the bottom of the sidebar or ⌘, (Ctrl+,), which takes the keyboard's focus as
+every dialog does, is for what to do: with the open document, its **Source** (the markdown, which
+you can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)),
+**History**, **Save version**, **Preview** (below), **Find and replace…**, **Outline**, **Insert
+table**, when it was last saved and kept in the history, and its code session; with the workspace,
 **Search…** (⇧⌘F: every text file, and open documents as they are being typed; a result opens the
 file at the match, [0042](docs/decisions/0042-search.md)), **Sync** (offered once there is an online
 copy or another device; it says "Up to date" or how many changes it brought in) and who is here;
-**Components…** and **Markdown and shortcuts**; and your settings. Commit ids and branch names are
+and **Markdown and shortcuts**.
+
+Settings are in one window of four sections, each saying who it applies to and where it is kept
+([decision 0064](docs/decisions/0064-four-kinds-of-settings.md)): **You** (your name, email and
+colour, your key, and how each kind of document is edited for you; in this browser), **Document**
+(the open document's header; in its file), **Workspace** (its name, packages, devices and invite
+links, online copy, and removing it from the list; in the workspace) and **Server** (what the server
+runs and how; only its owner changes it). The menu opens it at each: **Document settings…** (also
+right-clicking a file), **Workspace settings…** and **Settings…**; ⌥⌘, opens it too. Commit ids and branch names are
 behind **Details**. The bottom of the sidebar shows whether you are connected and how many others are
 here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
 **Try again now**. Saving paused or failing (git busy outside the app) is a banner while it lasts.
@@ -194,7 +197,7 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
 component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Components…**, its **Online copy** section (wherever the host listens only on this computer: the desktop app,
+In **Workspace settings**, its **Online copy** section (wherever the host listens only on this computer: the desktop app,
 `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
@@ -369,9 +372,9 @@ What runs and which formats are on are the host's Settings (or its flags); loadi
 turning off the sandbox and naming the Podman program are flags only (`--component`,
 `--allow-unsandboxed`, `--podman`), as they choose code that runs with your rights. The desktop app
 takes `--engine` (`--engine none` for none), `--env`, `--format`, `--component`,
-`--allow-unsandboxed` and `--podman` too. **Components…** in the menu shows what is on, read-only, and lets each person turn their own
+`--allow-unsandboxed` and `--podman` too. Settings' **Server** section shows what is on, read-only, and its **You** section lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
-browser. It also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and
+browser. The Server section also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and
 where installs are allowed offers **Download** and **Remove**: tools are kept once per computer in
 the data folder and used only where code runs ([decision 0045](docs/decisions/0045-tools.md)). A
 file whose format is off opens as a Text file

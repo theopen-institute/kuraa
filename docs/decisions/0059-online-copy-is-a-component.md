@@ -1,5 +1,7 @@
 # 0059 · The online copy is a component
 
+*Since [0064](0064-four-kinds-of-settings.md): the online copy is set up in Settings › Workspace.*
+
 The online copy ([0039](0039-online-copy.md)) was built into the host: `Host` made an
 `OnlineCopies` from `backups.ts` for every workspace, `/api/online` was fixed in the routes, and
 the menu always had an **Online copy** section. It is now a component, like engines,

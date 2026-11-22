@@ -91,7 +91,6 @@ test('two browsers co-edit one paragraph and see each other', async ({ browser }
   expect(onDisk).toContain(`\n${expected}\n`);
   for (const block of untouched) expect(onDisk).toContain(block);
   await alice.getByTestId('menu-button').click();
-  await alice.getByTestId('menu-document').click();
   await expect(alice.getByTestId('last-flush')).not.toContainText('—');
 
   // M4 through the UI: the idle commit appears in the history panel with both people.

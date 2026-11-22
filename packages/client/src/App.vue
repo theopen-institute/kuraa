@@ -20,16 +20,16 @@ import ErrorBanner from './ErrorBanner.vue';
 import FileTree from './FileTree.vue';
 import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
-import Menu, { type MenuPanel } from './Menu.vue';
+import Menu from './Menu.vue';
 import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
-import ComponentsDialog from './ComponentsDialog.vue';
 import PastVersion from './PastVersion.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
 import FolderPicker from './FolderPicker.vue';
 import SettingsWindow from './SettingsWindow.vue';
+import type { SettingsSection } from './settingsSections.js';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
 import RenderPanel from './RenderPanel.vue';
@@ -88,12 +88,9 @@ const syncing = ref(false);
 const historyOpen = ref(false);
 const showSource = ref(false);
 const menuOpen = ref(false);
-/** The menu's part to open at: the menu itself, or Document settings. */
-const menuPanel = ref<MenuPanel>('menu');
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
-const componentsOpen = ref(false);
-/** Goes up when the host says a tool changed (downloaded, removed): the Components dialog and the preview ask again. */
+/** Goes up when the host says a tool changed (downloaded, removed): Settings › Server and the preview ask again. */
 const toolsKey = ref(0);
 const addingWorkspace = ref(false);
 /** Inviting people: whether the workspace already syncs with devices. */
@@ -128,8 +125,7 @@ function openSearch() {
   sidePanel.value = 'search';
   searchAsked.value++;
 }
-function openMenu(panel: MenuPanel = 'menu') {
-  menuPanel.value = panel;
+function openMenu() {
   menuOpen.value = true;
 }
 
@@ -213,10 +209,16 @@ async function switchWorkspace(id: string) {
   chosen.value = id;
 }
 
-/** The Settings window (decision 0060): yours, and, for its owner, this computer's server's (0047). */
+/**
+ * The Settings window (decisions 0060, 0064): you, the open document, the open
+ * workspace, and the server, opened at one of them: the one asked for, else
+ * the one last shown.
+ */
 const settingsOpen = ref(false);
-function openSettings() {
+const settingsSection = ref<SettingsSection>('you');
+function openSettings(section?: SettingsSection) {
   menuOpen.value = false;
+  if (section) settingsSection.value = section;
   settingsOpen.value = true;
 }
 /** The server's settings saved: it has reopened every workspace with them; the page starts again with them too. */
@@ -361,11 +363,11 @@ function select(next: string | null) {
   path.value = next;
 }
 
-/** Open a file (if it is not open) and its Document settings. */
+/** Open a file (if it is not open), and Settings at its section. */
 function openDocumentSettings(next: string) {
   select(next);
   view(null);
-  openMenu('document');
+  openSettings('document');
 }
 
 // Refreshes overlap (a file made here, work arriving from another device): an
@@ -541,7 +543,7 @@ function useSettings(s: Settings) {
   <div class="app">
     <div v-if="rejected" class="banner warn" role="alert" data-testid="rejected-banner">
       <template v-if="shell.managesHost">{{ S.offline.rejectedManaged }} <button type="button" data-testid="reconnect" @click="reconnect">{{ S.offline.reconnect }}</button></template>
-      <template v-else>{{ S.offline.rejected }} <button type="button" data-testid="change-code" @click="openSettings">{{ S.offline.changeCode }}</button></template>
+      <template v-else>{{ S.offline.rejected }} <button type="button" data-testid="change-code" @click="openSettings('you')">{{ S.offline.changeCode }}</button></template>
     </div>
     <div v-else-if="offline" class="banner warn" role="status" data-testid="offline-banner">
       <strong>{{ S.offline.title }}</strong> {{ S.offline.kept }} <span data-testid="offline-unsent">{{ S.offline.unsent(status?.unsynced ?? 0) }}</span>
@@ -695,7 +697,6 @@ function useSettings(s: Settings) {
 
     <Menu
       v-if="menuOpen"
-      :panel="menuPanel"
       :path="path"
       :name="fileName"
       :type="type"
@@ -704,14 +705,12 @@ function useSettings(s: Settings) {
       :host-url="settings.hostUrl"
       :viewing="!!viewing"
       :show-source="showSource"
-      :header="header"
       :history-open="historyOpen"
       :syncing="syncing"
       :settings="settings"
       :shell="shell"
       :api="api"
       :conflicts="file?.conflicts ?? 0"
-      :can-remove-workspace="canAdd && !!chosen"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
@@ -721,14 +720,10 @@ function useSettings(s: Settings) {
       @save-version="saveVersion"
       @sync="sync"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @components="componentsOpen = true"
-      @invite="invite"
       @preview="preview"
       @search="openSearch"
       @help="toggleHelp"
       @settings="openSettings"
-      @rename-workspace="renameWorkspace"
-      @remove-workspace="chosen && removeWorkspace(chosen)"
       @close="menuOpen = false"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
@@ -741,25 +736,32 @@ function useSettings(s: Settings) {
       @cancel="addingWorkspace = false"
       @open-folder="addingWorkspace = false; openFolder()"
     />
-    <ComponentsDialog
-      v-if="componentsOpen"
-      :api="api"
-      :editors="editors"
-      :editors-off="editorsOff"
-      :tools-key="toolsKey"
-      @editors-off="setEditorsOff"
-      @close="componentsOpen = false"
-    />
     <SettingsWindow
       v-if="settingsOpen"
       :hub="hubApi"
       :api="api"
       :shell="shell"
       :settings="settings"
+      :section="settingsSection"
       :can-change-settings="canChangeSettings"
       :owner-off="ownerOff"
+      :path="path && type && !viewing ? path : null"
+      :doc-name="path && type && !viewing ? fileName : null"
+      :header="header"
+      :opening="!!path && !editor?.view"
+      :workspace="workspace"
+      :runner="status?.runner ?? null"
+      :can-remove-workspace="canAdd && !!chosen"
+      :editors="editors"
+      :editors-off="editorsOff"
+      :tools-key="toolsKey"
       @save-settings="useSettings"
       @saved="serverSettingsSaved"
+      @editors-off="setEditorsOff"
+      @rename-workspace="renameWorkspace"
+      @remove-workspace="chosen && removeWorkspace(chosen)"
+      @invite="invite"
+      @packages="(runner, engine) => (packages = { runner, engine })"
       @close="settingsOpen = false"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />

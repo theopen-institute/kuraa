@@ -1,5 +1,7 @@
 # 0054 · Document settings: the open document's own panel of the menu; a file's right-click menu is about the file
 
+*Since [0064](0064-four-kinds-of-settings.md): Document settings is a section of the Settings window (the header); the commands that were in its panel are in the menu.*
+
 *Since [0063](0063-settings-keep-what-you-change.md): the header has no **Save header**; what was changed is written as Document settings closes, however it closes, as one edit that can be undone.*
 
 The menu had grown a section for the open document (views, versions, saving, writing, its code

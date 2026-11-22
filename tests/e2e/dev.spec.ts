@@ -102,12 +102,12 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await page.getByTestId('settings-close').click();
     await page.getByTestId('menu-button').click();
 
-    // An online copy, added in Components (it is a component, decision 0059): a plain git repository each save is pushed to.
+    // An online copy, added in Workspace settings (it is a component, decision 0059): a plain git repository each save is pushed to.
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
     await expect(page.getByTestId('menu').getByTestId('sync:online')).toHaveCount(0);
-    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
-    const online = page.getByTestId('components').getByTestId('sync:online');
+    await page.getByTestId('menu-workspace-settings').click();
+    const online = page.getByTestId('settings-workspace').getByTestId('sync:online');
     await expect(online).toContainText('Online copy');
     await online.getByTestId('sync-address').fill(bare);
     await online.getByTestId('sync-add').click();

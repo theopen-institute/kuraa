@@ -56,12 +56,13 @@ test('an R script is highlighted, edits keep indentation and CRLF, and paste spl
   await expect(editor.locator('.tok-atom', { hasText: 'TRUE' })).toHaveCount(1);
   // No markdown machinery: no Source toggle, and markdown cues stay literal.
   await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-document').click();
   await expect(page.getByTestId('menu')).toBeVisible();
   await expect(page.getByTestId('toggle-source')).toHaveCount(0);
-  // Escape goes back from Document settings to the menu, and closes the menu.
+  // A text file has no settings of its own: Settings says so.
+  await page.getByTestId('menu-document').click();
+  await expect(page.getByTestId('settings-document-none')).toHaveText('This kind of document has no settings of its own.');
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('settings-window')).toHaveCount(0);
 
   // Enter keeps the indentation of the line it splits.
   await endOf(page, 'n = n())');

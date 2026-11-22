@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The menu's Devices section: who is in the workspace, by person and computer,
+// Settings › Workspace's Devices (decision 0064): who is in the workspace, by person and computer,
 // and who is online. Every member has the same say (0038): on every hub (0047),
 // anyone here may invite people, remove a device (for good; it keeps its copy)
 // and rename this one.

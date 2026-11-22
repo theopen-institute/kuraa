@@ -72,10 +72,10 @@ test('the header is edited in Document settings; the page shows only its title',
     await dialog.getByTestId('header-add').click();
     await dialog.getByTestId('header-add:link-citations').click();
     await expect(dialog.getByTestId('header-field:link-citations').getByRole('checkbox')).toBeChecked();
-    // No Save button: written when Document settings closes, as it says.
+    // No Save button: written when Settings closes, as it says.
     await expect(dialog.getByTestId('header-save')).toHaveCount(0);
-    await expect(dialog.getByTestId('header-pending')).toHaveText('Saved when you close Document settings');
-    await page.getByTestId('document-done').click();
+    await expect(dialog.getByTestId('header-pending')).toHaveText('Saved when you close Settings');
+    await page.getByTestId('settings-close').click();
     await expect(dialog).toBeHidden();
 
     await expect.poll(onDisk(dir, 'paper.md')).toBe(
@@ -87,7 +87,6 @@ test('the header is edited in Document settings; the page shows only its title',
 
     // The Source view shows it as text.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-document').click();
     await page.getByTestId('toggle-source').click();
     await expect(page.locator('.source-view')).toContainText('title: "A better title: with a colon"');
   } finally {
@@ -115,7 +114,7 @@ test('a document needs a title; YAML that does not parse cannot be saved', async
     await expect(dialog.getByRole('alert')).toBeVisible();
     await expect(dialog.getByTestId('header-pending')).toHaveText('Fix this to keep your changes');
     // Closing now asks whether to discard the changes; staying keeps them, to fix.
-    await page.getByTestId('document-done').click();
+    await page.getByTestId('settings-close').click();
     await expect(page.getByTestId('ask')).toContainText('cannot be saved. Discard them?');
     await page.getByTestId('ask').getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeVisible();
@@ -123,12 +122,12 @@ test('a document needs a title; YAML that does not parse cannot be saved', async
     await expect(dialog.getByRole('alert')).toHaveText('A document needs a title.');
     await expect(dialog.getByTestId('header-pending')).toHaveText('Fix this to keep your changes');
     await yaml.fill('title: Fresh\nlang: fr');
-    await expect(dialog.getByTestId('header-pending')).toHaveText('Saved when you close Document settings');
+    await expect(dialog.getByTestId('header-pending')).toHaveText('Saved when you close Settings');
     // Back to the fields: they are read from the YAML.
     await dialog.getByTestId('header-fields-tab').click();
     await expect(dialog.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Fresh');
     await expect(dialog.getByRole('combobox', { name: 'Language', exact: true })).toHaveValue('fr');
-    await page.getByTestId('document-done').click();
+    await page.getByTestId('settings-close').click();
     await expect.poll(onDisk(dir, 'plain.md')).toBe('---\ntitle: Fresh\nlang: fr\n---\n\n# Plain\n\nNo header.\n');
     // The sidebar shows the new title.
     await expect(page.getByTestId('file:plain.md')).toContainText('Fresh');

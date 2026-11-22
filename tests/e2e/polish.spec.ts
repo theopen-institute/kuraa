@@ -209,11 +209,12 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   await expect(menu.getByRole('menuitem')).toHaveText(['Document settings…', 'Rename…', 'Delete…']);
   for (let i = 0; i < 10 && !(await menu.getByTestId('context:document-settings').evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  // Document settings: the menu's panel for the document, with its header.
-  await expect(page.getByTestId('menu')).toHaveAccessibleName('Document settings');
+  // Settings, at the document's section, with its header (decision 0064).
+  await expect(page.getByTestId('settings-window')).toHaveAccessibleName('Settings');
+  await expect(page.getByTestId('settings-tab-document')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('header').getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Beta');
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('menu')).toBeHidden();
+  await expect(page.getByTestId('settings-window')).toBeHidden();
   // A folder's menu has what goes in it.
   await row(`${dir}/inner`).focus();
   await page.keyboard.press('Shift+F10');
@@ -263,10 +264,9 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
 
   // A question (ask.ts) is a dialog on the same stack: Escape closes it.
   await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-document').click();
-  const documentSettings = page.getByRole('dialog', { name: 'Document settings' });
-  await expect(documentSettings).toBeVisible();
-  await documentSettings.getByRole('button', { name: 'Save version…' }).click();
+  const theMenu = page.getByRole('dialog', { name: 'Menu' });
+  await expect(theMenu).toBeVisible();
+  await theMenu.getByRole('button', { name: 'Save version…' }).click();
   const ask = page.getByRole('dialog', { name: 'Name this version' });
   await expect(ask).toBeVisible();
   await page.keyboard.press('Escape');

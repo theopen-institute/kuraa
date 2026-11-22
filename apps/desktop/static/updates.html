@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+  <title>Updates</title>
+  <!-- Check for Updates… (update-window.ts): draws what it is sent, and says which button was pressed. -->
+  <style>
+    :root { --bg: #fbfaf8; --text: #1d1c1a; --muted: #635f58; --border: #e2ded6; --track: #ebe8e2; --accent: #2f6f5e; --warn: #9a3412; color-scheme: light; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #222220; --text: #e8e6e1; --muted: #a5a198; --border: #34332f; --track: #34332f; --accent: #7cc4ad; --warn: #fdba8c; color-scheme: dark; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; user-select: none; overflow: hidden; }
+    main { padding: 20px 22px 18px; display: grid; gap: 12px; }
+    #message { font-weight: 600; font-size: 14px; margin: 0; overflow-wrap: anywhere; }
+    .warning #message { color: var(--warn); }
+    #detail { margin: 0; color: var(--muted); min-height: 1.45em; overflow-wrap: anywhere; user-select: text; font-variant-numeric: tabular-nums; }
+    #detail:empty { display: none; }
+    .bar { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; position: relative; }
+    .bar[hidden] { display: none; }
+    .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); border-radius: 3px; transition: width 0.25s ease-out; }
+    /* How far not known yet: a stretch that sweeps across. */
+    .bar.going .fill { width: 35%; animation: sweep 1.3s ease-in-out infinite; transition: none; }
+    @keyframes sweep { from { left: -35%; } to { left: 100%; } }
+    @media (prefers-reduced-motion: reduce) { .bar.going .fill { animation: none; width: 100%; opacity: 0.4; } .fill { transition: none; } }
+    .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+    button { font: inherit; border-radius: 6px; padding: 5px 14px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text); }
+    button.default { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main id="main">
+    <p id="message" role="status" aria-live="polite"></p>
+    <div class="bar" id="bar" role="progressbar" aria-labelledby="message" aria-valuemin="0" aria-valuemax="100" hidden><div class="fill" id="fill"></div></div>
+    <p id="detail"></p>
+    <div class="buttons" id="buttons"></div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let shown = '';
+    window.updates.onView((v) => {
+      $('main').className = v.tone === 'warning' ? 'warning' : '';
+      $('message').textContent = v.message;
+      $('detail').textContent = v.detail;
+      const bar = $('bar');
+      bar.hidden = v.progress === undefined;
+      bar.classList.toggle('going', v.progress === null);
+      if (typeof v.progress === 'number') {
+        $('fill').style.width = `${Math.round(v.progress * 1000) / 10}%`;
+        bar.setAttribute('aria-valuenow', String(Math.round(v.progress * 100)));
+      } else bar.removeAttribute('aria-valuenow');
+      // The buttons are made again only when they change, so focus stays put while the bar moves.
+      const key = v.buttons.map((b) => `${b.choice}:${b.label}`).join('|');
+      if (key !== shown) {
+        shown = key;
+        $('buttons').replaceChildren(...[...v.buttons].reverse().map((b, i, all) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = b.label;
+          button.dataset.choice = b.choice;
+          if (i === all.length - 1) button.className = 'default';
+          button.addEventListener('click', () => window.updates.choose(b.choice));
+          return button;
+        }));
+        $('buttons').querySelector('.default')?.focus();
+      }
+    });
+    // Escape: the button that does nothing (Hide, Later, OK), never Restart.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const quiet = [...document.querySelectorAll('#buttons button')].find((b) => b.dataset.choice !== 'restart');
+      if (quiet) window.updates.choose(quiet.dataset.choice);
+    });
+    // The window fits what is drawn.
+    new ResizeObserver(() => window.updates.size($('main').getBoundingClientRect().height)).observe($('main'));
+  </script>
+</body>
+</html>

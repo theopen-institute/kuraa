@@ -45,12 +45,13 @@ import { standardRunComponents } from '@kuraa/run-components';
 import type { ShellConfig } from '@kuraa/client';
 import { D } from './strings.js';
 import { startUpdates, updatable, type Updates } from './updates.js';
+import { updateWindow, UPDATES_PAGE } from './update-window.js';
 import { keepLog, logFile } from './log.js';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
 /** The only pages the windows may show. */
-const OWN_PAGES = [WEB_INDEX, LAUNCHER].map((p) => pathToFileURL(p).href);
+const OWN_PAGES = [WEB_INDEX, LAUNCHER, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
 const isOwnPage = (url: string) => OWN_PAGES.includes(url.split(/[?#]/)[0]!);
 
 const { values: flags } = parseArgs({
@@ -265,15 +266,9 @@ function showHelp(): void {
   if (config && window) window.webContents.send('kuraa:help');
 }
 
-/** Check for Updates… in the app's menu: look now, and say what was found. */
-async function checkForUpdates(): Promise<void> {
-  const why = updatable();
-  const r = updates ? await updates.check(true) : { kind: 'off' as const };
-  const message = r.kind === 'off' ? D.updates.off(why ?? '') : r.kind === 'none' ? D.updates.latest(app.getVersion()) : r.kind === 'downloading' ? D.updates.downloading(r.version) : r.kind === 'ready' ? D.updates.ready(r.version) : D.updates.failed(r.message);
-  const buttons = r.kind === 'ready' ? [D.updates.restart, D.updates.later] : [D.updates.ok];
-  const { response } = await dialog.showMessageBox(window ?? undefined as unknown as BrowserWindow, { type: r.kind === 'failed' ? 'warning' : 'info', message, buttons, defaultId: 0 });
-  if (r.kind === 'ready' && response === 0) await restartToUpdate();
-}
+/** Check for Updates… in the app's menu: a window that looks now, and shows how it goes (update-window.ts). Made once updates have started. */
+let updatesWindow: ReturnType<typeof updateWindow> | null = null;
+const checkForUpdates = async (): Promise<void> => updatesWindow?.show();
 
 /** Save every workspace, quit, put the update in place, and start again. */
 async function restartToUpdate(): Promise<void> {
@@ -451,6 +446,14 @@ function showContextMenu(contents: WebContents, params: ContextMenuParams): void
 app.whenReady().then(async () => {
   buildMenu();
   updates = startUpdates({ log: (m) => console.log(m), ready: (version) => window?.webContents.send('kuraa:update-ready', version) });
+  updatesWindow = updateWindow({
+    parent: () => window,
+    updates,
+    why: () => updatable() ?? '',
+    current: app.getVersion(),
+    restart: restartToUpdate,
+    webPreferences: windowOptions().webPreferences,
+  });
   // A device of a workspace runs a newer kuraa: this one does not sync with it until updated, so look now.
   void onNewerVersion(() => void updates?.check());
   window = new BrowserWindow({

@@ -16,13 +16,20 @@ export const D = {
   },
   updates: {
     title: 'Updates',
+    checking: 'Looking for a newer version of kuraa…',
     latest: (version: string) => `kuraa ${version} is the latest version.`,
-    downloading: (version: string) => `kuraa ${version} is being downloaded. It says when it is ready.`,
-    ready: (version: string) => `kuraa ${version} is ready. Restart now to use it, or it is put in place when kuraa next starts.`,
-    failed: (why: string) => `Could not look for updates: ${why}`,
+    downloading: (version: string) => `Downloading kuraa ${version}…`,
+    starting: 'Starting the download…',
+    /** How far a download has come: 12 MB of 98 MB · 4.1 MB a second. */
+    progress: (done: string, total: string, speed: string | null) => `${done} of ${total}${speed ? ` · ${speed} a second` : ''}`,
+    ready: (version: string) => `kuraa ${version} is ready.`,
+    readyDetail: 'Restart now to use it, or it is put in place when kuraa next starts.',
+    failedTitle: 'Could not update kuraa.',
     off: (why: string) => `This copy of kuraa does not update itself${why ? ` (${why})` : ''}.`,
     restart: 'Restart Now',
     later: 'Later',
+    /** Closes the window; the download goes on, and the page says when it is ready. */
+    hide: 'Hide',
     ok: 'OK',
   },
   folder: {

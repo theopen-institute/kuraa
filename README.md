@@ -509,7 +509,7 @@ networking library does; not musl (Alpine).
 
 The app updates itself ([decision 0051](docs/decisions/0051-the-app-updates-itself.md)): it looks for
 a newer release a minute after starting and every four hours (and from **Check for Updates…** in
-its menu), downloads it in the background, only the parts that changed where it can (a code change
+its menu, which stays open and shows the download's progress, then offers **Restart Now**), downloads it in the background, only the parts that changed where it can (a code change
 is a few megabytes of a 130 MB app), and puts it in place when it quits; the page offers **Restart
 now**. It also looks at once when a device of a workspace runs a newer kuraa, as the two do not
 sync until this one is updated (**Devices** says "newer kuraa" or "older kuraa").

@@ -7,8 +7,10 @@
 // Developer ID; Windows: the same publisher), or it is not installed.
 //
 // It looks a minute after starting, every four hours, when the app's menu asks
-// (Check for Updates…), and when a device of a workspace runs a newer kuraa
-// than this one (they do not sync until this one is updated).
+// (Check for Updates…, which shows how it goes: update-window.ts), and when a
+// device of a workspace runs a newer kuraa than this one (they do not sync
+// until this one is updated). Whoever listens hears how updating stands as it
+// changes: looking, downloading and how far, ready, failed.
 //
 // On Linux, an AppImage replaces itself; a .deb or .rpm package is installed
 // with dpkg or rpm, as root, so it asks for an administrator's password (pkexec):
@@ -22,6 +24,7 @@ import { app } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import electronUpdater from 'electron-updater';
+import type { UpdateProgress, UpdateStatus } from './update-view.js';
 
 /** Looked for again this often while the app runs. */
 const EVERY_MS = 4 * 3600_000;
@@ -33,6 +36,10 @@ export interface Updates {
   check(asked?: boolean): Promise<UpdateCheck>;
   /** The version downloaded and ready to put in place, if any. */
   readonly ready: string | null;
+  /** How updating stands; null: not looked for yet. */
+  readonly status: UpdateStatus | null;
+  /** Hear how updating stands, as it changes. */
+  onStatus(fn: (s: UpdateStatus) => void): () => void;
   /** Save (`before`), quit, put the update in place, and start again. */
   restart(before: () => Promise<void>): Promise<void>;
 }
@@ -84,23 +91,53 @@ export function startUpdates(o: { log(m: string): void; ready(version: string): 
   let ready: string | null = null;
   let last = 0;
   let checking: Promise<UpdateCheck> | null = null;
+  let status: UpdateStatus | null = null;
+  const listeners = new Set<(s: UpdateStatus) => void>();
+  const set = (s: UpdateStatus) => {
+    status = s;
+    for (const fn of listeners) fn(s);
+  };
+  /** How it stands now: the updater's events change it while a check waits. */
+  const now = (): UpdateStatus | null => status;
+  /** Looking or downloading: what an error ends. */
+  const busy = () => status?.kind === 'checking' || status?.kind === 'downloading';
+  autoUpdater.on('update-available', (info: { version: string }) => {
+    if (!ready && status?.kind !== 'downloading') set({ kind: 'downloading', version: info.version, progress: null });
+  });
+  autoUpdater.on('download-progress', (p: UpdateProgress) => {
+    if (ready || status?.kind !== 'downloading') return;
+    set({ kind: 'downloading', version: status.version, progress: { percent: p.percent, transferred: p.transferred, total: p.total, bytesPerSecond: p.bytesPerSecond } });
+  });
   autoUpdater.on('update-downloaded', (info: { version: string }) => {
     ready = info.version;
+    set({ kind: 'ready', version: info.version });
     o.ready(info.version);
   });
-  autoUpdater.on('error', (e: Error) => o.log(`[updates] ${e.message}`));
+  autoUpdater.on('error', (e: Error) => {
+    o.log(`[updates] ${e.message}`);
+    if (busy() && !ready) set({ kind: 'failed', message: e.message });
+  });
 
   const check = (asked = false): Promise<UpdateCheck> => {
     if (ready) return Promise.resolve({ kind: 'ready', version: ready });
+    // Downloading already: it goes on, and says how far.
+    if (status?.kind === 'downloading') return Promise.resolve({ kind: 'downloading', version: status.version });
     if (checking) return checking;
     if (!asked && Date.now() - last < AT_MOST_MS) return Promise.resolve({ kind: 'none' });
     last = Date.now();
+    set({ kind: 'checking' });
     checking = (async (): Promise<UpdateCheck> => {
       try {
         const r = await autoUpdater.checkForUpdates();
-        if (!r?.isUpdateAvailable) return { kind: 'none' };
-        return ready ? { kind: 'ready', version: ready } : { kind: 'downloading', version: r.updateInfo.version };
+        if (!r?.isUpdateAvailable) {
+          set({ kind: 'none' });
+          return { kind: 'none' };
+        }
+        if (ready) return { kind: 'ready', version: ready };
+        if (now()?.kind !== 'downloading') set({ kind: 'downloading', version: r.updateInfo.version, progress: null });
+        return { kind: 'downloading', version: r.updateInfo.version };
       } catch (e) {
+        if (!ready && now()?.kind !== 'failed') set({ kind: 'failed', message: (e as Error).message });
         return { kind: 'failed', message: (e as Error).message };
       } finally {
         checking = null;
@@ -116,6 +153,13 @@ export function startUpdates(o: { log(m: string): void; ready(version: string): 
     check,
     get ready() {
       return ready;
+    },
+    get status() {
+      return status;
+    },
+    onStatus(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
     },
     async restart(before) {
       if (!ready) return;

@@ -51,6 +51,8 @@ for (const name of NATIVE) {
 }
 // The preload runs sandboxed, where require() offers little beyond 'electron': no shim, no Node built-ins.
 await build({ ...common, platform: 'browser', target: 'chrome140', entryPoints: ['src/preload.ts'], outfile: 'build/preload.cjs' });
+// The updates window's (update-window.ts): its own, offering that page nothing else.
+await build({ ...common, platform: 'browser', target: 'chrome140', entryPoints: ['src/updates-preload.ts'], outfile: 'build/updates-preload.cjs' });
 if (!existsSync('../web/dist/index.html')) throw new Error('Build the web client first: pnpm --filter @kuraa/web build');
 cpSync('../web/dist', 'build/web', { recursive: true });
 cpSync('static', 'build/static', { recursive: true });

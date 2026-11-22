@@ -27,7 +27,12 @@ syncing makes that worse: devices running different versions may not understand 
   (below). It downloads in the background, only the blocks that changed where it can (on macOS,
   from the second update on: the first after installing from the DMG has no earlier download to
   compare with), and puts the update in place when the app quits. The page shows "kuraa x.y.z is
-  ready" with **Restart now**, which saves every workspace, quits, and starts the new version. Not
+  ready" with **Restart now**, which saves every workspace, quits, and starts the new version.
+  **Check for Updates…** opens a small window over the app's (`update-window.ts`, a sheet on macOS)
+  that stays open and shows how it goes: looking, then downloading with a bar (how much of how much,
+  how fast), then **Restart Now** or **Later**; or that this is the latest version, or why it could
+  not update. **Hide** closes it while the download goes on (the page still says when it is
+  ready); the Dock or taskbar icon shows the bar too. Not
   in a build without a place to look, run from the repository, or a Linux build that is neither an
   AppImage nor installed from a `.deb` or `.rpm`. A package is installed with dpkg or rpm, as root,
   so it asks for an administrator's password: only on **Restart now** (not when the app quits), and

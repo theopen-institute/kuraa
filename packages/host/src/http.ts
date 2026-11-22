@@ -712,12 +712,14 @@ const peerRoutes: Route[] = [
   // Removing a device: permanent, passed on to every device; it keeps its copy.
   route('DELETE', /^\/api\/peers\/devices\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
+    let revoked: boolean;
     try {
-      await peers.removeDevice(params[0]!);
+      ({ revoked } = await peers.removeDevice(params[0]!));
     } catch (e) {
       throw new HttpError(e instanceof NotAllowed ? 403 : 404, (e as Error).message);
     }
-    send(res, 200, { ok: true });
+    // One's own computer: its key revoked too, where this computer keeps one's identity (0068).
+    send(res, 200, { ok: true, revoked });
   }),
 
   // The workspace's people (0066): an admin makes someone an admin or a member, or takes them out (with their devices).

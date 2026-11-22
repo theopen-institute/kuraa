@@ -36,7 +36,7 @@ describe('signed membership records', () => {
     expect(judge(r, standing({ members: new Set() }))).toBe('wait');
   });
 
-  it('that remove a device, or make the secret anew, are taken only from an admin’s device, once a policy says who (0066)', () => {
+  it('that remove a device are taken only from an admin’s device, or one of the same person’s, once a policy says who (0066, 0068)', () => {
     const remove = signRecord({ kind: 'remove', workspace: WS, subject: hex(cy) }, bo);
     const secret = signRecord({ kind: 'secret', workspace: WS, subject: 'ee'.repeat(32) }, bo);
     const add = signRecord({ kind: 'add', workspace: WS, subject: hex(crypto.keyPair()), name: 'new' }, bo);
@@ -44,9 +44,13 @@ describe('signed membership records', () => {
     expect(judge(remove, standing())).toBe('take');
     // Bo's device is not an admin's: waiting (the policy that makes him one may come); Cy's is.
     expect(judge(remove, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
-    expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
     expect(judge(add, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
     expect(judge(remove, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
+    // A person removes their own computer, admin or not (0068): Bo's device removes Cy's only if both are the same person's.
+    expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p1']]) }))).toBe('take');
+    expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p2']]) }))).toBe('wait');
+    // The new secret that goes with a removal is any member's to make.
+    expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
   });
 
   it('are taken from every member alike, the newest as the first', () => {

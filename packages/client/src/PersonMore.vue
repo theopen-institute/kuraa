@@ -42,6 +42,8 @@ async function act(fn: () => Promise<unknown>, done: string | ((r: never) => str
   }
 }
 
+/** Email and escrow are shown once there is a server to check addresses (the workspace names one), or you have an address checked. */
+const checking = computed(() => verifiers.value.length > 0 || !!me.value?.identity?.emails?.length);
 const nameOf = (id: string) => people.value.find((p) => p.id === id)?.name ?? `${id.slice(0, 8)}…`;
 const verifierLabel = (key: string) => verifiers.value.find((v) => v.key === key)?.url ?? `${key.slice(0, 8)}…`;
 
@@ -116,6 +118,7 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
   <details v-if="me?.identity" class="person-advanced person-more" data-testid="person-more">
     <summary>{{ S.more.title }}</summary>
 
+    <template v-if="checking">
     <h4>{{ S.more.email }}</h4>
     <ul v-if="me.identity.emails?.length" class="person-keys" data-testid="emails">
       <li v-for="e in me.identity.emails" :key="e.email + e.verifier">{{ e.email }} <span class="muted">{{ S.more.checkedBy(verifierLabel(e.verifier)) }}</span></li>
@@ -158,6 +161,7 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
       <input :value="back.line" readonly data-testid="back-line">
       <button type="button" @click="copy(back.line)">{{ S.common.copy }}</button>
     </div>
+    </template>
 
     <h4>{{ S.more.trustees }}</h4>
     <p class="menu-facts" data-testid="trustees">{{ trustees ? S.more.yourTrustees(trustees.ids.map(nameOf), trustees.threshold) : S.more.noTrustees }}</p>

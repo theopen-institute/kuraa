@@ -310,7 +310,7 @@ export class HostApi {
   createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member'; email?: string }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   /** Remove a device from the workspace, for good (it keeps its copy). */
-  removeDevice(key: string) { return this.json(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
+  removeDevice(key: string) { return this.json<{ ok: boolean; revoked?: boolean }>(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
   renameDevice(name: string) { return this.json<{ name: string }>('/api/peers/name', { method: 'POST', body: JSON.stringify({ name }) }); }
   /** The syncs the host's components bring (the online copy), their targets, and whether people here may add and remove them. */
   syncs() { return this.json<{ canManage: boolean; syncs: SyncInfo[] }>('/api/syncs'); }

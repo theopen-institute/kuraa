@@ -483,19 +483,32 @@ export class Identity {
     await this.decide('attest', a.id, { attestation: a });
   }
 
-  /** The devices whose person is an admin of the workspace; null if there is no policy yet. */
-  private async managers(list?: MemberRecord[]): Promise<Set<string> | null> {
+  /**
+   * The devices whose person is an admin of the workspace (null if there is no
+   * policy yet), and the person each device is, where known: who may remove a
+   * device (an admin, or the same person: 0068).
+   */
+  private async managers(list?: MemberRecord[]): Promise<{ managers: Set<string> | null; persons: Map<string, string> }> {
     const records = list ?? (await this.records());
     const policy = await this.policy(records);
-    if (!policy.founded) return null;
     const w = this.who(records);
     const self = (await this.deviceKey()).publicKey.toString('hex');
-    const out = new Set<string>();
+    const persons = new Map<string, string>();
+    const managers = new Set<string>();
     for (const d of [self, ...(await this.members()).map((m) => m.key)]) {
       const id = w.personOf.get(w.signsWith.get(d) ?? '')?.key ?? null;
-      if (policy.isAdmin(id)) out.add(d);
+      if (id) persons.set(d, id);
+      if (policy.isAdmin(id)) managers.add(d);
     }
-    return out;
+    return { managers: policy.founded ? managers : null, persons };
+  }
+
+  /** Whether a device may remove another (0068): with no policy, any; an admin's, any; else only one of the same person's. */
+  async mayRemove(device: string, other: string): Promise<boolean> {
+    const { managers, persons } = await this.managers();
+    if (!managers || managers.has(device)) return true;
+    const whose = persons.get(device);
+    return !!whose && whose === persons.get(other);
   }
 
   /** The person (identity ID) a device is, as its signing key's vouch says; null if none. */
@@ -579,7 +592,7 @@ export class Identity {
       self: (await this.deviceKey()).publicKey.toString('hex'),
       members: new Set((await this.members()).map((m) => m.key)),
       removed: new Set(await this.removed()),
-      managers: await this.managers(),
+      ...(await this.managers()),
     };
   }
 
@@ -731,7 +744,7 @@ export class Identity {
               standing.removed.add(r.subject);
             }
             // Who is an admin may have changed: a record waiting for that is judged again.
-            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) standing.managers = await this.managers();
+            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) Object.assign(standing, await this.managers());
             taken.push(r);
             progress = true;
           } else if (verdict === 'wait') next.push(r);

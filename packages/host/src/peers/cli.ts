@@ -256,7 +256,8 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const { id } = await identityAt(values.dir!);
       const m = (await id.members()).find((x) => x.name === arg || x.key === arg);
       if (!m) throw new Error(`No paired device called ${arg}`);
-      if (!(await id.mayManage((await id.deviceKey()).publicKey.toString('hex')))) throw new Error('Only an admin of this workspace can remove devices');
+      // An admin, or whoever it is: one's own lost or retired computer (0068).
+      if (!(await id.mayRemove((await id.deviceKey()).publicKey.toString('hex'), m.key))) throw new Error('Only an admin of this workspace, or whoever it is, can remove a computer');
       await id.removeMember(m.key);
       // It knew the workspace's secret: a new one, so it can no longer find the others (0050).
       await id.newSecret();

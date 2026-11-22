@@ -592,6 +592,34 @@ describe('equal members, and forks', () => {
     await until(() => !existsSync(join(dirC, 'plan.md')), 20_000, 'the plan gone from Cy’s copy');
   });
 
+  it('let a person remove their own computer, admin or not; no one else’s (0068)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const bo = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const dirA = repo();
+    const a = await start(dirA, { person: ada });
+    // Bo, a member, on two computers.
+    const joinAs = async (name: string) => {
+      const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+      dirs.push(parent);
+      const dir = join(parent, 'notes');
+      signingKeys.set(dir, crypto.keyPair());
+      await joinWorkspace({ dir, invitation: await inviteFrom(a), name, bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: bo, signing: signingKeys.get(dir) });
+      return start(dir, { person: bo });
+    };
+    const laptop = await joinAs('laptop');
+    const desk = await joinAs('desk');
+    const deskKey = desk.host.peers!.node.myKey;
+    await until(async () => (await laptop.host.peers!.people()).people.find((p) => p.id === bo.id)?.devices.includes(deskKey) ?? false, 20_000, 'Bo’s desk known as his on his laptop');
+    // Not Ada's computer: not his to remove.
+    await expect(laptop.host.peers!.removeDevice(a.host.peers!.node.myKey)).rejects.toThrow('whoever it is');
+    // His desk, lost: removed from his laptop, and Ada's device takes it.
+    await laptop.host.peers!.removeDevice(deskKey);
+    await until(async () => (await a.host.peers!.node.identity.removed()).includes(deskKey), 20_000, 'Ada’s device took the removal');
+    await until(async () => (await desk.host.peers!.status()).removed, 20_000, 'the desk knows');
+  });
+
   it('take any member’s work, and name it by the person whose it is', async () => {
     const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
     dirs.push(people);

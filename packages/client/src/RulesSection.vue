@@ -127,19 +127,25 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
       <button type="submit" :disabled="busy || !newGroup.trim()" data-testid="new-group-add">{{ S.rules.addTo }}</button>
     </form>
 
-    <h3>{{ S.rules.verifiers }}</h3>
-    <p class="menu-facts">{{ S.rules.verifiersAbout }}</p>
-    <ul v-if="rules.verifiers?.length" class="menu-devices" data-testid="verifiers">
-      <li v-for="v in rules.verifiers" :key="v.key">
-        <span class="device-who">{{ v.url }}</span>
-        <button v-if="rules.admin" type="button" :disabled="busy" @click="act(() => api.removeVerifier(v.key))">{{ S.rules.remove }}</button>
-      </li>
-    </ul>
-    <p v-else class="menu-facts">{{ S.rules.noVerifiers }}</p>
-    <form v-if="rules.admin" class="person-row rule-new-group" @submit.prevent="addVerifier">
-      <input v-model="newVerifier" :placeholder="S.rules.verifierPlaceholder" spellcheck="false" data-testid="verifier-add-url">
-      <button type="submit" :disabled="busy || !newVerifier.trim()" data-testid="verifier-add">{{ S.rules.add }}</button>
-    </form>
+    <!-- Email checks (0066, step 6): shown once a verifier is named; naming the first is under Advanced, for admins. -->
+    <template v-if="rules.verifiers?.length">
+      <h3>{{ S.rules.verifiers }}</h3>
+      <p class="menu-facts">{{ S.rules.verifiersAbout }}</p>
+      <ul class="menu-devices" data-testid="verifiers">
+        <li v-for="v in rules.verifiers" :key="v.key">
+          <span class="device-who">{{ v.url }}</span>
+          <button v-if="rules.admin" type="button" :disabled="busy" @click="act(() => api.removeVerifier(v.key))">{{ S.rules.remove }}</button>
+        </li>
+      </ul>
+    </template>
+    <details v-if="rules.admin" class="person-advanced" data-testid="verifiers-advanced">
+      <summary>{{ S.rules.advanced }}</summary>
+      <p class="menu-facts">{{ S.rules.verifiersAbout }}</p>
+      <form class="person-row rule-new-group" @submit.prevent="addVerifier">
+        <input v-model="newVerifier" :placeholder="S.rules.verifierPlaceholder" spellcheck="false" data-testid="verifier-add-url">
+        <button type="submit" :disabled="busy || !newVerifier.trim()" data-testid="verifier-add">{{ S.rules.add }}</button>
+      </form>
+    </details>
     <ErrorBanner v-if="error" :error="error" inline />
   </section>
 </template>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// Settings › Workspace's Devices (decision 0064): who is in the workspace, by person and computer,
-// and who is online. Its people, as the workspace's policy says (0066), with
-// their role: admins invite people, remove a device (for good; it keeps its
-// copy), and make others admins or members or take them out. Anyone renames
-// this device. With no policy yet, everyone has the same say (0038).
+// Settings › Workspace's People and computers (decisions 0064, 0068): who is in the workspace,
+// each person with their computers, and who is online. Its people, as the
+// workspace's policy says (0066), with their role: admins invite people, make
+// others admins or members, and take them out (with their computers). A
+// computer lost or no longer used is removed, for good (it keeps its copy), by
+// its own person (whose identity, kept here, also revokes its key) or an admin.
+// Computers no identity says whose are listed apart. Anyone renames this one.
+// With no policy yet, everyone has the same say (0038).
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
@@ -48,10 +51,29 @@ async function act(fn: () => Promise<unknown>) {
   }
 }
 
+/** What was done last, to say (a computer removed, and whether its key was revoked). */
+const note = ref<string | null>(null);
+
 async function remove(d: Device) {
-  const ok = await askConfirm(S.devices.removeAsk(label(d)), S.common.remove, true);
-  if (ok) await act(() => props.api.removeDevice(d.key));
+  const own = whose(d)?.you ?? false;
+  const ok = await askConfirm(own ? S.devices.lostOwnAsk(d.name) : S.devices.removeAsk(label(d)), S.common.remove, true);
+  if (!ok) return;
+  note.value = null;
+  await act(async () => {
+    const r = await props.api.removeDevice(d.key);
+    note.value = own ? (r.revoked ? S.devices.lostRevoked(d.name) : S.devices.lostNotRevoked(d.name)) : null;
+  });
 }
+
+type Info = Extract<PeersInfo, { enabled: true }>;
+/** The person a computer is, as the workspace's people list them. */
+const whose = (d: Device) => (info.value?.enabled ? info.value.people?.people.find((p) => p.devices.includes(d.key)) : undefined);
+/** A person's computers, but this one (shown apart, as this computer). */
+const devicesOf = (i: Info, p: Someone) => i.devices.filter((d) => p.devices.includes(d.key));
+/** Computers no person here is known to be: listed apart (all of them, where there is no policy). */
+const others = (i: Info) => i.devices.filter((d) => !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
+/** Whether you may remove a computer: an admin, or it is yours (0068). */
+const mayRemove = (i: Info, d: Device) => i.canInvite && !i.removed && (admin.value || !!whose(d)?.you);
 
 /** Whether you may invite and remove here: an admin, or anyone where there is no policy yet. */
 const admin = computed(() => (info.value?.enabled ? info.value.people?.admin ?? true : true));
@@ -103,36 +125,64 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
     <p v-if="info.removed" class="menu-facts warn" role="status" data-testid="device-removed">{{ S.devices.removed }}</p>
     <p v-else-if="noContact(info)" class="menu-facts warn" data-testid="no-contact">{{ noContact(info) }}</p>
     <p v-if="!info.removed && info.network && S.devices.network[info.network.kind]" class="menu-facts warn" data-testid="this-network">{{ S.devices.network[info.network.kind] }}</p>
-    <ul v-if="info.devices.length" class="menu-devices">
-      <li v-for="d in info.devices" :key="d.key" :data-testid="`device:${d.name}`">
-        <span :class="['device-dot', { online: d.online, through: !d.online && d.through.length }]" aria-hidden="true" />
-        <span class="device-who">{{ label(d) }}</span>
-        <span v-if="d.related" class="device-tag" :title="S.devices.separateTitle">{{ S.devices.separate }}</span>
-        <span v-if="d.otherVersion" class="device-tag" :title="S.devices.otherVersionTitle">{{ S.devices.otherVersion }}</span>
-        <span v-if="d.kuraa" class="device-tag warn" :title="d.kuraa === 'newer' ? S.devices.newerTitle : S.devices.olderTitle" :data-testid="`kuraa:${d.name}`">{{ d.kuraa === 'newer' ? S.devices.newer : S.devices.older }}</span>
-        <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`state:${d.name}`">{{ viaText(d) }}</span>
-        <span v-else-if="d.through.length" class="device-state" :title="S.devices.throughTitle(via(info, d))" :data-testid="`through:${d.name}`">{{ S.devices.through(via(info, d)) }}</span>
-        <span v-else class="device-state" :data-testid="`state:${d.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
-        <button v-if="info.canInvite && !info.removed && admin" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
-      </li>
-    </ul>
-    <template v-if="info.people?.founded && info.people.people.length">
-      <h3>{{ S.people.title }}</h3>
-      <ul class="menu-devices" data-testid="people">
-        <li v-for="p in info.people.people" :key="p.id" :data-testid="`person:${nameOf(p)}`">
+
+    <!-- Each person, with their computers (0068). -->
+    <ul v-if="info.people?.founded" class="menu-people" data-testid="people">
+      <li v-for="p in info.people.people" :key="p.id" class="person-block" :data-testid="`person:${nameOf(p)}`">
+        <div class="person-line">
           <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template><span v-if="p.emails?.length" class="muted"> · {{ p.emails.join(', ') }}</span></span>
           <span class="device-tag" :title="p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'admin' ? S.people.admin : S.people.member }}</span>
           <template v-if="admin && info.canInvite && !info.removed && !p.you">
             <button type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
-            <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.common.removeEllipsis }}</button>
+            <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.people.removeEllipsis }}</button>
           </template>
-        </li>
-        <li v-for="i in info.people.invited ?? []" :key="i.email" :data-testid="`invited:${i.email}`">
+        </div>
+        <ul class="menu-devices person-devices">
+          <li v-if="p.you" data-testid="device-self">
+            <span class="device-dot online" aria-hidden="true" />
+            <span class="device-who">{{ info.device.name }}</span>
+            <span class="device-state">{{ S.devices.thisComputer }}</span>
+          </li>
+          <li v-for="d in devicesOf(info, p)" :key="d.key" :data-testid="`device:${d.name}`">
+            <span :class="['device-dot', { online: d.online, through: !d.online && d.through.length }]" aria-hidden="true" />
+            <span class="device-who">{{ d.name }}</span>
+            <span v-if="d.related" class="device-tag" :title="S.devices.separateTitle">{{ S.devices.separate }}</span>
+            <span v-if="d.otherVersion" class="device-tag" :title="S.devices.otherVersionTitle">{{ S.devices.otherVersion }}</span>
+            <span v-if="d.kuraa" class="device-tag warn" :title="d.kuraa === 'newer' ? S.devices.newerTitle : S.devices.olderTitle" :data-testid="`kuraa:${d.name}`">{{ d.kuraa === 'newer' ? S.devices.newer : S.devices.older }}</span>
+            <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`state:${d.name}`">{{ viaText(d) }}</span>
+            <span v-else-if="d.through.length" class="device-state" :title="S.devices.throughTitle(via(info, d))" :data-testid="`through:${d.name}`">{{ S.devices.through(via(info, d)) }}</span>
+            <span v-else class="device-state" :data-testid="`state:${d.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
+            <button v-if="mayRemove(info, d)" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.devices.lost }}</button>
+          </li>
+        </ul>
+      </li>
+      <li v-for="i in info.people.invited ?? []" :key="i.email" class="person-block" :data-testid="`invited:${i.email}`">
+        <div class="person-line">
           <span class="device-who muted">{{ S.people.invited(i.email) }}</span>
           <span class="device-tag">{{ i.role === 'admin' ? S.people.admin : S.people.member }}</span>
+        </div>
+      </li>
+    </ul>
+
+    <!-- Computers no identity here says whose (all of them, with no policy yet). -->
+    <template v-if="others(info).length">
+      <h4 v-if="info.people?.founded" class="menu-subhead">{{ S.devices.others }}</h4>
+      <ul class="menu-devices">
+        <li v-for="d in others(info)" :key="d.key" :data-testid="`device:${d.name}`">
+          <span :class="['device-dot', { online: d.online, through: !d.online && d.through.length }]" aria-hidden="true" />
+          <span class="device-who">{{ label(d) }}</span>
+          <span v-if="d.related" class="device-tag" :title="S.devices.separateTitle">{{ S.devices.separate }}</span>
+          <span v-if="d.otherVersion" class="device-tag" :title="S.devices.otherVersionTitle">{{ S.devices.otherVersion }}</span>
+          <span v-if="d.kuraa" class="device-tag warn" :title="d.kuraa === 'newer' ? S.devices.newerTitle : S.devices.olderTitle" :data-testid="`kuraa:${d.name}`">{{ d.kuraa === 'newer' ? S.devices.newer : S.devices.older }}</span>
+          <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`state:${d.name}`">{{ viaText(d) }}</span>
+          <span v-else-if="d.through.length" class="device-state" :title="S.devices.throughTitle(via(info, d))" :data-testid="`through:${d.name}`">{{ S.devices.through(via(info, d)) }}</span>
+          <span v-else class="device-state" :data-testid="`state:${d.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
+          <button v-if="mayRemove(info, d)" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.devices.lost }}</button>
         </li>
       </ul>
     </template>
+
+    <p v-if="note" class="menu-facts" role="status" data-testid="device-note">{{ note }}</p>
     <p v-for="(d, i) in info.people?.disputes ?? []" :key="i" class="menu-facts warn" :data-testid="`dispute:${i}`">{{ S.people.dispute(d) }}</p>
     <p v-if="!admin && !info.removed" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
     <!-- A removed device's invitations and removals are refused by the others: none offered. -->

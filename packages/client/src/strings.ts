@@ -381,7 +381,7 @@ export const S = {
   },
 
   devices: {
-    title: 'Devices',
+    title: 'People and computers',
     alone: 'This workspace is on this computer only. Invite people to work on it with you, from their own computers.',
     invite: 'Invite people…',
     youAreOn: (name: string) => `You are on ${name}.`,
@@ -419,7 +419,13 @@ export const S = {
     noContact: (since: string) => `No other device has connected since ${since}. They may all be offline, or this device may have been removed from the workspace while it was offline (it is not told then): someone on another device can tell you.`,
     renameAsk: 'What should this computer be called here?',
     rename: 'Rename this computer…',
-    notAdmin: 'Only the workspace’s admins invite people and remove devices.',
+    notAdmin: 'Only the workspace’s admins invite people. Your own computers you remove yourself.',
+    thisComputer: 'this computer',
+    others: 'Other computers',
+    lost: 'Lost or no longer used…',
+    lostOwnAsk: (name: string) => `Is ${name} lost, or no longer used? It stops syncing with everyone here, for good, and cannot join again with an old link; whatever it signs from now on stops counting as yours. What it has stays on it.`,
+    lostRevoked: (name: string) => `${name} is removed, and its key revoked: what it signs from now on is no one’s, here and in your other workspaces as they next sync.`,
+    lostNotRevoked: (name: string) => `${name} is removed. Its key is not revoked: your identity is not on this computer. Revoke it from a computer that has it (Settings › You › Advanced).`,
   },
 
   access: {
@@ -445,7 +451,7 @@ export const S = {
   },
 
   more: {
-    title: 'Email, and getting your identity back',
+    title: 'Getting your identity back',
     email: 'Your email',
     noEmail: 'No address checked yet. A workspace counts an address checked by a server it names, so people can find and invite you by it.',
     checkedBy: (by: string) => `checked by ${by}`,
@@ -542,7 +548,7 @@ export const S = {
     takeOut: 'Take out',
     verifiers: 'Email checked by',
     verifiersAbout: 'Servers whose checks of people’s email addresses count here: so people are known by their address, and can be invited by it.',
-    noVerifiers: 'None: addresses are not checked here.',
+    advanced: 'Advanced: check people’s email addresses',
     verifierPlaceholder: 'https://… (a kuraa server that checks addresses)',
   },
 
@@ -554,6 +560,7 @@ export const S = {
     unknown: 'Someone not yet known here',
     makeAdmin: 'Make admin',
     makeMember: 'Make member',
+    removeEllipsis: 'Take out…',
     adminTitle: 'Admins invite people, remove devices, and decide who is an admin.',
     invited: (email: string) => `${email} (invited, not in yet)`,
     dispute: (names: string[]) => `${list(names)} took each other out of the workspace at the same time. That would have left it with no admin, so neither stands: talk it over, and take someone out again if need be.`,

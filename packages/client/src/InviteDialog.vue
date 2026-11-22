@@ -25,6 +25,8 @@ const EXPIRY = [
 const expiry = ref(1);
 const asAdmin = ref(false);
 const forEmail = ref('');
+/** Whether this workspace counts any server's email checks: only then is a place kept for an address (0066, step 6). */
+const checksEmail = ref(false);
 const made = shallowRef<{ code: string; once: boolean; expires: number } | null>(null);
 const links = shallowRef<InviteLinkInfo[]>([]);
 const busy = ref(false);
@@ -38,7 +40,10 @@ async function loadLinks() {
     error.value = e;
   }
 }
-onMounted(loadLinks);
+onMounted(() => {
+  void loadLinks();
+  void props.api.rules().then((r) => (checksEmail.value = !!r.verifiers?.length), () => undefined);
+});
 
 async function create() {
   busy.value = true;
@@ -105,11 +110,11 @@ const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.s
           <span>{{ S.invite.asAdmin }}</span>
         </label>
         <p v-if="asAdmin" class="naming-hint">{{ S.invite.adminAbout }}</p>
-        <label class="field">
+        <label v-if="checksEmail" class="field">
           <span>{{ S.invite.forEmail }}</span>
           <input v-model="forEmail" type="email" placeholder="name@example.org" data-testid="invite-email">
         </label>
-        <p v-if="forEmail.trim()" class="naming-hint">{{ S.invite.forEmailAbout }}</p>
+        <p v-if="checksEmail && forEmail.trim()" class="naming-hint">{{ S.invite.forEmailAbout }}</p>
         <p class="naming-hint">
           <template v-if="forWhom === 'one'">{{ S.invite.oneAbout }}</template>
           <template v-else>{{ S.invite.anyoneAbout }}</template>

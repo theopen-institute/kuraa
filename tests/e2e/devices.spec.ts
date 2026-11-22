@@ -87,7 +87,7 @@ test('people on two devices edit one document; a member made an admin renames th
     await bo.getByTestId('settings-tab-workspace').click();
     await expect(bo.getByTestId('not-admin')).toContainText('Only the workspace’s admins');
     await expect(bo.getByTestId('invite-button')).toHaveCount(0);
-    await expect(bo.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
+    await expect(bo.getByTestId('devices').getByRole('button', { name: 'Lost or no longer used…' })).toHaveCount(0);
 
     // Ada makes him an admin.
     await ada.getByTestId('make-admin:Bo').click();
@@ -103,7 +103,7 @@ test('people on two devices edit one document; a member made an admin renames th
     await expect(bo.getByTestId('this-device')).toContainText('You are on bo-s-laptop');
     const adas = bo.getByTestId('devices').locator('li[data-testid^="device:"]');
     await expect(adas).toHaveCount(1);
-    await adas.getByRole('button', { name: 'Remove…' }).click();
+    await adas.getByRole('button', { name: 'Lost or no longer used…' }).click();
     await expect(bo.getByTestId('ask')).toContainText('permanent');
     await expect(bo.getByTestId('ask')).toContainText('keeps their copy');
     await bo.getByTestId('ask').getByRole('button', { name: 'Remove' }).click();
@@ -115,7 +115,7 @@ test('people on two devices edit one document; a member made an admin renames th
     await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('device-removed')).toContainText('removed from the workspace', { timeout: 10_000 });
     await expect(ada.getByTestId('invite-button')).toHaveCount(0);
-    await expect(ada.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
+    await expect(ada.getByTestId('devices').getByRole('button', { name: 'Lost or no longer used…' })).toHaveCount(0);
     await ada.keyboard.press('Escape');
     expect(readFileSync(join(dirA, 'notes.md'), 'utf8')).toContain('Ada was here. So was Bo.');
   } finally {

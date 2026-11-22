@@ -183,10 +183,12 @@ export interface Standing {
   removed: Set<string>;
   /** Devices whose person is an admin of the workspace (policy.ts); null: no policy yet, every member's word counts (0038). */
   managers: Set<string> | null;
+  /** The person each device is (as its signing key's vouch says), where known: a person removes their own computers (0068). */
+  persons?: Map<string, string>;
 }
 
-/** Records only an admin's device may make (0066): removing a device, and the workspace's new secret that goes with it. */
-export const forAdmins = (k: RecordKind) => k === 'remove' || k === 'secret';
+/** Records only an admin's device may make (0066), or, for a device, one of the same person's (0068): removing a device. */
+export const forAdmins = (k: RecordKind) => k === 'remove';
 
 /**
  * Whether to take a record now: 'take' (any member's), 'wait' (its signer is
@@ -198,8 +200,11 @@ export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' 
   if (r.by === s.self) return 'take';
   if (s.removed.has(r.by)) return 'refuse';
   if (!s.members.has(r.by)) return 'wait';
-  // Not (yet) an admin's: it may be once the policy that makes its person one is taken.
-  if (forAdmins(r.kind) && s.managers && !s.managers.has(r.by)) return 'wait';
+  // Not (yet) an admin's, nor the same person's as the device it removes: it may be, once the policy or vouch that says so is taken.
+  if (forAdmins(r.kind) && s.managers && !s.managers.has(r.by)) {
+    const whose = s.persons?.get(r.by);
+    if (!whose || whose !== s.persons?.get(r.subject)) return 'wait';
+  }
   return 'take';
 }
 

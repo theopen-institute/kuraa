@@ -555,16 +555,43 @@ export class Peers {
    * (any member may). It keeps its copy. The workspace's secret is made anew, so
    * the device, which knew the old one, can no longer find the others (0050).
    */
-  async removeDevice(key: string): Promise<void> {
+  async removeDevice(key: string): Promise<{ revoked: boolean }> {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
-    if (!(await this.node.identity.mayManage(this.node.myKey))) throw new NotAllowed('Only an admin of this workspace can remove devices');
+    // An admin, or the same person: one's own lost or retired computer (0068).
+    if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace, or whoever it is, can remove a computer');
+    // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.
+    const revoked = await this.revokeOwn(key);
     await this.node.identity.removeMember(key);
     await this.node.newSecret();
     // Told first, with the others (it stops syncing once it takes the record); then let go of, in any case.
     const link = this.node.links.get(key);
     await this.node.membersChanged();
     if (link) setTimeout(() => link.close(), 1000).unref();
+    return { revoked };
+  }
+
+  /**
+   * Revoke the signing key of one of this person's own other computers (a lost
+   * or retired one), where this computer keeps their identity (person.ts), and
+   * say so in this workspace at once (with its cutoff); the person's other
+   * workspaces say so as they next sync. Whether it was revoked.
+   */
+  private async revokeOwn(device: string): Promise<boolean> {
+    const id = this.node.identity;
+    const me = (await this.node.person())?.id;
+    const key = await id.signingKeyOf(device);
+    if (!me || !key || (await id.personIdOf(device)) !== me || this.opts.person !== undefined) return false;
+    const { readPerson, revokeKey } = await import('./person.js');
+    const p = await readPerson();
+    if (!p || p.id !== me) return false;
+    try {
+      await revokeKey(key);
+    } catch {
+      return false;
+    }
+    await this.node.signingKey();
+    return true;
   }
 
   /** What this device is called, to people and to the devices that pair with it from now on. */

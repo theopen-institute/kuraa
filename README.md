@@ -348,10 +348,13 @@ runs one and prints its key, to name in Settings (Other computers › Advanced) 
 internet. All the workspaces on a computer share one connection to the DHT, which remembers the
 nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
 
-In the app, Workspace settings' **Devices** section lists the devices, by person and computer,
-online or offline, and the **People**, admins and members; admins have **Remove…** (for good; they
-keep their copy), **Make admin**/**Make member** and **Invite people…**, which makes and lists
-invite links, to revoke; anyone has **Rename this computer…**. From the command line, `pnpm host
+In the app, Workspace settings' **People and computers** lists each person, admin or member, with
+their computers, online or offline ([0068](docs/decisions/0068-people-and-their-computers.md)).
+**Lost or no longer used…** on a computer removes it, for good (it keeps its copy): your own,
+whether or not you are an admin (its key revoked too, where your identity is on this computer), or
+anyone's, for admins. Admins also have **Make admin**/**Make member**, **Take out…** (a person and
+their computers) and **Invite people…**, which makes and lists invite links, to revoke; anyone has
+**Rename this computer…**. From the command line, `pnpm host
 devices` and `people` list them; `remove-device`, `role <person> admin|member`, `remove-person`,
 `name` and `fork` manage them. Paired devices
 are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.

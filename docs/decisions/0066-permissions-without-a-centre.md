@@ -1,0 +1,332 @@
+# 0066 · Who may read and change what, without a centre
+
+**Status: proposed, not implemented.** This is the redesign [0038](0038-equal-peers.md) left for later.
+When built, it replaces 0038's model (every member has total control), extends
+[0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
+(identities), and brings back, in shared form, parts of [0032](0032-accepting-work.md) and
+[0033](0033-document-rules-and-people.md) (rules by path, documents opening read-only).
+
+The owner's direction:
+
+> "The base model here is git. Everybody can do whatever they want to their own copies of files.
+> 'Permissions' aren't about attempting to block that but instead come down to how each user handles
+> merges from each other… The app should provide cues that a document isn't editable, but actual
+> enforcement is handled by the individuals deciding to merge or not to merge."
+
+> "In addition to write permissions, I would like it to be possible to set read permissions as well,
+> similar to how something like Notion does it with both user and group-level permissions."
+
+And, after a first sketch: read boundaries must be possible for a single file; groups have admins
+and members, only admins change membership and every admin has full control; recovering a lost
+owner's key matters.
+
+## The idea: the agreement is shared data
+
+0032 and 0033 made permissions each device's own rules. Devices with different rules kept different
+versions of a file, the workspace parted silently, and nobody could say what "the" document was.
+
+Here the agreement is a **policy**, signed by those allowed to change it, synced like everything
+else, and applied by every device in exactly the same way, as merges already are ([0025](0025-merging.md)).
+Any device may still ignore it: that is forking, in the open, as git always allows. What the policy
+decides is what everyone *else* takes.
+
+Write and read are different in kind:
+
+- **Write** rests on agreement. Everyone may have the bytes; the policy decides whose changes are
+  merged.
+- **Read** cannot rest on agreement: what was sent cannot be unsent. It rests on what is sent at all,
+  by keeping each audience's files in a repository of their own ("spaces", below).
+
+## Identities: a stable ID, keys that change
+
+Everything below names people, so this comes first. Today rules would name an identity's key; a lost
+key means a new identity, and every rule naming the old one rewritten (0033 says so).
+
+- **An identity is an ID**: the hash of its first record (its *inception*), with a signed history of
+  its keys after it. Policies, groups and audiences name the ID; changing keys changes no rule.
+  Identity records travel as records do now, passed on in every workspace the person is in.
+- **The identity's key** vouches for each computer's signing key, as in 0035. Lost computers are
+  still handled by revoking that computer's signing key.
+- **Recovery key, committed in advance (pre-rotation).** The inception names the *hash* of a second
+  key, kept offline (printed, a password manager). To change the identity's key, the person reveals
+  that key and names the hash of the next. Someone who has stolen the current key cannot do this.
+  ([KERI](https://keri.one) is the reference design.)
+- **Trustees.** An identity may name trustees ("any 2 of these 3 people") whose signatures together
+  can change its keys when both are lost.
+- **Server escrow, optional.** A server may hold the recovery key encrypted with a passphrase,
+  released after the person proves an email or other attestation (below). Opt-in, and a person may
+  require more than email (a passphrase, or one trustee as well).
+- **A key change has a cutoff.** Whatever the old key signs that is not already known when the change
+  is made (see *Cutoffs*) is no one's, on every device. This covers a stolen key, not only a lost one.
+
+### Attestations: email and other proofs
+
+Signed statements about an identity: "X controls `bo@uni.edu`", "X is GitHub user `bo`", "X has
+ORCID …", "X controls `lab.org`". A **verifier** (a server, after a code or magic link; OpenID
+Connect for ORCID or a university's sign-in; DNS or `.well-known` for a domain) signs
+`{identity, claim, verifier, date}`.
+
+- **No global authority.** Each workspace's policy names the verifiers it believes.
+- **Uses:** names people are known by in the interface (0035 left names as free text);
+  finding someone to share with; inviting by email before the person has an identity (an audience
+  or group may hold `email:bob@uni.edu`, waiting for a matching attestation from a trusted verifier);
+  recovery through escrow.
+- **Attestations expire and can be withdrawn** (people leave institutions). Losing an email never
+  loses the identity, which was never the email.
+- **Privacy:** an attestation shows the email to everyone it reaches. Publish only its hash for
+  matching invites, or show attestations only to people who share a space with the person.
+
+### People who only use a browser
+
+A browser user on a shared server who signs in by email may have an identity **the server holds
+for them**, so they can work at once. Because keys change, they can **take custody later**: change
+the server's key for one on their own device, after which the server cannot act for them. A
+**passkey** can keep a browser's signing key encrypted (the WebAuthn PRF extension gives a key to
+encrypt it with); passkeys cannot sign git commits themselves.
+
+## The workspace's root and policy
+
+- **Genesis.** Whoever makes a workspace signs its first policy record. The workspace's ID is that
+  record's hash; invite links carry it, and a device takes a policy only if it descends from that
+  genesis. (Radicle's repository identity works the same way.)
+- **The policy is a signed history on its own ref**, `refs/kuraa/access`, as outputs have
+  `refs/kuraa/outputs/*` ([0058](0058-shared-outputs.md)): each change a commit, signed by someone
+  the policy before it allowed to make it. History, signatures, audit and sync come with git.
+- **Content commits say which policy they were made under**, in a trailer
+  (`Kuraa-Policy: <hash>`), so whether a commit counts depends on the commit and the policy history
+  alone, not on the order a device happened to receive things.
+
+### Groups: admins and members
+
+Every group has **admins** and **members**. Only admins change a group's membership, and every admin
+of a group has full control of it. The workspace is itself a group: its admins change the policy
+(rules, verifiers, spaces, and any group). Groups may contain identities, other groups, and
+`email:` entries waiting for an attestation.
+
+```yaml
+workspace: { admins: [ada], members: [group:editors, group:readers] }
+groups:
+  editors: { admins: [ada], members: [bo, chen] }
+  readers: { admins: [ada, bo], members: [dee, email:eve@uni.edu] }
+verifiers: [<this workspace's server>]
+write:                                   # most specific path wins
+  - path: ""          by: [group:workspace.admins]
+  - path: chapters/   by: [group:editors]
+```
+
+An invite link adds its holder to a named group, as a member unless it says admin. A link no longer
+gives full power (0038's first weakness).
+
+The two common shapes:
+
+| | Admins | Write |
+| --- | --- | --- |
+| **Equal group** | everyone | everyone, everywhere |
+| **Owned workspace** | the owner (and a second admin, for safety) | the owner everywhere; groups or people on chosen paths |
+
+### Concurrent changes, resolved the same everywhere
+
+No admin outranks another, so conflicts are resolved by rules every device applies alike:
+
+- **Removal wins.** An add and a remove of the same person at once: removed.
+- **Nothing a removed admin does after their cutoff counts.**
+- **Mutual removal removes both**, unless that would leave the group with no admin; then neither
+  stands, and the group's members are told of the conflict. (A stolen admin key is not settled
+  here but by its owner changing the key, whose cutoff voids what the thief did.)
+- **The last admin cannot leave** without naming another.
+- Otherwise changes made at once all apply.
+
+### Cutoffs
+
+A removal (or a key change) names the heads the person making it had seen: of the policy, and of
+each space they can read. Whatever the removed person (or old key) signs that is not reachable from
+those heads does not count, on every device. Without this, the removed person could backdate work by
+building on old commits and naming an old policy. 0035 counted a revocation "from when each device
+takes it", which differs by device; a cutoff is the same everywhere.
+
+For spaces the remover cannot read, the first member of each to see the removal signs a cutoff for
+it; several at once count as the union of their heads. *(To settle when built.)*
+
+The cost: the removed person's edits in flight are dropped. Anyone who may write there can take
+them up as a suggestion.
+
+## Write: rules by path, enforced in the merge
+
+- Rules name paths (a whole space, a folder, a file) and the identities or groups who may write
+  there; the most specific counts. Rules about a private space's files are kept in that space, so
+  even their paths stay private.
+- **Merging applies them, identically on every device.** Work touching a path its signer may not
+  write: its history comes in, the merge keeps the earlier version of that path (0033's "kept this
+  version", now the same everywhere, so nothing parts), and the refused change becomes a
+  **suggestion**.
+- **Suggestions** are shown to those who may write there, with **Accept**, which commits it again
+  under their own signature (a pull request, made of what the app already has). Anyone who can read
+  a file may suggest; a suggestion is kept in the file's own space, so only its readers see it.
+- **Rooms follow the rules.** A room takes live edits only from connections whose person may write
+  the document; otherwise rooms would be a way round the policy. The editor opens such a document
+  read-only, with a line saying who may edit it and a **Suggest** mode. A browser user on a shared
+  server counts as whoever signed in.
+- **Merges stay no one's** (0035): any device makes a merge again to check it; a "merge" that differs
+  is its signer's own commit, and judged as theirs.
+- You can write only what you can read: a space that never reaches you cannot be edited by you.
+
+## Read: spaces, one per audience
+
+A **space** is a git repository of its own whose files are readable by one **audience**: a rule
+naming identities and groups (`group:team + dee`), not a fixed list. A device syncs, stores and
+joins rooms of only the spaces its person is in the audience of. Adding someone to `team` gives them
+every space whose audience includes `team`; no file moves.
+
+### Siblings laid over one another, not submodules
+
+A submodule is a pointer in its parent's history, so everyone who reads the parent knows the child
+exists, where, and when it changed; and its boundary is a whole folder. Spaces are **siblings**: none
+refers to another, and each holds its files at their full workspace paths. The app lays the spaces a
+person can read over one another into one tree (a union mount where no file is in two layers):
+
+```
+space A (everyone)        space B (editors)        space C (Ada)
+  README.md                 chapters/03-draft.md     chapters/notes.md
+  chapters/01-intro.md      data/survey.csv          ideas.md
+```
+
+Ada sees all seven files; Bo, an editor, five; Chen three, with no gap, placeholder or history entry
+where the others are. Repositories grow with the number of distinct audiences, not files: a team area
+and a few private drafts is a handful of spaces, whatever the number of files.
+
+### On disk, one ordinary folder
+
+Several git directories share one working folder, each tracking only its own files (as
+[vcsh](https://github.com/RichiH/vcsh) does for `$HOME`):
+
+```
+my-workspace/                      plain files, as now
+  .git/                            space A, the one everyone reads
+  .git/kuraa/spaces/<B>/           space B's git directory
+  .git/kuraa/spaces/<C>/           space C's
+```
+
+The host knows which space owns each file and runs git against that one. Space A's local exclude
+file (never committed or synced) lists the others' files, so plain `git status` stays clean. Finder,
+RStudio and other editors see files; plain git sees the public layer; the private layers are reached
+through Kuraa, or by pointing git at their directories.
+
+### What a person sees
+
+One folder, every file of every space they can read at its own path. The app shows **who can read**
+each file (a badge: "Editors", "Only you"), not spaces; the share dialog changes it, and that is what
+moves a file between spaces. New files go where the folder's default audience says; a file may
+override it, as Notion pages do. A folder's default is a small record kept where everyone who sees
+the folder can read it, and not in the public layer if the default is itself sensitive.
+
+### Each space is a whole workspace
+
+Its own history, merges, write rules, online copy ([0039](0039-online-copy.md); or none: a git
+server counts as a reader of what is pushed to it), and sync topic ([0050](0050-networking-review.md)),
+so devices outside its audience never find it. The workspace's policy lists spaces only as entries
+encrypted to their audience (or not at all, each space's invitation going directly), so outsiders do
+not learn that a private audience exists; a space's name is kept inside it.
+
+### Consequences
+
+- **Commits split by space.** One editing session across a public and a private file is a commit in
+  each. Automatic commit messages, which name documents and headings ([0026](0026-commit-messages-and-history.md)),
+  stay within the audience.
+- **Histories differ by person.** A person's workspace history is their spaces' commits, interleaved
+  by time.
+- **Changing a file's audience** moves it: narrowing leaves its history with the old audience, who
+  have seen it; widening asks whether to share its history or only its version from now on. A move
+  is "add to the new space, then delete from the old", not atomic; the tree hides the moment it is in
+  both.
+- **The same path in two spaces** (two people, unaware of each other, making `ideas.md`): both
+  stay; someone who reads both sees both, the narrower labelled. No one renames a file in a space
+  they cannot write.
+- **Branches span spaces by name**: switching to `draft` switches each space that has one; one
+  without stays on `main`.
+- **Search, rooms and sync are per space** and come out right with no more.
+- **What belongs to a document goes with it**: pasted images and bibliographies go into its space.
+- **Code may read only what is at least as widely readable.** A code session mounts only files
+  whose audience includes everyone in the document's audience; its outputs are kept in the
+  document's space. Data flows from public into private, never back, so a public document's output
+  cannot carry private data.
+
+### Why not encrypt files inside one repository
+
+Considered and declined: commits span files and their messages name documents and headings, so one
+shared history leaks even with contents encrypted; devices that cannot read a file cannot merge it,
+breaking the same merge everywhere; and losing a key would lose data, where with spaces it loses only
+authority. Encryption may come later on top of spaces, for servers to hold a copy of a space they are
+not in.
+
+## Servers
+
+None of this needs one. A server can be given, in the policy, granted and revocable roles: an
+always-on member that holds and passes on the policy, suggestions and its spaces while people are
+away; a verifier for attestations; an escrow for recovery keys; a holder of identities for browser
+users; and a **sequencer for policy changes**, putting them in one order so conflicts do not arise,
+every device still checking each change. No role makes a server an authority.
+
+## Limits, accepted
+
+- What has been read cannot be unread, and a reader can always copy.
+- Anyone can still edit their own copy and fork; the policy decides what others take.
+- With every admin equal, one admin's key, stolen, is full control until its owner changes it.
+- Every device must apply the policy identically, so its rules are part of the protocol version
+  ([0051](0051-the-app-updates-itself.md)).
+- Plain git outside the app sees only the public layer.
+
+## Elsewhere
+
+A web check (November 2026) found each part done elsewhere, and nothing doing the whole: stores by
+audience laid over one another into one tree differing by reader, with no central server.
+
+- **Store per audience:** Keybase's filesystem names a private folder by its readers and writers
+  (`/keybase/private/alice,bob`, `alice#bob` for a read-only Bob), membership fixed by the name and
+  each folder backed by an implicit team; shown as separate folders, not laid over one another
+  ([KBFS](https://book.keybase.io/docs/files/details)).
+- **Repository as read boundary, without a centre:** Radicle's private repositories replicate only
+  to delegates and allowed peers; its identity document names delegates and a threshold, and a
+  canonical branch is what a threshold of delegates agree on
+  ([canonical references](https://radicle.xyz/2025/08/12/canonical-references)).
+- **Several repositories, one folder:** [vcsh](https://github.com/RichiH/vcsh), using "fake bare"
+  repositories whose work tree is `$HOME`. Git itself treats this as unsupported, so the host must
+  keep each space's files to itself.
+- **Groups and access control for local-first data:** Ink & Switch's
+  [Keyhive](https://www.inkandswitch.com/project/keyhive/) (convergent capabilities; groups as a CRDT
+  that handles concurrent changes and revocation; a group per document, groups within groups; meant
+  for Automerge and git); [p2panda-auth](https://docs.rs/p2panda-auth) (decentralised groups with
+  per-member permissions). p2panda uses *spaces* for encryption contexts within groups, a different
+  thing by the same name.
+- **Research:** [GUARDTs](https://arxiv.org/abs/2611.08083) (decentralised access control for
+  replicated data types, with policies that change and replicas that may lie) and
+  [formal verification of local-first access control](https://arxiv.org/abs/2604.23560) (delegation
+  and revocation; Keyhive and p2panda as subjects). Both work on data types, not files; worth reading
+  before the cutoff and conflict rules are fixed.
+- **Per-path read rules with a centre:** Perforce's protections, Google's Piper. **Encrypted files
+  in one repository:** git-crypt; Peergos.
+
+The new parts carry the risk: the same path in two spaces, moves that are not atomic, histories that
+differ by person, and how usable plain git is with only the public layer.
+
+## Order of work
+
+1. Identities with stable IDs, pre-rotation and key changes with cutoffs.
+2. Genesis, the policy history, groups with admins and members (everyone an admin: today's
+   behaviour, written down); invite links that add to a group.
+3. Write rules by path, the same merge filtering everywhere, suggestions, read-only rooms.
+4. Conflict rules and cutoffs.
+5. Spaces: audiences, laying them over one another, saving and committing by space, moving between
+   audiences, the rule for what code reads. This changes saving and committing; settle it before 3
+   is built far.
+6. Attestations and invites by email (could follow 2), trustees, escrow, server-held identities,
+   passkeys, server roles.
+
+## Open
+
+- Cutoffs for spaces the remover cannot read (above).
+- How audiences are named and shown, and whether "Only you" files are a space per person.
+- Whether people working outside the app accept seeing only the public layer, or Kuraa should offer
+  a command that shows all a person's spaces to plain git.
+- Where attestations are visible, and whether hashes suffice for invites by email.
+- Several people on one server, each with their own keys there (0035 left it open), as the home
+  of server-held identities.

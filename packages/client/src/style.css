@@ -695,6 +695,9 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 
 /* Preferences (PreferencesDialog.vue). */
 .modal.preferences { width: min(600px, 94vw); max-height: 90vh; overflow: auto; }
+/* The Settings window's two parts (decision 0060): you, then this computer's server. */
+.settings-part { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); }
+.settings-part > h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .pref-group { border: 0; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; min-width: 0; }
 .pref-group legend { font-weight: 600; padding: 0; margin-bottom: 4px; float: left; width: 100%; }
 .pref-check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; }

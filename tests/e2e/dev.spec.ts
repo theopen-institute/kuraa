@@ -90,14 +90,17 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     expect(existsSync(join(root, 'field-notes', '.git'))).toBe(true);
 
     // You on this computer, in the browser too: pnpm dev runs the host on your own computer, and lets the app
-    // manage it. Your identity is made for you from your name; the keys are under Advanced.
+    // manage it. Your identity is made for you from your name; the keys are under Advanced, in Settings.
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-settings').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer:');
     await expect.poll(() => existsSync(person), { timeout: 10_000 }).toBe(true);
     await expect(key.getByTestId('signing-key')).toBeHidden();
     await key.getByText('Advanced').click();
     await expect(key.getByTestId('signing-key')).toHaveText(/^[0-9a-f]{8}…$/);
+    await page.getByTestId('settings-close').click();
+    await page.getByTestId('menu-button').click();
 
     // An online copy, added in Components (it is a component, decision 0059): a plain git repository each save is pushed to.
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));

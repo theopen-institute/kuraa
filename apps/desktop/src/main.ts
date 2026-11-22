@@ -286,9 +286,9 @@ async function restartToUpdate(): Promise<void> {
 function buildMenu(): void {
   const isMac = process.platform === 'darwin';
   const updatesItem = { label: D.menu.checkUpdates, click: () => void checkForUpdates().catch((e: Error) => dialog.showErrorBox(D.updates.title, e.message)) };
-  // Not "Settings", which in the client are the person's own (name, email, colour). ⌘, is the
-  // page's own (its menu, which holds your settings), so Preferences takes ⌥⌘, (decision 0044);
-  // the in-app menu also opens it (Preferences…). Both open the client's dialog.
+  // Settings: the client's one window, with your own settings and this computer's server's
+  // (decision 0060). ⌘, is the page's own (its menu), so Settings takes ⌥⌘, (decision 0044);
+  // the in-app menu also opens it (Settings…). Both open the client's window.
   const preferencesItem = { label: D.menu.preferences, accelerator: 'CmdOrCtrl+Alt+,', click: () => void showPreferences().catch((e: Error) => dialog.showErrorBox(D.errors.workspaces, e.message)) };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(isMac ? [{

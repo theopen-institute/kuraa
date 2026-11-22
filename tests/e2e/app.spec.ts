@@ -40,22 +40,36 @@ test('the first run welcomes you and asks your name; the menu changes it', async
   await openFile(page, path);
   await expect(page.getByTestId('peers')).toHaveText('First Run (you)');
 
-  // A new name, from the menu, reaches the others at once (and is kept).
+  // A new name, from Settings (opened from the menu), reaches the others at once (and is kept).
   await page.getByTestId('menu-button').click();
-  // The server and its access code are behind Server and access code…, not beside the name.
-  await expect(page.getByTestId('menu').getByLabel('Server address')).toHaveCount(0);
-  await page.getByTestId('menu-access').click();
-  await expect(page.getByTestId('menu-connection').getByLabel('Server address')).toHaveValue(E2E.url);
-  await expect(page.getByTestId('menu-connection').getByLabel('Access code')).toHaveValue(E2E.token);
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('menu').getByLabel('Your name')).toHaveValue('First Run');
-  await page.getByTestId('menu').getByLabel('Your name').fill('Renamed');
-  await page.getByTestId('menu').getByRole('button', { name: 'Save settings' }).click();
+  // The menu has no form of its own: your settings and the server's are in one window.
+  await expect(page.getByTestId('menu').getByLabel('Your name')).toHaveCount(0);
+  await expect(page.getByTestId('menu-you')).toHaveText('First Run');
+  await page.getByTestId('menu-settings').click();
   await expect(page.getByTestId('menu')).toHaveCount(0);
+  const settings = page.getByTestId('settings-window');
+  // The server and its access code are there too, with a button of their own.
+  await expect(settings.getByTestId('settings-connection').getByLabel('Server address')).toHaveValue(E2E.url);
+  await expect(settings.getByTestId('settings-connection').getByLabel('Access code')).toHaveValue(E2E.token);
+  await expect(settings.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('First Run');
+  // Saved as it is changed: there is no save button, and the window stays open.
+  await expect(settings.getByRole('button', { name: 'Save settings' })).toHaveCount(0);
+  await settings.getByLabel('Your name').fill('Renamed');
+  await settings.getByLabel('Your name').press('Enter');
   await expect(page.getByTestId('peers')).toHaveText('Renamed (you)');
+  await expect(settings).toBeVisible();
+  // A name emptied goes back to the one saved.
+  await settings.getByLabel('Your name').fill('');
+  await settings.getByLabel('Your name').press('Tab');
+  await expect(settings.getByLabel('Your name')).toHaveValue('Renamed');
+  // Still being typed when the window closes: kept.
+  await settings.getByLabel('Your name').fill('Renamed Again');
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
+  await expect(page.getByTestId('peers')).toHaveText('Renamed Again (you)');
   await page.reload();
   await openFile(page, path);
-  await expect(page.getByTestId('peers')).toHaveText('Renamed (you)');
+  await expect(page.getByTestId('peers')).toHaveText('Renamed Again (you)');
 });
 
 test('a named version is committed; a past version reads as rendered or source', async ({ page }) => {

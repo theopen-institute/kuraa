@@ -95,12 +95,13 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.reload();
     await openNotes(page);
 
-    // The app manages this host: Settings has no host or token, and offers the shell's actions.
+    // The app manages this host: the menu offers the shell's actions, and Settings has no host or token.
     await page.getByTestId('menu-button').click();
-    await expect(page.getByLabel('Your name')).toHaveValue('Desk Top');
-    await expect(page.getByLabel('Server address')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Join a shared server…' })).toBeVisible();
-    await expect(page.getByTestId('menu-preferences')).toBeVisible();
+    await page.getByTestId('menu-settings').click();
+    await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Desk Top');
+    await expect(page.getByLabel('Server address')).toHaveCount(0);
+    await expect(page.getByTestId('preferences')).toBeVisible();
     await page.keyboard.press('Escape');
     // Open a folder… is with the workspaces, as in a browser.
     await page.getByTestId('workspace-switcher').click();
@@ -235,9 +236,9 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
     await openNotes(page);
     await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
 
-    // Joined, not managed: Server and access code… shows them.
+    // Joined, not managed: Settings shows them.
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-access').click();
+    await page.getByTestId('menu-settings').click();
     await expect(page.getByLabel('Server address')).toHaveValue(host.url);
   } finally {
     await app.close();
@@ -334,11 +335,11 @@ test('updates: says when one is ready, with Restart now; run from the repository
   }
 });
 
-/** Open Preferences from the app's menu (⌥⌘,): the client's dialog, in the window, as in a browser (decision 0047). */
+/** Open Settings from the app's menu (⌥⌘,): the client's window, in the window, as in a browser (decision 0047). */
 async function openPreferences(app: ElectronApplication, page: Page): Promise<Locator> {
   const item = await app.evaluate(({ Menu }) => {
     const items = Menu.getApplicationMenu()!.items.flatMap((i) => i.submenu?.items ?? []);
-    const preferences = items.find((i) => i.label === 'Preferences…')!;
+    const preferences = items.find((i) => i.label === 'Settings…')!;
     preferences.click();
     return { accelerator: preferences.accelerator };
   });
@@ -451,8 +452,9 @@ test('you on this computer: made from your name, said in each workspace that syn
       }
     };
     await expect.poll(said, { timeout: 15_000 }).toBe(true);
-    // The menu says so in plain words; the keys are under Advanced.
+    // Settings says so in plain words; the keys are under Advanced.
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-settings').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
     await key.getByText('Advanced').click();
@@ -470,6 +472,7 @@ test('you on this computer: made from your name, said in each workspace that syn
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     await expect.poll(() => existsSync(elsewhere), { timeout: 15_000 }).toBe(true);
     await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-settings').click();
     const key = page.getByTestId('person-key');
     await key.getByText('Advanced').click();
     await key.getByTestId('person-line').fill(line);

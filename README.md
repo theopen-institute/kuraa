@@ -35,10 +35,10 @@ pnpm host --dir ~/research/notes --static apps/web/dist   # one folder, and noth
 ```
 
 With neither `--dir` nor `--workspaces`, `pnpm host` serves **your workspaces**, just as the desktop
-app does: new ones go in the folder Preferences names (`Documents/kuraa` at first), its list and its
+app does: new ones go in the folder Settings names (`Documents/kuraa` at first), its list and its
 settings are kept with the app's data (`settings.json` and `host-workspaces.json`, or beside the file
 `--settings` names), so choosing another folder for new workspaces keeps the list. `--workspaces
-<folder>` names that folder instead (its list kept in it), and wins over Preferences. `--dir` serves
+<folder>` names that folder instead (its list kept in it), and wins over Settings. `--dir` serves
 exactly one folder, a git working tree (`--init` makes it one), and nothing can be added from the
 app. Either way it is the same kind of server, a hub
 ([decision 0030](docs/decisions/0030-one-kind-of-server.md)).
@@ -48,41 +48,41 @@ in, and for `--dir` a `git clone` command.
 
 **Whoever has the access code of a host listening only on this computer is its owner**, as the
 person using the desktop app is ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)):
-in a browser too they have **Preferences…**, **Open a folder…** (any folder on the computer, chosen
+in a browser too they have **Settings…**, **Open a folder…** (any folder on the computer, chosen
 in the page), their identity and the online copy. That is the default (`--host 127.0.0.1`). With
 `--host` naming a network address, those are off, and the app says why; invites and devices stay,
 as every member has the same say ([0038](docs/decisions/0038-equal-peers.md)). A server for many
 people will need a design of its own.
 
-Every setting below is in **Preferences**, in a browser and in the desktop app alike, so nobody
+Every setting below is in **Settings** (This computer’s server), in a browser and in the desktop app alike, so nobody
 needs a flag; a flag given at start wins over its setting for as long as the host runs, and
-Preferences says so. The last column says where. What stays on the command line, and why, is in
+Settings says so. The last column says where. What stays on the command line, and why, is in
 [decision 0047](docs/decisions/0047-browser-equals-desktop.md).
 
 | Option | Default | Notes | In the app |
 | --- | --- | --- | --- |
 | `--port` | `4321` | — | Command line only: how the server is reached |
-| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect (Preferences, opening folders and your identity are then off) | Command line only (as `--port`) |
+| `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect (Settings, opening folders and your identity are then off) | Command line only (as `--port`) |
 | `--token` | random | Or set `KURAA_TOKEN` | Command line only (as `--port`) |
 | `--static` | none | The built web client to serve | Command line only (as `--port`) |
 | `--dir` | off | Serve this one folder, and nothing else | Command line only; **Open a folder…** adds one to your workspaces |
-| `--settings` | `settings.json` in your app data folder | Where Preferences are kept | Command line only |
-| `--workspaces` | Preferences, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Preferences: New workspaces |
-| `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Preferences: Other computers › Advanced |
-| `--relay` | none | Relays to connect through when computers cannot connect directly, by key (`pnpm host relay` runs one) | Preferences: Other computers › Advanced |
+| `--settings` | `settings.json` in your app data folder | Where Settings are kept | Command line only |
+| `--workspaces` | Settings, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Settings: New workspaces |
+| `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Settings: Other computers › Advanced |
+| `--relay` | none | Relays to connect through when computers cannot connect directly, by key (`pnpm host relay` runs one) | Settings: Other computers › Advanced |
 | `--peer-port`, `--public-address` | none | A server's: take devices' connections over TCP on this port, and where they reach it (`host` or `host:port`), for networks that block UDP; told to members and put in invite links | Command line only |
 | `--dht-port`, `--no-serve-dht` | any, serving | A server's: its DHT node on a fixed port, for members to start from; never serving the public DHT | Command line only |
-| `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Preferences: Saving › Advanced (in seconds) |
-| `--engine` | `r` | Which engines run code: `--engine r`, or `--engine none`. See below | Preferences: Run R code |
-| `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Preferences: Where code runs (shown when there is a choice) |
-| `--memory` | `4g` | The most memory a code session's container may use | Preferences: Running code › Advanced |
-| `--cpus` | `2` | How many CPUs a code session's container may use (fractions allowed: `0.5`) | Preferences: Running code › Advanced |
-| `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Preferences: Running code › Advanced |
-| `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Preferences: Running code › Advanced |
-| `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Preferences: Kinds of documents |
-| `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Preferences: Running code › Advanced |
-| `--allow-installs` | on | Let people install packages and download tools such as TeX (`--no-allow-installs` to refuse) | Preferences: Running code |
-| `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Preferences: Running code › Advanced |
+| `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Settings: Saving › Advanced (in seconds) |
+| `--engine` | `r` | Which engines run code: `--engine r`, or `--engine none`. See below | Settings: Run R code |
+| `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Settings: Where code runs (shown when there is a choice) |
+| `--memory` | `4g` | The most memory a code session's container may use | Settings: Running code › Advanced |
+| `--cpus` | `2` | How many CPUs a code session's container may use (fractions allowed: `0.5`) | Settings: Running code › Advanced |
+| `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Settings: Running code › Advanced |
+| `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Settings: Running code › Advanced |
+| `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Settings: Kinds of documents |
+| `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Settings: Running code › Advanced |
+| `--allow-installs` | on | Let people install packages and download tools such as TeX (`--no-allow-installs` to refuse) | Settings: Running code |
+| `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Settings: Running code › Advanced |
 | `--podman` | found on the `PATH` or where the installers put it | The Podman program to run containers with; or set `KURAA_PODMAN` | Command line only: it names a program run with your rights |
 | `--component` | none | Load a run component (engine, environment or tool) by path or package name | Command line only: code run with your rights |
 | `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) | Command line only: code run with your rights |
@@ -94,11 +94,14 @@ Everyone who has the URL and token can edit. The first time, the app welcomes ea
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
 section changes them. In the app the URL and token are the **server address** and **access code**.
 
-## Preferences
+## Settings
 
-**Preferences…** in the menu's **You** section, or ⌥⌘, (Ctrl+Alt+,; ⌘, is the menu's own), opens
-the same dialog in a browser and in the desktop app (where it is also in the app menu on a Mac, and
-in File elsewhere), wherever the host listens only on this computer. In view: the kinds of
+**Settings…** in the menu's **You** section, or ⌥⌘, (Ctrl+Alt+,; ⌘, is the menu's own), opens
+one window in a browser and in the desktop app (where it is also in the app menu on a Mac, and
+in File elsewhere), in two parts ([0060](docs/decisions/0060-one-settings-window.md)). **You**:
+your name, email and cursor colour, kept in this browser and saved as each is changed; your key
+on this computer; and, where the app does not run the server itself, the server address and access
+code. **This computer’s server**, wherever the host listens only on this computer: in view, the kinds of
 documents that are on, running R code (and whether Podman is ready for it),
 whether documents may install packages and download tools, and where new workspaces go. Under
 **Advanced**: the servers used to find other computers on a private network, the limits on each
@@ -106,7 +109,7 @@ document's code (memory, CPUs, disk), what a workspace may ask for (writing to i
 network), base images R may use, where packages and tools are kept, and how soon edits are written
 and versions saved. A value that is wrong is refused, saying what. Saving reopens every workspace
 with them, committing pending edits first, at the same address and access code, and the page reloads.
-A flag given at start wins over its setting, and the dialog says so. The desktop app keeps them in
+A flag given at start wins over its setting, and the window says so. The desktop app keeps them in
 `preferences.json` with its data, `pnpm host` in `settings.json`, `pnpm dev` in
 `.dev-workspaces/settings.json` ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)).
 
@@ -291,7 +294,7 @@ it cannot read, or through a relay: the workspace's other computers on ordinary 
 **Devices** says how each device is connected (on this network, by its address, through another
 device), when an offline one was last seen, and when this computer's network is the problem
 ([0053](docs/decisions/0053-reaching-each-other.md)). A workspace on only two computers needs one run elsewhere: `pnpm host relay`
-runs one and prints its key, to name in Preferences (Other computers › Advanced) or with
+runs one and prints its key, to name in Settings (Other computers › Advanced) or with
 `--relay`. Computers on the same local network find each other there too, with or without the
 internet. All the workspaces on a computer share one connection to the DHT, which remembers the
 nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
@@ -349,7 +352,7 @@ code runs only where the environment keeps it from your files and network. No en
 that runs code on the computer itself ships. One can be written, but a host uses an environment
 that is not sandboxed only when started with `--allow-unsandboxed`.
 
-What runs and which formats are on are the host's Preferences (or its flags); loading a component,
+What runs and which formats are on are the host's Settings (or its flags); loading a component,
 turning off the sandbox and naming the Podman program are flags only (`--component`,
 `--allow-unsandboxed`, `--podman`), as they choose code that runs with your rights. The desktop app
 takes `--engine` (`--engine none` for none), `--env`, `--format`, `--component`,
@@ -369,7 +372,7 @@ file whose format is off opens as a Text file
 }
 ```
 
-Write access and the network are granted only where Preferences (or `--allow-write`,
+Write access and the network are granted only where Settings (or `--allow-write`,
 `--allow-network`) allow them.
 
 **Packages.** The environment starts with the tidyverse. Install more with `install.packages()` in
@@ -377,7 +380,7 @@ a chunk, or **Packages…** in the menu (CRAN names, `name@version`, `bioc::name
 `owner/repo` from GitHub). Installs run apart from your data, with the network; your code keeps
 running without it. Each workspace records its packages in `.kuraa/r-packages.json` (committed),
 so collaborators and other machines get the same ones; each package version is stored once per
-computer. Installs are allowed unless Preferences (or `--no-allow-installs`) turn them off
+computer. Installs are allowed unless Settings (or `--no-allow-installs`) turn them off
 ([decision 0014](docs/decisions/0014-packages.md)). A run component is a module exporting `defineRunComponent({ name, engines,
 environments, tools })` from `@kuraa/run-kit`: examples of [an engine](packages/host/test/fixtures/echo-engine.mjs),
 [environments](packages/host/test/fixtures/environments.mjs) and [a tool](packages/host/test/fixtures/tools.mjs),
@@ -402,7 +405,7 @@ pnpm dev --dir ~/research/notes   # one folder, as `pnpm host --dir` serves it
 ```
 
 Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
-Preferences and **Open a folder…** in the page; its settings are kept in
+Settings and **Open a folder…** in the page; its settings are kept in
 `.dev-workspaces/settings.json` (beside `--workspaces`, if given). The first time, it starts with a
 Scratch workspace.
 
@@ -435,7 +438,7 @@ changes appear in the editor. Quitting writes and commits any pending edits.
 
 Joining a shared host or hub runs none of the app's own; the launcher leads back to your workspaces.
 
-**Preferences…** is the client's dialog, as in a browser ([above](#preferences)). What stays the
+**Settings…** is the client's dialog, as in a browser ([above](#settings)). What stays the
 desktop app's own: its native menus, the spelling suggestions in its right-click menu, the git it
 ships, the launcher and joining another server, native save dialogs (a browser downloads instead), and
 leaving out the server address and access code, which it manages itself.
@@ -458,7 +461,7 @@ left out, and files are always written as git stores them (no `core.autocrlf`); 
 script names the release). `pnpm desktop` uses this git as well once it has been fetched
 (`pnpm --filter @kuraa/desktop fetch-git`), and the computer's otherwise.
 
-Running R still needs Podman installed; everything else works without it, and Preferences says
+Running R still needs Podman installed; everything else works without it, and Settings says
 whether it is ready.
 
 **macOS.** Build on a Mac. electron-builder signs with the *Developer ID Application* certificate in
@@ -598,7 +601,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | — | `packages/host/test/outputs.test.ts`, `peers.test.ts` (run outputs between devices): outputs published on a signed ref of each device's own, taken by the others (passed on only if signed by the device they came from, the newest kept), shown with where they ran, and cleared everywhere from any device |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
-| — | `packages/host/test/settings.test.ts`, `tests/e2e/preferences.spec.ts`: one settings model in the hub (read leniently, saved strictly, flags winning), applied by reopening every workspace at the same address; the owner's features only on loopback; Preferences and Open a folder… in the browser, through the folder picker |
+| — | `packages/host/test/settings.test.ts`, `tests/e2e/preferences.spec.ts`: one settings model in the hub (read leniently, saved strictly, flags winning), applied by reopening every workspace at the same address; the owner's features only on loopback; Settings and Open a folder… in the browser, through the folder picker |
 
 ## Layout
 

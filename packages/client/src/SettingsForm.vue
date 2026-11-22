@@ -2,7 +2,12 @@
 // Your settings: name, email, cursor colour, and the server and its access code
 // (unless the shell runs it). `part` shows some of them: the menu keeps the
 // server and access code in a panel of their own, apart from the rest.
-import { reactive } from 'vue';
+// With `autosave` (the menu's name, email and colour), each field is saved as
+// it is changed (on leaving it, or Enter; the colour as it is picked), and what
+// is still being typed when the form goes away (the menu closed), with no
+// button. A name left empty goes back to the saved one; an email that is not
+// one is not saved.
+import { onBeforeUnmount, reactive, useTemplateRef } from 'vue';
 import type { Settings } from './settings.js';
 import type { Shell } from './shell.js';
 import { S } from './strings.js';
@@ -16,18 +21,55 @@ const props = withDefaults(defineProps<{
   autoFocus?: boolean;
   /** What the save button says, if not the usual. */
   submitLabel?: string;
+  /** Save each field as it is changed, with no save button. */
+  autosave?: boolean;
 }>(), { part: 'all' });
 const emit = defineEmits<{ save: [settings: Settings]; cancel: [] }>();
 
 const s = reactive({ ...props.initial });
 
+const cleaned = (): Settings => ({ ...s, name: s.name.trim(), email: s.email.trim(), hostUrl: s.hostUrl.trim().replace(/\/$/, ''), token: s.token.trim() });
+
 function submit() {
-  emit('save', { ...s, name: s.name.trim(), email: s.email.trim(), hostUrl: s.hostUrl.trim().replace(/\/$/, ''), token: s.token.trim() });
+  emit('save', cleaned());
 }
+
+const emailInput = useTemplateRef<HTMLInputElement>('emailInput');
+
+/** Your name, email and colour as they would be saved (autosave): each field that is not valid as it was saved; null if nothing differs. */
+function edited(): Settings | null {
+  const was = props.initial;
+  const next = { ...was, name: s.name.trim() || was.name, email: emailInput.value?.validity.valid === false ? was.email : s.email.trim(), color: s.color };
+  return next.name === was.name && next.email === was.email && next.color === was.color ? null : next;
+}
+
+/** A field changed, or Enter in one (autosave): saved, or, if it is not valid, said why. */
+function saveField(event: Event) {
+  if (!props.autosave) return;
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  if (input.name === 'name' && !s.name.trim()) {
+    s.name = props.initial.name;
+    return;
+  }
+  if (!input.checkValidity()) {
+    input.reportValidity();
+    return;
+  }
+  const next = edited();
+  if (next) emit('save', next);
+}
+
+// The menu closed (Escape, a click outside) with a field still being typed in: it changes no more, so it is kept.
+onBeforeUnmount(() => {
+  if (!props.autosave) return;
+  const next = edited();
+  if (next) emit('save', next);
+});
 </script>
 
 <template>
-  <form class="settings-form" @submit.prevent="submit">
+  <form class="settings-form" @submit.prevent="autosave ? undefined : submit()" @change="saveField" @keydown.enter="autosave && saveField($event)">
     <template v-if="part !== 'connection'">
       <label class="field">
         <span>{{ S.settings.name }}</span>
@@ -35,7 +77,7 @@ function submit() {
       </label>
       <label class="field">
         <span>{{ S.settings.email }}</span>
-        <input v-model="s.email" name="email" type="email" autocomplete="email">
+        <input ref="emailInput" v-model="s.email" name="email" type="email" autocomplete="email">
       </label>
       <label class="field">
         <span>{{ S.settings.colour }}</span>
@@ -55,7 +97,7 @@ function submit() {
     <div v-if="part !== 'connection' && shell.leave" class="modal-shell">
       <button type="button" @click="shell.leave()">{{ S.settings.join }}</button>
     </div>
-    <div class="modal-actions">
+    <div v-if="!autosave" class="modal-actions">
       <button v-if="cancellable" type="button" @click="emit('cancel')">{{ S.common.cancel }}</button>
       <button type="submit" class="primary">{{ submitLabel ?? (part === 'connection' ? S.settings.saveConnection : S.settings.save) }}</button>
     </div>

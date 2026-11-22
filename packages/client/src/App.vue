@@ -29,7 +29,7 @@ import PastVersion from './PastVersion.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
 import FolderPicker from './FolderPicker.vue';
-import PreferencesDialog from './PreferencesDialog.vue';
+import SettingsWindow from './SettingsWindow.vue';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
 import RenderPanel from './RenderPanel.vue';
@@ -88,7 +88,7 @@ const syncing = ref(false);
 const historyOpen = ref(false);
 const showSource = ref(false);
 const menuOpen = ref(false);
-/** The menu's part to open at: the menu itself, Document settings, or its Server panel (to change the access code). */
+/** The menu's part to open at: the menu itself, or Document settings. */
 const menuPanel = ref<MenuPanel>('menu');
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
@@ -213,18 +213,14 @@ async function switchWorkspace(id: string) {
   chosen.value = id;
 }
 
-/** Preferences (the server's owner's settings, decision 0047). */
-const preferencesOpen = ref(false);
-function openPreferences() {
-  if (canChangeSettings.value) {
-    menuOpen.value = false;
-    preferencesOpen.value = true;
-  } else {
-    notice.value = { kind: 'warn', text: ownerOff.value ?? S.preferences.notHere };
-  }
+/** The Settings window (decision 0060): yours, and, for its owner, this computer's server's (0047). */
+const settingsOpen = ref(false);
+function openSettings() {
+  menuOpen.value = false;
+  settingsOpen.value = true;
 }
-/** Saved: the server has reopened every workspace with them; the page starts again with them too. */
-function preferencesSaved() {
+/** The server's settings saved: it has reopened every workspace with them; the page starts again with them too. */
+function serverSettingsSaved() {
   location.reload();
 }
 
@@ -328,7 +324,7 @@ const onKey = (e: KeyboardEvent) => {
     // Keys for the page wait while a dialog is open.
   } else if (k(APP_KEYS.preferences)) {
     e.preventDefault();
-    openPreferences();
+    openSettings();
   } else if (k(APP_KEYS.search)) {
     e.preventDefault();
     openSearch();
@@ -342,9 +338,9 @@ onMounted(() => {
   props.shell.onHelp?.(() => {
     if (!helpOpen.value) toggleHelp();
   });
-  // The desktop app's own menu: Preferences (⌥⌘,) and Open Folder (⌘O) are the page's, as in a browser.
+  // The desktop app's own menu: Settings (⌥⌘,) and Open Folder (⌘O) are the page's, as in a browser.
   props.shell.onPreferences?.(() => {
-    if (!preferencesOpen.value) openPreferences();
+    if (!settingsOpen.value) openSettings();
   });
   props.shell.onOpenFolder?.(() => void openFolder());
   // The desktop app downloaded an update (decision 0051): it installs when the app quits, or now.
@@ -525,7 +521,7 @@ function useSettings(s: Settings) {
   <div class="app">
     <div v-if="rejected" class="banner warn" role="alert" data-testid="rejected-banner">
       <template v-if="shell.managesHost">{{ S.offline.rejectedManaged }} <button type="button" data-testid="reconnect" @click="reconnect">{{ S.offline.reconnect }}</button></template>
-      <template v-else>{{ S.offline.rejected }} <button type="button" data-testid="change-code" @click="openMenu('access')">{{ S.offline.changeCode }}</button></template>
+      <template v-else>{{ S.offline.rejected }} <button type="button" data-testid="change-code" @click="openSettings">{{ S.offline.changeCode }}</button></template>
     </div>
     <div v-else-if="offline" class="banner warn" role="status" data-testid="offline-banner">
       <strong>{{ S.offline.title }}</strong> {{ S.offline.kept }} <span data-testid="offline-unsent">{{ S.offline.unsent(status?.unsynced ?? 0) }}</span>
@@ -704,8 +700,6 @@ function useSettings(s: Settings) {
       :shell="shell"
       :api="api"
       :conflicts="file?.conflicts ?? 0"
-      :can-change-settings="canChangeSettings"
-      :owner-off="ownerOff"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
@@ -714,14 +708,13 @@ function useSettings(s: Settings) {
       @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
       @sync="sync"
-      @save-settings="useSettings"
       @packages="(runner, engine) => (packages = { runner, engine })"
       @components="componentsOpen = true"
       @invite="invite"
       @preview="preview"
       @search="openSearch"
       @help="toggleHelp"
-      @preferences="openPreferences"
+      @settings="openSettings"
       @close="menuOpen = false"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
@@ -736,7 +729,18 @@ function useSettings(s: Settings) {
       @editors-off="setEditorsOff"
       @close="componentsOpen = false"
     />
-    <PreferencesDialog v-if="preferencesOpen" :hub="hubApi" :shell="shell" @saved="preferencesSaved" @close="preferencesOpen = false" />
+    <SettingsWindow
+      v-if="settingsOpen"
+      :hub="hubApi"
+      :api="api"
+      :shell="shell"
+      :settings="settings"
+      :can-change-settings="canChangeSettings"
+      :owner-off="ownerOff"
+      @save-settings="useSettings"
+      @saved="serverSettingsSaved"
+      @close="settingsOpen = false"
+    />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />
 

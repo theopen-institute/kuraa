@@ -1,22 +1,21 @@
 <script setup lang="ts">
 // The menu: everything that is not the document. Opened from the bottom of the
 // sidebar (or ⌘,). Sections: the workspace (sync, connection, who is here), its
-// devices, components (with the online copy, 0059), and you (your settings, you on this
-// computer, and the shell's own actions). The open document's own settings are
-// a panel of their own, Document settings (also opened by right-clicking a file
-// in the sidebar): its views, versions and saving, its header, and its code
-// session. So is the server and its access code, where the shell does not run
-// the host, opened from You. It is a modal dialog: focus moves into it, and
-// Escape closes it (or goes back from a panel opened from the menu).
-import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
+// devices, components (with the online copy, 0059), and you: who you are here,
+// and Settings…, the window with your settings and this computer's server's
+// (decision 0060). The open document's own settings are a panel of their own,
+// Document settings (also opened by right-clicking a file in the sidebar): its
+// views, versions and saving, its header, and its code session. It is a modal
+// dialog: focus moves into it, and Escape closes it (or goes back from a panel
+// opened from the menu).
+import { computed, onMounted, ref, useTemplateRef } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import type { HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
 import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
-import type { PersonShell, Shell } from './shell.js';
-import { personShellFor } from './hostPerson.js';
+import type { Shell } from './shell.js';
 import type { EditorStatus } from './types.js';
 import { time } from './labels.js';
 import { APP_KEYS, keyLabel } from './keys.js';
@@ -25,14 +24,12 @@ import { useDialog } from './vue.js';
 import CodeSection from './CodeSection.vue';
 import DevicesSection from './DevicesSection.vue';
 import HeaderForm from './HeaderForm.vue';
-import SettingsForm from './SettingsForm.vue';
-import PersonKey from './PersonKey.vue';
 
-/** The menu's parts: the menu itself, Document settings, and the Server panel. */
-export type MenuPanel = 'menu' | 'document' | 'access';
+/** The menu's parts: the menu itself, and Document settings. */
+export type MenuPanel = 'menu' | 'document';
 
 const props = defineProps<{
-  /** Where it opens: the menu, its Document settings, or its Server panel (to change the access code). */
+  /** Where it opens: the menu, or its Document settings. */
   panel?: MenuPanel;
   path: string | null;
   /** What the open file is called: its title, or its filename. */
@@ -52,17 +49,12 @@ const props = defineProps<{
   api: HostApi;
   /** How many conflicts the open document keeps. */
   conflicts?: number;
-  /** Preferences may be changed here (the server's owner, decision 0047). */
-  canChangeSettings?: boolean;
-  /** Why Preferences and your identity are not available here, if they are not. */
-  ownerOff?: string | null;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
   toggleHistory: [];
   saveVersion: [];
   sync: [];
-  saveSettings: [settings: Settings];
   packages: [runner: ChunkRunner, engine: string];
   components: [];
   /** Invite people to the workspace. */
@@ -78,13 +70,13 @@ const emit = defineEmits<{
   search: [];
   /** The Markdown and shortcuts sheet. */
   help: [];
-  /** The server's Preferences. */
-  preferences: [];
+  /** The Settings window: yours, and this computer's server's. */
+  settings: [];
   close: [];
 }>();
 
-/** The menu itself, its Document settings, or its Server panel. */
-const panel = ref<MenuPanel>(props.panel === 'access' ? (props.shell.managesHost ? 'menu' : 'access') : props.panel === 'document' && props.path ? 'document' : 'menu');
+/** The menu itself, or its Document settings. */
+const panel = ref<MenuPanel>(props.panel === 'document' && props.path ? 'document' : 'menu');
 const root = useTemplateRef<HTMLElement>('root');
 const headerForm = useTemplateRef<InstanceType<typeof HeaderForm>>('headerForm');
 useDialog(root, () => {
@@ -110,31 +102,14 @@ onMounted(async () => {
 
 const doc = computed(() => !!props.path && !!props.type && !props.viewing);
 
-// You on this computer: through the host, where it listens only on this computer (0047).
-const personShell = shallowRef<PersonShell | null>(null);
-onMounted(async () => {
-  personShell.value = await personShellFor(props.api);
-});
 const runner = computed(() => props.status?.runner ?? null);
 
 </script>
 
 <template>
   <div class="modal-backdrop" @mousedown.self="emit('close')">
-    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :class="{ 'menu-document': panel === 'document' && header }" :aria-label="panel === 'access' ? S.menu.server : panel === 'document' ? S.menu.documentSettingsTitle : S.menu.label" data-testid="menu">
-      <template v-if="panel === 'access'">
-        <div class="menu-panel-head">
-          <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">{{ S.menu.backToMenu }}</button>
-          <h2>{{ S.menu.server }}</h2>
-        </div>
-        <section v-if="!shell.managesHost" class="menu-section" data-testid="menu-connection">
-          <h3>{{ S.menu.server }}</h3>
-          <p class="menu-facts">{{ S.menu.serverAbout }}</p>
-          <SettingsForm :initial="settings" :shell="shell" part="connection" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
-        </section>
-        <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
-      </template>
-      <template v-else-if="panel === 'document'">
+    <div ref="root" class="modal menu" role="dialog" aria-modal="true" :class="{ 'menu-document': panel === 'document' && header }" :aria-label="panel === 'document' ? S.menu.documentSettingsTitle : S.menu.label" data-testid="menu">
+      <template v-if="panel === 'document'">
         <div class="menu-panel-head">
           <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">{{ S.menu.backToMenu }}</button>
           <h2>{{ S.menu.documentSettingsTitle }}</h2>
@@ -236,13 +211,11 @@ const runner = computed(() => props.status?.runner ?? null);
 
         <section class="menu-section">
           <h3>{{ S.menu.you }}</h3>
-          <SettingsForm :initial="settings" :shell="shell" part="profile" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
-          <PersonKey v-if="personShell" :person="personShell" :display-name="settings.name" />
-          <div v-if="!shell.managesHost || canChangeSettings" class="menu-actions">
-            <button v-if="!shell.managesHost" type="button" data-testid="menu-access" @click="panel = 'access'">{{ S.menu.access }}</button>
-            <button v-if="canChangeSettings" type="button" :title="S.menu.preferencesTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-preferences" @click="emit('close'); emit('preferences')">{{ S.menu.preferences }}</button>
+          <p v-if="settings.name" class="menu-facts" data-testid="menu-you">{{ settings.email ? `${settings.name} · ${settings.email}` : settings.name }}</p>
+          <div class="menu-actions">
+            <button type="button" :title="S.menu.settingsTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-settings" @click="emit('close'); emit('settings')">{{ S.menu.settings }}</button>
+            <button v-if="shell.leave" type="button" @click="shell.leave()">{{ S.settings.join }}</button>
           </div>
-          <p v-if="ownerOff" class="menu-facts" data-testid="menu-owner-off">{{ ownerOff }}</p>
         </section>
 
         <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>

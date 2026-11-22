@@ -5,7 +5,7 @@
 
 export const D = {
   menu: {
-    preferences: 'Preferences…',
+    preferences: 'Settings…',
     yourWorkspaces: 'Your Workspaces',
     openFolder: 'Open Folder…',
     join: 'Join Shared Server…',

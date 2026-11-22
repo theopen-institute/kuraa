@@ -29,13 +29,15 @@ async function yourWorkspaces(): Promise<{ hub: RunningHub; app: string }> {
   return { hub, app };
 }
 
-test('Preferences in the browser: a wrong value refused, a kind of document turned off, applied once saved', async ({ page }) => {
+test('Settings in the browser: a wrong value refused, a kind of document turned off, applied once saved', async ({ page }) => {
   const { hub, app } = await yourWorkspaces();
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Owner`);
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
     await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-preferences').click();
+    await page.getByTestId('menu-settings').click();
+    // One window: you, then this computer's server (decision 0060).
+    await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Owner');
     const prefs = page.getByTestId('preferences');
     await expect(prefs.getByTestId('pref-workspaces')).toHaveValue(/workspaces$/);
     await expect(prefs.getByTestId('pref-format-rmarkdown')).toBeChecked();

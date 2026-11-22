@@ -177,11 +177,8 @@ export const S = {
     help: 'Markdown and shortcuts',
     helpTitle: (key: string) => `Everything you can type, and the keys (${key})`,
     you: 'You',
-    access: 'Server and access code…',
-    server: 'Server',
-    serverAbout: 'The server this app works with, and the access code it lets you in with.',
-    preferences: 'Preferences…',
-    preferencesTitle: (key: string) => `Syncing with other computers, running code, and where new workspaces go (${key})`,
+    settings: 'Settings…',
+    settingsTitle: (key: string) => `Your name and colour, and this computer’s server: syncing, running code, where new workspaces go (${key})`,
     backToMenu: '‹ Menu',
   },
 
@@ -215,7 +212,7 @@ export const S = {
     search: 'Search every file',
     preview: 'Preview: render the document',
     menu: 'The menu',
-    preferences: 'Preferences, on the computer running the server',
+    preferences: 'Settings: yours, and this computer’s server',
     help: 'This list',
     undo: 'Undo',
     redo: 'Redo',
@@ -453,7 +450,7 @@ export const S = {
 
   components: {
     title: 'Components',
-    setBy: 'What runs code, and which formats are on, are set in Preferences on the computer running this server, or with flags when it starts.',
+    setBy: 'What runs code, and which formats are on, are set in Settings on the computer running this server, or with flags when it starts.',
     flags: 'Set with --engine, --env, --format and --component.',
     running: 'Running code',
     where: 'Where code runs',
@@ -466,7 +463,7 @@ export const S = {
     editing: 'Editing · just you',
     tools: 'Downloaded when needed',
     toolsAbout: 'Kept once on this computer, for every workspace, and used only where code runs.',
-    toolsOff: 'Downloading tools is turned off in this server’s Preferences (Let documents install packages and download tools).',
+    toolsOff: 'Downloading tools is turned off in this server’s settings (Let documents install packages and download tools).',
     toolSize: (mb: string) => `About ${mb} to download.`,
     toolReady: (mb: string) => `Downloaded: ${mb} on this computer.`,
     toolParts: (n: number, label: string) => (n ? ` ${n.toLocaleString()} ${label} added since.` : ''),
@@ -647,8 +644,14 @@ export const S = {
     go: 'Go',
   },
 
+  /** The Settings window (decision 0060): you, then this computer's server. */
   preferences: {
-    title: 'Preferences',
+    title: 'Settings',
+    you: 'You',
+    connection: 'Server',
+    connectionAbout: 'The server this app works with, and the access code it lets you in with.',
+    server: 'This computer’s server',
+    saveServer: 'Save server settings',
     network: 'Other computers',
     syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through the online copy where it has one.',
     advanced: 'Advanced',
@@ -689,7 +692,6 @@ export const S = {
     fromFlag: (flag: string) => `Set by ${flag} on the command line.`,
     whereNew: 'Where new workspaces go',
     whereData: 'Where packages and tools are kept',
-    notHere: 'This server has no Preferences to change: it was set up with flags when it started.',
   },
 
   workspaceSwitcher: {
@@ -704,7 +706,7 @@ export const S = {
 
   errors: {
     unreachable: 'Cannot reach the server. Check your connection; nothing you typed is lost.',
-    accessCode: 'The server did not accept your access code. Check it under Server and access code in the menu.',
+    accessCode: 'The server did not accept your access code. Check it in Settings.',
     gitBusy: 'Another program is using this folder’s history just now. Try again in a moment.',
     gitOperation: 'Saving is paused while a git operation outside the app (a merge or rebase) is under way in this folder. Finish it there, then try again.',
     remoteAuth: 'The online copy did not accept your sign-in. Check your SSH key or git sign-in for it.',

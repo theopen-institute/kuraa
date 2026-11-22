@@ -26,6 +26,8 @@ export type RoomMessage =
   /** Files changed under everyone (a merge from another device): reload the list. */
   | { type: 'files-changed'; at: string }
   | { type: 'run'; run: RunRecord }
+  /** These runs are gone: cleared here, or on another device of the workspace. */
+  | { type: 'runs-removed'; path: string; ids: string[] }
   | { type: 'run-session'; session: RunSessionInfo }
   /** A workspace's packages changed (installed, removed, restored). */
   | { type: 'packages'; engine: string; message: string }
@@ -92,6 +94,8 @@ export interface RunRecord {
   state: RunState;
   outputs: ChunkOutput[];
   by: { name: string; color: string };
+  /** The device of the workspace it ran on, when that is another device than the one showing it (0058). */
+  device?: string;
   queuedAt: string;
   finishedAt: string | null;
   ms: number | null;

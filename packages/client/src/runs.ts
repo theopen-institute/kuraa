@@ -173,6 +173,9 @@ export class ChunkRunner {
       if (m.run.state === 'cancelled') this.runs.delete(m.run.id);
       else this.runs.set(m.run.id, m.run);
       this.emit();
+    } else if (m.type === 'runs-removed' && m.path === this.path) {
+      for (const id of m.ids) this.runs.delete(id);
+      this.emit();
     } else if (m.type === 'packages') {
       this.packageNews = { engine: m.engine, message: m.message, at: Date.now() };
       this.emit();
@@ -376,8 +379,12 @@ export function renderOutputs(outputs: ChunkOutput[]): HTMLElement[] {
   });
 }
 
-export function describeRun(r: RunRecord): string {
-  const at = new Date(r.finishedAt ?? r.queuedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export function describeRun(r: RunRecord, now = new Date()): string {
+  const when = new Date(r.finishedAt ?? r.queuedAt);
+  const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // An output from another day (another device's, often) says which.
+  const at = when.toDateString() === now.toDateString() ? time : `${when.toLocaleDateString([], { day: 'numeric', month: 'short', ...(when.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) })} ${time}`;
   const took = r.ms === null ? '' : r.ms < 1000 ? ` · ${r.ms} ms` : ` · ${(r.ms / 1000).toFixed(1)} s`;
-  return `${r.chunk.partial ? S.code.ranPart : ''}${r.by.name} · ${at}${took}`;
+  const where = r.device ? ` · ${S.code.onDevice(r.device)}` : '';
+  return `${r.chunk.partial ? S.code.ranPart : ''}${r.by.name}${where} · ${at}${took}`;
 }

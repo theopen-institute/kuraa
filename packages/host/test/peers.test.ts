@@ -19,6 +19,9 @@ import { commitSigner } from '../src/signing.js';
 import { createPerson, type Person } from '../src/peers/person.js';
 import { joinWorkspace, startHost, type RunningHost } from '../src/index.js';
 import type { PeerOptions } from '../src/peers/peers.js';
+import type { RunOptions } from '../src/runner.js';
+import type { RunRecord } from '@kuraa/session/model';
+import { hashText } from '@kuraa/kernel';
 import { Git } from '../src/git.js';
 import { Identity, decodeLink, topicsFor } from '../src/peers/identity.js';
 import type { PeerNode } from '../src/peers/node.js';
@@ -77,7 +80,7 @@ const signingKeys = new Map<string, { publicKey: Buffer; secretKey: Buffer }>();
 
 type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort'>;
 
-async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net } = {}): Promise<RunningHost> {
+async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net } = {}): Promise<RunningHost> {
   const { person, node, dialMs, lookupsMs, bootstrap, net, ...rest } = extra;
   if (!signingKeys.has(dir)) signingKeys.set(dir, crypto.keyPair());
   const h = await startHost({ ...rest, dir, timings: FAST, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeys.get(dir), person: person ?? null, node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
@@ -89,9 +92,9 @@ async function start(dir: string, extra: { types?: DocumentType[]; person?: Pers
 const inviteFrom = (h: RunningHost) => h.host.peers!.inviteLink({ hours: 24, once: true });
 
 /** Two paired devices: Ada's (the first) and Bo's (joined by an invite link). */
-async function pair(): Promise<{ a: RunningHost; b: RunningHost; dirA: string; dirB: string }> {
+async function pair(first: Parameters<typeof start>[1] = {}): Promise<{ a: RunningHost; b: RunningHost; dirA: string; dirB: string }> {
   const dirA = repo();
-  const a = await start(dirA);
+  const a = await start(dirA, first);
   const invitation = await inviteFrom(a);
   const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
   dirs.push(parent);
@@ -215,6 +218,40 @@ describe('devices of one workspace', () => {
     expect(body).toContain('Co-authored-by: Ada <ada@example.org>');
     expect(body).toContain('Co-authored-by: Bo <bo@example.org>');
     expect(body).toContain('Kuraa-Kind: autosave');
+  });
+});
+
+describe('run outputs between devices (0058)', () => {
+  const ECHO = join(import.meta.dirname, 'fixtures/echo-engine.mjs');
+  const ENVS = join(import.meta.dirname, 'fixtures/environments.mjs');
+  const runsOn = async (h: RunningHost) => ((await (await api(h, '/api/runs?path=notes.md')).json()) as { runs: RunRecord[] }).runs;
+
+  it('show a chunk run on one device on the other, outside the branches, and clear it on both from either', async () => {
+    const { a, b, dirA, dirB } = await pair({ run: { engines: ['echo'], environment: 'fake', components: [ECHO, ENVS] } });
+    const res = await api(a, '/api/runs', { method: 'POST', body: JSON.stringify({ path: 'notes.md', engine: 'echo', code: 'crabs', chunk: { label: 'count', index: 0, codeHash: hashText('crabs') }, by: ADA }) });
+    expect(res.status).toBe(202);
+    const { id } = (await res.json()) as RunRecord;
+    await until(async () => (await runsOn(a)).some((r) => r.id === id), 15_000, 'the run done on Ada’s device');
+    // Bo's device, which runs no code, shows it, saying where it ran; a person with the document open there is told.
+    const bo = await connect(b, BO);
+    const told = bo.messages;
+    await until(async () => (await runsOn(b)).some((r) => r.id === id), 20_000, 'Ada’s run on Bo’s device');
+    const shown = (await runsOn(b)).find((r) => r.id === id)!;
+    expect(shown).toMatchObject({ by: { name: 'Ada' }, device: git(dirB, 'remote'), chunk: { label: 'count' }, state: 'done' });
+    expect(shown.outputs[0]).toMatchObject({ type: 'text', text: expect.stringContaining('echo crabs') });
+    await until(() => told.some((m) => m.type === 'run' && m.run.id === id), 5000, 'Bo told of the run');
+    // Its own ref on each device: not a branch, never checked out, and the working trees untouched.
+    const adaKey = (await a.host.peers!.status()).device.key;
+    expect(git(dirB, 'for-each-ref', '--format=%(refname)', 'refs/kuraa/outputs/')).toBe(`refs/kuraa/outputs/${adaKey}`);
+    expect(git(dirB, 'rev-parse', `refs/kuraa/outputs/${adaKey}`)).toBe(git(dirA, 'rev-parse', `refs/kuraa/outputs/${adaKey}`));
+    expect(git(dirB, 'branch', '-a', '--format=%(refname)').split('\n').every((r) => r.startsWith('refs/heads/') || r.startsWith('refs/remotes/'))).toBe(true);
+    expect(git(dirA, 'status', '--porcelain')).toBe('');
+    expect(git(dirB, 'status', '--porcelain')).toBe('');
+    // Cleared on Bo's device: gone there at once, and from Ada's once it hears.
+    expect((await api(b, '/api/runs/clear', { method: 'POST', body: JSON.stringify({ path: 'notes.md', chunk: shown.chunk }) })).status).toBe(200);
+    expect((await runsOn(b)).some((r) => r.id === id)).toBe(false);
+    await until(() => told.some((m) => m.type === 'runs-removed' && m.ids.includes(id)), 5000, 'Bo told it is gone');
+    await until(async () => !(await runsOn(a)).some((r) => r.id === id), 20_000, 'gone from Ada’s device too');
   });
 });
 

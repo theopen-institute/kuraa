@@ -131,9 +131,13 @@ export class Identity {
     else await this.git.run(['config', '--unset', 'kuraa.forkedfrom'], { allowFail: true });
   }
 
-  /** What this device is called to its peers. */
+  /**
+   * What this device is called to its peers: the name it was given, or else
+   * KURAA_DEVICE_NAME (pnpm dev sets it, so a development copy on the same
+   * computer as the app is told apart), or else the computer's name.
+   */
   async deviceName(): Promise<string> {
-    return (await this.get('kuraa.devicename')) ?? remoteName(hostname().replace(/\.local$/, ''));
+    return (await this.get('kuraa.devicename')) ?? remoteName(process.env.KURAA_DEVICE_NAME || hostname().replace(/\.local$/, ''));
   }
 
   async setDeviceName(name: string): Promise<void> {

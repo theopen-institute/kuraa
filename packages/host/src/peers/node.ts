@@ -30,8 +30,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { dialTcp, listenTcp, parseAddress } from './tcp.js';
 import { traced } from './records.js';
+import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
-import { PROTOCOL, PeerLink, readHeads, type ControlMessage, type TunnelAsk } from './link.js';
+import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type TunnelAsk } from './link.js';
 
 export interface NodeOptions {
   /** The repository's working tree. */
@@ -973,6 +974,7 @@ export class PeerNode {
       digest: paired ? digestOf(await this.identity.records()) : '',
       merges: this.o.merges ?? '',
       heads: await this.heads(),
+      ...(paired ? { outputs: await outputRefs(this.o.git) } : {}),
       // For members only: how to reach this device besides the DHT (a device not known yet learns
       // nothing of it): the relay it offers and whether it is on a public address, the relays named in
       // its settings, where it takes TCP (a server), and its DHT node to start from.
@@ -1030,6 +1032,7 @@ export class PeerNode {
     if (!link.accepted) return;
     if (m.type === 'refs') {
       link.heads = readHeads(m.heads);
+      link.outputs = readOutputs(m.outputs);
       this.events.refs?.(link);
     }
     else if (m.type === 'room') this.events.room?.(link, m);
@@ -1071,6 +1074,7 @@ export class PeerNode {
     if (link.accepted) {
       link.hello = h;
       link.heads = readHeads(h.heads);
+      link.outputs = readOutputs(h.outputs);
       if (h.workspace === this.ws.id) this.noteHints(link.key, h);
       if (h.workspace === this.ws.id) await this.gossip(link, h);
       return;
@@ -1116,6 +1120,7 @@ export class PeerNode {
     link.remote = member.name;
     link.hello = h;
     link.heads = readHeads(h.heads);
+    link.outputs = readOutputs(h.outputs);
     if (same) await this.gossip(link, h);
     if (same) this.noteHints(link.key, h);
     this.hints.seen[link.key] = Date.now();
@@ -1274,7 +1279,8 @@ export class PeerNode {
     if (this.closing) return false;
     const r = await this.o.git.run([
       '-c', `core.hooksPath=${devNull}`, '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
-      'fetch', '--prune', '--no-write-fetch-head', remote,
+      // Its branches, and the run outputs it has (outputs.ts): these are not branches, and go nowhere else.
+      'fetch', '--prune', '--no-write-fetch-head', remote, `+refs/heads/*:refs/remotes/${remote}/*`, outputsRefspec(remote),
     ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: gitPath(this.bridge.binDir) } });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;

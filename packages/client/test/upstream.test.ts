@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { hashText } from '@kuraa/kernel';
 import type { RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/model';
 import { behind, describeBehind, latestStep } from '../src/upstream.js';
-import { ChunkRunner, type Chunk } from '../src/runs.js';
+import { ChunkRunner, describeRun, type Chunk } from '../src/runs.js';
 import type { HostApi, RunInfo } from '../src/api.js';
 
 const chunk = (index: number, code: string, label: string | null = null, engine = 'r'): Chunk =>
@@ -139,5 +139,33 @@ describe('ChunkRunner', () => {
     const { runner } = setup([a, py, c]);
     runner.receive({ type: 'run-session', session: session([step(a)]) });
     expect(runner.rebuild(c.pos)).toBeNull();
+  });
+});
+
+describe('outputs from another device (0058)', () => {
+  const info: RunInfo = { enabled: false, engines: [{ id: 'r', label: 'R', handles: ['r'], packages: false }], allowInstalls: false, environment: null } as RunInfo;
+  const a = chunk(0, 'x <- 1', 'setup');
+  const theirs = (id: string, queuedAt: string): RunRecord => ({
+    id, path: 'doc.Rmd', chunk: { label: 'setup', index: 0, codeHash: a.codeHash }, engine: 'r', state: 'done', outputs: [{ type: 'text', text: '1' }],
+    by: { name: 'Bo', color: '#33d' }, device: 'bo-laptop', queuedAt, finishedAt: queuedAt, ms: 1200,
+  });
+
+  it('shows the newest run of a chunk, whichever device it ran on, and drops runs cleared anywhere', () => {
+    const runner = new ChunkRunner({} as HostApi, 'doc.Rmd', info, () => ({ name: 'Ada', email: '', color: '#d33' }));
+    runner.setChunks([a]);
+    runner.receive({ type: 'run', run: theirs('old', '2026-11-20T10:00:00.000Z') });
+    runner.receive({ type: 'run', run: theirs('new', '2026-11-21T10:00:00.000Z') });
+    expect(runner.state(a.pos).last?.id).toBe('new');
+    runner.receive({ type: 'runs-removed', path: 'doc.Rmd', ids: ['new'] });
+    expect(runner.state(a.pos).last?.id).toBe('old');
+    runner.receive({ type: 'runs-removed', path: 'other.Rmd', ids: ['old'] });
+    expect(runner.state(a.pos).last?.id).toBe('old');
+  });
+
+  it('says which device a run came from, and its day when not today', () => {
+    const run = theirs('r', '2026-11-20T10:00:00.000Z');
+    const label = describeRun(run, new Date('2026-11-22T12:00:00.000Z'));
+    expect(label).toMatch(/^Bo · on bo-laptop · .*20.* · 1\.2 s$/);
+    expect(describeRun({ ...run, device: undefined }, new Date(run.finishedAt!))).not.toContain(' on ');
   });
 });

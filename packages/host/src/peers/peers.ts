@@ -16,6 +16,7 @@ import { isAncestor } from '../merging.js';
 import { PROTOCOL, type PeerLink } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
+import { SharedOutputs, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 
@@ -113,6 +114,9 @@ const versionOf = (p: number | undefined) => (p === undefined || p === PROTOCOL 
 export class Peers {
   readonly node: PeerNode;
   readonly rooms: Rooms;
+  /** Run outputs shared with the other devices (outputs.ts); set once started. */
+  outputs: SharedOutputs | null = null;
+  private stopOutputs: (() => void) | null = null;
   private readonly fetching = new Map<string, Promise<void>>();
   private readonly again = new Set<string>();
   /** Work waiting on a device that merges differently, already logged: `remote/branch`. */
@@ -152,7 +156,10 @@ export class Peers {
       ...this.memberOptions(),
     }, this.events);
     this.rooms = new Rooms(host, this.node);
+    this.stateDir = stateDir;
   }
+
+  private readonly stateDir: string;
 
   /** What the node needs of this host (the same for a node just joined). */
   private memberOptions() {
@@ -170,6 +177,25 @@ export class Peers {
     if (this.opts.node) await this.node.becomeMember(this.memberOptions(), this.events);
     else await this.node.start(true);
     this.stopRefs = this.host.onRefsChanged(() => this.announce());
+    const identity = this.node.identity;
+    this.outputs = new SharedOutputs({
+      git: this.host.git,
+      myKey: this.node.myKey,
+      stateDir: this.stateDir,
+      signing: () => this.node.signingKey(),
+      members: () => identity.members(),
+      signerOf: (key) => identity.signingKeyOf(key),
+      cached: () => this.host.runner.cached(),
+      forget: (ids) => this.host.runner.forgetRuns(ids),
+      changed: (path, added, removed) => {
+        for (const run of added) this.host.broadcastPath(path, { type: 'run', run });
+        if (removed.length) this.host.broadcastPath(path, { type: 'runs-removed', path, ids: removed });
+      },
+      announce: () => this.announce(),
+      log: (m) => this.host.log(m),
+    });
+    this.stopOutputs = this.host.runner.onCacheChanged(() => this.outputs?.publish());
+    await this.outputs.start();
   }
 
   /**
@@ -180,18 +206,20 @@ export class Peers {
   private announce(): void {
     clearTimeout(this.announceTimer);
     this.announceTimer = setTimeout(() => {
-      void this.node.heads().then((heads) => this.node.broadcast({ type: 'refs', heads })).catch((e: Error) => this.host.log(`peers: ${e.message}`));
+      void Promise.all([this.node.heads(), outputRefs(this.host.git)]).then(([heads, outputs]) => this.node.broadcast({ type: 'refs', heads, outputs })).catch((e: Error) => this.host.log(`peers: ${e.message}`));
     }, 200);
   }
 
   /**
    * Whether this device has every branch the device says it has, as far as it
-   * goes or further: then fetching from it would bring nothing. Its tracking
-   * branches (`<device>/<branch>`) are moved to what it said, as a fetch would.
+   * goes or further, and every run output it has (or a newer one): then
+   * fetching from it would bring nothing. Its tracking branches
+   * (`<device>/<branch>`) are moved to what it said, as a fetch would.
    */
   private async upToDate(link: PeerLink): Promise<boolean> {
     const theirs = link.heads;
     if (!theirs) return false;
+    if (await this.outputs?.lacks(link.outputs)) return false;
     const mine = await this.node.heads();
     for (const [branch, oid] of Object.entries(theirs)) {
       const here = mine[branch];
@@ -220,6 +248,7 @@ export class Peers {
         if (await this.upToDate(link)) continue;
         if (!(await this.node.fetch(remote))) return;
         if (link.hello?.workspace !== this.node.ws.id) return; // a fork: fetched, never merged on its own
+        await this.outputs?.adopt(remote, link.key).catch((e: Error) => this.host.log(`peers: taking ${remote}’s run outputs failed: ${e.message}`));
         await this.rooms.settle(link);
         await this.bringIn(link);
       } while (this.again.has(remote) && !this.closed);
@@ -361,6 +390,8 @@ export class Peers {
     this.closed = true;
     clearTimeout(this.announceTimer);
     this.stopRefs?.();
+    this.stopOutputs?.();
+    this.outputs?.close();
     // Let fetches under way finish, but not hold closing up for long.
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([Promise.allSettled([...this.fetching.values()]), new Promise((r) => (timer = setTimeout(r, 5000)))]);

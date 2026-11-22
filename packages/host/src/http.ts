@@ -190,7 +190,7 @@ const runRoutes: Route[] = [
 
   route('GET', '/api/runs', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
-    send(res, 200, { runs: await host.runner.outputs(path), pending: host.runner.pending(path), session: host.runner.session(path) });
+    send(res, 200, { runs: await host.runsOf(path), pending: host.runner.pending(path), session: host.runner.session(path) });
   }),
 
   route('POST', '/api/runs', async ({ host, req, res }) => {
@@ -214,12 +214,13 @@ const runRoutes: Route[] = [
   }),
 
   ...(['interrupt', 'restart', 'clear'] as const).map((op) => route('POST', `/api/runs/${op}`, async ({ host, req, res }) => {
-    requireRunning(host, ' Whoever runs the server can turn it on.');
+    // Clearing outputs runs nothing: those another device published can be cleared on a device that runs no code.
+    if (op !== 'clear') requireRunning(host, ' Whoever runs the server can turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     if (op === 'interrupt') host.runner.interrupt(path);
     else if (op === 'restart') await host.runner.restart(path);
-    else await host.runner.clear(path, chunkRefOf(body.chunk));
+    else await host.clearRuns(path, chunkRefOf(body.chunk));
     send(res, 200, { ok: true });
   })),
 ];

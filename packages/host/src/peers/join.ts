@@ -23,7 +23,7 @@ export interface JoinOptions {
   dir: string;
   /** An invite link (kuraa-invite:…). */
   invitation: string;
-  /** What this device is called (default: the computer's name). */
+  /** What this device is called (default: KURAA_DEVICE_NAME, else the computer's name). */
   name?: string;
   bootstrap?: PeerOptions['bootstrap'];
   /** Relays run by someone, by key (relay.ts): a way in when no device of the workspace can be reached directly. */

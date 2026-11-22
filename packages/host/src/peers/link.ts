@@ -78,6 +78,8 @@ export type ControlMessage =
       digest: string;
       /** Its branches: name → commit (a device fetches only when it lacks one). */
       heads?: Record<string, string>;
+      /** The run outputs it has, its own and other members' (peers/outputs.ts): device key → commit. Only to a device it is paired with. */
+      outputs?: Record<string, string>;
       /** The key of the relay it offers members (relay.ts): only to a device it is paired with. */
       relay?: string;
       /** Its relay is on a public address (anyone can reach it): the best kind. */
@@ -92,7 +94,7 @@ export type ControlMessage =
   /** The answer to a joining device: what it needs to set itself up, and the records (the joining device checks who welcomed it by them). */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; branch: string; records: unknown[]; /** The workspace's secret: the link does not carry it (0050). */ secret?: string }
   /** This device's branches changed, to these (name → commit): fetch them, unless this device has them already. */
-  | { type: 'refs'; heads?: Record<string, string> }
+  | { type: 'refs'; heads?: Record<string, string>; outputs?: Record<string, string> }
   /** Signed membership records the other device lacks: just taken or made here, or asked for (want). */
   | { type: 'records'; records: unknown[] }
   /** Asking for the records this device lacks: it says which it has (the start of each signature). */
@@ -121,6 +123,19 @@ export function readHeads(v: unknown): Record<string, string> | null {
   return out;
 }
 
+/** Run outputs as a device says it has them, checked: device key → commit; null if not said, or not so. */
+export function readOutputs(v: unknown): Record<string, string> | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length > 10_000) return null;
+  const out: Record<string, string> = {};
+  for (const [key, oid] of entries) {
+    if (!/^[0-9a-f]{64}$/.test(key) || typeof oid !== 'string' || !/^[0-9a-f]{40,64}$/.test(oid)) return null;
+    out[key] = oid;
+  }
+  return out;
+}
+
 export class PeerLink {
   readonly key: string;
   private readonly mux: Protomux;
@@ -143,6 +158,8 @@ export class PeerLink {
   said: Promise<void> = Promise.resolve();
   /** Its branches as it last said (name → commit); null: not said, so fetched to know. */
   heads: Record<string, string> | null = null;
+  /** The run outputs it has, as it last said (device key → commit); null: not said. */
+  outputs: Record<string, string> | null = null;
 
   constructor(readonly conn: SwarmConnection, private readonly onClose: () => void) {
     this.key = conn.remotePublicKey.toString('hex');

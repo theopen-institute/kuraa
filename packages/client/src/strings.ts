@@ -519,6 +519,8 @@ export const S = {
     noOutput: 'No output.',
     plot: 'Plot',
     ranPart: 'Ran part · ',
+    /** Where a run from another device of the workspace ran. */
+    onDevice: (device: string) => `on ${device}`,
     rows: (shown: number, all: number, cols: number) => `${shown < all ? `${shown.toLocaleString()} of ` : ''}${count(all, 'row', 'rows')} · ${count(cols, 'column', 'columns')}`,
     chunkLabel: (label: string) => `chunk “${label}”`,
     chunkIndex: (n: number) => `chunk ${n}`,

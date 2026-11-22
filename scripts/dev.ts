@@ -18,10 +18,14 @@
 // in the desktop app. R chunks run in Podman containers, as everywhere (never on
 // this computer itself). --allow-write and --allow-network let the workspace ask
 // for those in .kuraa/run.json (as flags, they win over the Preferences).
+//
+// To other devices it is called <computer>-dev (KURAA_DEVICE_NAME, which you can
+// set yourself), so it is not taken for the desktop app on the same computer.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gitIdentity, startHub } from '../packages/host/src/index.js';
@@ -103,7 +107,12 @@ const host = run('host', bin('tsx'), [
   // and the online copy, as the desktop app has (decision 0047).
   ...(values['allow-write'] ? ['--allow-write'] : []),
   ...(values['allow-network'] ? ['--allow-network'] : []),
-], { KURAA_TOKEN: token });
+], {
+  KURAA_TOKEN: token,
+  // Called <computer>-dev to other devices, not by the computer's name as the desktop app on it is.
+  // A device given a name (renamed in the Devices section, or kuraa-host name) keeps it.
+  KURAA_DEVICE_NAME: process.env.KURAA_DEVICE_NAME || `${hostname().replace(/\.local$/, '')}-dev`,
+});
 
 const web = run('web', bin('vite'), ['--port', values.port!, '--strictPort', '--host', '127.0.0.1'], {
   KURAA_DEV_HOST: `http://127.0.0.1:${hostPort}`,

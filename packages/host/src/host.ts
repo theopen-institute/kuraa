@@ -7,7 +7,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
-import { Relay, decodeDoc, encodeSeed, patchState, type PresenceUser, type RoomMessage, type RoomSeed } from '@kuraa/session/server';
+import { Relay, decodeDoc, encodeSeed, patchState, type ChunkRef, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { Git } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
@@ -1247,6 +1247,24 @@ export class Host {
     } else if (rec.state) {
       rec.state = patchState(rec.state, doc);
     }
+  }
+
+  /**
+   * A document's runs as people see them: the latest of each chunk run here,
+   * and those the workspace's other devices published (0058), less those
+   * cleared anywhere.
+   */
+  async runsOf(path: string): Promise<RunRecord[]> {
+    const shared = this.peers?.outputs;
+    const hidden = shared ? await shared.hidden() : new Set<string>();
+    const own = (await this.runner.outputs(path)).filter((r) => !hidden.has(r.id));
+    return shared ? [...own, ...(await shared.runs(path))] : own;
+  }
+
+  /** Clear one chunk's outputs, or all of a document's: this device's, and those other devices published (for every device). */
+  async clearRuns(path: string, chunk?: ChunkRef): Promise<void> {
+    const ids = [...(await this.runner.clear(path, chunk)), ...((await this.peers?.outputs?.hide(path, chunk)) ?? [])];
+    if (ids.length) this.broadcastPath(path, { type: 'runs-removed', path, ids });
   }
 
   /** Send a message to everyone with `path` open, on any branch or generation. */

@@ -141,7 +141,7 @@ started from (0027). Devices tell each other which rooms they have open.
 
 - The DHT's bootstrap nodes are Hyperswarm's public ones unless `--bootstrap host:port` names
   others. They see that a device looks for a topic (a hash), not what the workspace holds.
-- Run outputs stay on each device. Branch deletions are not passed on.
+- ~~Run outputs stay on each device.~~ They reach the other devices since [0058](0058-shared-outputs.md). Branch deletions are not passed on.
 - Membership without an upstream is a convention every device follows: a removal reaches a device
   only through devices that know of it, and so does a revoked link. Since 0031 every change is a
   signed record, so who made it is known and any device can pass it on.

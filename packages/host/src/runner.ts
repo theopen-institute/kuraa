@@ -597,6 +597,28 @@ export class Runner {
     }
   }
 
+  /** Every document's cached runs (for sharing them with the workspace's other devices: peers/outputs.ts). */
+  async cached(): Promise<{ path: string; runs: RunRecord[] }[]> {
+    const dir = join(this.o.stateDir, 'outputs');
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const out: { path: string; runs: RunRecord[] }[] = [];
+    for (const name of names.filter((n) => n.endsWith('.json'))) {
+      try {
+        const c = JSON.parse(await readFile(join(dir, name), 'utf8')) as { path?: unknown; runs?: unknown };
+        if (typeof c.path === 'string' && Array.isArray(c.runs)) out.push({ path: c.path, runs: c.runs as RunRecord[] });
+      } catch { /* being written, or not one */ }
+    }
+    return out;
+  }
+
+  private readonly cacheListeners = new Set<(path: string) => void>();
+
+  /** Hear of every change to the cached runs, by document. */
+  onCacheChanged(fn: (path: string) => void): () => void {
+    this.cacheListeners.add(fn);
+    return () => this.cacheListeners.delete(fn);
+  }
+
   private readonly cacheChanges = new Map<string, Promise<unknown>>();
 
   /**
@@ -606,13 +628,18 @@ export class Runner {
    */
   private changeCache(path: string, change: (runs: RunRecord[]) => RunRecord[]): Promise<void> {
     const next = (this.cacheChanges.get(path) ?? Promise.resolve()).then(async () => {
-      const runs = change(await this.outputs(path));
+      const before = await this.outputs(path);
+      const runs = change(before);
+      if (runs.length === before.length && runs.every((r, i) => r === before[i])) return;
       const file = this.cacheFile(path);
-      if (!runs.length) return rm(file, { force: true });
-      await mkdir(dirname(file), { recursive: true });
-      const tmp = `${file}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify({ path, runs }));
-      await renameOver(tmp, file);
+      if (!runs.length) await rm(file, { force: true });
+      else {
+        await mkdir(dirname(file), { recursive: true });
+        const tmp = `${file}.${process.pid}.tmp`;
+        await writeFile(tmp, JSON.stringify({ path, runs }));
+        await renameOver(tmp, file);
+      }
+      for (const fn of this.cacheListeners) fn(path);
     });
     const settled = next.catch(() => undefined);
     this.cacheChanges.set(path, settled);
@@ -807,11 +834,32 @@ export class Runner {
     await this.changeCache(record.path, (runs) => [...runs.filter((r) => !same(r)), record]);
   }
 
-  /** Forget one chunk's output, or all of a document's. */
-  async clear(path: string, chunk?: ChunkRef): Promise<void> {
-    await this.changeCache(path, (runs) => chunk
-      ? runs.filter((r) => !(r.chunk.index === chunk.index && r.chunk.label === chunk.label && r.chunk.codeHash === chunk.codeHash))
-      : []);
+  /** Forget one chunk's output, or all of a document's. Returns the runs forgotten, by id. */
+  async clear(path: string, chunk?: ChunkRef): Promise<string[]> {
+    const gone = (r: RunRecord) => !chunk || (r.chunk.index === chunk.index && r.chunk.label === chunk.label && r.chunk.codeHash === chunk.codeHash);
+    const ids: string[] = [];
+    await this.changeCache(path, (runs) => runs.filter((r) => {
+      if (!gone(r)) return true;
+      ids.push(r.id);
+      return false;
+    }));
+    return ids;
+  }
+
+  /** Forget these runs, wherever they are cached (another device's person cleared them). */
+  async forgetRuns(ids: Set<string>): Promise<{ path: string; ids: string[] }[]> {
+    const out: { path: string; ids: string[] }[] = [];
+    for (const { path, runs } of await this.cached()) {
+      if (!runs.some((r) => ids.has(r.id))) continue;
+      const gone: string[] = [];
+      await this.changeCache(path, (now) => now.filter((r) => {
+        if (!ids.has(r.id)) return true;
+        gone.push(r.id);
+        return false;
+      }));
+      if (gone.length) out.push({ path, ids: gone });
+    }
+    return out;
   }
 
   /** Stop what is running for a document, and drop what is queued. */

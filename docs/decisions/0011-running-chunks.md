@@ -50,3 +50,6 @@ engines other than R, and a variable browser.
 plugin. "Off unless allowed" became `--engine r --env <environment>`; the desktop app runs chunks
 in a Podman container by default, and on this computer only if chosen in its Run Code menu.
 Session messages are `run-session` (with the engine and environment), not `r-session`.
+
+*Since 0058:* in a shared workspace, the cached outputs reach the other devices on a git ref of each
+device's own (`refs/kuraa/outputs/<device key>`), still never in the file or on a branch.

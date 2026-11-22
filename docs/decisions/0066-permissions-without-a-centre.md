@@ -1,6 +1,7 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: proposed, not implemented.** This is the redesign [0038](0038-equal-peers.md) left for later.
+**Status: being built, in the order below. Built: 1 (identities; see *Built so far* at the end).**
+This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
 (identities), and brings back, in shared form, parts of [0032](0032-accepting-work.md) and
@@ -330,3 +331,35 @@ differ by person, and how usable plain git is with only the public layer.
 - Where attestations are visible, and whether hashes suffice for invites by email.
 - Several people on one server, each with their own keys there (0035 left it open), as the home
   of server-held identities.
+
+## Built so far
+
+### 1 · Identities (`peers/kel.ts`, `peers/person.ts`)
+
+- **The log.** An identity is an inception (its first key, the hash of its recovery key) and
+  rotations (each revealing the key the last committed to, naming the hash of the next, and listing
+  the signing keys still the person's: `keep`). The ID is the inception's hash. Followed from the
+  inception whatever order events arrive in; two different events at one place leave it in dispute,
+  and nothing its keys sign counts.
+- **On record.** Each event travels as a `key-event` record (passed on by any member, once). A
+  `vouch` or `revoke-key` names the identity's ID (`person`) and which of its keys signed
+  (`personKey`); records from before, without one, are not records, and each computer vouches again
+  as its workspaces next sync. A vouch counts if signed by the identity's key now, or by an earlier
+  key and every later rotation keeps its subject; a revocation counts if by the key now, or by an
+  earlier one that no later rotation contradicts. Vouches and revocations are kept once per signing
+  identity key, and the name said with the latest key wins, so what a stolen key signs, however it
+  is dated, never pushes out the person's own word.
+- **The recovery key** is made with the identity and kept beside it (`recovery.json`) until the
+  person says it is saved elsewhere (**I've saved it** in Settings, `person recovery saved`), then
+  removed. Its line (`kuraa-recovery:`) carries the identity's log, which cannot change without it,
+  so recovering needs nothing else. Recovering makes it the identity's key, makes a new recovery key
+  to save, and keeps the signing keys the workspaces know to be the person's, less those unticked
+  (a hub asks all its workspaces). A computer whose copy of the identity was recovered elsewhere
+  vouches for nothing until it is copied there again, and says so in its log.
+- **Identities kept before logs** are given one from their key, with a recovery key made then; the
+  same for every process upgrading at once (the recovery key made once, the inception dated 0).
+  Identity lines copied from an older kuraa are refused, to be copied again.
+- **Not yet:** trustees, escrow and attestations (step 6); cutoffs for content commits signed by a
+  revoked signing key (step 4: until then a revocation counts from when a device takes it, as 0035
+  had it). The protocol version is unchanged: an older kuraa and this one still sync, but neither
+  takes the other's vouches, so each names the other's people only once both are updated.

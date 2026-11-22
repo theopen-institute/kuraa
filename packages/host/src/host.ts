@@ -94,6 +94,8 @@ export interface HostOptions {
   manageOnline?: boolean;
   /** Your identity changed through this host's API: tell every workspace that syncs (the hub's), not just this one. */
   personChanged?: () => Promise<void>;
+  /** The signing keys the workspaces know to be this identity's (a hub: all of its workspaces'); else this workspace's. */
+  knownKeys?: (id: string) => Promise<string[]>;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }

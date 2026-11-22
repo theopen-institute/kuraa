@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
@@ -411,12 +411,13 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
   }
 });
 
-test('you on this computer: made from your name, said in each workspace that syncs, and taken to another computer', async () => {
+test('you on this computer: made from your name, said in each workspace that syncs, taken to another computer, and recovered', async () => {
   const dir = makeRepo(true);
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const person = join(mkdtempSync(join(tmpdir(), 'kuraa-desktop-person-')), 'person.json');
   let { app, page } = await launch(['--open', dir], timings, { KURAA_PERSON: person });
   let line: string;
+  let recovery: string;
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     // Made without asking, from the name in Settings (git's, here), and said to the workspace's other devices.
@@ -446,6 +447,15 @@ test('you on this computer: made from your name, said in each workspace that syn
     await expect(page.getByTestId('person-status')).toContainText('Copied');
     line = await app.evaluate(({ clipboard }) => clipboard.readText());
     expect(line).toMatch(/^kuraa-id:/);
+    // Its recovery key, shown until it is saved elsewhere; then removed from this computer (0066).
+    const notice = key.getByTestId('person-recovery');
+    await notice.getByTestId('recovery-copy').click();
+    await expect(page.getByTestId('person-status')).toContainText('Keep it somewhere safe');
+    recovery = await app.evaluate(({ clipboard }) => clipboard.readText());
+    expect(recovery).toMatch(/^kuraa-recovery:/);
+    await notice.getByTestId('recovery-saved').click();
+    await expect(notice).toBeHidden();
+    expect(existsSync(join(dirname(person), 'recovery.json'))).toBe(false);
   } finally {
     await app.close();
   }
@@ -464,6 +474,17 @@ test('you on this computer: made from your name, said in each workspace that syn
     await expect(page.getByTestId('person-status')).toContainText('Your identity is here now');
     expect(JSON.parse(readFileSync(elsewhere, 'utf8')).publicKey).toBe(JSON.parse(readFileSync(person, 'utf8')).publicKey);
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
+    // The first computer is stolen: recovered here with the recovery key, the identity keeps its ID, with a new key.
+    const before = JSON.parse(readFileSync(elsewhere, 'utf8')) as { id: string; publicKey: string };
+    await key.getByTestId('recover-line').fill(recovery);
+    await key.getByTestId('recover-check').click();
+    await key.getByTestId('recover-confirm').getByTestId('recover').click();
+    await expect(page.getByTestId('person-status')).toContainText('Your identity is recovered');
+    const after = JSON.parse(readFileSync(elsewhere, 'utf8')) as { id: string; publicKey: string };
+    expect(after.id).toBe(before.id);
+    expect(after.publicKey).not.toBe(before.publicKey);
+    // A new recovery key, to save.
+    await expect(key.getByTestId('person-recovery')).toBeVisible();
   } finally {
     await app.close();
   }

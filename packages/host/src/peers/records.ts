@@ -13,7 +13,9 @@
 // device can claim a key it does not hold; the latest of each device counts),
 // this key is a person's (vouch: with their identity's signature and the key's
 // own), and this one no longer is (revoke-key, with their identity's
-// signature; 0035). Any member may pass these on.
+// signature; 0035). Any member may pass these on. A person is their identity's
+// ID, whose key may change (0066, kel.ts): its events travel as records too
+// (key-event), and a vouch or revocation names which of its keys signed it.
 //
 // Finding each other (0050): an invite link a member made, and the topic its
 // holders look the workspace up by (link: no secret in it, so a link revoked or
@@ -25,20 +27,25 @@
 // The git config this layer has always used (remotes, kuraa.removed,
 // kuraa.revokedlinks) stays: it is what the records taken say, applied.
 import crypto from 'hypercore-crypto';
+import { eventHash, eventIdentity, readEvent, type KeyEvent } from './kel.js';
 
-export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret';
+export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event';
 
 export interface MemberRecord {
   v: 1;
   kind: RecordKind;
   /** The workspace it is about (a record of one workspace means nothing in another, or in a fork). */
   workspace: string;
-  /** add, remove: a device key. revoke-link, link: a link id. signs, vouch, revoke-key: a signing key. secret: the workspace's secret. */
+  /** add, remove: a device key. revoke-link, link: a link id. signs, vouch, revoke-key: a signing key. secret: the workspace's secret. key-event: the identity's ID. */
   subject: string;
   /** add: what the device is called. vouch: what the person is called. revoke-link: 'used', for a link for one person that let them in. */
   name?: string;
-  /** vouch, revoke-key: the person's identity key. */
+  /** vouch, revoke-key: the person's identity (its ID). */
   person?: string;
+  /** vouch, revoke-key: which of the identity's keys signed (`proof`). */
+  personKey?: string;
+  /** key-event: one event of the identity's log (kel.ts), as it was signed. */
+  event?: KeyEvent;
   /** signs: the signing key's signature (signsMessage); vouch, revoke-key: the person's (vouchMessage, revokeKeyMessage). Hex. */
   proof?: string;
   /** vouch: the signing key's own signature over the same (vouchMessage). Hex. */
@@ -60,12 +67,15 @@ const hexKey = /^[0-9a-f]{64}$/;
 function message(r: Omit<MemberRecord, 'sig'>): Buffer {
   // A link's topic and expiry only where there are any: records made before them are signed as they were.
   const link = r.topic !== undefined ? [r.topic, r.expires ?? 0] : [];
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link].join('\0'));
+  // Likewise the identity's key, and an event (by its hash: the event is signed in itself).
+  const person = r.personKey !== undefined ? ['personKey', r.personKey] : [];
+  const event = r.event !== undefined ? ['event', eventHash(r.event)] : [];
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
 export const signsMessage = (device: string) => Buffer.from(`kuraa-signs\0${device}`);
-/** What a person's identity and a signing key both sign to say the key is theirs (in every workspace). */
+/** What a person's identity (its key, for its ID) and a signing key both sign to say the key is theirs (in every workspace). */
 export const vouchMessage = (key: string, person: string, name: string) => Buffer.from(`kuraa-vouch\0${key}\0${person}\0${name}`);
 /** What a person's identity signs to say a signing key is no longer theirs. */
 export const revokeKeyMessage = (key: string) => Buffer.from(`kuraa-revoke-key\0${key}`);
@@ -78,6 +88,9 @@ export const aboutItself = (k: RecordKind) => k === 'signs';
 /** Whether a record is one a person makes, with their identity's signature (vouch, revoke-key): any member may pass it on. */
 export const byPerson = (k: RecordKind) => k === 'vouch' || k === 'revoke-key';
 
+/** Whether a record carries what a person signed elsewhere, passed on as it is (an event of their identity): any member may pass it on. */
+export const passedOn = (k: RecordKind) => k === 'key-event';
+
 export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { at?: number }, key: { publicKey: Buffer; secretKey: Buffer }): MemberRecord {
   const body = { v: 1 as const, ...r, by: key.publicKey.toString('hex'), at: r.at ?? Date.now() };
   return { ...body, sig: crypto.sign(message(body), key.secretKey).toString('hex') };
@@ -87,7 +100,7 @@ export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { 
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret'];
+  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event'];
   if (r.v !== 1 || !kinds.includes(r.kind as RecordKind) || typeof r.workspace !== 'string' || typeof r.subject !== 'string'
     || typeof r.by !== 'string' || !hexKey.test(r.by) || typeof r.at !== 'number' || typeof r.sig !== 'string' || !/^[0-9a-f]{128}$/.test(r.sig)) return null;
   if (r.name !== undefined && typeof r.name !== 'string') return null;
@@ -95,6 +108,12 @@ export function readRecord(v: unknown): MemberRecord | null {
   if (r.person !== undefined && (typeof r.person !== 'string' || !hexKey.test(r.person))) return null;
   if (r.keyProof !== undefined && (typeof r.keyProof !== 'string' || !/^[0-9a-f]{128}$/.test(r.keyProof))) return null;
   const kind = r.kind as RecordKind;
+  if (r.personKey !== undefined && (!byPerson(kind) || typeof r.personKey !== 'string' || !hexKey.test(r.personKey))) return null;
+  // A person's records name the key that signed them (0066); those from before identities had logs do not, and count for nothing.
+  if (byPerson(kind) && r.personKey === undefined) return null;
+  const event = r.event !== undefined ? readEvent(r.event) : null;
+  if ((kind === 'key-event') !== (event !== null) || (r.event !== undefined && !event)) return null;
+  if (event && eventIdentity(event) !== r.subject) return null;
   const aboutLink = kind === 'revoke-link' || kind === 'link';
   if (!aboutLink && !hexKey.test(r.subject)) return null;
   if (aboutLink && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
@@ -109,6 +128,8 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(r.name !== undefined ? { name: r.name as string } : {}),
     ...(r.proof !== undefined ? { proof: r.proof as string } : {}),
     ...(r.person !== undefined ? { person: r.person as string } : {}),
+    ...(r.personKey !== undefined ? { personKey: r.personKey as string } : {}),
+    ...(event ? { event } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
     ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
   };
@@ -117,11 +138,12 @@ export function readRecord(v: unknown): MemberRecord | null {
   // Each says what only the key it is about could say.
   const proven = (message: Buffer, key: string, proof = rec.proof!) => crypto.verify(message, Buffer.from(proof, 'hex'), Buffer.from(key, 'hex'));
   if (kind === 'signs' && !proven(signsMessage(rec.by), rec.subject)) return null;
+  // Whether the key that signed is the identity's (and counts) is for whoever reads the records with the identity's log (identity.ts).
   if (kind === 'vouch') {
     const m = vouchMessage(rec.subject, rec.person!, rec.name!);
-    if (!proven(m, rec.person!) || !proven(m, rec.subject, rec.keyProof)) return null;
+    if (!proven(m, rec.personKey!) || !proven(m, rec.subject, rec.keyProof)) return null;
   }
-  if (kind === 'revoke-key' && !proven(revokeKeyMessage(rec.subject), rec.person!)) return null;
+  if (kind === 'revoke-key' && !proven(revokeKeyMessage(rec.subject), rec.personKey!)) return null;
   return rec;
 }
 

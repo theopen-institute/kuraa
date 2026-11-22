@@ -424,11 +424,11 @@ describe('equal members, and forks', () => {
     // A member that joined last has the same say as the first: its work comes in, with no rule to pass.
     expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'chapters/bo.md', content: '# Bo’s\n' }) })).status).toBe(201);
     await until(() => existsSync(join(dirA, 'chapters', 'bo.md')), 15_000, 'Bo’s work on Ada’s device');
-    // Signed with Bo's key on his computer, which his identity vouched for: Ada's device names him.
+    // Signed with Bo's key on his computer, which his identity vouched for: Ada's device names him (by his identity's ID).
     const signer = await commitSigner(a.host.git, git(dirA, 'log', '-1', '--format=%H', '--', 'chapters/bo.md'));
     expect(signer).toBe(signingKeys.get(dirB)!.publicKey.toString('hex'));
     await until(async () => (await a.host.peers!.status()).devices[0]?.person === 'Bo', 15_000, 'Bo named on Ada’s device');
-    expect(await a.host.peers!.node.identity.personOf(signer!)).toEqual({ key: bo.publicKey.toString('hex'), name: 'Bo' });
+    expect(await a.host.peers!.node.identity.personOf(signer!)).toEqual({ key: bo.id, name: 'Bo' });
   });
 
   it('spread a new member through the others, and let any member remove another, the first among them', async () => {

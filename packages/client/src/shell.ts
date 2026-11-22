@@ -45,8 +45,14 @@ export type FolderPurpose = 'open' | 'workspaces' | 'data';
 export interface PersonInfo {
   /** This computer's signing key for you: it signs the commits made here. */
   signing: string;
-  /** Your identity, if it is on this computer: it vouches for your signing keys. */
-  identity: { name: string; key: string } | null;
+  /** Your identity, if it is on this computer: it vouches for your signing keys. Its ID never changes; its key may (0066). */
+  identity: {
+    name: string;
+    id: string;
+    key: string;
+    /** Whether its recovery key is still on this computer, to copy somewhere safe ('here'), or not ('saved'). */
+    recovery: 'here' | 'saved';
+  } | null;
   /** Your signing keys the workspace knows of (this computer's among them): a lost computer's to revoke. */
   keys: { key: string; thisComputer: boolean }[];
 }
@@ -64,6 +70,14 @@ export interface PersonShell {
   copy(): Promise<boolean>;
   /** Revoke one of your signing keys (a lost computer's); an error message, or null. */
   revoke(key: string): Promise<string | null>;
+  /** Put your recovery key on the clipboard, to keep somewhere safe. */
+  copyRecovery(): Promise<boolean>;
+  /** You kept the recovery key elsewhere: remove it from this computer; an error message, or null. */
+  recoverySaved(): Promise<string | null>;
+  /** Whose a recovery key is, and the signing keys workspaces know to be theirs; or an error message. */
+  previewRecovery(line: string): Promise<{ id: string; name: string; keys: string[] } | string>;
+  /** Recover your identity with its recovery key, all its known keys staying yours but `drop`; an error message, or null. */
+  recover(line: string, drop: string[]): Promise<string | null>;
 }
 
 export const webShell: Shell = { managesHost: false };

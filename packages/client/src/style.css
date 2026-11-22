@@ -553,6 +553,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .person-error { color: var(--warn); }
 .person-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .person-keys li { display: flex; gap: 8px; align-items: center; }
+.person-recovery { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--accent-soft); }
+.person-recovery .menu-facts { margin: 0; }
 
 /* Writing (0040): citations, images, tables, find and the outline. */
 .editor-pane { position: relative; }

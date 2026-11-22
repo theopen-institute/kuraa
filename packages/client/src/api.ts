@@ -240,6 +240,10 @@ export class HostApi {
   createPerson(name: string) { return this.json('/api/person', { method: 'POST', body: JSON.stringify({ name }) }); }
   importPerson(line: string) { return this.json('/api/person/import', { method: 'POST', body: JSON.stringify({ line }) }); }
   exportPerson() { return this.json<{ line: string }>('/api/person/export').then((r) => r.line); }
+  recoveryLine() { return this.json<{ line: string }>('/api/person/recovery').then((r) => r.line); }
+  recoverySaved() { return this.json('/api/person/recovery/saved', { method: 'POST' }); }
+  previewRecovery(line: string) { return this.json<{ id: string; name: string; keys: string[] }>('/api/person/recover/preview', { method: 'POST', body: JSON.stringify({ line }) }); }
+  recover(line: string, drop: string[]) { return this.json('/api/person/recover', { method: 'POST', body: JSON.stringify({ line, drop }) }); }
   /** Sync; how many changes came in, and how many conflicts their merges kept. */
   sync() { return this.json<{ ok: boolean; message: string; brought?: number; conflicts?: number }>('/api/sync', { method: 'POST' }); }
   runs(path: string) { return this.json<{ runs: RunRecord[]; pending: RunRecord[]; session: RunSessionInfo }>(`/api/runs?path=${encodeURIComponent(path)}`); }

@@ -390,8 +390,12 @@ const hostPerson = async (host: Host) => {
   if (!host.options.managePerson) throw new HttpError(404, 'Your identity is managed only on the computer running this server, while it is not open to the network');
   const keys = await personKeys();
   const p = await keys.readPerson();
-  const known = p && host.peers ? (await host.peers.node.identity.people()).find((x) => x.key === p.publicKey.toString('hex'))?.keys ?? [] : [];
-  return keys.personInfo(known);
+  return keys.personInfo(p ? await knownKeys(host, p.id) : []);
+};
+/** The signing keys workspaces know to be this identity's: every workspace on a hub (knownKeys), else this one. */
+const knownKeys = async (host: Host, id: string): Promise<string[]> => {
+  if (host.options.knownKeys) return host.options.knownKeys(id);
+  return host.peers ? (await host.peers.node.identity.people()).find((x) => x.key === id)?.keys ?? [] : [];
 };
 /**
  * Made, imported or revoked: said now by every workspace that syncs (the hub tells
@@ -429,6 +433,39 @@ const personRoutes: Route[] = [
     await hostPerson(host);
     const key = str((await readBody(req)).key, 'key');
     await keysDo(async () => (await personKeys()).revokeKey(key));
+    await personChanged(host);
+    send(res, 200, { person: await hostPerson(host) });
+  }),
+  // The recovery key (0066): shown until the person says it is saved elsewhere, then removed from this computer.
+  route('GET', '/api/person/recovery', async ({ host, res }) => {
+    await hostPerson(host);
+    const line = await (await personKeys()).recoveryLine();
+    if (!line) throw new HttpError(404, 'Your recovery key is not on this computer');
+    send(res, 200, { line });
+  }),
+  route('POST', '/api/person/recovery/saved', async ({ host, res }) => {
+    await hostPerson(host);
+    await keysDo(async () => (await personKeys()).recoverySaved());
+    send(res, 200, { person: await hostPerson(host) });
+  }),
+  // Whose a recovery key is, and the keys workspaces know to be theirs: to choose which stay theirs.
+  route('POST', '/api/person/recover/preview', async ({ host, req, res }) => {
+    await hostPerson(host);
+    const line = str((await readBody(req)).line, 'line');
+    let who: { id: string; name: string } | undefined;
+    await keysDo(async () => { who = (await personKeys()).readRecoveryLine(line); });
+    send(res, 200, { ...who!, keys: await knownKeys(host, who!.id) });
+  }),
+  route('POST', '/api/person/recover', async ({ host, req, res }) => {
+    await hostPerson(host);
+    const b = await readBody(req);
+    const line = str(b.line, 'line');
+    const drop = new Set(Array.isArray(b.drop) ? b.drop.filter((k): k is string => typeof k === 'string') : []);
+    await keysDo(async () => {
+      const keys = await personKeys();
+      const known = await knownKeys(host, keys.readRecoveryLine(line).id);
+      await keys.recoverPerson(line, known.filter((k) => !drop.has(k)));
+    });
     await personChanged(host);
     send(res, 200, { person: await hostPerson(host) });
   }),

@@ -889,10 +889,15 @@ export class PeerNode {
     const said = `${key.publicKey.toString('hex')}:${person ? `${person.publicKey.toString('hex')}:${person.name}` : ''}:${revokedStamp}`;
     if (said === this.saidFor) return false;
     await this.identity.signsWith(key);
-    if (person) {
+    // An identity recovered on another computer since it was copied here (0066): its key here no
+    // longer counts, and vouches for nothing until it is copied here again.
+    const there = person && (await this.identity.identityState(person.id));
+    if (person && there && there.events.length > person.events.length) {
+      this.o.log(`peers: your identity was recovered on another computer; copy it here again for what you save here to be marked as yours`);
+    } else if (person) {
       await this.identity.vouch(person, key);
-      const p = person.publicKey.toString('hex');
-      for (const r of await revokedKeys()) await this.identity.revokeKey(p, r.key, r.proof);
+      // Revocations kept before identities had logs were signed by the identity's first key.
+      for (const r of await revokedKeys()) await this.identity.revokeKey(person.id, r.by ?? person.events[0]!.key, r.key, r.proof);
     }
     this.saidFor = said;
     return true;

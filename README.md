@@ -325,9 +325,13 @@ computer, which their identity vouches for, so `git log --show-signature` and th
 wrote what ([0035](docs/decisions/0035-identities-and-signing-keys.md)). Your identity is made for
 you, from your name, the first time the app knows it; the menu's **You** section says "You on this
 computer", and keeps the keys under **Advanced**: copy your identity there to a second computer
-(it replaces the one made there), or revoke a lost computer's key. From the command line, `pnpm
-host person [create | export | import | revoke <key>]`; `pnpm host signing-key` prints this
-computer's signing key, to add to GitHub as a signing key.
+(it replaces the one made there), or revoke a lost computer's key. Your identity is a stable ID
+whose key can change: Settings shows its **recovery key** until you say it is saved somewhere safe
+(then it is removed from the computer), and with it **Advanced** recovers your identity on any
+computer if its key is lost or stolen; what the old key signs from then on is no one's
+([0066](docs/decisions/0066-permissions-without-a-centre.md)). From the command line, `pnpm host
+person [create | export | import | recovery [saved] | recover <recovery key> | revoke <key>]`;
+`pnpm host signing-key` prints this computer's signing key, to add to GitHub as a signing key.
 
 Devices running different versions of kuraa can work together. Each tells the others how it merges
 (a version, and the document types that merge on their own); where two differ, only the one with

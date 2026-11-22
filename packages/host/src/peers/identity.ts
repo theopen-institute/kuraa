@@ -21,7 +21,8 @@ import crypto from 'hypercore-crypto';
 import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
-import { aboutItself, byPerson, judge, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
+import { aboutItself, byPerson, judge, passedOn, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
+import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
 
@@ -42,6 +43,9 @@ export interface WorkspaceIdentity {
 }
 
 export const KURAA_SCHEME = 'kuraa://';
+
+/** The ID of the identity whose log this is (its inception's hash). */
+const person0 = (events: KeyEvent[]) => resolve(events)!.id;
 
 const hex = /^[0-9a-f]+$/;
 
@@ -252,9 +256,12 @@ export class Identity {
       if (now && (now.at > r.at || (now.at === r.at && now.sig > r.sig))) return false;
       list = list.filter((x) => !(x.kind === r.kind && x.by === r.by));
     }
-    // What a person says about a key, once, whoever passed it on (a vouch: the latest).
+    // An event of a person's identity, once, whoever passed it on.
+    if (passedOn(r.kind) && list.some((x) => x.kind === r.kind && x.event && eventHash(x.event) === eventHash(r.event!))) return false;
+    // What a person says about a key, once, whoever passed it on (a vouch: the latest): once for
+    // each of their identity's keys, so what a key no longer theirs signs never pushes out what theirs did.
     if (byPerson(r.kind)) {
-      const same = list.filter((x) => x.kind === r.kind && x.person === r.person && x.subject === r.subject);
+      const same = list.filter((x) => x.kind === r.kind && x.person === r.person && x.subject === r.subject && x.personKey === r.personKey);
       if (r.kind === 'revoke-key' && same.length) return false;
       if (same.some((x) => x.at > r.at || (x.at === r.at && x.sig > r.sig))) return false;
       list = list.filter((x) => !same.includes(x));
@@ -267,24 +274,46 @@ export class Identity {
     return true;
   }
 
+  /** Each identity's log, as the events on record show it (kel.ts), by ID. */
+  private identities(list: MemberRecord[]): Map<string, IdentityState> {
+    const events = list.filter((r) => r.kind === 'key-event').map((r) => r.event!);
+    const out = new Map<string, IdentityState>();
+    for (const id of new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject))) {
+      const state = resolve(events, id);
+      if (state) out.set(id, state);
+    }
+    return out;
+  }
+
+  /** An identity's log as this workspace knows it; null if it knows none. */
+  async identityState(id: string): Promise<IdentityState | null> {
+    return this.identities(await this.records()).get(id) ?? null;
+  }
+
   /**
-   * Who is who, from the records (0035): the signing key each device signs with,
-   * and the person whose each signing key is: the one identity that vouched for
-   * it, with the key's own signature too. A key more than one identity vouched
-   * for (only whoever holds it could make that so) is no one's, as is one its
-   * person revoked.
+   * Who is who, from the records (0035, 0066): the signing key each device signs
+   * with, and the person whose each signing key is: the one identity that
+   * vouched for it (with a key that counts for it, by its log), with the key's
+   * own signature too. A key more than one identity vouched for (only whoever
+   * holds it could make that so) is no one's, as is one its person revoked.
    */
   private who(list: MemberRecord[]): { signsWith: Map<string, string>; personOf: Map<string, { key: string; name: string }> } {
     const signsWith = new Map<string, string>();
     for (const by of new Set(list.filter((r) => r.kind === 'signs').map((r) => r.by))) signsWith.set(by, this.latest('signs', by, list)!.subject);
-    const revoked = new Set(list.filter((r) => r.kind === 'revoke-key').map((r) => `${r.person}\0${r.subject}`));
+    const ids = this.identities(list);
+    const counts = (r: MemberRecord, test: typeof vouchCounts) => {
+      const state = ids.get(r.person!);
+      return !!state && test(state, r.personKey!, r.subject);
+    };
+    const revoked = new Set(list.filter((r) => r.kind === 'revoke-key' && counts(r, revocationCounts)).map((r) => `${r.person}\0${r.subject}`));
     const vouches = new Map<string, MemberRecord[]>();
-    for (const r of list) if (r.kind === 'vouch') vouches.set(r.subject, [...(vouches.get(r.subject) ?? []), r]);
+    for (const r of list) if (r.kind === 'vouch' && counts(r, vouchCounts)) vouches.set(r.subject, [...(vouches.get(r.subject) ?? []), r]);
     const personOf = new Map<string, { key: string; name: string }>();
     for (const [key, vs] of vouches) {
       if (new Set(vs.map((v) => v.person)).size !== 1) continue;
-      // Their latest name.
-      const v = vs.reduce((a, b) => (b.at > a.at || (b.at === a.at && b.sig > a.sig) ? b : a));
+      // Their latest name: said with the identity's latest key, then the latest said.
+      const place = (v: MemberRecord) => ids.get(v.person!)!.events.findIndex((e) => e.key === v.personKey);
+      const v = vs.reduce((a, b) => (place(b) > place(a) || (place(b) === place(a) && (b.at > a.at || (b.at === a.at && b.sig > a.sig))) ? b : a));
       if (!revoked.has(`${v.person}\0${key}`)) personOf.set(key, { key: v.person!, name: v.name ?? '' });
     }
     return { signsWith, personOf };
@@ -326,21 +355,32 @@ export class Identity {
     await this.decide('signs', hex, { proof: sign(signsMessage(self), key) });
   }
 
-  /** Say, in this workspace, that a signing key is a person's: with their identity's signature and the key's own. */
-  async vouch(person: Person, key: KeyPair): Promise<void> {
+  /** Put an identity's events on record in this workspace (those not yet), so every device can follow its keys. */
+  async publishIdentity(events: KeyEvent[]): Promise<void> {
     if (!(await this.workspace())) return;
-    const p = person.publicKey.toString('hex');
-    const k = key.publicKey.toString('hex');
-    if ((await this.records()).some((r) => r.kind === 'vouch' && r.person === p && r.subject === k && r.name === person.name)) return;
-    const m = vouchMessage(k, p, person.name);
-    await this.decide('vouch', k, { person: p, name: person.name, proof: sign(m, person), keyProof: sign(m, key) });
+    const have = new Set((await this.records()).filter((r) => r.kind === 'key-event').map((r) => eventHash(r.event!)));
+    for (const e of events) {
+      if (have.has(eventHash(e))) continue;
+      await this.decide('key-event', e.t === 'icp' ? person0(events) : e.id, { event: e });
+    }
   }
 
-  /** Pass on a person's revocation of one of their signing keys (with their signature), in this workspace. */
-  async revokeKey(person: string, key: string, proof: string): Promise<void> {
+  /** Say, in this workspace, that a signing key is a person's: with their identity's signature (its key now) and the key's own; its log first. */
+  async vouch(person: Person, key: KeyPair): Promise<void> {
+    if (!(await this.workspace())) return;
+    await this.publishIdentity(person.events);
+    const pk = person.publicKey.toString('hex');
+    const k = key.publicKey.toString('hex');
+    if ((await this.records()).some((r) => r.kind === 'vouch' && r.person === person.id && r.personKey === pk && r.subject === k && r.name === person.name)) return;
+    const m = vouchMessage(k, person.id, person.name);
+    await this.decide('vouch', k, { person: person.id, personKey: pk, name: person.name, proof: sign(m, person), keyProof: sign(m, key) });
+  }
+
+  /** Pass on a person's revocation of one of their signing keys (signed by `personKey`, one of their identity's keys), in this workspace. */
+  async revokeKey(person: string, personKey: string, key: string, proof: string): Promise<void> {
     if (!(await this.workspace())) return;
     if ((await this.records()).some((r) => r.kind === 'revoke-key' && r.person === person && r.subject === key)) return;
-    await this.decide('revoke-key', key, { person, proof });
+    await this.decide('revoke-key', key, { person, personKey, proof });
   }
 
   /** What this device knows, to judge a record by. */
@@ -454,14 +494,14 @@ export class Identity {
     else if (r.kind === 'remove') await this.removeMemberNow(r.subject);
     else if (r.kind === 'revoke-link' && !(await this.revokedLinks()).includes(r.subject)) await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
     else if (r.kind === 'secret') await this.applySecret();
-    // signs, vouch, revoke-key, link: kept as they are, and read from the records.
+    // signs, vouch, revoke-key, link, key-event: kept as they are, and read from the records.
   }
 
   /**
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');

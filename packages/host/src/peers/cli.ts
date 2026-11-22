@@ -33,7 +33,7 @@ import { joinWorkspace } from './join.js';
 import { useDht } from './dht.js';
 import { Relay, keptRelayKey } from './relay.js';
 import { sshPublicKey } from '../signing.js';
-import { createPerson, exportPerson, importPerson, personFile, readPerson, revokeKey, signingFile, signingKey } from './person.js';
+import { createPerson, exportPerson, importPerson, personFile, readPerson, readRecoveryLine, recoverPerson, recoveryLine, recoverySaved, recoveryState, revokeKey, signingFile, signingKey } from './person.js';
 
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
@@ -175,12 +175,15 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
         const p = await readPerson(file);
         say(`This computer's signing key, for you: ${signing} (${signingFile()}). It signs the commits you make here.`);
         if (!p) return say(`You have no identity here. kuraa-host person create <your name> makes one (kept in ${file}), which vouches for your signing keys; or import the one from your other computer.`);
-        return say(`Your identity: ${p.name} ${p.publicKey.toString('hex')} (${file}). It vouches for this computer's key when your workspaces next sync.`);
+        say(`Your identity: ${p.name} ${p.id} (${file}). It vouches for this computer's key when your workspaces next sync.`);
+        if ((await recoveryState(file)) === 'here') say('Its recovery key is still on this computer: kuraa-host person recovery prints it, to keep somewhere safe.');
+        return;
       }
       if (arg === 'create') {
         const p = await createPerson(more.join(' '), file);
-        say(`Made ${p.name}'s identity: ${p.publicKey.toString('hex')}, kept in ${file}.`);
-        return say('It vouches for this computer\'s signing key when your workspaces next sync. On your other computers, import it (kuraa-host person export, then import).');
+        say(`Made ${p.name}'s identity: ${p.id}, kept in ${file}.`);
+        say('It vouches for this computer\'s signing key when your workspaces next sync. On your other computers, import it (kuraa-host person export, then import).');
+        return say('Keep its recovery key somewhere safe: kuraa-host person recovery prints it.');
       }
       if (arg === 'export') {
         const p = await readPerson(file);
@@ -190,7 +193,31 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       }
       if (arg === 'import') {
         const p = await importPerson(more.join(''), file);
-        return say(`Your identity is here now: ${p.name} ${p.publicKey.toString('hex')}. It vouches for this computer's signing key when your workspaces next sync.`);
+        return say(`Your identity is here now: ${p.name} ${p.id}. It vouches for this computer's signing key when your workspaces next sync.`);
+      }
+      if (arg === 'recovery') {
+        if (more[0] === 'saved') {
+          await recoverySaved(file);
+          return say('Removed the recovery key from this computer. Keep the copy you saved: it is the only one.');
+        }
+        const line = await recoveryLine(file);
+        if (!line) throw new Error('Your recovery key is not on this computer: you saved it elsewhere when it was made (or this computer has no identity)');
+        say(line);
+        return say('\nKeep this somewhere safe (printed, or in a password manager): with it you can recover your identity on any computer if its key is lost or stolen. Then remove it from here: kuraa-host person recovery saved');
+      }
+      if (arg === 'recover') {
+        const line = more.find((m) => m.startsWith('kuraa-recovery:'));
+        const drop = new Set(more.filter((m) => /^[0-9a-f]{64}$/.test(m)));
+        if (!line) throw new Error('Usage: kuraa-host person recover <recovery key> [<signing key to stop counting>…]');
+        // The person's keys this workspace knows of stay theirs, but those named.
+        const { id } = await identityAt(values.dir!);
+        const which = readRecoveryLine(line).id;
+        const known = (await id.people()).find((x) => x.key === which)?.keys ?? [];
+        const keep = known.filter((k) => !drop.has(k));
+        const p = await recoverPerson(line, keep, file);
+        say(`Recovered ${p.name}'s identity (${p.id}): its key is now the recovery key, and what the old key signs from now on is no one's.`);
+        if (keep.length) say(`Still yours: ${keep.map((k) => k.slice(0, 8)).join(', ')}.`);
+        return say('A new recovery key was made: kuraa-host person recovery prints it, to keep somewhere safe. On your other computers, copy your identity again (kuraa-host person export, then import).');
       }
       if (arg === 'use') {
         const { id } = await identityAt(values.dir!);
@@ -206,7 +233,7 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
         await revokeKey(key, file);
         return say(`${key.slice(0, 8)}… is no longer yours: what it signs no longer counts as yours on each device as this reaches it (what a device already has stays yours). Each of your workspaces says so when it next syncs.`);
       }
-      throw new Error('Usage: kuraa-host person [create <name> | export | import <line> | use | revoke <key>]');
+      throw new Error('Usage: kuraa-host person [create <name> | export | import <line> | recovery [saved] | recover <recovery key> [<key>…] | use | revoke <key>]');
     }
     case 'online': {
       const { git } = await identityAt(values.dir!);

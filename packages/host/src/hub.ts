@@ -77,7 +77,7 @@ export interface HubOptions {
   /** The built web client, served at `/`. */
   staticDir?: string;
   /** For every workspace's host: formats, running code, timings, identity, logging. */
-  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'run'> & {
+  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'knownKeys' | 'run'> & {
     /** Running code. With settings, only what flags set: engines here (--engine) win over the setting. */
     run?: Partial<RunOptions>;
   };
@@ -330,6 +330,13 @@ export class Hub {
     await Promise.all([...this.hosts.values()].map((h) => h.host.peers?.node.signingKey().catch(() => undefined)));
   }
 
+  /** The signing keys any of this hub's workspaces knows to be this identity's. */
+  private async knownKeys(id: string): Promise<string[]> {
+    const all = await Promise.all([...this.hosts.values()].map(async (h) =>
+      (await h.host.peers?.node.identity.people().catch(() => []) ?? []).find((p) => p.key === id)?.keys ?? []));
+    return [...new Set(all.flat())];
+  }
+
   /**
    * Start a workspace's host. A workspace that cannot open is listed with why.
    * `joined`: the node that just joined it, still connected, for its host to go on with.
@@ -350,6 +357,7 @@ export class Hub {
         managePerson: this.owner,
         manageOnline: this.owner,
         personChanged: () => this.personChanged(),
+        knownKeys: (id) => this.knownKeys(id),
       });
       this.hosts.set(e.id, h);
       this.errors.delete(e.id);

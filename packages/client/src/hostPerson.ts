@@ -13,6 +13,14 @@ export async function hostPerson(api: HostApi): Promise<PersonShell | null> {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+  const copied = async (line: () => Promise<string>) => {
+    try {
+      await navigator.clipboard.writeText(await line());
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const attempt = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -27,14 +35,17 @@ export async function hostPerson(api: HostApi): Promise<PersonShell | null> {
     create: (name) => attempt(() => api.createPerson(name)),
     import: (line) => attempt(() => api.importPerson(line)),
     revoke: (key) => attempt(() => api.revokeKey(key)),
-    copy: async () => {
+    copy: () => copied(() => api.exportPerson()),
+    copyRecovery: () => copied(() => api.recoveryLine()),
+    recoverySaved: () => attempt(() => api.recoverySaved()),
+    previewRecovery: async (line) => {
       try {
-        await navigator.clipboard.writeText(await api.exportPerson());
-        return true;
-      } catch {
-        return false;
+        return await api.previewRecovery(line);
+      } catch (e) {
+        return (e as Error).message;
       }
     },
+    recover: (line, drop) => attempt(() => api.recover(line, drop)),
   };
 }
 

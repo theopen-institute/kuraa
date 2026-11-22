@@ -19,16 +19,24 @@ const hidden = ref(false);
 const error = shallowRef<unknown>(null);
 const busy = ref(false);
 
+/** Listings asked for, in order: only the last one asked is shown (an earlier one may answer later). */
+let asked = 0;
+
 async function go(path: string | null) {
+  const n = ++asked;
+  /** What the path said as this was asked: changed meanwhile (typed into), it is left as typed. */
+  const said = typed.value;
   busy.value = true;
   try {
-    listing.value = await props.hub.folders(path, hidden.value);
-    typed.value = listing.value.path;
+    const answer = await props.hub.folders(path, hidden.value);
+    if (n !== asked) return;
+    listing.value = answer;
+    if (typed.value === said) typed.value = answer.path;
     error.value = null;
   } catch (e) {
-    error.value = e;
+    if (n === asked) error.value = e;
   } finally {
-    busy.value = false;
+    if (n === asked) busy.value = false;
   }
 }
 void go(props.start ?? null).then(() => {

@@ -488,7 +488,7 @@ app.on('before-quit', (event) => {
   if (quitting || !hub) return;
   event.preventDefault();
   quitting = true;
-  void stopHub().finally(() => app.quit());
+  void stopHub().catch((e: Error) => console.error(`[desktop] stopping the hub: ${e.message}`)).finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => app.quit());

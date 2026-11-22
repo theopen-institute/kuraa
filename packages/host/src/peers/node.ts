@@ -343,7 +343,7 @@ export class PeerNode {
       const now = this.relayOffered + String(this.relayPublic);
       if (now === relaySaid) return;
       relaySaid = now;
-      for (const l of this.links.values()) if (l.accepted) void this.helloFor(l).then((h) => l.send(h));
+      for (const l of this.links.values()) if (l.accepted) void this.helloFor(l).then((h) => l.send(h), (e: Error) => this.logUnlessClosing(e));
     });
     // The other workspaces of this computer that devices connected here share with it: over the same links.
     for (const other of localNodes(this.computer).values()) if (other !== this) for (const l of other.links.values()) if (l.accepted) other.sayAlso(l);
@@ -1119,7 +1119,8 @@ export class PeerNode {
       const members = (await this.identity.members()).filter((x) => x.key !== link.key);
       // With the workspace's secret, which the link no longer carries (0050).
       link.send({ type: 'welcome', name: this.name, members: members.map((x) => ({ key: x.key, name: x.name })), branch: await this.o.branch(), records: await this.identity.records(), secret: this.ws.secret });
-      void this.membersChanged(link);
+      // Not waited for, and so caught: it may still be going when this device closes (its folder gone, say).
+      void this.membersChanged(link).catch((e: Error) => this.logUnlessClosing(e));
     }
     link.accepted = true;
     link.remote = member.name;
@@ -1288,9 +1289,11 @@ export class PeerNode {
     const before = this.fetches.get(queue) ?? Promise.resolve(true);
     const run = before.catch(() => false).then(() => this.fetchNow(remote, refspec));
     this.fetches.set(queue, run);
-    void run.finally(() => {
+    // Its failure is the caller's to handle (run is returned): not this bookkeeping's, which would leave it unhandled.
+    const forget = () => {
       if (this.fetches.get(queue) === run) this.fetches.delete(queue);
-    });
+    };
+    void run.then(forget, forget);
     return run;
   }
 
@@ -1302,6 +1305,11 @@ export class PeerNode {
     ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: gitPath(this.bridge.binDir) } });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;
+  }
+
+  /** Something that went wrong in the background, logged; not once this device is closing (what it worked on may be gone). */
+  private logUnlessClosing(e: Error): void {
+    if (!this.closing) this.o.log(`peers: ${e.message}`);
   }
 
   /** Tell every connected device something. */

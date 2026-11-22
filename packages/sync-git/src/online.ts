@@ -145,9 +145,11 @@ export class OnlineCopies implements SyncSession {
     const before = this.running.get(name) ?? Promise.resolve(null);
     const run = before.catch(() => null).then(() => this.syncNow(name, fetchFirst));
     this.running.set(name, run);
-    void run.finally(() => {
+    // Its failure is the caller's to handle (run is returned): not this bookkeeping's, which would leave it unhandled.
+    const forget = () => {
       if (this.running.get(name) === run) this.running.delete(name);
-    });
+    };
+    void run.then(forget, forget);
     return run;
   }
 

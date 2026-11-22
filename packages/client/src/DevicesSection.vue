@@ -120,12 +120,16 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
       <h3>{{ S.people.title }}</h3>
       <ul class="menu-devices" data-testid="people">
         <li v-for="p in info.people.people" :key="p.id" :data-testid="`person:${nameOf(p)}`">
-          <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template></span>
+          <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template><span v-if="p.emails?.length" class="muted"> · {{ p.emails.join(', ') }}</span></span>
           <span class="device-tag" :title="p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'admin' ? S.people.admin : S.people.member }}</span>
           <template v-if="admin && info.canInvite && !info.removed && !p.you">
             <button type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
             <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.common.removeEllipsis }}</button>
           </template>
+        </li>
+        <li v-for="i in info.people.invited ?? []" :key="i.email" :data-testid="`invited:${i.email}`">
+          <span class="device-who muted">{{ S.people.invited(i.email) }}</span>
+          <span class="device-tag">{{ i.role === 'admin' ? S.people.admin : S.people.member }}</span>
         </li>
       </ul>
     </template>

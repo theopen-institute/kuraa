@@ -13,6 +13,7 @@ import type { Settings } from './settings.js';
 import type { PersonShell, Shell } from './shell.js';
 import { S } from './strings.js';
 import PersonKey from './PersonKey.vue';
+import PersonMore from './PersonMore.vue';
 import SettingsForm from './SettingsForm.vue';
 
 const props = defineProps<{
@@ -48,6 +49,7 @@ defineExpose({ pending });
     <section class="settings-part">
       <SettingsForm :initial="settings" :shell="shell" part="profile" autosave @save="(s) => emit('saveSettings', s)" />
       <PersonKey v-if="personShell" :person="personShell" :display-name="settings.name" />
+      <PersonMore v-if="personShell" :api="api" />
     </section>
     <section v-if="modules.length" class="settings-part" data-testid="components-editing">
       <fieldset class="pref-group">

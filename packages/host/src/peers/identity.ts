@@ -22,6 +22,7 @@ import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
+import type { Attestation } from './attest.js';
 import { evaluate, grantMessage, isGroupName, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
@@ -260,6 +261,7 @@ export class Identity {
     // An event of a person's identity, or a policy operation, once, whoever passed it on.
     if (r.kind === 'key-event' && list.some((x) => x.kind === r.kind && x.event && eventHash(x.event) === eventHash(r.event!))) return false;
     if (r.kind === 'policy' && list.some((x) => x.kind === r.kind && x.subject === r.subject)) return false;
+    if (r.kind === 'attest' && list.some((x) => x.kind === r.kind && x.attestation?.sig === r.attestation?.sig)) return false;
     // What a person says about a key, once, whoever passed it on (a vouch: the latest): once for
     // each of their identity's keys, so what a key no longer theirs signs never pushes out what theirs did.
     if (byPerson(r.kind)) {
@@ -279,9 +281,20 @@ export class Identity {
   /** Each identity's log, as the events on record show it (kel.ts), by ID. */
   private identities(list: MemberRecord[]): Map<string, IdentityState> {
     const events = list.filter((r) => r.kind === 'key-event').map((r) => r.event!);
-    const out = new Map<string, IdentityState>();
-    for (const id of new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject))) {
+    const ids = new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject));
+    // First each log by its own keys; then again, a trustee rotation judged by its trustees' keys as those say (step 6).
+    const plain = new Map<string, IdentityState>();
+    for (const id of ids) {
       const state = resolve(events, id);
+      if (state) plain.set(id, state);
+    }
+    const trusteeKey = (id: string) => {
+      const t = plain.get(id);
+      return t && !t.disputed ? t.current : null;
+    };
+    const out = new Map<string, IdentityState>();
+    for (const id of ids) {
+      const state = resolve(events, id, { trusteeKey });
       if (state) out.set(id, state);
     }
     return out;
@@ -436,11 +449,38 @@ export class Identity {
     const records = list ?? (await this.records());
     const ws = await this.workspace();
     const w = this.who(records);
-    return evaluate(records.filter((r) => r.kind === 'policy' && r.workspace === ws?.id).map(policyEntry), {
-      workspace: ws?.id ?? '',
-      pin: await this.pin(),
-      personOf: (key) => w.personOf.get(key)?.key ?? null,
-    });
+    const entries = records.filter((r) => r.kind === 'policy' && r.workspace === ws?.id).map(policyEntry);
+    const ctx = { workspace: ws?.id ?? '', pin: await this.pin(), personOf: (key: string) => w.personOf.get(key)?.key ?? null };
+    const base = evaluate(entries, ctx);
+    if (!base.verifiers.size) return base;
+    // Then again, with the emails attested by the verifiers it counts (step 6).
+    const claims = this.claims(records, base.verifiers);
+    return evaluate(entries, { ...ctx, claimsOf: (id) => [...(claims.get(id) ?? [])], claimed: new Set([...claims.values()].flatMap((c) => [...c])) });
+  }
+
+  /** The emails attested of each person, by the verifiers given, unexpired. */
+  private claims(records: MemberRecord[], verifiers: Map<string, string>, now = Date.now()): Map<string, Set<string>> {
+    const out = new Map<string, Set<string>>();
+    for (const r of records) {
+      const a = r.attestation;
+      if (r.kind !== 'attest' || !a || !verifiers.has(a.verifier) || a.expires <= now) continue;
+      out.set(a.id, (out.get(a.id) ?? new Set()).add(a.claim.slice(6)));
+    }
+    return out;
+  }
+
+  /** The emails attested of a person that count in this workspace (by its verifiers). */
+  async emailsOf(id: string): Promise<string[]> {
+    const records = await this.records();
+    const policy = await this.policy(records);
+    return [...(this.claims(records, policy.verifiers).get(id) ?? [])].sort();
+  }
+
+  /** Put an attestation of this person on record here, if it is not (step 6). */
+  async publishAttestation(a: Attestation): Promise<void> {
+    if (!(await this.workspace())) return;
+    if ((await this.records()).some((r) => r.kind === 'attest' && r.attestation?.sig === a.sig)) return;
+    await this.decide('attest', a.id, { attestation: a });
   }
 
   /** The devices whose person is an admin of the workspace; null if there is no policy yet. */
@@ -486,12 +526,12 @@ export class Identity {
    * In a workspace from before, the first seals its legacy geneses, so none
    * made later counts.
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
-    if (op.t === 'rule') {
-      if (!policy.isAdmin(me)) throw new Error('Only an admin of this workspace can say who may change what');
+    if (op.t === 'rule' || op.t === 'verifier') {
+      if (!policy.isAdmin(me)) throw new Error(op.t === 'rule' ? 'Only an admin of this workspace can say who may change what' : 'Only an admin of this workspace can say whose checks count here');
     } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
       throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
     }
@@ -650,7 +690,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; attestation?: Attestation; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');

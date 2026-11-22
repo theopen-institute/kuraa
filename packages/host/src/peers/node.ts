@@ -16,7 +16,7 @@ import { writeAllowedSigners } from '../signing.js';
 import type { Policy } from './policy.js';
 import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
-import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
+import { attestations, attestationsFile, createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 import { stat } from 'node:fs/promises';
 import { pipeline, type Duplex } from 'node:stream';
@@ -934,7 +934,12 @@ export class PeerNode {
       const st = await stat(revokedFile());
       revokedStamp = `${st.mtimeMs}:${st.size}`;
     } catch { /* none */ }
-    const said = `${key.publicKey.toString('hex')}:${person ? `${person.publicKey.toString('hex')}:${person.name}` : ''}:${revokedStamp}`;
+    let attestStamp = '';
+    try {
+      const st = await stat(attestationsFile());
+      attestStamp = `${st.mtimeMs}:${st.size}`;
+    } catch { /* none */ }
+    const said = `${key.publicKey.toString('hex')}:${person ? `${person.publicKey.toString('hex')}:${person.name}` : ''}:${revokedStamp}:${attestStamp}`;
     if (said === this.saidFor) return false;
     await this.identity.signsWith(key);
     // An identity recovered on another computer since it was copied here (0066): its key here no
@@ -948,6 +953,8 @@ export class PeerNode {
       const heads = await this.branchTips();
       // Revocations kept before identities had logs were signed by the identity's first key.
       for (const r of await revokedKeys()) await this.identity.revokeKey(person.id, r.by ?? person.events[0]!.key, r.key, r.proof, heads);
+      // What verifiers attested of them (their emails, step 6): each workspace counts those of its verifiers.
+      if (this.o.person === undefined) for (const a of await attestations()) if (a.id === person.id) await this.identity.publishAttestation(a);
       // Keys no longer theirs since their identity was recovered: revoked here too, for their cutoff.
       for (const k of await this.identity.droppedKeys(person.id)) {
         await this.identity.revokeKey(person.id, person.publicKey.toString('hex'), k, crypto.sign(revokeKeyMessage(k), person.secretKey).toString('hex'), heads);

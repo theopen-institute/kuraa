@@ -24,6 +24,7 @@ const EXPIRY = [
 ] as const;
 const expiry = ref(1);
 const asAdmin = ref(false);
+const forEmail = ref('');
 const made = shallowRef<{ code: string; once: boolean; expires: number } | null>(null);
 const links = shallowRef<InviteLinkInfo[]>([]);
 const busy = ref(false);
@@ -44,7 +45,7 @@ async function create() {
   error.value = null;
   copied.value = false;
   try {
-    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one', role: asAdmin.value ? 'admin' : 'member' });
+    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one', role: asAdmin.value ? 'admin' : 'member', ...(forEmail.value.trim() ? { email: forEmail.value.trim() } : {}) });
     made.value = { code: r.link, once: r.once, expires: r.expires };
     await loadLinks();
   } catch (e) {
@@ -104,6 +105,11 @@ const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.s
           <span>{{ S.invite.asAdmin }}</span>
         </label>
         <p v-if="asAdmin" class="naming-hint">{{ S.invite.adminAbout }}</p>
+        <label class="field">
+          <span>{{ S.invite.forEmail }}</span>
+          <input v-model="forEmail" type="email" placeholder="name@example.org" data-testid="invite-email">
+        </label>
+        <p v-if="forEmail.trim()" class="naming-hint">{{ S.invite.forEmailAbout }}</p>
         <p class="naming-hint">
           <template v-if="forWhom === 'one'">{{ S.invite.oneAbout }}</template>
           <template v-else>{{ S.invite.anyoneAbout }}</template>

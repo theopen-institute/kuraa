@@ -16,7 +16,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import crypto from 'hypercore-crypto';
 import { revokeKeyMessage } from './records.js';
-import { incept, nextDigest, readEvent, resolve, rotate, type KeyEvent } from './kel.js';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
+import { readAttestation, type Attestation } from './attest.js';
+import { incept, nextDigest, readEvent, resolve, rotate, trusteeMessage, trusteeRequest, trusteeRotation, vouchFor, type KeyEvent, type TrusteeRotation, type TrusteeVouch, type Trustees } from './kel.js';
 import { createOnly, keptKey, keyFromSecret, keyJson, type KeyPair } from '../keys.js';
 
 export interface Person {
@@ -43,7 +45,8 @@ export function recoveryFile(person = personFile()): string {
 /** A log, checked: its events, its ID, and that `key` is its key now. Null if not. */
 function checkLog(list: unknown, key: KeyPair): { id: string; events: KeyEvent[] } | null {
   if (!Array.isArray(list)) return null;
-  const state = resolve(list.map(readEvent).filter((e): e is KeyEvent => !!e));
+  // The person's own copy of their log: a trustee rotation in it was made here, or copied from here (step 6).
+  const state = resolve(list.map(readEvent).filter((e): e is KeyEvent => !!e), undefined, { trustTrots: true });
   if (!state || state.disputed || state.current !== key.publicKey.toString('hex')) return null;
   return { id: state.id, events: state.events };
 }
@@ -209,7 +212,7 @@ export function readRecoveryLine(line: string): { id: string; name: string } {
  * What the old key vouched for and is not kept stops counting, on every device
  * alike. Replaces any other identity on this computer, as importing does.
  */
-export async function recoverPerson(line: string, keep: string[], file = personFile()): Promise<Person> {
+export async function recoverPerson(line: string, keep: string[], file = personFile(), trustees?: Trustees): Promise<Person> {
   const { name, key, events } = decodeLine(line, 'kuraa-recovery', 'a recovery key');
   if (!Array.isArray(events)) throw new Error('This recovery key is damaged');
   const known = (events as unknown[]).map(readEvent).filter((e): e is KeyEvent => !!e);
@@ -218,7 +221,7 @@ export async function recoverPerson(line: string, keep: string[], file = personF
   if (!state) throw new Error('This recovery key is damaged');
   // Checked before anything here changes (a recovery key already used, or another identity's, is refused).
   const nextRecovery = crypto.keyPair();
-  const log = [...state.events, rotate(state.events, key, nextRecovery, keep)];
+  const log = [...state.events, rotate(state.events, key, nextRecovery, keep, Date.now(), trustees)];
   const p: Person = { name, ...key, ...checkLog(log, key)! };
   await replace(file, p);
   // A recovery key left here by another identity: kept aside (replace). This identity's was the key just used.
@@ -290,7 +293,7 @@ export async function revokeKey(key: string, file = personFile()): Promise<void>
 /** You on this computer, as the app shows it: its signing key, your identity if here, and your keys `known` to workspaces. */
 export async function personInfo(known: string[] = []): Promise<{
   signing: string;
-  identity: { name: string; id: string; key: string; recovery: 'here' | 'saved' } | null;
+  identity: { name: string; id: string; key: string; recovery: 'here' | 'saved'; trustees: Trustees | null; emails: { email: string; verifier: string; expires: number }[] } | null;
   keys: { key: string; thisComputer: boolean }[];
 }> {
   const signing = (await signingKey()).publicKey.toString('hex');
@@ -299,7 +302,181 @@ export async function personInfo(known: string[] = []): Promise<{
   const keys = [...new Set([signing, ...(p ? known : [])])].filter((k) => !revoked.has(k));
   return {
     signing,
-    identity: p && { name: p.name, id: p.id, key: p.publicKey.toString('hex'), recovery: await recoveryState() },
+    identity: p && {
+      name: p.name, id: p.id, key: p.publicKey.toString('hex'), recovery: await recoveryState(), trustees: trusteesOf(p),
+      emails: (await attestations()).filter((a) => a.id === p.id).map((a) => ({ email: a.claim.slice(6), verifier: a.verifier, expires: a.expires })),
+    },
     keys: keys.map((key) => ({ key, thisComputer: key === signing })),
   };
+}
+
+// Trustees (0066, step 6) ---------------------------------------------------------
+//
+// With both its keys lost, an identity's trustees (named by a rotation, with
+// the recovery key: nameTrustees) may replace its key together: the person, on
+// a computer of theirs, asks (askTrustees: a new key, kept here meanwhile, and
+// what the change will say, as one line to send each trustee); each trustee, in
+// their own app, vouches (vouchForAsk, with their identity: a line back); with
+// as many as the threshold, the person completes it (completeTrustees).
+
+/** Name an identity's trustees (any `threshold` of `ids`), with its recovery key: as recovering it does, keeping `keep`. */
+export function nameTrustees(line: string, trustees: Trustees, keep: string[], file = personFile()): Promise<Person> {
+  return recoverPerson(line, keep, file, trustees);
+}
+
+/** Where a request to trustees waits for their answers. */
+const askFile = (person: string) => join(dirname(person), 'trustee-request.json');
+
+const lineOf = (prefix: string, v: unknown) => `${prefix}:${Buffer.from(JSON.stringify(v)).toString('base64url')}`;
+
+function parseLine<T>(line: string, prefix: string, what: string): T {
+  const m = new RegExp(`^${prefix}:([A-Za-z0-9_-]+)$`).exec(line.trim());
+  if (!m) throw new Error(`Not ${what} (it starts with ${prefix}:)`);
+  try {
+    return JSON.parse(Buffer.from(m[1]!, 'base64url').toString('utf8')) as T;
+  } catch {
+    throw new Error(`This ${what.replace(/^an? /, '')} is damaged`);
+  }
+}
+
+/** A request's own hash: what a trustee's answer is for. */
+const requestHash = (r: Omit<TrusteeRotation, 'sig' | 'vouches'>) => createHash('sha256').update(trusteeMessage(r)).digest('hex');
+
+/**
+ * Ask an identity's trustees to replace its key (both lost), from this
+ * computer: a new key and recovery key are made and kept here until they
+ * answer; the line to send each of them says whose and what. `log`: the
+ * identity's log, as a workspace knows it; `keep`: signing keys still theirs.
+ */
+export async function askTrustees(log: KeyEvent[], name: string, keep: string[], file = personFile()): Promise<{ line: string; trustees: Trustees }> {
+  const key = crypto.keyPair();
+  const recovery = crypto.keyPair();
+  const request = trusteeRequest(log, key, recovery, keep);
+  const state = resolve(log, request.id, { trustTrots: true })!;
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(askFile(file), JSON.stringify({ name, request, log: state.events, secretKey: key.secretKey.toString('hex'), recovery: recovery.secretKey.toString('hex') }), { mode: 0o600 });
+  return { line: lineOf('kuraa-trustees-ask', { name, request, log: state.events }), trustees: state.trustees! };
+}
+
+/** What a request to trustees asks (read without answering): whose identity, and its trustees. */
+export function readTrusteeAsk(line: string): { name: string; id: string; trustees: Trustees; request: Omit<TrusteeRotation, 'sig' | 'vouches'> } {
+  const v = parseLine<{ name?: unknown; request?: unknown; log?: unknown }>(line, 'kuraa-trustees-ask', 'a request to trustees');
+  const log = Array.isArray(v.log) ? (v.log as unknown[]).map(readEvent).filter((e): e is KeyEvent => !!e) : [];
+  const state = resolve(log, undefined, { trustTrots: true });
+  const r = v.request as Omit<TrusteeRotation, 'sig' | 'vouches'> | undefined;
+  if (!state || !state.trustees || typeof v.name !== 'string' || !r || r.id !== state.id || r.t !== 'trot') throw new Error('This request to trustees is damaged');
+  const last = state.events[state.events.length - 1]!;
+  if (r.seq !== (last.t === 'icp' ? 1 : last.seq + 1)) throw new Error('This request is for an identity that has changed since: ask for a new one');
+  return { name: v.name, id: state.id, trustees: state.trustees, request: r };
+}
+
+/**
+ * Vouch, as a trustee, for a request to replace someone's key (with this
+ * computer's identity): a line to send back. Only after making sure, in person
+ * or by a call, that it is theirs: whoever has enough such lines has their identity.
+ */
+export async function vouchForAsk(line: string, file = personFile()): Promise<string> {
+  const ask = readTrusteeAsk(line);
+  const me = await readPerson(file);
+  if (!me) throw new Error('Your identity is not on this computer');
+  if (!ask.trustees.ids.includes(me.id)) throw new Error(`You are not one of ${ask.name}’s trustees`);
+  return lineOf('kuraa-trustee-yes', { for: requestHash(ask.request), vouch: vouchFor(ask.request, me.id, me) });
+}
+
+/**
+ * With trustees' answers (as many as the threshold): the identity, its key the
+ * new one made when asking, a new recovery key to save, here; replacing any
+ * other identity on this computer, as importing does. Other devices count the
+ * change once they know the trustees' logs and the answers are by their keys.
+ */
+export async function completeTrustees(lines: string[], file = personFile()): Promise<Person> {
+  let pending: { name: string; request: Omit<TrusteeRotation, 'sig' | 'vouches'>; log: unknown[]; secretKey: string; recovery: string };
+  try {
+    pending = JSON.parse(await readFile(askFile(file), 'utf8')) as typeof pending;
+  } catch {
+    throw new Error('No request to trustees is waiting on this computer');
+  }
+  const key = keyFromSecret(pending.secretKey);
+  const recovery = keyFromSecret(pending.recovery);
+  if (!key || !recovery) throw new Error('The request waiting here is damaged');
+  const hash = requestHash(pending.request);
+  const vouches: TrusteeVouch[] = [];
+  for (const l of lines.map((x) => x.trim()).filter(Boolean)) {
+    const v = parseLine<{ for?: unknown; vouch?: TrusteeVouch }>(l, 'kuraa-trustee-yes', 'a trustee’s answer');
+    if (v.for !== hash) throw new Error('One of the answers is to another request');
+    if (v.vouch) vouches.push(v.vouch);
+  }
+  const log = (pending.log).map(readEvent).filter((e): e is KeyEvent => !!e);
+  const state = resolve(log, pending.request.id, { trustTrots: true });
+  if (!state?.trustees) throw new Error('The request waiting here is damaged');
+  const by = new Set(vouches.filter((v) => state.trustees!.ids.includes(v.id)).map((v) => v.id));
+  if (by.size < state.trustees.threshold) throw new Error(`It takes ${state.trustees.threshold} of the trustees: ${by.size} answered`);
+  const event = trusteeRotation(pending.request, key, vouches);
+  const next = checkLog([...state.events, event], key);
+  if (!next) throw new Error('The answers do not make a change to this identity');
+  const p: Person = { name: pending.name, ...key, ...next };
+  await replace(file, p);
+  await rm(recoveryFile(file), { force: true });
+  await createOnly(recoveryFile(file), keyJson(recovery));
+  await rm(askFile(file), { force: true });
+  return p;
+}
+
+/** An identity's trustees now, from its log here; null if it named none. */
+export function trusteesOf(p: Person): Trustees | null {
+  return resolve(p.events, p.id, { trustTrots: true })?.trustees ?? null;
+}
+
+// Attestations of this person (0066, step 6) -------------------------------------
+//
+// Kept beside their identity (attestations.json), and put on record by each of
+// their workspaces as it next syncs (node.ts): a workspace counts those by the
+// verifiers its policy names.
+
+/** Where this computer keeps the attestations of its person. */
+export function attestationsFile(person = personFile()): string {
+  return join(dirname(person), 'attestations.json');
+}
+
+export async function attestations(file = attestationsFile()): Promise<Attestation[]> {
+  try {
+    return (JSON.parse(await readFile(file, 'utf8')) as unknown[]).map(readAttestation).filter((a): a is Attestation => !!a);
+  } catch {
+    return [];
+  }
+}
+
+/** Keep an attestation of this person (one of the same claim by the same verifier is replaced). */
+export async function keepAttestation(a: Attestation, file = attestationsFile()): Promise<void> {
+  const list = (await attestations(file)).filter((x) => !(x.claim === a.claim && x.verifier === a.verifier));
+  list.push(a);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(list, null, 1), { mode: 0o600 });
+}
+
+// A recovery key locked with a passphrase (0066, step 6): what a verifier keeps
+// in escrow, never able to read it. scrypt makes guessing the passphrase slow;
+// AES-GCM says if it was the wrong one.
+
+export function sealRecovery(line: string, passphrase: string): string {
+  if (passphrase.length < 8) throw new Error('A passphrase of 8 characters at least: it is all that guards the key');
+  const salt = randomBytes(16);
+  const key = scryptSync(passphrase.normalize('NFC'), salt, 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([c.update(line, 'utf8'), c.final()]);
+  return Buffer.from(JSON.stringify({ v: 1, salt: salt.toString('hex'), iv: iv.toString('hex'), tag: c.getAuthTag().toString('hex'), data: data.toString('base64') })).toString('base64url');
+}
+
+/** The recovery key a sealed one holds; null if the passphrase is not its. */
+export function openRecovery(blob: string, passphrase: string): string | null {
+  try {
+    const v = JSON.parse(Buffer.from(blob, 'base64url').toString('utf8')) as { salt: string; iv: string; tag: string; data: string };
+    const key = scryptSync(passphrase.normalize('NFC'), Buffer.from(v.salt, 'hex'), 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(v.iv, 'hex'));
+    d.setAuthTag(Buffer.from(v.tag, 'hex'));
+    return Buffer.concat([d.update(Buffer.from(v.data, 'base64')), d.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
 }

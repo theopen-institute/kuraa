@@ -9,7 +9,7 @@ import crypto from 'hypercore-crypto';
 import { Git } from '../src/git.js';
 import { Identity, decodeLink } from '../src/peers/identity.js';
 import { judge, readRecord, revokeKeyMessage, sign, signRecord, signsMessage, vouchMessage, type Standing } from '../src/peers/records.js';
-import { createPerson, exportPerson, importPerson, readPerson, readRecoveryLine, recoverPerson, recoveryLine, recoverySaved, recoveryState } from '../src/peers/person.js';
+import { askTrustees, completeTrustees, createPerson, exportPerson, importPerson, nameTrustees, readPerson, readRecoveryLine, readTrusteeAsk, recoverPerson, recoveryLine, recoverySaved, recoveryState, trusteesOf, vouchForAsk } from '../src/peers/person.js';
 import { identityId, incept, rotate, type KeyEvent } from '../src/peers/kel.js';
 import { commitSigned, commitSigner, sshPublicKey, writeAllowedSigners } from '../src/signing.js';
 
@@ -224,6 +224,45 @@ describe('cutoffs for keys no longer a person’s (0066, step 4)', () => {
     // A cutoff's heads are signed with the record: changed after, not a record.
     const r = (await id.records()).find((x) => x.kind === 'revoke-key')!;
     expect(readRecord({ ...r, heads: ['ef'.repeat(20)] })).toBeNull();
+  });
+});
+
+describe('trustees (0066, step 6)', () => {
+  const file = () => join(mkdtempSync(join(tmpdir(), 'kuraa-person-')), 'person.json');
+
+  it('replace a lost identity’s key together, as many as it takes; a workspace counts it by their keys', async () => {
+    const [boFile, adaFile, cyFile, deeFile, newFile] = [file(), file(), file(), file(), file()];
+    const boP = await createPerson('Bo', boFile);
+    const adaP = await createPerson('Ada', adaFile);
+    const cyP = await createPerson('Cy', cyFile);
+    await createPerson('Dee', deeFile);
+    // Bo names Ada and Cy, any two of them (with his recovery key, as a recovery does).
+    const named = await nameTrustees((await recoveryLine(boFile))!, { threshold: 2, ids: [adaP.id, cyP.id] }, [], boFile);
+    expect(trusteesOf(named)).toEqual({ threshold: 2, ids: [adaP.id, cyP.id].sort() });
+    // Both his keys are lost. On a new computer, he asks them.
+    const { line, trustees } = await askTrustees(named.events, 'Bo', [], newFile);
+    expect(trustees.threshold).toBe(2);
+    expect(readTrusteeAsk(line)).toMatchObject({ name: 'Bo', id: boP.id });
+    const fromAda = await vouchForAsk(line, adaFile);
+    await expect(vouchForAsk(line, deeFile)).rejects.toThrow('not one of Bo’s trustees');
+    await expect(completeTrustees([fromAda], newFile)).rejects.toThrow('It takes 2');
+    const fromCy = await vouchForAsk(line, cyFile);
+    const back = await completeTrustees([fromAda, fromCy], newFile);
+    expect(back.id).toBe(boP.id);
+    expect(await recoveryState(newFile)).toBe('here');
+    // A workspace that knows Ada's and Cy's logs counts it; one that knew of other keys for them would not.
+    const { id } = repo();
+    const ws = await id.found();
+    await id.addMember(hex(bo), 'bo');
+    const events = (p: { id: string; events: KeyEvent[] }) => p.events.map((e) => signRecord({ kind: 'key-event', workspace: ws.id, subject: p.id, event: e }, bo));
+    await id.takeRecords([...events(adaP), ...events(cyP), ...events(back)]);
+    expect((await id.identityState(boP.id))!.current).toBe(back.publicKey.toString('hex'));
+    const { id: other } = repo();
+    const ws2 = await other.found();
+    await other.addMember(hex(bo), 'bo');
+    await other.takeRecords(back.events.map((e) => signRecord({ kind: 'key-event', workspace: ws2.id, subject: boP.id, event: e }, bo)));
+    // Without the trustees' logs, the trustee rotation waits: Bo's key there is the one he named trustees with.
+    expect((await other.identityState(boP.id))!.current).toBe(named.publicKey.toString('hex'));
   });
 });
 

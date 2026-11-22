@@ -35,6 +35,12 @@
 //   by whoever made it, or by the workspace's admins. Files not in a space are
 //   the workspace's: everyone in it reads them.
 //
+// - verifier: a server whose attestations count here (attest.ts, step 6): its
+//   key and where it is; an admin's to add, or take away (with no address).
+//
+// Anywhere a person can be named (a group, a rule, an audience), `email:<address>`
+// names whoever holds an attestation of that address by a verifier counted here.
+//
 // Groups: `workspace` (everyone in it), and any an admin of the workspace makes
 // by putting someone in it. A group may hold people (identity IDs) and, as
 // members, other groups (`group:<name>`).
@@ -51,7 +57,8 @@ export type PolicyOp =
   | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string }
   | { t: 'seal'; geneses: string[] }
   | { t: 'rule'; path: string; by: string[] }
-  | { t: 'space'; id: string; audience: string[] };
+  | { t: 'space'; id: string; audience: string[] }
+  | { t: 'verifier'; key: string; url: string };
 
 /** A policy operation as a record carries it (records.ts, kind `policy`). */
 export interface PolicyEntry {
@@ -82,6 +89,7 @@ function encodeOp(op: PolicyOp): string {
     case 'seal': return ['seal', op.geneses.join(',')].join('\0');
     case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
     case 'space': return ['space', op.id, op.audience.join(',')].join('\0');
+    case 'verifier': return ['verifier', op.key, op.url].join('\0');
   }
 }
 
@@ -109,8 +117,12 @@ const sortedUnique = (list: unknown, test: RegExp): string[] | null => {
   return s.join() === (list as string[]).join() ? s : null;
 };
 
-const whoTest = /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39})$/;
-const writerTest = /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/;
+const emailEntry = 'email:[^\\s@,]{1,64}@[^\\s@,]{1,190}\\.[^\\s@,.A-Z]{2,63}';
+const whoTest = new RegExp(`^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|${emailEntry})$`);
+const writerTest = new RegExp(`^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins|${emailEntry})$`);
+
+/** Whether a string names someone in a group, rule or audience: an identity, a group, the admins, or an email (step 6). */
+export const isWriter = (w: string) => writerTest.test(w);
 
 /** Whether a path is one a rule can name: `''` (everything), `dir/` (a folder), or a file; relative, with no `.` or `..` parts. */
 export function isRulePath(path: string): boolean {
@@ -155,6 +167,9 @@ export function readOp(v: unknown): PolicyOp | null {
       const audience = sortedUnique(o.audience, writerTest);
       return typeof o.id === 'string' && /^[0-9a-f]{32}$/.test(o.id) && audience && audience.length ? { t: 'space', id: o.id, audience } : null;
     }
+    case 'verifier':
+      return typeof o.key === 'string' && hexKey.test(o.key) && typeof o.url === 'string' && o.url.length <= 500 && (o.url === '' || /^https?:\/\/\S+$/.test(o.url))
+        ? { t: 'verifier', key: o.key, url: o.url } : null;
     default:
       return null;
   }
@@ -174,6 +189,10 @@ export interface PolicyContext {
   pin: string | null;
   /** The person (identity ID) a signing key is, as the records show; null if no one's. */
   personOf(signingKey: string): string | null;
+  /** The emails attested of a person by verifiers this workspace counts (step 6). */
+  claimsOf?: (id: string) => string[];
+  /** Every email attested of anyone by those verifiers (who has been invited by email and is in: step 6). */
+  claimed?: Set<string>;
 }
 
 export class Policy {
@@ -198,11 +217,22 @@ export class Policy {
     readonly cutoffs = new Map<string, string[]>(),
     /** Spaces (step 5): ID → who may read it, and who made it. */
     readonly spaces = new Map<string, { audience: string[]; by: string }>(),
+    /** Verifiers whose attestations count here (step 6): key → where it is. */
+    readonly verifiers = new Map<string, string>(),
+    /** The emails attested of a person (by verifiers counted here). */
+    readonly claimsOf: (id: string) => string[] = () => [],
+    /** Every email attested of anyone (by verifiers counted here). */
+    readonly claimed = new Set<string>(),
   ) {}
+
+  /** Whether an entry naming someone (`email:` included) names this person. */
+  private names(entry: string, id: string): boolean {
+    return entry === id || (entry.startsWith('email:') && this.claimsOf(id).includes(entry.slice(6)));
+  }
 
   /** Whether an audience entry (a person, `group:<name>`, `admins`) holds a person. */
   private holds(entry: string, id: string): boolean {
-    return entry === id || (entry === 'admins' && this.isAdmin(id)) || (entry.startsWith('group:') && this.role(id, entry.slice(6)) !== null);
+    return this.names(entry, id) || (entry === 'admins' && this.isAdmin(id)) || (entry.startsWith('group:') && this.role(id, entry.slice(6)) !== null);
   }
 
   /**
@@ -212,7 +242,7 @@ export class Policy {
    */
   mayRead(id: string | null, space: string | null): boolean {
     if (!this.founded) return space === null;
-    if (!id || !this.groups.get(WORKSPACE)?.has(id)) return false;
+    if (!id || !this.role(id)) return false;
     if (space === null) return true;
     const s = this.spaces.get(space);
     return !!s && s.audience.some((e) => this.holds(e, id));
@@ -220,7 +250,7 @@ export class Policy {
 
   /** Everyone in the workspace who may read a space now: for whether one audience holds another (what code may read). */
   readers(space: string | null): Set<string> {
-    return new Set([...(this.groups.get(WORKSPACE)?.keys() ?? [])].filter((id) => !id.startsWith('group:') && this.mayRead(id, space)));
+    return new Set([...(this.groups.get(WORKSPACE)?.keys() ?? [])].filter((id) => /^[0-9a-f]{64}$/.test(id) && this.mayRead(id, space)));
   }
 
   /** The rule that counts for a file: the most specific path that holds it; null if none. */
@@ -238,7 +268,7 @@ export class Policy {
     const rule = this.ruleFor(path);
     if (!rule) return true;
     if (!id) return false;
-    return rule.by.some((w) => w === id || (w === 'admins' && this.isAdmin(id)) || (w.startsWith('group:') && this.role(id, w.slice(6)) !== null));
+    return rule.by.some((w) => this.names(w, id) || (w === 'admins' && this.isAdmin(id)) || (w.startsWith('group:') && this.role(id, w.slice(6)) !== null));
   }
 
   /** Whether there is a policy at all (a genesis that counts). */
@@ -248,7 +278,7 @@ export class Policy {
 
   /** A person's role in a group: by their own entry, or (as a member) through a group in it. Outside the workspace, in none. */
   role(id: string, group: string = WORKSPACE): Role | null {
-    if (group !== WORKSPACE && !this.groups.get(WORKSPACE)?.has(id)) return null;
+    if (group !== WORKSPACE && !this.roleIn(id, WORKSPACE, new Set())) return null;
     return this.roleIn(id, group, new Set());
   }
 
@@ -257,7 +287,7 @@ export class Policy {
     seen.add(group);
     const g = this.groups.get(group);
     if (!g) return null;
-    const own = g.get(id);
+    const own = g.get(id) ?? [...g].find(([who]) => who.startsWith('email:') && this.names(who, id))?.[1];
     if (own) return own;
     for (const who of g.keys()) if (who.startsWith('group:') && this.roleIn(id, who.slice(6), seen)) return 'member';
     return null;
@@ -269,7 +299,14 @@ export class Policy {
 
   /** The people (not groups) with an entry in a group, and their roles. */
   people(group: string = WORKSPACE): { id: string; role: Role }[] {
-    return [...(this.groups.get(group) ?? new Map<string, Role>())].filter(([who]) => !who.startsWith('group:')).map(([id, role]) => ({ id, role }));
+    return [...(this.groups.get(group) ?? new Map<string, Role>())].filter(([who]) => /^[0-9a-f]{64}$/.test(who)).map(([id, role]) => ({ id, role }));
+  }
+
+  /** People named by email in a group whom no identity here is attested to be yet: invited, not (yet) in (step 6). */
+  invited(group: string = WORKSPACE): { email: string; role: Role }[] {
+    return [...(this.groups.get(group) ?? new Map<string, Role>())]
+      .filter(([who]) => who.startsWith('email:') && !this.claimed.has(who.slice(6)))
+      .map(([who, role]) => ({ email: who.slice(6), role }));
   }
 
   /** A short name for the policy as it is: the hash of its heads (what a commit made under it names, later). */
@@ -316,6 +353,7 @@ interface State {
   groups: Map<string, Map<string, Role>>;
   rules: Map<string, string[]>;
   spaces: Map<string, { audience: string[]; by: string }>;
+  verifiers: Map<string, string>;
   usedLinks: Set<string>;
   seal: string[] | null;
   applied: string[];
@@ -331,30 +369,31 @@ interface Removal {
   wasAdmin: boolean;
 }
 
-const view = (s: State, geneses: string[] = []) => new Policy(s.groups, geneses, s.applied, [], s.usedLinks, !!s.seal, s.rules, [], new Map(), s.spaces);
+const view = (s: State, claims?: (id: string) => string[]) => new Policy(s.groups, [], s.applied, [], s.usedLinks, !!s.seal, s.rules, [], new Map(), s.spaces, s.verifiers, claims);
 
 function freshState(order: PolicyEntry[], counted: Set<string>): State {
   const groups = new Map<string, Map<string, Role>>([[WORKSPACE, new Map()]]);
   for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) groups.get(WORKSPACE)!.set(id, 'admin');
-  return { groups, rules: new Map(), spaces: new Map(), usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
+  return { groups, rules: new Map(), spaces: new Map(), verifiers: new Map(), usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
 }
 
 const adminCount = (s: State) => [...s.groups.get(WORKSPACE)!].filter(([, r]) => r === 'admin').length;
 
 /** Whether `by` may make operation `e`, with the policy as `s` (its past) has it. */
 function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): boolean {
-  const now = view(s);
+  const now = view(s, ctx.claimsOf);
   const ws = s.groups.get(WORKSPACE)!;
   const op = e.op;
   switch (op.t) {
     case 'grant': {
       const nested = op.who.startsWith('group:');
+      const byEmail = op.who.startsWith('email:');
       if (nested && (op.group === WORKSPACE || op.role !== 'member' || op.who.slice(6) === op.group)) return false;
       // A new group is the workspace's admins' to make.
       const may = s.groups.has(op.group) ? now.isAdmin(by, op.group) : now.isAdmin(by);
       const demotesLast = op.group === WORKSPACE && ws.get(op.who) === 'admin' && op.role !== 'admin' && adminCount(s) === 1;
-      // Into another group, only someone in the workspace.
-      return may && !demotesLast && (op.group === WORKSPACE || nested || ws.has(op.who));
+      // Into another group, only someone in the workspace (or named by email: they come in by being attested).
+      return may && !demotesLast && (op.group === WORKSPACE || nested || byEmail || ws.has(op.who));
     }
     case 'revoke': {
       const may = now.isAdmin(by, op.group) || op.who === by;
@@ -369,11 +408,12 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
     case 'seal':
       return !s.seal && now.isAdmin(by);
     case 'rule':
+    case 'verifier':
       return now.isAdmin(by);
     case 'space': {
       // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
       const had = s.spaces.get(op.id);
-      if (!ws.has(by)) return false;
+      if (!now.role(by)) return false;
       const holdsMaker = op.audience.some((e) => e === by || (e === 'admins' && now.isAdmin(by)) || (e.startsWith('group:') && now.role(by, e.slice(6)) !== null));
       return had ? had.by === by || now.isAdmin(by) : holdsMaker;
     }
@@ -393,8 +433,8 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
   const ws = group(WORKSPACE);
   switch (op.t) {
     case 'grant':
-      // Into another group, only someone (still) in the workspace.
-      if (op.group !== WORKSPACE && !op.who.startsWith('group:') && !ws.has(op.who)) return false;
+      // Into another group, only someone (still) in the workspace, or named by email.
+      if (op.group !== WORKSPACE && !op.who.startsWith('group:') && !op.who.startsWith('email:') && !ws.has(op.who)) return false;
       group(op.group).set(op.who, op.role);
       return true;
     case 'revoke':
@@ -421,6 +461,10 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
       return true;
     case 'space':
       s.spaces.set(op.id, { audience: op.audience, by: s.spaces.get(op.id)?.by ?? by });
+      return true;
+    case 'verifier':
+      if (op.url) s.verifiers.set(op.key, op.url);
+      else s.verifiers.delete(op.key);
       return true;
     case 'genesis':
       return false;
@@ -554,5 +598,5 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
     if (!m || m.group !== WORKSPACE || m.kind !== 'out' || state.groups.get(WORKSPACE)!.has(m.person) || e.op.t !== 'revoke') continue;
     cutoffs.set(m.person, [...new Set([...(cutoffs.get(m.person) ?? []), ...(e.op.cutoff ?? [])])].sort());
   }
-  return { policy: new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.rules, disputes, cutoffs, state.spaces), seal: state.seal };
+  return { policy: new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.rules, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed), seal: state.seal };
 }

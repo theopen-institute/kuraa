@@ -14,6 +14,7 @@
 import { WaitingForPolicy, describeOutcome, type Host } from '../host.js';
 import { RESOLVED_TRAILER, gate, type GateResult } from './gate.js';
 import { suggestions, type Suggestion } from './suggestions.js';
+import { emailOf } from './attest.js';
 import { MERGE_VERSION, isAncestor } from '../merging.js';
 import { randomBytes } from 'node:crypto';
 import { PEER_SPACES } from './node.js';
@@ -151,6 +152,8 @@ export interface RulesInfo {
   admin: boolean;
   rules: { path: string; by: string[] }[];
   groups: { name: string; entries: { who: string; role: Role; name: string | null }[] }[];
+  /** Verifiers whose attestations count here (0066, step 6). */
+  verifiers: { key: string; url: string }[];
 }
 
 /** The workspace's people, by its policy (0066). */
@@ -159,7 +162,9 @@ export interface PeopleInfo {
   founded: boolean;
   /** Whether this person may invite people, remove devices and change who is in it. */
   admin: boolean;
-  people: { id: string; role: Role; name: string | null; devices: string[]; you: boolean }[];
+  people: { id: string; role: Role; name: string | null; devices: string[]; you: boolean; emails: string[] }[];
+  /** People invited by email who are not in yet (0066, step 6). */
+  invited: { email: string; role: Role }[];
   /** Admins who took each other out at the same time, which would have left none, so neither removal stood: their names. */
   disputes: string[][];
 }
@@ -507,7 +512,13 @@ export class Peers {
    * first device it lets in uses it up) or anyone with it, until it expires
    * (`hours`; null: never) or is revoked.
    */
-  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string }): Promise<string> {
+  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string; email?: string }): Promise<string> {
+    // For someone by their email (0066, step 6): their place in the group waits for an attestation of that address.
+    if (o.email) {
+      const email = emailOf(o.email);
+      if (!email) throw new NotAllowed('Not an email address');
+      await this.adminOp({ t: 'grant', group: o.group ?? WORKSPACE, who: `email:${email}`, role: o.role ?? 'member' });
+    }
     // With the ways in besides the DHT this device knows: relays named, servers that take TCP (0053).
     // Putting its holder in a group, signed by this person (0066): the workspace, as a member, unless it says otherwise.
     const person = await this.node.person();
@@ -574,7 +585,9 @@ export class Peers {
     return {
       founded: policy.founded,
       admin: policy.founded ? policy.isAdmin(me) : true,
-      people: policy.people().map((p) => ({ id: p.id, role: p.role, name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
+      people: await Promise.all(policy.people().map(async (p) => ({ id: p.id, role: p.role, name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me, emails: await id.emailsOf(p.id) }))),
+      // Invited by email, and not in yet (no one attested to have that address): step 6.
+      invited: policy.invited(),
       // Admins who took each other out at once, which would have left none: neither stood (step 4).
       disputes: policy.disputes.map((d) => d.people.map((id) => known.get(id)?.name ?? `${id.slice(0, 8)}…`)),
     };
@@ -716,6 +729,7 @@ export class Peers {
     return {
       admin: policy.founded ? policy.isAdmin(me) : false,
       rules: [...policy.rules].map(([path, by]) => ({ path, by })).sort((a, b) => (a.path < b.path ? -1 : 1)),
+      verifiers: [...policy.verifiers].map(([key, url]) => ({ key, url })),
       groups: [...policy.groups].filter(([g]) => g !== WORKSPACE).map(([name, entries]) => ({
         name,
         entries: [...entries].map(([who, role]) => ({ who, role, name: who.startsWith('group:') ? who.slice(6) : names.get(who) ?? null })),
@@ -723,7 +737,28 @@ export class Peers {
     };
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' }>): Promise<void> {
+  /** Count a verifier's attestations here (an admin's to do): its key, asked of it at its address (verifier.ts). */
+  async addVerifier(url: string): Promise<RulesInfo> {
+    const clean = url.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/\S+$/.test(clean)) throw new NotAllowed('A verifier is a server’s address (https://…)');
+    let key: unknown;
+    try {
+      key = ((await (await fetch(`${clean}/verify`)).json()) as { key?: unknown }).key;
+    } catch (e) {
+      throw new NotAllowed(`Could not ask ${clean}: ${(e as Error).message}`);
+    }
+    if (typeof key !== 'string' || !/^[0-9a-f]{64}$/.test(key)) throw new NotAllowed(`${clean} is not a verifier`);
+    await this.adminOp({ t: 'verifier', key, url: clean });
+    return this.rules();
+  }
+
+  /** Stop counting a verifier's attestations here. */
+  async removeVerifier(key: string): Promise<RulesInfo> {
+    await this.adminOp({ t: 'verifier', key, url: '' });
+    return this.rules();
+  }
+
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());

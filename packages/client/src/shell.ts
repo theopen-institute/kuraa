@@ -52,6 +52,10 @@ export interface PersonInfo {
     key: string;
     /** Whether its recovery key is still on this computer, to copy somewhere safe ('here'), or not ('saved'). */
     recovery: 'here' | 'saved';
+    /** Its trustees, if it named any (0066, step 6). */
+    trustees?: { threshold: number; ids: string[] } | null;
+    /** Its email addresses, as verifiers checked them (step 6). */
+    emails?: { email: string; verifier: string; expires: number }[];
   } | null;
   /** Your signing keys the workspace knows of (this computer's among them): a lost computer's to revoke. */
   keys: { key: string; thisComputer: boolean }[];

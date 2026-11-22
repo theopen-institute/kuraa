@@ -1,6 +1,6 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles), 3 (write rules, suggestions), 4 (changes at the same time, cutoffs, merges checked) and 5 (who reads what: spaces); see *Built so far* at the end.**
+**Status: built, in the order below, but for step 6's server-held identities, passkeys and sequencer, which wait on a design for a server many people sign in to (see *Built so far* at the end).**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
@@ -546,3 +546,44 @@ differ by person, and how usable plain git is with only the public layer.
   member); sharing a file's history when its audience widens; two spaces with one path; outputs of
   a space's documents on other devices after the fact; moving files between audiences from the
   command line.
+
+### 6 · Attestations, trustees, escrow (`peers/attest.ts`, `verifier.ts`, `peers/kel.ts`)
+
+- **Trustees.** A rotation may name trustees (`trustees`: identities, and how many it takes); so
+  naming them takes the recovery key, as a recovery does (with the identity's key alone, a thief
+  could name their own). With both keys lost, a *trustee rotation* (`trot`) replaces the key: a
+  new key (signing it) and recovery key, signed by as many trustees as the threshold, each with
+  their identity's key now. A device counts one only where it holds the trustees' logs and the
+  signatures are by their keys there (until then, the identity stays as it was); it competes with
+  an ordinary rotation at the same place like any other (both: in dispute). The person's own copy
+  of their log takes trustee rotations as they are. In Settings › You: name them (with the recovery
+  key); ask them (on a computer in a workspace that knows the identity: a line to send each); as a
+  trustee, read a request and vouch (a line back, after making sure it is them); and complete
+  with the answers. HTTP: `/api/person/trustees`, `…/ask`, `…/preview`, `…/vouch`, `…/complete`.
+- **Attestations** (`attest`: an identity, a claim `email:<address>`, the verifier's key, when, and
+  until when, signed by the verifier) travel as `attest` records, passed on by any member. A
+  workspace counts one only if its policy names the verifier (`verifier`: its key and address, an
+  admin's to add or take away; the key is asked of the server at its address) and it has not
+  expired. The policy is evaluated once for its verifiers, then again with the emails they attest.
+- **Email entries.** A group, rule or audience may name `email:<address>`, which names whoever is
+  attested to have it. **Invite people…** takes an address: the link's holder comes in as the link
+  says, and the role kept for the address applies once their address is checked, whichever link
+  they used. People show their checked addresses; addresses invited and not yet in are listed as
+  such. Attestations are seen by every member of each workspace their person is in (the address in
+  full: not hashed, for now).
+- **A verifier** is a kuraa server started with `--verify-emails "<mail command>"` (the message,
+  headers first, on the command's input: `sendmail -t`, say), `--verifier-name`, and `--escrow` to
+  keep recovery keys. Its routes, `/verify` and `/verify/…`, are public, each guarded by what it
+  asks for: an identity's signature (with its log) to have a code sent for one of its claims, the
+  code (six digits, fifteen minutes, five tries, one per address each half minute) to have the
+  attestation (a year). Its key is kept beside the settings (`verifier/verifier.json`).
+- **Escrow.** The recovery key, while it is on the computer, is locked with a passphrase (scrypt,
+  AES-GCM) on the person's own computer, and kept by a verifier that checked their address (asked
+  with the identity's key); then removed from the computer. A code sent to the address returns
+  what is kept for it (the same answer whether or not anything is), which only the passphrase opens:
+  the recovery key, for **Recover your identity**. Requiring more than email (a trustee as well) is
+  not offered yet.
+- **Not built (they wait on a design for a server many people sign in to, which 0047 left for
+  later):** identities a server holds for people who only use a browser, and taking custody of
+  them; passkeys to keep a browser's signing key; a server as sequencer of policy changes. A server
+  can already be an always-on member, a verifier, and a keeper of locked recovery keys.

@@ -304,7 +304,18 @@ history of its own in the repository (`refs/spaces/…`), which devices send onl
 of the people who may read it, so no one else's device ever has it, nor its history. On your
 device its files lie in the folder with the rest, marked with a lock in the file list, and kept
 out of plain git's way (`.git/info/exclude`). Code run for a document cannot see files fewer
-people read than the document, and nothing of a space goes to the online copy. This is a signed policy every device holds alike, so no device takes
+people read than the document, and nothing of a space goes to the online copy.
+
+**Email, trustees and getting your identity back** (Settings › You). A kuraa server can check
+people's email addresses: `pnpm host --verify-emails "sendmail -t" --verifier-name "Lab server"`
+sends a code to the address and signs, once it is typed in, that it is theirs; add `--escrow` to
+keep recovery keys locked with a passphrase it never sees, given back for a code sent to the
+address. A workspace counts the checks of the servers its admins name (Workspace settings › Who
+can change what › Email checked by); then people are known by their address, and **Invite
+people…** can keep a place for one (`email:` entries name people in groups, rules and audiences
+too). Your **trustees**, named with your recovery key, can together give you your identity back
+if both its keys are lost: you send each a line, each vouches in their own app, and their answers
+complete it. This is a signed policy every device holds alike, so no device takes
 a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
 workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
 by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person

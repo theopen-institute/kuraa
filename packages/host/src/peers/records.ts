@@ -29,8 +29,9 @@
 import crypto from 'hypercore-crypto';
 import { eventHash, eventIdentity, readEvent, type KeyEvent } from './kel.js';
 import { entrySigned, readOp, type PolicyEntry, type PolicyOp } from './policy.js';
+import { readAttestation, type Attestation } from './attest.js';
 
-export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event' | 'policy';
+export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event' | 'policy' | 'attest';
 
 export interface MemberRecord {
   v: 1;
@@ -47,6 +48,8 @@ export interface MemberRecord {
   personKey?: string;
   /** key-event: one event of the identity's log (kel.ts), as it was signed. */
   event?: KeyEvent;
+  /** attest: a verifier's statement about an identity (attest.ts), passed on as it was signed. */
+  attestation?: Attestation;
   /** revoke-key: the commits (branch tips) its maker's device had when it said so: what the key signed among them still counts (its cutoff, 0066). */
   heads?: string[];
   /** policy: the operation (policy.ts), the operations its maker had seen, and the signing key that signed it (`proof`). */
@@ -80,7 +83,8 @@ function message(r: Omit<MemberRecord, 'sig'>): Buffer {
   // A policy operation is signed in itself, and named by its hash (the subject), which covers it.
   const policy = r.signer !== undefined ? ['signer', r.signer] : [];
   const heads = r.heads !== undefined ? ['heads', r.heads.join(',')] : [];
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy, ...heads].join('\0'));
+  const attestation = r.attestation !== undefined ? ['attestation', r.attestation.sig] : [];
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy, ...heads, ...attestation].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
@@ -110,7 +114,7 @@ export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { 
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event', 'policy'];
+  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event', 'policy', 'attest'];
   if (r.v !== 1 || !kinds.includes(r.kind as RecordKind) || typeof r.workspace !== 'string' || typeof r.subject !== 'string'
     || typeof r.by !== 'string' || !hexKey.test(r.by) || typeof r.at !== 'number' || typeof r.sig !== 'string' || !/^[0-9a-f]{128}$/.test(r.sig)) return null;
   if (r.name !== undefined && typeof r.name !== 'string') return null;
@@ -128,6 +132,9 @@ export function readRecord(v: unknown): MemberRecord | null {
   if ((kind === 'policy') !== (op !== null) || (r.op !== undefined && !op)) return null;
   if (op && (!Array.isArray(r.parents) || !r.parents.every((p) => typeof p === 'string') || typeof r.signer !== 'string' || typeof r.proof !== 'string')) return null;
   if (!op && (r.parents !== undefined || r.signer !== undefined)) return null;
+  const attestation = r.attestation !== undefined ? readAttestation(r.attestation) : null;
+  if ((kind === 'attest') !== (attestation !== null) || (r.attestation !== undefined && !attestation)) return null;
+  if (attestation && attestation.id !== r.subject) return null;
   if (r.heads !== undefined && (kind !== 'revoke-key' || !Array.isArray(r.heads) || r.heads.length > 1000 || !r.heads.every((h) => typeof h === 'string' && /^[0-9a-f]{40,64}$/.test(h)))) return null;
   const aboutLink = kind === 'revoke-link' || kind === 'link';
   if (!aboutLink && !hexKey.test(r.subject)) return null;
@@ -147,6 +154,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(event ? { event } : {}),
     ...(op ? { op, parents: r.parents as string[], signer: r.signer as string } : {}),
     ...(r.heads !== undefined ? { heads: r.heads as string[] } : {}),
+    ...(attestation ? { attestation } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
     ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
   };

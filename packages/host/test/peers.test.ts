@@ -418,7 +418,7 @@ describe('equal members, and forks', () => {
     const dirA = repo();
     const a = await start(dirA, { person: ada });
     // A workspace made now: its genesis names Ada its admin, and is pinned.
-    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'admin', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true }]);
+    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'admin', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true, emails: [] }]);
     const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
     dirs.push(parent);
     const dirB = join(parent, 'notes');

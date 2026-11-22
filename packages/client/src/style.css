@@ -555,6 +555,14 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .person-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .person-keys li { display: flex; gap: 8px; align-items: center; }
 .rule-form { display: grid; gap: 6px; }
+.person-more h4 { margin: 10px 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.person-more textarea { width: 100%; box-sizing: border-box; font: 12px var(--mono, ui-monospace, monospace); }
+.small-number { width: 3.5em; }
+.person-more input:not([type=checkbox]):not([type=radio]), .person-more select, .person-row input, .person-row select { font: 13px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; min-width: 0; }
+.person-more .person-row label.muted { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+.person-more .person-row { align-items: center; }
+.person-row button { white-space: nowrap; }
+.person-more .menu-facts { margin: 2px 0; }
 .tree-readers { flex: none; align-self: center; margin-left: 5px; color: var(--muted); }
 .readers .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .readers-who { display: grid; gap: 4px; margin: 0 0 0 22px; padding: 0; border: 0; }

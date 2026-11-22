@@ -37,6 +37,9 @@ export interface JoinOptions {
   keep?: boolean;
   /** Each step, as it is reached (and again, while looking, when more is known about the network). */
   progress?: (p: JoinProgress) => void;
+  /** Who joins, and this computer's signing key for them: the ones this computer keeps, unless given (tests). */
+  person?: PeerOptions['person'];
+  signing?: PeerOptions['signing'];
 }
 
 /**
@@ -75,7 +78,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   // Ways in besides the DHT the link names (0053): servers that take TCP, and relays.
   const joinAs = l.topic ? { id: l.workspace.id, forkedFrom: l.workspace.forkedFrom, topic: l.topic, dial: [l.issuer.key, ...l.through], tcp: l.hints?.tcp ?? [] } : undefined;
   const relays = [...new Set([...(o.relays ?? []), ...(l.hints?.relays ?? [])])];
-  const node = new PeerNode({ dir, git, stateDir, bootstrap: o.bootstrap, relays, lan: o.lan, branch: async () => 'main', log, joining: true, ticket: link, joinAs });
+  const node = new PeerNode({ dir, git, stateDir, bootstrap: o.bootstrap, relays, lan: o.lan, branch: async () => 'main', log, joining: true, ticket: link, joinAs, person: o.person, signing: o.signing });
   let said = '';
   const tell = (p: JoinProgress) => {
     const now = JSON.stringify(p);
@@ -86,6 +89,8 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
     if (p.step === 'looking' && p.slowNetwork) log('this network makes direct connections take a few tries: this may take a minute or two');
   };
   if (l.workspace.secret) await node.identity.adopt({ ...l.workspace, secret: l.workspace.secret });
+  // The workspace's genesis, as the link's grant names it: no other policy counts here (0066).
+  if (l.grant?.genesis) await node.identity.setPin(l.grant.genesis);
   if (o.name) await node.identity.setDeviceName(o.name);
   // The device that made the link is the first to look for.
   await node.identity.addMember(l.issuer.key, l.issuer.name);

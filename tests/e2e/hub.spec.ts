@@ -174,6 +174,9 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     await page.getByTestId('invite-button').click();
     const dialog = page.getByTestId('invite');
     await expect(dialog).toContainText('Making one turns on syncing');
+    // As a member, unless the link says admin (0066).
+    await expect(dialog).toContainText('they can read and change everything');
+    await dialog.getByTestId('invite-admin').check();
     await expect(dialog).toContainText('the same say as you');
     await dialog.getByTestId('invite-anyone').click();
     await dialog.getByTestId('invite-expiry').selectOption({ label: 'in a day' });

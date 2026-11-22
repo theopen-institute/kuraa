@@ -33,12 +33,15 @@ import { joinWorkspace } from './join.js';
 import { useDht } from './dht.js';
 import { Relay, keptRelayKey } from './relay.js';
 import { sshPublicKey } from '../signing.js';
+import { WORKSPACE } from './policy.js';
+import type { Person } from './person.js';
+import type { KeyPair } from '../keys.js';
 import { createPerson, exportPerson, importPerson, personFile, readPerson, readRecoveryLine, recoverPerson, recoveryLine, recoverySaved, recoveryState, revokeKey, signingFile, signingKey } from './person.js';
 
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
 
-export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
+export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'remove-person', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
 
 /** The ways into a workspace besides the DHT this device knows (node.ts keeps them in hints.json), for an invite link. */
 async function storedHints(dir: string, id: Identity, relays: string[]): Promise<LinkHints> {
@@ -50,6 +53,29 @@ async function storedHints(dir: string, id: Identity, relays: string[]): Promise
   const members = new Set((await id.members()).map((m) => m.key));
   const tcp = Object.entries(h.tcp ?? {}).filter(([k]) => members.has(k)).flatMap(([k, as]) => as.map((a) => `${k}@${a}`));
   return { relays: [...new Set([...relays, ...(h.relays ?? [])])].filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4), tcp: tcp.slice(0, 4) };
+}
+
+/**
+ * You, in this workspace: your identity (made, as the app makes it, if this
+ * computer has none) and this computer's signing key, said here; and the
+ * workspace's policy written down if it has none (`fresh`: just made here).
+ */
+async function asPerson(git: Git, id: Identity, fresh: boolean): Promise<{ person: Person; key: KeyPair }> {
+  const person = (await readPerson()) ?? (await createPerson((await git.run(['config', 'user.name'], { allowFail: true })).stdout.trim() || (await id.deviceName())));
+  const key = await signingKey();
+  await id.signsWith(key);
+  await id.vouch(person, key);
+  await id.ensureGenesis(person.id, key, fresh);
+  return { person, key };
+}
+
+/** A person of the workspace, by their name or the start of their ID. */
+async function personNamed(id: Identity, name: string): Promise<string> {
+  const people = (await id.policy()).people();
+  const named = await id.people();
+  const hits = people.filter((p) => p.id.startsWith(name) || named.find((n) => n.key === p.id)?.name === name);
+  if (hits.length !== 1) throw new Error(hits.length ? `More than one person is ${name}: give the start of their ID (kuraa-host people)` : `No one in this workspace is ${name} (kuraa-host people lists them)`);
+  return hits[0]!.id;
 }
 
 async function identityAt(dir: string): Promise<{ git: Git; id: Identity }> {
@@ -71,6 +97,7 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       name: { type: 'string' },
       bootstrap: { type: 'string', multiple: true },
       relay: { type: 'string', multiple: true },
+      admin: { type: 'boolean', default: false },
     },
   });
   const [given, arg, ...more] = positionals;
@@ -78,18 +105,22 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
   const say = (m: string) => console.log(m);
   switch (command) {
     case 'invite': {
-      const { id } = await identityAt(values.dir!);
-      if (!(await id.workspace())) await id.found();
+      const { git, id } = await identityAt(values.dir!);
+      const fresh = !(await id.workspace());
+      if (fresh) await id.found();
+      const { key } = await asPerson(git, id, fresh);
       const hours = values.forever ? null : Number(values.hours ?? 168);
       if (hours !== null && !(hours > 0)) throw new Error('--hours must be a number of hours');
       // `link` was the name of a link for anyone.
       const once = !values.anyone && given !== 'link';
       // With the ways in this device knows besides the DHT (0053): servers members said take TCP, relays named.
-      const link = await id.createLink(hours, once, await storedHints(values.dir!, id, values.relay ?? []));
+      // As a member, unless --admin (0066).
+      const role = values.admin ? 'admin' : 'member';
+      const link = await id.createLink(hours, once, await storedHints(values.dir!, id, values.relay ?? []), { key, role });
       say(link);
       const until = hours === null ? 'until it is revoked' : `for ${hours} hours, or until it is revoked`;
       say(`\n${once ? `For one person: the first device it lets in uses it up. It works ${until}.` : `Anyone with this link can join, ${until}.`}`);
-      say('They join as a full member, able to read and change everything, and to invite and remove others:');
+      say(role === 'admin' ? 'They join as an admin, able to read and change everything, and to invite and remove others:' : 'They join as a member, able to read and change everything; only admins invite and remove others (--admin makes them one):');
       say('  kuraa-host join <link> --dir <new folder>');
       say('Any running device of the workspace can let them in.');
       say(`Share it only with people who may join. Revoke it: kuraa-host revoke-invite ${decodeLink(link).id}`);
@@ -159,10 +190,42 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       await id.setDeviceName(arg);
       return say(`This device is now called ${await id.deviceName()}.`);
     }
+    case 'people': {
+      const { id } = await identityAt(values.dir!);
+      const policy = await id.policy();
+      if (!policy.founded) return say('This workspace has no policy yet: every member has the same say. A running device writes it down.');
+      const named = await id.people();
+      for (const p of policy.people()) {
+        const n = named.find((x) => x.key === p.id);
+        say(`  ${n?.name ?? '(not yet known here)'} ${p.id.slice(0, 12)}…  ${p.role}${n?.devices.length ? `  devices ${n.devices.map((d) => d.slice(0, 8)).join(', ')}` : ''}`);
+      }
+      return;
+    }
+    case 'role': {
+      const role = more[0];
+      if (!arg || (role !== 'admin' && role !== 'member')) throw new Error('Usage: kuraa-host role <person> admin|member');
+      const { git, id } = await identityAt(values.dir!);
+      const { key } = await asPerson(git, id, false);
+      await id.adminOp({ t: 'grant', group: WORKSPACE, who: await personNamed(id, arg), role }, key);
+      return say(`Done: ${arg} is ${role === 'admin' ? 'an admin' : 'a member'} of this workspace. Other devices learn of it when they next meet this one.`);
+    }
+    case 'remove-person': {
+      if (!arg) throw new Error('Usage: kuraa-host remove-person <person>');
+      const { git, id } = await identityAt(values.dir!);
+      const { key } = await asPerson(git, id, false);
+      const who = await personNamed(id, arg);
+      const devices = (await id.people()).find((p) => p.key === who)?.devices ?? [];
+      await id.adminOp({ t: 'revoke', group: WORKSPACE, who }, key);
+      const members = new Set((await id.members()).map((m) => m.key));
+      for (const d of devices.filter((x) => members.has(x))) await id.removeMember(d);
+      if (devices.some((d) => members.has(d))) await id.newSecret();
+      return say(`Took ${arg} out of this workspace, with their devices. Other devices learn of it when they next meet this one.`);
+    }
     case 'remove-device': {
       const { id } = await identityAt(values.dir!);
       const m = (await id.members()).find((x) => x.name === arg || x.key === arg);
       if (!m) throw new Error(`No paired device called ${arg}`);
+      if (!(await id.mayManage((await id.deviceKey()).publicKey.toString('hex')))) throw new Error('Only an admin of this workspace can remove devices');
       await id.removeMember(m.key);
       // It knew the workspace's secret: a new one, so it can no longer find the others (0050).
       await id.newSecret();

@@ -21,7 +21,8 @@ import crypto from 'hypercore-crypto';
 import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
-import { aboutItself, byPerson, judge, passedOn, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
+import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
+import { evaluate, grantMessage, isGroupName, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
@@ -256,8 +257,9 @@ export class Identity {
       if (now && (now.at > r.at || (now.at === r.at && now.sig > r.sig))) return false;
       list = list.filter((x) => !(x.kind === r.kind && x.by === r.by));
     }
-    // An event of a person's identity, once, whoever passed it on.
-    if (passedOn(r.kind) && list.some((x) => x.kind === r.kind && x.event && eventHash(x.event) === eventHash(r.event!))) return false;
+    // An event of a person's identity, or a policy operation, once, whoever passed it on.
+    if (r.kind === 'key-event' && list.some((x) => x.kind === r.kind && x.event && eventHash(x.event) === eventHash(r.event!))) return false;
+    if (r.kind === 'policy' && list.some((x) => x.kind === r.kind && x.subject === r.subject)) return false;
     // What a person says about a key, once, whoever passed it on (a vouch: the latest): once for
     // each of their identity's keys, so what a key no longer theirs signs never pushes out what theirs did.
     if (byPerson(r.kind)) {
@@ -383,6 +385,107 @@ export class Identity {
     await this.decide('revoke-key', key, { person, personKey, proof });
   }
 
+  // The policy (policy.ts, 0066) -----------------------------------------------
+
+  /** The genesis this workspace is pinned to (made since policies, or joined by a link that names it); null: one from before. */
+  async pin(): Promise<string | null> {
+    return this.get('kuraa.genesis');
+  }
+
+  async setPin(genesis: string): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(genesis)) throw new Error('Not a genesis');
+    await this.git.run(['config', 'kuraa.genesis', genesis]);
+  }
+
+  /** The workspace's policy, as the operations on record make it. */
+  async policy(list?: MemberRecord[]): Promise<Policy> {
+    const records = list ?? (await this.records());
+    const ws = await this.workspace();
+    const w = this.who(records);
+    return evaluate(records.filter((r) => r.kind === 'policy' && r.workspace === ws?.id).map(policyEntry), {
+      workspace: ws?.id ?? '',
+      pin: await this.pin(),
+      personOf: (key) => w.personOf.get(key)?.key ?? null,
+    });
+  }
+
+  /** The devices whose person is an admin of the workspace; null if there is no policy yet. */
+  private async managers(list?: MemberRecord[]): Promise<Set<string> | null> {
+    const records = list ?? (await this.records());
+    const policy = await this.policy(records);
+    if (!policy.founded) return null;
+    const w = this.who(records);
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const out = new Set<string>();
+    for (const d of [self, ...(await this.members()).map((m) => m.key)]) {
+      const id = w.personOf.get(w.signsWith.get(d) ?? '')?.key ?? null;
+      if (policy.isAdmin(id)) out.add(d);
+    }
+    return out;
+  }
+
+  /** The person (identity ID) a device is, as its signing key's vouch says; null if none. */
+  async personIdOf(device: string): Promise<string | null> {
+    return (await this.personOf(device))?.key ?? null;
+  }
+
+  /** Whether a device's person is an admin of the workspace (or of `group`); with no policy yet, every member is (0038). */
+  async mayManage(device: string, group: string = WORKSPACE): Promise<boolean> {
+    const policy = await this.policy();
+    if (!policy.founded) return true;
+    return policy.isAdmin(await this.personIdOf(device), group);
+  }
+
+  /** Make a policy operation, signed with this person's signing key, after all this device knows of. */
+  async makePolicy(op: PolicyOp, key: KeyPair): Promise<string> {
+    const ws = await this.workspace();
+    if (!ws) throw new Error('This repository is not a workspace shared between devices');
+    const parents = op.t === 'genesis' ? [] : (await this.policy()).heads;
+    const e = makeOp(ws.id, op, parents, key);
+    await this.decide('policy', e.id, { op: e.op, parents: e.parents, signer: e.signer, proof: e.proof });
+    return e.id;
+  }
+
+  /**
+   * A change to the policy that only an admin may make (`group`'s, or the
+   * workspace's): refused here first if this person may not, and checked after.
+   * In a workspace from before, the first seals its legacy geneses, so none
+   * made later counts.
+   */
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' }>, key: KeyPair): Promise<void> {
+    const policy = await this.policy();
+    const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
+    if (!policy.founded) throw new Error('This workspace has no policy yet');
+    if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
+    if (!(await this.pin()) && !policy.sealed) await this.makePolicy({ t: 'seal', geneses: policy.geneses }, key);
+    const id = await this.makePolicy(op, key);
+    if (!(await this.policy()).applied.includes(id)) {
+      throw new Error(op.group === WORKSPACE && op.t === 'revoke' ? 'The workspace needs an admin: make someone else one first' : 'That change is not allowed');
+    }
+  }
+
+  /**
+   * Write the policy down if there is none: for a workspace just made (`fresh`),
+   * its genesis, naming this person its admin, pinned; for one from before, a
+   * legacy genesis naming everyone this device knows of as admins (everyone has
+   * the same say there, as before: 0038), which counts with the others' until an
+   * admin seals them. A person whose key is not yet vouched for here writes none.
+   */
+  async ensureGenesis(person: string, key: KeyPair, fresh: boolean): Promise<void> {
+    if (!(await this.workspace())) return;
+    if (await this.pin()) return;
+    if (fresh) {
+      await this.setPin(await this.makePolicy({ t: 'genesis', admins: [person], legacy: false }, key));
+      return;
+    }
+    const records = await this.records();
+    const policy = await this.policy(records);
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    if (policy.founded || records.some((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.by === self)) return;
+    const people = new Set([person, ...(await this.people()).map((p) => p.key)]);
+    await this.makePolicy({ t: 'genesis', admins: [...people].sort(), legacy: true }, key);
+  }
+
   /** What this device knows, to judge a record by. */
   private async standing(): Promise<Standing> {
     const ws = await this.workspace();
@@ -391,6 +494,7 @@ export class Identity {
       self: (await this.deviceKey()).publicKey.toString('hex'),
       members: new Set((await this.members()).map((m) => m.key)),
       removed: new Set(await this.removed()),
+      managers: await this.managers(),
     };
   }
 
@@ -501,7 +605,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
@@ -541,6 +645,8 @@ export class Identity {
               standing.members.delete(r.subject);
               standing.removed.add(r.subject);
             }
+            // Who is an admin may have changed: a record waiting for that is judged again.
+            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) standing.managers = await this.managers();
             taken.push(r);
             progress = true;
           } else if (verdict === 'wait') next.push(r);
@@ -569,16 +675,32 @@ export class Identity {
   }
 
   /**
-   * Make an invite link: whoever has it can join the workspace as a full device,
+   * Make an invite link: whoever has it can join the workspace as a device,
    * until it expires (`hours`; null: never) or is revoked; `once`, for one
    * person: the first device it lets in uses it up. Signed with this device's
-   * key, so any member can check it and let them in.
+   * key, so any member can check it and let them in. Where the workspace has a
+   * policy (0066), the link puts its holder in a group (`grant`: the workspace,
+   * as a member, unless it says otherwise), signed by this person's signing key,
+   * who must be an admin of that group.
    */
-  async createLink(hours: number | null, once: boolean, hints: LinkHints = { relays: [], tcp: [] }): Promise<string> {
+  async createLink(hours: number | null, once: boolean, hints: LinkHints = { relays: [], tcp: [] }, grant?: { key: KeyPair; group?: string; role?: Role }): Promise<string> {
     const ws = await this.workspace();
     if (!ws) throw new Error('This repository is not a workspace shared between devices');
     const key = await this.deviceKey();
     const id = randomBytes(8).toString('hex');
+    const policy = await this.policy();
+    let granted: LinkGrant | undefined;
+    if (policy.founded) {
+      if (!grant) throw new Error('Only a person can invite to this workspace: this computer has no identity');
+      const group = grant.group ?? WORKSPACE;
+      const role = grant.role ?? 'member';
+      if (!isGroupName(group)) throw new Error('Not a group');
+      const signer = grant.key.publicKey.toString('hex');
+      const who = this.who(await this.records()).personOf.get(signer)?.key ?? null;
+      if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
+      const genesis = await this.pin();
+      granted = { group, role, genesis, granter: signer, signature: crypto.sign(grantMessage(ws.id, genesis, id, group, role, once), grant.key.secretKey).toString('hex') };
+    }
     const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
     const issuer = key.publicKey.toString('hex');
     const through = await this.cameInThrough();
@@ -591,7 +713,38 @@ export class Identity {
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
     await this.decide('link', id, { topic, expires });
-    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints });
+    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}) });
+  }
+
+  /**
+   * Why a link's grant does not let its holder in under this workspace's policy,
+   * or null if it does (or there is no policy yet: 0038). The grant must be for
+   * this workspace's genesis, signed by its granter, who must be an admin of
+   * the group it names.
+   */
+  async refuseGrant(l: InviteLink): Promise<string | null> {
+    const policy = await this.policy();
+    if (!policy.founded) return null;
+    const g = l.grant;
+    if (!g) return 'the link was made by an older kuraa: ask for a new one';
+    if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
+    if (!crypto.verify(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once), Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'))) return 'the link is not signed by the person it names';
+    const who = this.who(await this.records()).personOf.get(g.granter)?.key ?? null;
+    if (!policy.isAdmin(who, g.group)) return 'the person who made the link may no longer invite people';
+    return null;
+  }
+
+  /**
+   * Joined by a link that puts its holder in a group: say so in the policy,
+   * with the link's grant (once: done already, it is not done again).
+   */
+  async joinPolicy(l: InviteLink, key: KeyPair): Promise<void> {
+    const g = l.grant;
+    if (!g || !(await this.workspace())) return;
+    const records = await this.records();
+    const signer = key.publicKey.toString('hex');
+    if (records.some((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.link === l.id && r.signer === signer)) return;
+    await this.makePolicy({ t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature }, key);
   }
 
   /**
@@ -686,6 +839,28 @@ export interface InviteLink {
   once: boolean;
   /** The issuer's signature over the workspace id, link id, expiry, whether it is for one person, issuer key and the devices it came in through, hex. */
   signature: string;
+  /** Where the workspace has a policy (0066): the group the holder is put in, and as what, signed by an admin of it. */
+  grant?: LinkGrant;
+}
+
+/** What an invite link lets its holder be (0066): signed (grantMessage) by an admin's signing key. */
+export interface LinkGrant {
+  group: string;
+  role: Role;
+  /** The workspace's genesis (its pin); null in one from before. */
+  genesis: string | null;
+  /** The signing key that signed it. */
+  granter: string;
+  signature: string;
+}
+
+function encodeGrant(g: LinkGrant | undefined): string {
+  return g ? `g:${g.group},${g.role},${g.genesis ?? '-'},${g.granter},${g.signature}` : '';
+}
+
+function decodeGrant(s: string | undefined): LinkGrant | undefined {
+  const m = s ? /^g:([a-z0-9][a-z0-9-]{0,39}),(admin|member),([0-9a-f]{64}|-),([0-9a-f]{64}),([0-9a-f]{128})$/.exec(s) : null;
+  return m ? { group: m[1]!, role: m[2] as Role, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]! } : undefined;
 }
 
 /** Ways into a workspace besides the DHT, as an invite link carries them. */
@@ -713,14 +888,17 @@ export function encodeLink(l: InviteLink): string {
   // The second field: the topic, as `t:<topic>`; in a link before 0050, the workspace's secret.
   const where = l.topic ? `t:${l.topic}` : l.workspace.secret ?? '';
   const hints = encodeHints(l.hints);
-  const payload = [l.workspace.id, where, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(','), ...(hints ? [hints] : [])].join('|');
+  const grant = encodeGrant(l.grant);
+  // Hints, then the grant, each where there is one (an empty hints field before a grant).
+  const tail = grant ? [hints, grant] : hints ? [hints] : [];
+  const payload = [l.workspace.id, where, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(','), ...tail].join('|');
   return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
 }
 
 export function decodeLink(code: string): InviteLink {
   const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
   if (!m) throw new Error('Not an invite link (it starts with kuraa-invite:)');
-  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
+  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField, grantField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
   const through = throughField ? throughField.split(',') : [];
   const topic = where?.startsWith('t:') ? where.slice(2) : null;
   const secret = topic === null ? where : null;
@@ -729,7 +907,9 @@ export function decodeLink(code: string): InviteLink {
     throw new Error('This invite link is damaged');
   }
   const hints = decodeHints(hintsField);
-  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}) };
+  const grant = decodeGrant(grantField);
+  if (grantField && !grant) throw new Error('This invite link is damaged');
+  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}), ...(grant ? { grant } : {}) };
 }
 
 /**

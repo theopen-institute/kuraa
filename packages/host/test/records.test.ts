@@ -20,7 +20,7 @@ const cy = crypto.keyPair();
 const hex = (k: { publicKey: Buffer }) => k.publicKey.toString('hex');
 
 const standing = (over: Partial<Standing> = {}): Standing => ({
-  workspace: WS, self: hex(ada), members: new Set([hex(bo), hex(cy)]), removed: new Set(), ...over,
+  workspace: WS, self: hex(ada), members: new Set([hex(bo), hex(cy)]), removed: new Set(), managers: null, ...over,
 });
 
 describe('signed membership records', () => {
@@ -34,6 +34,19 @@ describe('signed membership records', () => {
     expect(judge(signRecord({ kind: 'remove', workspace: 'cd'.repeat(16), subject: hex(cy) }, bo), standing())).toBe('refuse');
     expect(judge(r, standing({ removed: new Set([hex(bo)]) }))).toBe('refuse');
     expect(judge(r, standing({ members: new Set() }))).toBe('wait');
+  });
+
+  it('that remove a device, or make the secret anew, are taken only from an admin’s device, once a policy says who (0066)', () => {
+    const remove = signRecord({ kind: 'remove', workspace: WS, subject: hex(cy) }, bo);
+    const secret = signRecord({ kind: 'secret', workspace: WS, subject: 'ee'.repeat(32) }, bo);
+    const add = signRecord({ kind: 'add', workspace: WS, subject: hex(crypto.keyPair()), name: 'new' }, bo);
+    // No policy yet: every member's word counts (0038).
+    expect(judge(remove, standing())).toBe('take');
+    // Bo's device is not an admin's: waiting (the policy that makes him one may come); Cy's is.
+    expect(judge(remove, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
+    expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
+    expect(judge(add, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
+    expect(judge(remove, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
   });
 
   it('are taken from every member alike, the newest as the first', () => {
@@ -152,6 +165,40 @@ describe('records a device makes about itself', () => {
     expect(await id.personOf(me)).toEqual({ key: made.id, name: 'Ada Lovelace' });
     expect((await id.records()).filter((r) => r.kind === 'vouch')).toHaveLength(1);
     expect((await id.records()).filter((r) => r.kind === 'key-event')).toHaveLength(1);
+  });
+});
+
+describe('a workspace’s policy, on a device (0066)', () => {
+  it('a workspace from before: written down with everyone it knows of an admin; the first admin change seals it', async () => {
+    const { id } = repo();
+    const ws = await id.found();
+    await id.addMember(hex(bo), 'bo');
+    const me = identity();
+    const boId = identity();
+    const myKey = crypto.keyPair();
+    const boKey = crypto.keyPair();
+    // Bo's device signs with his key, which his identity vouched for; this device with Ada's.
+    await id.takeRecords([...eventRecords(ws.id, boId), signRecord({ kind: 'signs', workspace: ws.id, subject: hex(boKey), proof: sign(signsMessage(hex(bo)), boKey) }, bo), vouchFor(ws.id, boKey, boId, 'Bo')]);
+    const ada = { name: 'Ada', ...me.key, id: me.id, events: me.events };
+    await id.signsWith(myKey);
+    await id.vouch(ada, myKey);
+    expect((await id.policy()).founded).toBe(false);
+    await id.ensureGenesis(me.id, myKey, false);
+    await id.ensureGenesis(me.id, myKey, false);
+    const policy = await id.policy();
+    expect(await id.pin()).toBeNull();
+    expect(policy.people().map((p) => p.role)).toEqual(['admin', 'admin']);
+    expect(policy.isAdmin(boId.id)).toBe(true);
+    expect(await id.mayManage(hex(bo))).toBe(true);
+    // Ada makes Bo a member: the legacy geneses are sealed first, then Bo's role changes.
+    await id.adminOp({ t: 'grant', group: 'workspace', who: boId.id, role: 'member' }, myKey);
+    const after = await id.policy();
+    expect(after.sealed).toBe(true);
+    expect(after.role(boId.id)).toBe('member');
+    expect(await id.mayManage(hex(bo))).toBe(false);
+    // Bo's device's removals now wait for an admin's word.
+    const removal = signRecord({ kind: 'remove', workspace: ws.id, subject: hex(cy) }, bo);
+    expect(await id.takeRecords([removal])).toEqual([]);
   });
 });
 

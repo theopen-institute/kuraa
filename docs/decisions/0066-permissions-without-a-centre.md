@@ -1,6 +1,6 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: being built, in the order below. Built: 1 (identities; see *Built so far* at the end).**
+**Status: being built, in the order below. Built: 1 (identities) and 2 (the policy, groups, roles); see *Built so far* at the end.**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
@@ -363,3 +363,49 @@ differ by person, and how usable plain git is with only the public layer.
   revoked signing key (step 4: until then a revocation counts from when a device takes it, as 0035
   had it). The protocol version is unchanged: an older kuraa and this one still sync, but neither
   takes the other's vouches, so each names the other's people only once both are updated.
+
+### 2 · The policy, groups, admins and members (`peers/policy.ts`)
+
+- **Records, not a git ref (a deviation from *The workspace's root and policy* above).** Each
+  operation is a `policy` record, signed by the person's signing key (the identity that vouched for
+  it made it) and naming the operations its maker had seen (`parents`), so they form a graph every
+  device holds alike, passed on as membership records always were (0050: by hash, only what is
+  missing). A git ref would have needed its own fetching and merging for no gain: what makes it a
+  history is the parents and signatures, which records carry as well. Commits naming the policy
+  they were made under (`Kuraa-Policy`) come with step 3; `Policy.version` is the hash they will name.
+- **The same everywhere.** Operations are put in one order (parents first, then by hash); each is
+  checked against the policy as those before it left it; one whose parents are not all known
+  waits. Operations are `genesis`, `grant`, `revoke`, `join` and `seal`.
+- **Genesis.** A workspace made now is pinned to its genesis (`kuraa.genesis`), naming whoever made
+  it its admin; every invite link carries it, and a device joining takes it from the link, so no
+  later genesis counts. The workspace's ID stays what it was (random): the pin, not the ID, is what
+  proves the root.
+- **A workspace from before** has no pin: each of its devices, when it starts, writes down a
+  legacy genesis naming everyone it knows of, and all of them count together (everyone an admin, as
+  everyone had the same say: 0038). The first change an admin makes seals them (a `seal`
+  operation naming those that count); a legacy genesis made after counts for nothing. Until that
+  first change, a member could still name more admins by a legacy genesis of their own, as anyone
+  could do anything before. A device joining never writes one.
+- **Groups**: `workspace`, and any its admins make. Admins of a group change it, and the
+  workspace's admins change any. Out of the workspace is out of every group; the workspace keeps an
+  admin; anyone may leave. A group may hold groups, as members.
+- **What admins alone do, now:** make invite links (a link carries a *grant*, the group and role
+  its holder gets, signed by an admin's signing key with the genesis; a device letting someone in
+  checks it, and the person let in records a `join` with it, once for a link for one person),
+  remove devices and make the secret anew (a device takes `remove` and `secret` records only from a
+  device whose person is an admin, once there is a policy), and change who is in groups. Links made
+  before carry no grant and let no one into a workspace with a policy. Anyone still reads and
+  changes everything (step 3), renames their own device, and leaves.
+- **Every computer that syncs has an identity**: one is made for whoever runs a host, named as git
+  names them, else after the device, where none was (servers included), since roles are people's.
+- **Where it shows.** Workspace settings list the people with their roles; admins see **Make
+  admin**/**Make member**, **Remove…** (the person and their devices) and **Invite people…**, whose
+  dialog makes a member unless **They can invite and remove people too** is ticked; others are
+  told only admins invite and remove. CLI: `people`, `role <person> admin|member`,
+  `remove-person`, `invite --admin`. HTTP: `POST`/`DELETE /api/peers/people/<id>`, `role` on
+  `POST /api/peers/links`, `people` in `GET /api/peers`.
+- **Protocol 3.** A device that holds to the policy and one that does not would disagree about who
+  is in the workspace, so they do not sync until both are updated (0051).
+- **Not yet:** concurrent changes are settled only by the order above (removal-wins and cutoffs
+  are step 4); group management in the app beyond the workspace's roles comes with step 3, where
+  groups first matter.

@@ -51,8 +51,8 @@ person using the desktop app is ([decision 0047](docs/decisions/0047-browser-equ
 in a browser too they have **Settings…**, **Open a folder…** (any folder on the computer, chosen
 in the page), their identity and the online copy. That is the default (`--host 127.0.0.1`). With
 `--host` naming a network address, those are off, and the app says why; invites and devices stay,
-as every member has the same say ([0038](docs/decisions/0038-equal-peers.md)). A server for many
-people will need a design of its own.
+for the workspace's admins ([0066](docs/decisions/0066-permissions-without-a-centre.md)). A server
+for many people will need a design of its own.
 
 Every setting below is in **Settings** (This computer’s server), in a browser and in the desktop app alike, so nobody
 needs a flag; a flag given at start wins over its setting for as long as the host runs, and
@@ -275,24 +275,27 @@ sides changed differently stays in the document with both versions, to choose be
 
 ```sh
 # On the first device (inviting makes the workspace shared; its host syncs it from then on):
-pnpm host invite --dir ~/research/notes          # an invite link for one person, for a week
+pnpm host invite --dir ~/research/notes          # an invite link for one person, for a week, as a member
 pnpm host invite --anyone --forever --dir ~/research/notes   # or for anyone with it, with no expiry
+pnpm host invite --admin --dir ~/research/notes  # who joins by it is an admin
 # On another device:
 pnpm host join kuraa-invite:… --dir ~/notes      # fetches the workspace
 pnpm host --dir ~/notes --static apps/web/dist
 ```
 
-**Every member has the same say** ([decision 0038](docs/decisions/0038-equal-peers.md)): every
-member's work comes in, on every branch, and any member may invite people, remove anyone, and
-revoke links. An invite link is for one person (the first device it lets in uses it up) or for
-anyone who has it, and lasts a day, a week (`--hours`) or forever (`--forever`), unless revoked
-(`pnpm host revoke-invite <id>`; `pnpm host invites` lists them). Any running device of the
-workspace can let someone in. Whoever joins can read and change everything, and invite and remove
-others: share a link only with people you trust with that. A link does not carry the workspace's
-secret: the device that lets its holder in gives it, and removing a device makes a new one, so the
-removed device can no longer find the others
-([0050](docs/decisions/0050-networking-review.md)). The trust model is to be redesigned; its known
-weaknesses are listed in 0038.
+**A workspace has admins and members** ([decision 0066](docs/decisions/0066-permissions-without-a-centre.md)):
+everyone's work comes in, on every branch, and everyone reads and changes everything (rules for
+who may change what come next); only admins invite people, remove devices, and make others admins
+or members or take them out. This is a signed policy every device holds alike, so no device takes
+a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
+workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
+by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person
+(the first device it lets in uses it up) or for anyone who has it, and lasts a day, a week
+(`--hours`) or forever (`--forever`), unless revoked (`pnpm host revoke-invite <id>`; `pnpm host
+invites` lists them). Any running device of the workspace can let someone in. A link does not
+carry the workspace's secret: the device that lets its holder in gives it, and removing a device
+makes a new one, so the removed device can no longer find the others
+([0050](docs/decisions/0050-networking-review.md)).
 
 Joining in the app says how it is going: looking for a computer the workspace is on, being let in,
 copying, opening; and, on a network that makes direct connections take a few tries, that it may take
@@ -312,10 +315,12 @@ runs one and prints its key, to name in Settings (Other computers › Advanced) 
 internet. All the workspaces on a computer share one connection to the DHT, which remembers the
 nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
 
-In the app, the menu's **Devices** section lists who is in the workspace, by person and computer,
-online or offline, with **Remove…** (for good; they keep their copy) and **Rename this
-computer…**; **Invite people…** makes and lists invite links, to revoke. From the command line,
-`pnpm host devices` lists them; `remove-device`, `name` and `fork` manage them. Paired devices
+In the app, Workspace settings' **Devices** section lists the devices, by person and computer,
+online or offline, and the **People**, admins and members; admins have **Remove…** (for good; they
+keep their copy), **Make admin**/**Make member** and **Invite people…**, which makes and lists
+invite links, to revoke; anyone has **Rename this computer…**. From the command line, `pnpm host
+devices` and `people` list them; `remove-device`, `role <person> admin|member`, `remove-person`,
+`name` and `fork` manage them. Paired devices
 are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.
 
 Merges are the same on every device, so work done apart comes together into one history. A

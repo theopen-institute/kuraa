@@ -410,6 +410,40 @@ describe('joining, and staying connected', () => {
 });
 
 describe('equal members, and forks', () => {
+  it('let only admins invite and remove: a link puts its holder in as a member unless it says admin (0066)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const bo = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const dirA = repo();
+    const a = await start(dirA, { person: ada });
+    // A workspace made now: its genesis names Ada its admin, and is pinned.
+    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'admin', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true }]);
+    const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+    dirs.push(parent);
+    const dirB = join(parent, 'notes');
+    signingKeys.set(dirB, crypto.keyPair());
+    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: bo, signing: signingKeys.get(dirB) });
+    expect(git(dirB, 'config', 'kuraa.genesis')).toBe(git(dirA, 'config', 'kuraa.genesis'));
+    const b = await start(dirB, { person: bo });
+    const role = async (h: RunningHost, id: string) => (await h.host.peers!.people()).people.find((p) => p.id === id)?.role ?? null;
+    await until(async () => (await role(a, bo.id)) === 'member' && (await role(b, bo.id)) === 'member', 15_000, 'Bo a member on both');
+    // A member may not invite, nor remove a device, nor make himself an admin.
+    await expect(b.host.peers!.inviteLink({ hours: 1, once: true })).rejects.toThrow('Only an admin');
+    await expect(b.host.peers!.removeDevice(a.host.peers!.node.myKey)).rejects.toThrow('Only an admin');
+    await expect(b.host.peers!.setRole(bo.id, 'admin')).rejects.toThrow('Only an admin');
+    expect((await api(b, `/api/peers/devices/${a.host.peers!.node.myKey}`, { method: 'DELETE' })).status).toBe(403);
+    // Ada makes him an admin: then he may invite, and his links may make admins.
+    await a.host.peers!.setRole(bo.id, 'admin');
+    await until(async () => (await role(b, bo.id)) === 'admin', 15_000, 'Bo an admin on his device');
+    expect(decodeLink(await b.host.peers!.inviteLink({ hours: 1, once: true, role: 'admin' })).grant).toMatchObject({ group: 'workspace', role: 'admin' });
+    // The workspace keeps an admin: Ada takes Bo out, with his device.
+    await a.host.peers!.removePerson(bo.id);
+    expect(await role(a, bo.id)).toBeNull();
+    await until(async () => (await b.host.peers!.status()).removed, 15_000, 'Bo’s device removed');
+    await expect(a.host.peers!.removePerson(ada.id)).rejects.toThrow('needs an admin');
+  });
+
   it('take any member’s work, and name it by the person whose it is', async () => {
     const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
     dirs.push(people);

@@ -28,15 +28,16 @@
 // kuraa.revokedlinks) stays: it is what the records taken say, applied.
 import crypto from 'hypercore-crypto';
 import { eventHash, eventIdentity, readEvent, type KeyEvent } from './kel.js';
+import { entrySigned, readOp, type PolicyEntry, type PolicyOp } from './policy.js';
 
-export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event';
+export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event' | 'policy';
 
 export interface MemberRecord {
   v: 1;
   kind: RecordKind;
   /** The workspace it is about (a record of one workspace means nothing in another, or in a fork). */
   workspace: string;
-  /** add, remove: a device key. revoke-link, link: a link id. signs, vouch, revoke-key: a signing key. secret: the workspace's secret. key-event: the identity's ID. */
+  /** add, remove: a device key. revoke-link, link: a link id. signs, vouch, revoke-key: a signing key. secret: the workspace's secret. key-event: the identity's ID. policy: the operation's hash. */
   subject: string;
   /** add: what the device is called. vouch: what the person is called. revoke-link: 'used', for a link for one person that let them in. */
   name?: string;
@@ -46,6 +47,10 @@ export interface MemberRecord {
   personKey?: string;
   /** key-event: one event of the identity's log (kel.ts), as it was signed. */
   event?: KeyEvent;
+  /** policy: the operation (policy.ts), the operations its maker had seen, and the signing key that signed it (`proof`). */
+  op?: PolicyOp;
+  parents?: string[];
+  signer?: string;
   /** signs: the signing key's signature (signsMessage); vouch, revoke-key: the person's (vouchMessage, revokeKeyMessage). Hex. */
   proof?: string;
   /** vouch: the signing key's own signature over the same (vouchMessage). Hex. */
@@ -70,7 +75,9 @@ function message(r: Omit<MemberRecord, 'sig'>): Buffer {
   // Likewise the identity's key, and an event (by its hash: the event is signed in itself).
   const person = r.personKey !== undefined ? ['personKey', r.personKey] : [];
   const event = r.event !== undefined ? ['event', eventHash(r.event)] : [];
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event].join('\0'));
+  // A policy operation is signed in itself, and named by its hash (the subject), which covers it.
+  const policy = r.signer !== undefined ? ['signer', r.signer] : [];
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
@@ -88,8 +95,8 @@ export const aboutItself = (k: RecordKind) => k === 'signs';
 /** Whether a record is one a person makes, with their identity's signature (vouch, revoke-key): any member may pass it on. */
 export const byPerson = (k: RecordKind) => k === 'vouch' || k === 'revoke-key';
 
-/** Whether a record carries what a person signed elsewhere, passed on as it is (an event of their identity): any member may pass it on. */
-export const passedOn = (k: RecordKind) => k === 'key-event';
+/** A policy record's operation, as policy.ts takes it. */
+export const policyEntry = (r: MemberRecord): PolicyEntry => ({ id: r.subject, op: r.op!, parents: r.parents!, signer: r.signer!, proof: r.proof! });
 
 export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { at?: number }, key: { publicKey: Buffer; secretKey: Buffer }): MemberRecord {
   const body = { v: 1 as const, ...r, by: key.publicKey.toString('hex'), at: r.at ?? Date.now() };
@@ -100,7 +107,7 @@ export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { 
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event'];
+  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event', 'policy'];
   if (r.v !== 1 || !kinds.includes(r.kind as RecordKind) || typeof r.workspace !== 'string' || typeof r.subject !== 'string'
     || typeof r.by !== 'string' || !hexKey.test(r.by) || typeof r.at !== 'number' || typeof r.sig !== 'string' || !/^[0-9a-f]{128}$/.test(r.sig)) return null;
   if (r.name !== undefined && typeof r.name !== 'string') return null;
@@ -114,6 +121,10 @@ export function readRecord(v: unknown): MemberRecord | null {
   const event = r.event !== undefined ? readEvent(r.event) : null;
   if ((kind === 'key-event') !== (event !== null) || (r.event !== undefined && !event)) return null;
   if (event && eventIdentity(event) !== r.subject) return null;
+  const op = r.op !== undefined ? readOp(r.op) : null;
+  if ((kind === 'policy') !== (op !== null) || (r.op !== undefined && !op)) return null;
+  if (op && (!Array.isArray(r.parents) || !r.parents.every((p) => typeof p === 'string') || typeof r.signer !== 'string' || typeof r.proof !== 'string')) return null;
+  if (!op && (r.parents !== undefined || r.signer !== undefined)) return null;
   const aboutLink = kind === 'revoke-link' || kind === 'link';
   if (!aboutLink && !hexKey.test(r.subject)) return null;
   if (aboutLink && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
@@ -130,6 +141,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(r.person !== undefined ? { person: r.person as string } : {}),
     ...(r.personKey !== undefined ? { personKey: r.personKey as string } : {}),
     ...(event ? { event } : {}),
+    ...(op ? { op, parents: r.parents as string[], signer: r.signer as string } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
     ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
   };
@@ -144,6 +156,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     if (!proven(m, rec.personKey!) || !proven(m, rec.subject, rec.keyProof)) return null;
   }
   if (kind === 'revoke-key' && !proven(revokeKeyMessage(rec.subject), rec.personKey!)) return null;
+  if (kind === 'policy' && !entrySigned(rec.workspace, policyEntry(rec))) return null;
   return rec;
 }
 
@@ -155,7 +168,12 @@ export interface Standing {
   /** Devices it is paired with. */
   members: Set<string>;
   removed: Set<string>;
+  /** Devices whose person is an admin of the workspace (policy.ts); null: no policy yet, every member's word counts (0038). */
+  managers: Set<string> | null;
 }
+
+/** Records only an admin's device may make (0066): removing a device, and the workspace's new secret that goes with it. */
+export const forAdmins = (k: RecordKind) => k === 'remove' || k === 'secret';
 
 /**
  * Whether to take a record now: 'take' (any member's), 'wait' (its signer is
@@ -166,7 +184,10 @@ export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' 
   if (r.workspace !== s.workspace) return 'refuse';
   if (r.by === s.self) return 'take';
   if (s.removed.has(r.by)) return 'refuse';
-  return s.members.has(r.by) ? 'take' : 'wait';
+  if (!s.members.has(r.by)) return 'wait';
+  // Not (yet) an admin's: it may be once the policy that makes its person one is taken.
+  if (forAdmins(r.kind) && s.managers && !s.managers.has(r.by)) return 'wait';
+  return 'take';
 }
 
 /**

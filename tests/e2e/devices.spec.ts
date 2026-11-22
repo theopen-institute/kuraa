@@ -1,7 +1,8 @@
 // Two devices of one workspace, each with its own host and a browser on it:
-// people on the two edit one document live; the menu lists the devices, and
-// the device that joined last renames itself and removes the first, with the
-// same say as any member (0038). On a local DHT, so nothing leaves this machine.
+// people on the two edit one document live; Workspace settings list the
+// devices and the people, and the person who joined last, a member, may not
+// remove anyone until the first makes them an admin (0066); then they rename
+// their device and remove the first. On a local DHT, so nothing leaves this machine.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -10,11 +11,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import createTestnet from 'hyperdht/testnet.js';
 import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
+import { createPerson } from '../../packages/host/src/peers/person.js';
+import { keptKey } from '../../packages/host/src/keys.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
 
-test('people on two devices edit one document, and any member renames its device and removes another', async ({ browser }) => {
+test('people on two devices edit one document; a member made an admin renames their device and removes another', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-a-'));
@@ -26,12 +29,19 @@ test('people on two devices edit one document, and any member renames its device
   git(dirA, 'add', '-A');
   git(dirA, 'commit', '-q', '-m', 'Initial');
   const peers = { bootstrap: testnet.bootstrap as never };
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers, invites: { peers } });
+  // Two people, each on a computer of their own: their own identity and signing key.
+  const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-keys-'));
+  const adaPerson = await createPerson('Ada', join(keys, 'ada', 'person.json'));
+  const boPerson = await createPerson('Bo', join(keys, 'bo', 'person.json'));
+  const asAda = { ...peers, person: adaPerson, signing: await keptKey(join(keys, 'ada', 'signing.json')) };
+  const asBo = { ...peers, person: boPerson, signing: await keptKey(join(keys, 'bo', 'signing.json')) };
+  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
   const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-dev-b-')), 'notes');
-  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000 });
+  // Invited as a member (as links do, unless they say admin).
+  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: boPerson, signing: asBo.signing });
   git(dirB, 'config', 'user.name', 'Bo');
   git(dirB, 'config', 'user.email', 'bo@example.org');
-  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers, invites: { peers } });
+  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
       const page = await (await browser.newContext()).newPage();
@@ -68,16 +78,30 @@ test('people on two devices edit one document, and any member renames its device
     b.host.peers!.node.links.get(a.host.peers!.node.myKey)!.send({ type: 'present', keys: [phone] });
     await expect(ada.getByTestId('through:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
     await expect(ada.getByTestId('devices')).toContainText('2 of 2 other devices online');
-    await ada.keyboard.press('Escape');
+    // The people, with their roles: Ada, who made the workspace, its admin; Bo, invited, a member.
+    await expect(ada.getByTestId('role:Ada')).toHaveText('admin');
+    await expect(ada.getByTestId('role:Bo')).toHaveText('member', { timeout: 15_000 });
 
-    // On Bo's device, the one that joined last: rename it, then remove Ada's device. It is permanent, and she keeps her copy.
+    // On Bo's device: a member, he may rename his device, but not invite or remove anyone.
     await bo.getByTestId('settings-button').click();
     await bo.getByTestId('settings-tab-workspace').click();
+    await expect(bo.getByTestId('not-admin')).toContainText('Only the workspace’s admins');
+    await expect(bo.getByTestId('invite-button')).toHaveCount(0);
+    await expect(bo.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
+
+    // Ada makes him an admin.
+    await ada.getByTestId('make-admin:Bo').click();
+    await expect(ada.getByTestId('role:Bo')).toHaveText('admin');
+    await ada.keyboard.press('Escape');
+
+    // Bo, an admin now: rename his device, then remove Ada's. It is permanent, and she keeps her copy.
+    await expect(bo.getByTestId('role:Bo')).toHaveText('admin', { timeout: 15_000 });
+    await expect(bo.getByTestId('invite-button')).toBeVisible();
     await bo.getByTestId('rename-device').click();
     await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');
     await bo.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
     await expect(bo.getByTestId('this-device')).toContainText('You are on bo-s-laptop');
-    const adas = bo.getByTestId('devices').locator('li');
+    const adas = bo.getByTestId('devices').locator('li[data-testid^="device:"]');
     await expect(adas).toHaveCount(1);
     await adas.getByRole('button', { name: 'Remove…' }).click();
     await expect(bo.getByTestId('ask')).toContainText('permanent');

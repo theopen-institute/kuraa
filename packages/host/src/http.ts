@@ -13,7 +13,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
 import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
-import { HttpError } from './errors.js';
+import { HttpError, NotAllowed } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
 import { renderRoutes, searchRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
@@ -518,6 +518,16 @@ const syncRoutes: Route[] = [
   }),
 ];
 
+/** Done, or refused by the workspace's policy (403: this person is not an admin) or as asked (400). */
+async function allowed<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(e instanceof NotAllowed || /^Only an admin/.test((e as Error).message) ? 403 : 400, (e as Error).message);
+  }
+}
+
 const peerRoutes: Route[] = [
   route('GET', '/api/peers', async ({ host, res }) => {
     const canInvite = !!host.options.invites;
@@ -536,7 +546,9 @@ const peerRoutes: Route[] = [
     const peers = await host.peersForInvites();
     // Named before it is shared: whoever joins gets the name (0061).
     await host.ensureName();
-    const link = await peers.inviteLink({ hours, once: body.once === true });
+    // As a member, unless it says admin (0066).
+    const role = body.role === 'admin' ? 'admin' : 'member';
+    const link = await allowed(() => peers.inviteLink({ hours, once: body.once === true, role }));
     send(res, 201, { link, ...(await peers.links()).at(-1)! });
   }),
 
@@ -552,9 +564,23 @@ const peerRoutes: Route[] = [
     try {
       await peers.removeDevice(params[0]!);
     } catch (e) {
-      throw new HttpError(404, (e as Error).message);
+      throw new HttpError(e instanceof NotAllowed ? 403 : 404, (e as Error).message);
     }
     send(res, 200, { ok: true });
+  }),
+
+  // The workspace's people (0066): an admin makes someone an admin or a member, or takes them out (with their devices).
+  route('POST', /^\/api\/peers\/people\/([0-9a-f]{64})$/, async ({ host, req, res, params }) => {
+    const peers = await host.peersForInvites();
+    const role = (await readBody(req)).role;
+    if (role !== 'admin' && role !== 'member') throw new HttpError(400, 'A person is an admin or a member');
+    await allowed(() => peers.setRole(params[0]!, role));
+    send(res, 200, await peers.people());
+  }),
+  route('DELETE', /^\/api\/peers\/people\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+    const peers = await host.peersForInvites();
+    await allowed(() => peers.removePerson(params[0]!));
+    send(res, 200, await peers.people());
   }),
 
   route('POST', '/api/peers/name', async ({ host, req, res }) => {

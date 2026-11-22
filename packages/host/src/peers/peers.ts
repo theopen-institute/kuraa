@@ -18,6 +18,8 @@ import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
+import { WORKSPACE, type PolicyOp, type Role } from './policy.js';
+import { NotAllowed } from '../errors.js';
 import type { KeyPair } from '../keys.js';
 
 /** How soon this device tells the others its outputs changed, in ms: sooner than branches, which come in bursts. */
@@ -113,6 +115,17 @@ export interface PeersStatus {
    * offline, or that this device was removed while it was.
    */
   noContactSince: number | null;
+  /** The people of the workspace, as its policy says (0066). */
+  people: PeopleInfo;
+}
+
+/** The workspace's people, by its policy (0066). */
+export interface PeopleInfo {
+  /** Whether the workspace has a policy yet (no: every member has the same say, 0038). */
+  founded: boolean;
+  /** Whether this person may invite people, remove devices and change who is in it. */
+  admin: boolean;
+  people: { id: string; role: Role; name: string | null; devices: string[]; you: boolean }[];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -393,9 +406,12 @@ export class Peers {
    * first device it lets in uses it up) or anyone with it, until it expires
    * (`hours`; null: never) or is revoked.
    */
-  async inviteLink(o: { hours: number | null; once: boolean }): Promise<string> {
+  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string }): Promise<string> {
     // With the ways in besides the DHT this device knows: relays named, servers that take TCP (0053).
-    const link = await this.node.identity.createLink(o.hours, o.once, await this.node.linkHints());
+    // Putting its holder in a group, signed by this person (0066): the workspace, as a member, unless it says otherwise.
+    const person = await this.node.person();
+    const grant = person ? { key: await this.node.signingKeyNow(), group: o.group, role: o.role } : undefined;
+    const link = await this.node.identity.createLink(o.hours, o.once, await this.node.linkHints(), grant);
     // On record, so every member announces its topic while it lets people in (0050).
     await this.node.membersChanged();
     return link;
@@ -428,6 +444,7 @@ export class Peers {
   async removeDevice(key: string): Promise<void> {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
+    if (!(await this.node.identity.mayManage(this.node.myKey))) throw new NotAllowed('Only an admin of this workspace can remove devices');
     await this.node.identity.removeMember(key);
     await this.node.newSecret();
     // Told first, with the others (it stops syncing once it takes the record); then let go of, in any case.
@@ -441,6 +458,51 @@ export class Peers {
     if (!name.trim()) throw new Error('A device needs a name');
     await this.node.identity.setDeviceName(name);
     this.node.name = await this.node.identity.deviceName();
+    await this.node.membersChanged();
+  }
+
+  /**
+   * The people of the workspace (0066), as its policy says: each with their role,
+   * their name as their identity says it, and their devices here; and whether
+   * this person may change who is in it.
+   */
+  async people(): Promise<PeopleInfo> {
+    const id = this.node.identity;
+    const { policy, me } = await this.node.policy();
+    const known = new Map((await id.people()).map((p) => [p.key, p]));
+    return {
+      founded: policy.founded,
+      admin: policy.founded ? policy.isAdmin(me) : true,
+      people: policy.people().map((p) => ({ id: p.id, role: p.role, name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
+    };
+  }
+
+  /** Make a person of the workspace an admin, or a member (an admin's to do). */
+  async setRole(person: string, role: Role): Promise<void> {
+    await this.adminOp({ t: 'grant', group: WORKSPACE, who: person, role });
+  }
+
+  /**
+   * Take a person out of the workspace (an admin's to do; or anyone, themselves),
+   * and remove their devices, as removing a device does (0050: a new secret).
+   */
+  async removePerson(person: string): Promise<void> {
+    const devices = (await this.node.identity.people()).find((p) => p.key === person)?.devices ?? [];
+    await this.adminOp({ t: 'revoke', group: WORKSPACE, who: person });
+    const members = new Set((await this.node.identity.members()).map((m) => m.key));
+    const theirs = devices.filter((d) => members.has(d) && d !== this.node.myKey);
+    for (const d of theirs) await this.node.identity.removeMember(d);
+    if (theirs.length) await this.node.newSecret();
+    await this.node.membersChanged();
+  }
+
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' }>): Promise<void> {
+    if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
+    try {
+      await this.node.identity.adminOp(op, await this.node.signingKeyNow());
+    } catch (e) {
+      throw new NotAllowed((e as Error).message);
+    }
     await this.node.membersChanged();
   }
 
@@ -469,6 +531,7 @@ export class Peers {
       workspace: { id: this.node.ws.id, forkedFrom: this.node.ws.forkedFrom },
       devices,
       removed: (await id.removed()).includes(this.node.myKey),
+      people: await this.people(),
       noContactSince: connected || !devices.length ? null : Math.max(this.started, ...devices.map((d) => d.lastSeen ?? 0)),
     };
   }

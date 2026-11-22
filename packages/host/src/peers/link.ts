@@ -18,9 +18,10 @@ const CONTROL = 'kuraa/control/1';
  * and the one running the older kuraa is to be updated (0051). Raised whenever
  * a change would keep an older device from understanding a newer one. 1: before
  * the hello said it; 2: 0050 (records by hash, links without the secret, acks
- * on git streams).
+ * on git streams); 3: 0066 (identities with logs, the workspace's policy: only
+ * admins' devices invite and remove, which an older one would not hold to).
  */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

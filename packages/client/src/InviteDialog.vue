@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Inviting people to the workspace with an invite link: for one person (the
 // first to use it) or anyone who has it, for a day, a week or with no expiry.
-// Whoever joins is a full member, with the same say as everyone else: they
-// read and change everything, and may invite and remove others; the dialog
-// says so. Making one turns syncing on, if it was not. The links made here are
+// Whoever joins reads and changes everything; they join as a member, or, if
+// the dialog says so, as an admin, who may invite and remove others too
+// (0066). Making one turns syncing on, if it was not. The links made here are
 // listed, to revoke.
 import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HostApi, InviteLinkInfo } from './api.js';
@@ -23,6 +23,7 @@ const EXPIRY = [
   { label: S.invite.never, hours: null },
 ] as const;
 const expiry = ref(1);
+const asAdmin = ref(false);
 const made = shallowRef<{ code: string; once: boolean; expires: number } | null>(null);
 const links = shallowRef<InviteLinkInfo[]>([]);
 const busy = ref(false);
@@ -43,7 +44,7 @@ async function create() {
   error.value = null;
   copied.value = false;
   try {
-    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one' });
+    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one', role: asAdmin.value ? 'admin' : 'member' });
     made.value = { code: r.link, once: r.once, expires: r.expires };
     await loadLinks();
   } catch (e) {
@@ -98,6 +99,11 @@ const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.s
             <option v-for="(e, i) in EXPIRY" :key="e.label" :value="i">{{ e.label }}</option>
           </select>
         </label>
+        <label class="check">
+          <input v-model="asAdmin" type="checkbox" data-testid="invite-admin">
+          <span>{{ S.invite.asAdmin }}</span>
+        </label>
+        <p v-if="asAdmin" class="naming-hint">{{ S.invite.adminAbout }}</p>
         <p class="naming-hint">
           <template v-if="forWhom === 'one'">{{ S.invite.oneAbout }}</template>
           <template v-else>{{ S.invite.anyoneAbout }}</template>

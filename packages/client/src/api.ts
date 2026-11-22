@@ -79,7 +79,18 @@ export type PeersInfo =
       removed?: boolean;
       /** Since when no other device has been connected here (ms since 1970); null while one is, or if there are none. */
       noContactSince?: number | null;
+      /** The workspace's people, as its policy says (0066). */
+      people?: PeopleInfo;
     };
+
+/** The workspace's people, by its policy (0066). */
+export interface PeopleInfo {
+  /** Whether the workspace has a policy yet (no: every member has the same say). */
+  founded: boolean;
+  /** Whether you may invite people, remove devices and change who is in it. */
+  admin: boolean;
+  people: { id: string; role: 'admin' | 'member'; name: string | null; devices: string[]; you: boolean }[];
+}
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
 export interface SyncTargetInfo {
@@ -225,7 +236,11 @@ export class HostApi {
   peers() { return this.json<PeersInfo>('/api/peers'); }
   peerLinks() { return this.json<{ links: InviteLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
   /** An invite link: for one person (`once`) or anyone, lasting `hours` (null: no expiry). Turns syncing on if it is not. */
-  createLink(o: { hours: number | null; once: boolean }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
+  /** Make someone of the workspace an admin or a member (an admin's to do, 0066). */
+  setRole(id: string, role: 'admin' | 'member') { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'POST', body: JSON.stringify({ role }) }); }
+  /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
+  removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
+  createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member' }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   /** Remove a device from the workspace, for good (it keeps its copy). */
   removeDevice(key: string) { return this.json(`/api/peers/devices/${key}`, { method: 'DELETE' }); }

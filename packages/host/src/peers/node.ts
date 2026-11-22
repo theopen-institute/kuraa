@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
-import { personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
+import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 import { stat } from 'node:fs/promises';
 import { pipeline, type Duplex } from 'node:stream';
@@ -286,8 +286,13 @@ export class PeerNode {
     this.ws = ws ?? (joinAs ? { id: joinAs.id, secret: '', forkedFrom: joinAs.forkedFrom } : await this.identity.found());
     this.key = await this.identity.deviceKey();
     this.name = await this.identity.deviceName();
-    // Whose this device is, if this computer keeps a person's key: said in this workspace, with their signature.
+    // Whose this device is: said in this workspace, with their signature. A computer with no identity yet is given one (0066).
+    await this.ensurePerson();
     await this.syncPerson();
+    // The policy written down, if there is none: a workspace made now has its own genesis; one this
+    // device was in from before, everyone an admin. A device joining writes none: it takes the workspace's.
+    if (!ws && found && !joinAs) await this.ensureGenesis(true);
+    else if (ws && !this.o.joining) await this.ensureGenesis(false);
     // What the records say, applied, in case a record was kept and this device stopped before applying it.
     await this.identity.reconcile();
     for (const r of await this.identity.records()) this.told.add(r.sig);
@@ -867,8 +872,39 @@ export class PeerNode {
     return this.personRead.person;
   }
 
+  /**
+   * A computer that syncs and has no identity is given one (0066: groups, and
+   * who may invite and remove, are people's), named as git names whoever runs
+   * it, else after the device. Tests that give none (null) have none.
+   */
+  private async ensurePerson(): Promise<void> {
+    if (this.o.person !== undefined || (await this.person())) return;
+    const name = (await this.o.git.run(['config', 'user.name'], { allowFail: true })).stdout.trim() || this.name;
+    try {
+      await createPerson(name);
+      this.o.log(`peers: made an identity for whoever runs this, as ${name} (${personFile()})`);
+    } catch { /* made meanwhile, by another workspace's host */ }
+    this.personRead = null;
+  }
+
+  /** Write the workspace's policy down if it has none (Identity.ensureGenesis). */
+  private async ensureGenesis(fresh: boolean): Promise<void> {
+    const person = await this.person();
+    if (!person) return;
+    try {
+      await this.identity.ensureGenesis(person.id, await this.signingKeyNow(), fresh);
+    } catch (e) {
+      this.o.log(`peers: could not write the workspace's policy down: ${(e as Error).message}`);
+    }
+  }
+
+  /** The workspace's policy (policy.ts), and the person this device is. */
+  async policy(): Promise<{ policy: import('./policy.js').Policy; me: string | null }> {
+    return { policy: await this.identity.policy(), me: (await this.person())?.id ?? null };
+  }
+
   /** This computer's signing key, for its person (person.ts: made on first use, never copied; read each time, as importing an identity replaces it). Tests give theirs. */
-  private signingKeyNow(): Promise<KeyPair> {
+  signingKeyNow(): Promise<KeyPair> {
     return this.o.signing ? Promise.resolve(this.o.signing) : signingKey();
   }
 
@@ -1017,9 +1053,9 @@ export class PeerNode {
     } catch (e) {
       return (e as Error).message;
     }
-    // Any member's links (0038).
+    // Any member's links (0038), if an admin's grant lets its holder in (0066).
     const members = [this.myKey, ...(await this.identity.members()).map((m) => m.key)];
-    return checkLink(l, { workspace: this.ws.id, members, revoked: await this.identity.revokedLinks() });
+    return checkLink(l, { workspace: this.ws.id, members, revoked: await this.identity.revokedLinks() }) ?? this.identity.refuseGrant(l);
   }
 
   /**
@@ -1183,6 +1219,12 @@ export class PeerNode {
       void this.retopic();
     }
     await this.takeRecords(link, records);
+    // Let in by a link that puts this person in a group: said in the policy (0066).
+    const person = await this.person();
+    if (person && this.o.ticket) {
+      await this.identity.joinPolicy(decodeLink(this.o.ticket), await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not join the workspace's policy: ${e.message}`));
+      void this.membersChanged().catch(() => undefined);
+    }
     this.events.welcome?.(link, { ...m, members });
   }
 

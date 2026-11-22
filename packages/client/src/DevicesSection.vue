@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // Settings › Workspace's Devices (decision 0064): who is in the workspace, by person and computer,
-// and who is online. Every member has the same say (0038): on every hub (0047),
-// anyone here may invite people, remove a device (for good; it keeps its copy)
-// and rename this one.
-import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
+// and who is online. Its people, as the workspace's policy says (0066), with
+// their role: admins invite people, remove a device (for good; it keeps its
+// copy), and make others admins or members or take them out. Anyone renames
+// this device. With no policy yet, everyone has the same say (0038).
+import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
 import { time } from './labels.js';
@@ -52,6 +53,20 @@ async function remove(d: Device) {
   if (ok) await act(() => props.api.removeDevice(d.key));
 }
 
+/** Whether you may invite and remove here: an admin, or anyone where there is no policy yet. */
+const admin = computed(() => (info.value?.enabled ? info.value.people?.admin ?? true : true));
+type Someone = NonNullable<Extract<PeersInfo, { enabled: true }>['people']>['people'][number];
+const nameOf = (p: Someone) => p.name ?? S.people.unknown;
+
+async function setRole(p: Someone, role: 'admin' | 'member') {
+  await act(() => props.api.setRole(p.id, role));
+}
+
+async function removePerson(p: Someone) {
+  const ok = await askConfirm(S.people.removeAsk(nameOf(p)), S.common.remove, true);
+  if (ok) await act(() => props.api.removePerson(p.id));
+}
+
 async function rename(current: string) {
   const name = (await askText(S.devices.renameAsk, current, S.common.rename))?.trim();
   if (name && name !== current) await act(() => props.api.renameDevice(name));
@@ -98,12 +113,26 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
         <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`state:${d.name}`">{{ viaText(d) }}</span>
         <span v-else-if="d.through.length" class="device-state" :title="S.devices.throughTitle(via(info, d))" :data-testid="`through:${d.name}`">{{ S.devices.through(via(info, d)) }}</span>
         <span v-else class="device-state" :data-testid="`state:${d.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
-        <button v-if="info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
+        <button v-if="info.canInvite && !info.removed && admin" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
       </li>
     </ul>
+    <template v-if="info.people?.founded && info.people.people.length">
+      <h3>{{ S.people.title }}</h3>
+      <ul class="menu-devices" data-testid="people">
+        <li v-for="p in info.people.people" :key="p.id" :data-testid="`person:${nameOf(p)}`">
+          <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template></span>
+          <span class="device-tag" :title="p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'admin' ? S.people.admin : S.people.member }}</span>
+          <template v-if="admin && info.canInvite && !info.removed && !p.you">
+            <button type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
+            <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.common.removeEllipsis }}</button>
+          </template>
+        </li>
+      </ul>
+    </template>
+    <p v-if="!admin && !info.removed" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
     <!-- A removed device's invitations and removals are refused by the others: none offered. -->
     <div v-if="info.canInvite && !info.removed" class="menu-actions">
-      <button type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button>
+      <button v-if="admin" type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button>
       <button type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">{{ S.devices.rename }}</button>
     </div>
     <ErrorBanner v-if="error" :error="error" inline />

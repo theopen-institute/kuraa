@@ -5,3 +5,6 @@ export class HttpError extends Error {
     super(message);
   }
 }
+
+/** Refused by the workspace's policy: this person is not an admin (decision 0066). */
+export class NotAllowed extends Error {}

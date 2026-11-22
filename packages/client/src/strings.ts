@@ -344,7 +344,9 @@ export const S = {
   invite: {
     title: (workspace: string) => `Invite people to ${workspace}`,
     label: 'Invite people',
-    about: 'Whoever joins gets a copy of this workspace that syncs with yours, and the same say as you: they can read and change everything, invite others, and remove anyone. Share a link only with people you trust with that.',
+    about: 'Whoever joins gets a copy of this workspace that syncs with yours: they can read and change everything. Share a link only with people you trust with that.',
+    asAdmin: 'They can invite and remove people too (an admin)',
+    adminAbout: 'An admin has the same say as you: they can invite others, make them admins, and remove anyone.',
     turnsOn: ' Making one turns on syncing for this workspace.',
     forWhom: 'Who it is for',
     one: 'One person',
@@ -412,6 +414,19 @@ export const S = {
     noContact: (since: string) => `No other device has connected since ${since}. They may all be offline, or this device may have been removed from the workspace while it was offline (it is not told then): someone on another device can tell you.`,
     renameAsk: 'What should this computer be called here?',
     rename: 'Rename this computer…',
+    notAdmin: 'Only the workspace’s admins invite people and remove devices.',
+  },
+
+  people: {
+    title: 'People',
+    admin: 'admin',
+    member: 'member',
+    you: ' (you)',
+    unknown: 'Someone not yet known here',
+    makeAdmin: 'Make admin',
+    makeMember: 'Make member',
+    adminTitle: 'Admins invite people, remove devices, and decide who is an admin.',
+    removeAsk: (who: string) => `Take ${who} out of this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
   },
 
   // A sync's own words (its name, what it does, an example address, how to get one) come from its component.

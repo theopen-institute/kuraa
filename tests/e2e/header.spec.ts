@@ -86,7 +86,7 @@ test('the header is edited in Document settings; the page shows only its title',
     await expect(page.getByTestId('file:paper.md')).toContainText('A better title: with a colon');
 
     // The Source view shows it as text.
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await page.getByTestId('toggle-source').click();
     await expect(page.locator('.source-view')).toContainText('title: "A better title: with a colon"');
   } finally {
@@ -133,7 +133,7 @@ test('a document needs a title; YAML that does not parse cannot be saved', async
     await expect(page.getByTestId('file:plain.md')).toContainText('Fresh');
 
     // Other fields can be removed; the title stays.
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await page.getByTestId('menu-document').click();
     await dialog.getByRole('button', { name: 'Remove Language' }).click();
     // Escape closes it too, keeping the change.

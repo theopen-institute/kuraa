@@ -40,13 +40,10 @@ test('the first run welcomes you and asks your name; the menu changes it', async
   await openFile(page, path);
   await expect(page.getByTestId('peers')).toHaveText('First Run (you)');
 
-  // A new name, from Settings (opened from the menu), reaches the others at once (and is kept).
-  await page.getByTestId('menu-button').click();
-  // The menu has no form of its own: your settings and the server's are in one window.
-  await expect(page.getByTestId('menu').getByLabel('Your name')).toHaveCount(0);
-  await expect(page.getByTestId('menu-you')).toHaveText('First Run');
-  await page.getByTestId('menu-settings').click();
-  await expect(page.getByTestId('menu')).toHaveCount(0);
+  // A new name, from Settings (⚙ at the bottom of the sidebar: at the open document, decision 0065), reaches the others at once (and is kept).
+  await page.getByTestId('settings-button').click();
+  await expect(page.getByTestId('settings-tab-document')).toHaveAttribute('aria-current', 'page');
+  await page.getByTestId('settings-tab-you').click();
   const settings = page.getByTestId('settings-window');
   // The server and its access code are there too, with a button of their own.
   await expect(settings.getByTestId('settings-connection').getByLabel('Server address')).toHaveValue(E2E.url);
@@ -81,15 +78,15 @@ test('a named version is committed; a past version reads as rendered or source',
   await page.waitForTimeout(100);
   await page.keyboard.type(' Clearer by noon.');
 
-  await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu').getByRole('button', { name: 'Save version…' }).click();
+  await page.getByTestId('document-menu-button').click();
+  await page.getByTestId('document-menu').getByRole('button', { name: 'Save version…' }).click();
   await page.getByTestId('ask').locator('input').fill('Checkpoint');
   await page.getByTestId('ask').getByRole('button', { name: 'Save version' }).click();
   await expect(page.getByTestId('notice')).toContainText('Saved version “Checkpoint”.');
   expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe('Checkpoint');
 
-  await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu').getByRole('button', { name: 'History' }).click();
+  await page.getByTestId('document-menu-button').click();
+  await page.getByTestId('document-menu').getByRole('button', { name: 'History' }).click();
   const history = page.getByTestId('history').locator('li');
   await expect(history.first()).toContainText('Checkpoint');
   await history.last().click();

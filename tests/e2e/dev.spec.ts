@@ -49,7 +49,8 @@ test('pnpm dev serves the client against a live host with nothing to configure',
     await page.keyboard.press('Escape');
 
     // The dev server supplies the host, so Settings has no host or token.
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     await expect(page.getByLabel('Server address')).toHaveCount(0);
   } finally {
     process.kill(-dev.pid!, 'SIGINT');
@@ -91,8 +92,8 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
 
     // You on this computer, in the browser too: pnpm dev runs the host on your own computer, and lets the app
     // manage it. Your identity is made for you from your name; the keys are under Advanced, in Settings.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer:');
     await expect.poll(() => existsSync(person), { timeout: 10_000 }).toBe(true);
@@ -100,13 +101,14 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await key.getByText('Advanced').click();
     await expect(key.getByTestId('signing-key')).toHaveText(/^[0-9a-f]{8}…$/);
     await page.getByTestId('settings-close').click();
-    await page.getByTestId('menu-button').click();
 
     // An online copy, added in Workspace settings (it is a component, decision 0059): a plain git repository each save is pushed to.
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
-    await expect(page.getByTestId('menu').getByTestId('sync:online')).toHaveCount(0);
-    await page.getByTestId('menu-workspace-settings').click();
+    // Nothing to sync with yet: no Sync beside Search.
+    await expect(page.getByTestId('sync-button')).toHaveCount(0);
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-workspace').click();
     const online = page.getByTestId('settings-workspace').getByTestId('sync:online');
     await expect(online).toContainText('Online copy');
     await online.getByTestId('sync-address').fill(bare);

@@ -20,7 +20,7 @@ import ErrorBanner from './ErrorBanner.vue';
 import FileTree from './FileTree.vue';
 import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
-import Menu from './Menu.vue';
+import DocumentMenu from './DocumentMenu.vue';
 import MenuButton from './MenuButton.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
@@ -87,7 +87,8 @@ let viewAsked = 0;
 const syncing = ref(false);
 const historyOpen = ref(false);
 const showSource = ref(false);
-const menuOpen = ref(false);
+/** The document's ⋯ menu, if open: where it opens (under its button). */
+const docMenu = shallowRef<{ top: number; right: number } | null>(null);
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 /** Goes up when the host says a tool changed (downloaded, removed): Settings › Server and the preview ask again. */
@@ -125,8 +126,25 @@ function openSearch() {
   sidePanel.value = 'search';
   searchAsked.value++;
 }
-function openMenu() {
-  menuOpen.value = true;
+function openDocMenu(e: MouseEvent) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  docMenu.value = { top: r.bottom + 4, right: window.innerWidth - r.right };
+}
+
+/**
+ * Whether Sync has anything to sync with: other devices, or an online copy.
+ * Asked when a workspace opens, and after inviting people or closing Settings
+ * (where an online copy is added); Sync is offered only once it has.
+ */
+const syncable = ref(false);
+async function checkSyncable() {
+  const asked = api.value;
+  try {
+    const [peers, syncs] = await Promise.all([asked.peers(), asked.syncs()]);
+    if (asked === api.value) syncable.value = peers.enabled || syncs.syncs.some((s) => s.targets.length > 0);
+  } catch {
+    syncable.value = false;
+  }
 }
 
 /** Open a file at a search match. */
@@ -217,9 +235,13 @@ async function switchWorkspace(id: string) {
 const settingsOpen = ref(false);
 const settingsSection = ref<SettingsSection>('you');
 function openSettings(section?: SettingsSection) {
-  menuOpen.value = false;
+  docMenu.value = null;
   if (section) settingsSection.value = section;
   settingsOpen.value = true;
+}
+/** ⚙ and ⌘,: Settings, at what is in front of you: the open document, else the workspace. */
+function openSettingsHere() {
+  openSettings(path.value && type.value && !viewing.value ? 'document' : workspace.value ? 'workspace' : 'you');
 }
 /** The server's settings saved: it has reopened every workspace with them; the page starts again with them too. */
 function serverSettingsSaved() {
@@ -307,18 +329,17 @@ function setEditorsOff(ids: string[]) {
 
 function toggleHelp() {
   helpOpen.value = !helpOpen.value;
-  if (helpOpen.value) menuOpen.value = false;
+  if (helpOpen.value) docMenu.value = null;
 }
 
-// ⌘, (Ctrl+,) opens and closes the menu; ⌘/ the Markdown and shortcuts sheet; ⇧⌘F searches every
-// file; ⇧⌘R renders the document to preview it. While another dialog is open they wait.
+// ⌘, (Ctrl+,) opens Settings at what is in front of you; ⌘/ the Markdown and shortcuts sheet; ⇧⌘F
+// searches every file; ⇧⌘R renders the document to preview it. While another dialog is open they wait.
 const onKey = (e: KeyboardEvent) => {
   if (e.defaultPrevented) return;
   const k = (spec: string) => keyMatches(e, spec);
-  if (k(APP_KEYS.menu) && (menuOpen.value || !dialogOpen())) {
+  if (k(APP_KEYS.menu) && !dialogOpen()) {
     e.preventDefault();
-    if (menuOpen.value) menuOpen.value = false;
-    else openMenu();
+    openSettingsHere();
   } else if (k(APP_KEYS.help) && (helpOpen.value || !dialogOpen())) {
     e.preventDefault();
     toggleHelp();
@@ -395,6 +416,12 @@ async function refreshTree(selectPath?: string | null) {
 
 watch([api, editingSettings, ready], () => {
   if (!editingSettings.value && ready.value) void refreshTree();
+}, { immediate: true });
+
+// Whether Sync is offered: asked of each workspace as it opens.
+watch([api, ready], () => {
+  syncable.value = false;
+  if (ready.value) void checkSyncable();
 }, { immediate: true });
 
 // The workspace renamed (here, or on another device: 0061): the list of workspaces says so too.
@@ -581,8 +608,26 @@ function useSettings(s: Settings) {
             @add="addingWorkspace = true"
           />
         </template>
+        <!-- The workspace's own actions, beside New file: search it, and sync it (once there is something to sync with). -->
+        <template #actions>
+          <button type="button" :title="S.menu.searchTitle(keyLabel(APP_KEYS.search))" :aria-label="S.menu.search" data-testid="search-button" @click="openSearch">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+          </button>
+          <button
+            v-if="syncable"
+            type="button"
+            :disabled="syncing"
+            :title="syncing ? S.sync.syncing : S.sync.title"
+            :aria-label="S.sync.sync"
+            :class="{ spinning: syncing }"
+            data-testid="sync-button"
+            @click="sync"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M11.8 1.8v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+        </template>
         <template #footer>
-          <MenuButton :status="status" :has-document="!!path && !!type" @open="openMenu()" />
+          <MenuButton :status="status" :has-document="!!path && !!type" @open="openSettingsHere()" />
         </template>
       </FileTree>
       <nav v-else class="pane pane-left" :aria-label="S.app.workspaces">
@@ -598,7 +643,7 @@ function useSettings(s: Settings) {
           />
         </div>
         <div class="tree-scroll" />
-        <div class="pane-footer"><MenuButton :status="status" :has-document="false" @open="openMenu()" /></div>
+        <div class="pane-footer"><MenuButton :status="status" :has-document="false" @open="openSettingsHere()" /></div>
       </nav>
 
       <main class="pane pane-centre">
@@ -630,6 +675,18 @@ function useSettings(s: Settings) {
           {{ S.app.versionMismatchDetails(type!.label, type!.version, hostType!.version) }}
         </details>
         <div v-if="path && type && !versionMismatch && !editingSettings" class="centre-stack">
+          <!-- The document's ⋯ menu: what to do with it (DocumentMenu). -->
+          <button
+            v-if="!viewing"
+            type="button"
+            class="document-menu-button"
+            :title="S.docMenu.title"
+            :aria-label="S.docMenu.label"
+            aria-haspopup="dialog"
+            :aria-expanded="!!docMenu"
+            data-testid="document-menu-button"
+            @click="openDocMenu"
+          >⋯</button>
           <div :style="{ display: viewing ? 'none' : 'contents' }">
             <Editor
               ref="editor"
@@ -695,21 +752,14 @@ function useSettings(s: Settings) {
 
     <NoticeToast :notice="shownNotice" @dismiss="notice = null" />
 
-    <Menu
-      v-if="menuOpen"
-      :path="path"
+    <DocumentMenu
+      v-if="docMenu && path && type && !viewing"
+      :at="docMenu"
       :name="fileName"
       :type="type"
       :status="status"
-      :workspace="workspace"
-      :host-url="settings.hostUrl"
-      :viewing="!!viewing"
       :show-source="showSource"
       :history-open="historyOpen"
-      :syncing="syncing"
-      :settings="settings"
-      :shell="shell"
-      :api="api"
       :conflicts="file?.conflicts ?? 0"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
@@ -718,16 +768,14 @@ function useSettings(s: Settings) {
       @insert-table="editor?.command('insertTable')"
       @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
-      @sync="sync"
       @packages="(runner, engine) => (packages = { runner, engine })"
       @preview="preview"
-      @search="openSearch"
       @help="toggleHelp"
-      @settings="openSettings"
-      @close="menuOpen = false"
+      @settings="openSettings('document')"
+      @close="docMenu = null"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
-    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub()" />
+    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkSyncable()" />
     <AddWorkspaceDialog
       v-if="addingWorkspace"
       :hub="hubApi"
@@ -762,7 +810,7 @@ function useSettings(s: Settings) {
       @remove-workspace="chosen && removeWorkspace(chosen)"
       @invite="invite"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @close="settingsOpen = false"
+      @close="settingsOpen = false; void checkSyncable()"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />

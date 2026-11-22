@@ -57,8 +57,8 @@ test('people on two devices edit one document, and any member renames its device
     await expect.poll(() => git(dirA, 'rev-parse', 'HEAD') === git(dirB, 'rev-parse', 'HEAD') && git(dirB, 'status', '--porcelain') === '', { timeout: 20_000 }).toBe(true);
 
     // Workspace settings list the devices, in plain words: online or offline, no keys or branches.
-    await ada.getByTestId('menu-button').click();
-    await ada.getByTestId('menu-workspace-settings').click();
+    await ada.getByTestId('settings-button').click();
+    await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device online');
     await expect(ada.getByTestId('device:laptop')).toContainText('online');
     await expect(ada.getByTestId('devices')).not.toContainText(/[0-9a-f]{8}/);
@@ -71,8 +71,8 @@ test('people on two devices edit one document, and any member renames its device
     await ada.keyboard.press('Escape');
 
     // On Bo's device, the one that joined last: rename it, then remove Ada's device. It is permanent, and she keeps her copy.
-    await bo.getByTestId('menu-button').click();
-    await bo.getByTestId('menu-workspace-settings').click();
+    await bo.getByTestId('settings-button').click();
+    await bo.getByTestId('settings-tab-workspace').click();
     await bo.getByTestId('rename-device').click();
     await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');
     await bo.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
@@ -87,8 +87,8 @@ test('people on two devices edit one document, and any member renames its device
     // Ada's device learns it, and stops syncing; her files stay as they were.
     await expect.poll(() => { try { return git(dirA, 'config', '--get-all', 'kuraa.removed'); } catch { return ''; } }, { timeout: 20_000 }).toBe(a.host.peers!.node.myKey);
     // Her Devices section says so, and offers nothing the others would refuse.
-    await ada.getByTestId('menu-button').click();
-    await ada.getByTestId('menu-workspace-settings').click();
+    await ada.getByTestId('settings-button').click();
+    await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('device-removed')).toContainText('removed from the workspace', { timeout: 10_000 });
     await expect(ada.getByTestId('invite-button')).toHaveCount(0);
     await expect(ada.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);

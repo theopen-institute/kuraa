@@ -1,5 +1,7 @@
 # 0064 · Four kinds of settings, in one window
 
+*Since [0065](0065-no-menu.md): there is no menu. ⚙ (and ⌘,) open Settings at the open document, else the workspace; the document's commands are in its ⋯ menu; Search and Sync beside + in the sidebar.*
+
 > Changes where settings are shown: Settings ([0060](0060-one-settings-window.md)), Document
 > settings ([0054](0054-document-settings.md)), Components ([0017](0017-components-panel.md),
 > [0059](0059-online-copy-is-a-component.md)) and the menu ([0044](0044-polish.md)). What each

@@ -147,23 +147,23 @@ heading and is typed there (↑ at the top of the text goes up to it, Enter come
 to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 
-The **menu**, from the bottom of the sidebar or ⌘, (Ctrl+,), which takes the keyboard's focus as
-every dialog does, is for what to do: with the open document, its **Source** (the markdown, which
-you can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)),
+The open document's **⋯** (its top-right corner) is what to do with it: its **Source** (the
+markdown, which you can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)),
 **History**, **Save version**, **Preview** (below), **Find and replace…**, **Outline**, **Insert
-table**, when it was last saved and kept in the history, and its code session; with the workspace,
-**Search…** (⇧⌘F: every text file, and open documents as they are being typed; a result opens the
-file at the match, [0042](docs/decisions/0042-search.md)), **Sync** (offered once there is an online
-copy or another device; it says "Up to date" or how many changes it brought in) and who is here;
-and **Markdown and shortcuts**.
+table**, when it was last saved and kept in the history, its code session, **Document settings…** and
+**Markdown and shortcuts**. **Search** (⇧⌘F: every text file, and open documents as they are being
+typed; a result opens the file at the match, [0042](docs/decisions/0042-search.md)) and **Sync**
+(once there is an online copy or another device; it says "Up to date" or how many changes it brought
+in) are beside **+** at the top of the sidebar ([decision 0065](docs/decisions/0065-no-menu.md)).
 
 Settings are in one window of four sections, each saying who it applies to and where it is kept
 ([decision 0064](docs/decisions/0064-four-kinds-of-settings.md)): **You** (your name, email and
 colour, your key, and how each kind of document is edited for you; in this browser), **Document**
 (the open document's header; in its file), **Workspace** (its name, packages, devices and invite
 links, online copy, and removing it from the list; in the workspace) and **Server** (what the server
-runs and how; only its owner changes it). The menu opens it at each: **Document settings…** (also
-right-clicking a file), **Workspace settings…** and **Settings…**; ⌥⌘, opens it too. Commit ids and branch names are
+runs and how; only its owner changes it). **⚙** at the bottom of the sidebar, or ⌘, (Ctrl+,), opens it
+at the open document (else the workspace); **Document settings…** and right-clicking a file at the
+document; ⌥⌘, where you left it. Commit ids and branch names are
 behind **Details**. The bottom of the sidebar shows whether you are connected and how many others are
 here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
 **Try again now**. Saving paused or failing (git busy outside the app) is a banner while it lasts.

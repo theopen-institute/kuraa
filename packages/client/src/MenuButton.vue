@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// At the bottom of the sidebar: the connection, who is here, and the way into the menu.
+// At the bottom of the sidebar: the connection, who is here, and the way into
+// Settings (⚙, or ⌘,), at what is in front of you (decision 0065).
 import { computed } from 'vue';
 import type { EditorStatus } from './types.js';
 import { APP_KEYS, keyLabel } from './keys.js';
@@ -14,7 +15,7 @@ const others = computed(() => peers.value.filter((p) => !p.self));
 </script>
 
 <template>
-  <button type="button" class="menu-button" :title="S.menu.button(keyLabel(APP_KEYS.menu))" data-testid="menu-button" aria-haspopup="dialog" @click="$emit('open')">
+  <button type="button" class="menu-button" :title="S.menu.button(keyLabel(APP_KEYS.menu))" data-testid="settings-button" aria-haspopup="dialog" @click="$emit('open')">
     <span :class="`dot conn-${conn}`" aria-hidden="true" />
     <span class="menu-button-text" data-testid="status">{{ hasDocument ? connectionLabel(conn) : S.connection.none }}</span>
     <span v-if="others.length > 0" class="menu-people" :title="others.map((p) => p.name || S.common.anonymous).join(', ')">

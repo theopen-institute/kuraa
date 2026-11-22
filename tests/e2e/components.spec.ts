@@ -35,8 +35,8 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
 
 /** Settings, at a section. */
 async function openSettings(page: Page, section: 'you' | 'server'): Promise<void> {
-  await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-settings').click();
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('settings-tab-you').click();
   await page.getByTestId(`settings-tab-${section}`).click();
   await expect(page.getByTestId('settings-scope')).toBeVisible();
 }

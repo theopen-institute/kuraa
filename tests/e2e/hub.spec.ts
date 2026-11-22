@@ -72,8 +72,8 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await expect.poll(() => readFileSync(join(theirs, 'plan.md'), 'utf8'), { timeout: 30_000 }).toContain('Then the dunes.');
 
     // Renamed here, in Workspace settings, for everyone: Bo's copy takes the new name.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-workspace-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-workspace').click();
     await page.getByTestId('menu-rename-workspace').click();
     await expect(page.getByTestId('ask').locator('input')).toHaveValue('Bo’s survey');
     await page.getByTestId('ask').locator('input').fill('Dune survey');
@@ -168,8 +168,8 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
 
     // On this device only, so far: Workspace settings offer to invite people.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-workspace-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-workspace').click();
     await expect(page.getByTestId('devices')).toContainText('on this computer only');
     await page.getByTestId('invite-button').click();
     const dialog = page.getByTestId('invite');
@@ -194,8 +194,8 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     expect(late.status).toBe(400);
 
     // Workspace settings now show the device that joined.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-workspace-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-workspace').click();
     await expect(page.getByTestId('devices')).toContainText('1 of 1 other device online');
   } finally {
     await theirs.close();

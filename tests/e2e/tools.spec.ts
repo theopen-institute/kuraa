@@ -36,8 +36,8 @@ async function fakeHost(): Promise<RunningHost> {
 
 /** Settings › Server, where the tools are (decision 0064). */
 async function openComponents(page: Page): Promise<void> {
-  await page.getByTestId('menu-button').click();
-  await page.getByTestId('menu-settings').click();
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('settings-tab-you').click();
   await page.getByTestId('settings-tab-server').click();
   await expect(page.getByTestId('components')).toBeVisible();
 }
@@ -79,7 +79,7 @@ test('the preview offers the tool a PDF needs, and renders it once downloaded', 
   try {
     await page.goto(`${host.url}/?token=${host.token}&name=Owner&email=owner%40example.org`);
     await page.getByTestId('file:paper.md').click();
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await page.getByTestId('menu-preview').click();
     const panel = page.getByTestId('preview-panel');
     await panel.getByTestId('save-pdf').click();

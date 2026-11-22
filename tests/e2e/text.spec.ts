@@ -55,8 +55,8 @@ test('an R script is highlighted, edits keep indentation and CRLF, and paste spl
   await expect(editor.locator('.tok-keyword', { hasText: 'function' })).toHaveCount(1);
   await expect(editor.locator('.tok-atom', { hasText: 'TRUE' })).toHaveCount(1);
   // No markdown machinery: no Source toggle, and markdown cues stay literal.
-  await page.getByTestId('menu-button').click();
-  await expect(page.getByTestId('menu')).toBeVisible();
+  await page.getByTestId('document-menu-button').click();
+  await expect(page.getByTestId('document-menu')).toBeVisible();
   await expect(page.getByTestId('toggle-source')).toHaveCount(0);
   // A text file has no settings of its own: Settings says so.
   await page.getByTestId('menu-document').click();

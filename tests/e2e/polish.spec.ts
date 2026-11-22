@@ -69,7 +69,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await expect(page.getByTestId('editor')).toBeFocused();
 
   // From the menu.
-  await page.getByTestId('menu-button').click();
+  await page.getByTestId('document-menu-button').click();
   await page.getByTestId('menu-help').click();
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Close' }).click();
@@ -231,9 +231,9 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
   await editor.locator('p', { hasText: 'The text behind.' }).click();
   await expect(editor).toBeFocused();
 
-  // ⌘, opens the menu with focus inside it: typing does not reach the document behind.
+  // ⌘, opens Settings with focus inside it: typing does not reach the document behind.
   await page.keyboard.press(`${MOD}+Comma`);
-  const menu = page.getByRole('dialog', { name: 'Menu' });
+  const menu = page.getByRole('dialog', { name: 'Settings' });
   await expect(menu).toBeVisible();
   await expect(menu).toHaveAttribute('aria-modal', 'true');
   expect(await menu.evaluate((el) => el.contains(document.activeElement))).toBe(true);
@@ -263,8 +263,8 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
   await expect(row).toBeFocused();
 
   // A question (ask.ts) is a dialog on the same stack: Escape closes it.
-  await page.getByTestId('menu-button').click();
-  const theMenu = page.getByRole('dialog', { name: 'Menu' });
+  await page.getByTestId('document-menu-button').click();
+  const theMenu = page.getByRole('dialog', { name: 'Document' });
   await expect(theMenu).toBeVisible();
   await theMenu.getByRole('button', { name: 'Save version…' }).click();
   const ask = page.getByRole('dialog', { name: 'Name this version' });

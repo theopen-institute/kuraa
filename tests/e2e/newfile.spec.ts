@@ -153,11 +153,11 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await row.getByRole('button', { name: /^New file in/ }).click();
   await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', `${folder}/untitled.md`);
 
-  // ⌘, (Ctrl+, elsewhere) opens and closes the menu.
+  // ⌘, (Ctrl+, elsewhere) opens Settings, at the open document (decision 0065); Escape closes it.
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');
-  await expect(page.getByTestId('menu')).toBeVisible();
+  await expect(page.getByTestId('settings-tab-document')).toHaveAttribute('aria-current', 'page');
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('menu')).toHaveCount(0);
+  await expect(page.getByTestId('settings-window')).toHaveCount(0);
 });
 
 

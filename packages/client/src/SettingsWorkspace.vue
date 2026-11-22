@@ -51,6 +51,10 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
       </section>
       <DevicesSection :api="api" @invite="emit('invite')" />
       <SyncsSection :api="api" />
+      <details class="settings-part menu-details">
+        <summary>{{ S.common.details }}</summary>
+        <span class="menu-facts" data-testid="workspace-details">{{ S.menu.workspaceDetails(workspace.branch, workspace.head?.slice(0, 7) ?? null) }}</span>
+      </details>
       <section v-if="canRemove" class="settings-part settings-danger">
         <div class="pref-row">
           <button type="button" class="danger" :title="S.menu.removeWorkspaceTitle" data-testid="menu-remove-workspace" @click="emit('remove')">{{ S.menu.removeWorkspace }}</button>

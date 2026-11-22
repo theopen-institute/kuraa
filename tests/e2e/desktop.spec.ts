@@ -96,9 +96,9 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await openNotes(page);
 
     // The app manages this host: Settings has no host or token. Joining a shared server is not offered (only --join).
-    await page.getByTestId('menu-button').click();
     await expect(page.getByRole('button', { name: /join a shared server/i })).toHaveCount(0);
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Server address')).toHaveCount(0);
     await page.getByTestId('settings-tab-server').click();
@@ -134,10 +134,9 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await typeAtEnd(page, 'The tide', ' Desktop edit.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
     await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await expect(page.getByTestId('last-commit')).not.toContainText('—');
-    // Escape goes back from Document settings to the menu, and closes the menu.
-    await page.keyboard.press('Escape');
+    // Escape closes the document's menu.
     await page.keyboard.press('Escape');
 
     // M5 (a): another program edits elsewhere in the file while the user types.
@@ -189,8 +188,8 @@ test('joins a shared host without starting one', async () => {
       await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Light rain all morning. Joined from the desktop.');
       await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
       // Joined, not managed: Settings shows the server and access code.
-      await page.getByTestId('menu-button').click();
-      await page.getByTestId('menu-settings').click();
+      await page.getByTestId('settings-button').click();
+      await page.getByTestId('settings-tab-you').click();
       await expect(page.getByLabel('Server address')).toHaveValue(host.url);
     } finally {
       await app.close();
@@ -243,7 +242,7 @@ test('runs R chunks in a Podman container by default', async () => {
     await expect(page.getByTestId('status')).toContainText('Connected');
     await page.locator('.code-node-code_chunk').getByRole('button', { name: '▶ Run' }).click();
     await expect(page.locator('.chunk-output')).toContainText('[1] 42', { timeout: 14 * 60_000 });
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveText('R ready · in a Podman container');
   } finally {
     await app.close();
@@ -260,10 +259,11 @@ test('flags set what runs and which formats are on; the window shows only the ap
     // R Markdown is off: the file opens as text; nothing runs.
     await page.getByTestId('file:analysis.Rmd').click();
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
-    await page.getByTestId('menu-button').click();
+    await page.getByTestId('document-menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveCount(0);
+    await page.keyboard.press('Escape');
     // Settings › Server says what runs (decision 0064).
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
     await page.getByTestId('settings-tab-server').click();
     const components = page.getByTestId('settings-window');
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
@@ -338,8 +338,8 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
   const data = mkdtempSync(join(tmpdir(), 'kuraa-desktop-data-'));
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const rOn = async (page: Page) => {
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-server').click();
     const on = await page.getByTestId('components-run').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
     await page.keyboard.press('Escape');
@@ -372,8 +372,8 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
       runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
     });
     // R Markdown is off now: Settings › Server says so.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-server').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
@@ -437,8 +437,8 @@ test('you on this computer: made from your name, said in each workspace that syn
     };
     await expect.poll(said, { timeout: 15_000 }).toBe(true);
     // Settings says so in plain words; the keys are under Advanced.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
     await key.getByText('Advanced').click();
@@ -455,8 +455,8 @@ test('you on this computer: made from your name, said in each workspace that syn
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     await expect.poll(() => existsSync(elsewhere), { timeout: 15_000 }).toBe(true);
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
     await key.getByText('Advanced').click();
     await key.getByTestId('person-line').fill(line);

@@ -34,8 +34,8 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Owner`);
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     // One window of four sections (decision 0064): opened at You; this computer's server is a section of its own.
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Owner');
     await expect(page.getByTestId('settings-scope')).toContainText('Only you');
@@ -72,8 +72,8 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     expect(JSON.parse(readFileSync(join(app, 'settings.json'), 'utf8'))).toMatchObject({ memory: '3g', relays: ['ab'.repeat(32)], formats: expect.not.arrayContaining(['rmarkdown']) });
 
     // R Markdown is off now, and the file opens as plain text.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-server').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();

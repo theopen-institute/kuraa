@@ -398,6 +398,7 @@ provide(TREE, {
     <div :class="['pane-header', { 'drop-target': over === '' }]" @dragover="dragOver($event, '')" @drop="drop($event, '')">
       <slot name="title"><span class="workspace-name" :title="workspaceName" data-testid="workspace-name">{{ workspaceName }}</span></slot>
       <span class="pane-header-actions">
+        <slot name="actions" />
         <button type="button" :title="S.tree.newFile" :aria-label="S.tree.newFile" @click="create()">＋</button>
       </span>
     </div>

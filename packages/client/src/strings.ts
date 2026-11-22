@@ -154,13 +154,11 @@ export const S = {
   },
 
   menu: {
-    label: 'Menu',
-    button: (key: string) => `Menu (${key})`,
+    /** The button at the bottom of the sidebar: Settings, at what is in front of you (decision 0065). */
+    button: (key: string) => `Settings (${key})`,
     editSource: 'Edit the source',
     showDocument: 'Show the document',
     documentSettings: 'Document settings…',
-    /** What a new document's file is called until it has a title. */
-    untitledName: 'untitled',
     history: 'History',
     hideHistory: 'Hide history',
     saveVersion: 'Save version…',
@@ -183,10 +181,6 @@ export const S = {
     searchTitle: (key: string) => `Search every file (${key})`,
     help: 'Markdown and shortcuts',
     helpTitle: (key: string) => `Everything you can type, and the keys (${key})`,
-    you: 'You',
-    settings: 'Settings…',
-    settingsTitle: (key: string) => `Settings: you, the document, the workspace, and the server (${key})`,
-    workspaceSettings: 'Workspace settings…',
   },
 
   settings: {
@@ -217,8 +211,8 @@ export const S = {
     outline: 'The outline: the document’s headings',
     search: 'Search every file',
     preview: 'Preview: render the document',
-    menu: 'The menu',
-    preferences: 'Settings: yours, and this computer’s server',
+    menu: 'Settings, at the open document (or the workspace)',
+    preferences: 'Settings, where you left them',
     help: 'This list',
     undo: 'Undo',
     redo: 'Redo',
@@ -656,6 +650,12 @@ export const S = {
     folders: 'Folders',
     path: 'Folder',
     go: 'Go',
+  },
+
+  /** The document's ⋯ menu (decision 0065). */
+  docMenu: {
+    label: 'Document',
+    title: 'This document: its views and versions, writing in it, its code, and its settings',
   },
 
   /** The Settings window's four sections (decision 0064): what each is, and who it applies to. */

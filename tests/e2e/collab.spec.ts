@@ -90,14 +90,14 @@ test('two browsers co-edit one paragraph and see each other', async ({ browser }
   const untouched = NOTES.split('\n\n').filter((block) => !block.includes(PARAGRAPH));
   expect(onDisk).toContain(`\n${expected}\n`);
   for (const block of untouched) expect(onDisk).toContain(block);
-  await alice.getByTestId('menu-button').click();
+  await alice.getByTestId('document-menu-button').click();
   await expect(alice.getByTestId('last-flush')).not.toContainText('—');
 
   // M4 through the UI: the idle commit appears in the history panel with both people.
   // The panel starts closed.
   await expect(alice.getByTestId('last-commit')).not.toContainText('—', { timeout: 15_000 });
   await expect(alice.getByTestId('history')).toHaveCount(0);
-  await alice.getByTestId('menu').getByRole('button', { name: 'History' }).click();
+  await alice.getByTestId('document-menu').getByRole('button', { name: 'History' }).click();
   const latest = alice.getByTestId('history').locator('li').first();
   await expect(latest).toContainText('Alice Ng');
   await expect(latest).toContainText('Bob Ferreira');

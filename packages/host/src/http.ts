@@ -737,7 +737,7 @@ const peerRoutes: Route[] = [
   // Who may change what (0066): a file's access and suggestions; suggesting; seeing to a suggestion; rules and groups.
   route('GET', '/api/access', async ({ host, res, q }) => {
     const path = str(q.get('path'), 'path');
-    send(res, 200, host.peers ? await host.peers.access(path) : { canWrite: true, rule: null, suggestions: [], you: null });
+    send(res, 200, host.peers ? await host.peers.access(path) : { canWrite: true, rule: null, admin: false, suggestions: [], you: null, readers: null });
   }),
   route('POST', '/api/suggestions', async ({ host, req, res }) => {
     const peers = host.peers;

@@ -42,8 +42,8 @@ const emit = defineEmits<{
   packages: [runner: ChunkRunner, engine: string];
   /** Settings, at the document's section. */
   settings: [];
-  /** Who can read the document (0066). */
-  readers: [];
+  /** The document's permissions: who can read it, and who can change it (0066, 0067). */
+  permissions: [];
   help: [];
   close: [];
 }>();
@@ -105,7 +105,7 @@ const runner = computed(() => props.status?.runner ?? null);
 
       <section class="menu-section menu-links">
         <div class="menu-actions">
-          <button v-if="shared" type="button" data-testid="menu-readers" @click="then(() => emit('readers'))">{{ S.readers.menu }}</button>
+          <button v-if="shared" type="button" data-testid="menu-permissions" @click="then(() => emit('permissions'))">{{ S.permissions.menu }}</button>
           <button type="button" data-testid="menu-document" @click="then(() => emit('settings'))">{{ S.menu.documentSettings }}</button>
           <button type="button" :title="S.menu.helpTitle(keyLabel(APP_KEYS.help))" data-testid="menu-help" @click="then(() => emit('help'))">{{ S.menu.help }}</button>
         </div>

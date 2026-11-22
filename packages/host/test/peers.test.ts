@@ -465,7 +465,7 @@ describe('equal members, and forks', () => {
     // Only Ada may change chapters/.
     await a.host.peers!.setRule('chapters/', [ada.id]);
     await until(async () => !(await b.host.peers!.access('chapters/one.md')).canWrite, 15_000, 'the rule on Bo’s device');
-    expect((await b.host.peers!.access('chapters/one.md')).rule).toEqual({ path: 'chapters/', by: ['Ada'] });
+    expect((await b.host.peers!.access('chapters/one.md')).rule).toEqual({ path: 'chapters/', by: ['Ada'], who: [ada.id] });
     expect((await b.host.peers!.access('notes.md')).canWrite).toBe(true);
     await expect(b.host.peers!.setRule('', [bo.id])).rejects.toThrow('Only an admin');
 

@@ -38,8 +38,8 @@ const emit = defineEmits<{
   created: [path: string];
   /** Open this file at its first conflict. */
   conflicts: [path: string];
-  /** Say who can read this file (0066). */
-  readers: [path: string];
+  /** This file's permissions: who can read it, and who can change it (0066, 0067). */
+  permissions: [path: string];
 }>();
 
 const tree = computed(() => buildTree(props.files));
@@ -256,7 +256,7 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
     const file = props.files.find((f) => f.path === path);
     return [
       ...(file?.type ? [{ label: S.tree.documentSettings, run: () => emit('documentSettings', path), testid: 'context:document-settings' }] : []),
-      ...(props.shared ? [{ label: S.readers.menu, run: () => emit('readers', path), testid: 'context:readers' }] : []),
+      ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', path), testid: 'context:permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void rename(path), testid: 'context:rename' },
       { label: S.common.deleteEllipsis, run: () => void remove(path), danger: true, testid: 'context:delete' },
     ];

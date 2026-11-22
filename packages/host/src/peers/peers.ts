@@ -128,8 +128,10 @@ export interface PeersStatus {
 /** Who may change a file (0066). */
 export interface FileAccess {
   canWrite: boolean;
-  /** The rule that counts for it: its path and who it names, in words; null if none (anyone may). */
-  rule: { path: string; by: string[] } | null;
+  /** The rule that counts for it: its path, who it names in words, and as the policy says it; null if none (anyone may). */
+  rule: { path: string; by: string[]; who: string[] } | null;
+  /** Whether this person may make rules (an admin of the workspace). */
+  admin: boolean;
   suggestions: Suggestion[];
   /** This person (identity ID). */
   you: string | null;
@@ -142,7 +144,7 @@ export function audienceWords(audience: string[], me: string | null, names: Map<
   if (audience.length === 1 && audience[0] === me) return 'Only you';
   // You first: "You and Bo".
   const ordered = [...audience].sort((x, y) => Number(y === me) - Number(x === me));
-  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
+  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') || w.startsWith('email:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
   return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
 }
 
@@ -623,10 +625,13 @@ export class Peers {
     const space = this.host.spaceOf(path);
     const rule = policy.founded ? policy.ruleFor(path) : null;
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
-    const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
+    const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : w.startsWith('email:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
     return {
       canWrite: !policy.founded || policy.mayWrite(me, path),
-      rule: rule && { path: rule.path, by: rule.by.map(words) },
+      // In words, and as the policy says it (for the document's Permissions… to show and change: 0067).
+      rule: rule && { path: rule.path, by: rule.by.map(words), who: rule.by },
+      // Whether this person may say who changes it (make a rule): the workspace's admins (0066).
+      admin: policy.founded && policy.isAdmin(me),
       suggestions: await this.suggestions(path),
       you: me,
       // Who reads it: everyone in the workspace (null), or a space's audience (0066).

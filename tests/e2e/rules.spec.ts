@@ -93,3 +93,71 @@ test('an admin says who can change a document; someone else suggests a change, a
     await testnet.destroy();
   }
 });
+
+test('from a document’s ⋯ menu: an admin says only she can change it; then back to what the workspace says', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const testnet = await createTestnet(3);
+  const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-perm-a-'));
+  git(dirA, 'init', '-q', '-b', 'main');
+  git(dirA, 'config', 'user.name', 'Ada');
+  git(dirA, 'config', 'user.email', 'ada@example.org');
+  writeFileSync(join(dirA, 'notes.md'), '---\ntitle: Field notes\n---\n\nThe tide was out.\n');
+  git(dirA, 'add', '-A');
+  git(dirA, 'commit', '-q', '-m', 'Initial');
+  const peers = { bootstrap: testnet.bootstrap as never };
+  const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-perm-keys-'));
+  const asAda = { ...peers, person: await createPerson('Ada', join(keys, 'ada', 'person.json')), signing: await keptKey(join(keys, 'ada', 'signing.json')) };
+  const boPerson = await createPerson('Bo', join(keys, 'bo', 'person.json'));
+  const asBo = { ...peers, person: boPerson, signing: await keptKey(join(keys, 'bo', 'signing.json')) };
+  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-perm-b-')), 'notes');
+  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: boPerson, signing: asBo.signing });
+  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  try {
+    const open = async (h: typeof a, name: string) => {
+      const page = await (await browser.newContext()).newPage();
+      await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
+      await page.getByTestId('file:notes.md').click();
+      await expect(page.getByTestId('editor')).toContainText('The tide was out.');
+      return page;
+    };
+    const ada = await open(a, 'Ada');
+    const bo = await open(b, 'Bo');
+    await expect.poll(async () => (await a.host.peers!.people()).people.length, { timeout: 20_000 }).toBe(2);
+
+    // Ada, from the document's ⋯ menu: only she can change it.
+    await ada.getByTestId('document-menu-button').click();
+    await ada.getByTestId('menu-permissions').click();
+    const dialog = ada.getByTestId('permissions-dialog');
+    await expect(dialog.getByTestId('permissions-write')).toContainText('As its folder or the workspace says (anyone in the workspace)');
+    await dialog.getByTestId('write-me').check();
+    await dialog.getByTestId('permissions-save').click();
+    await expect(dialog).toBeHidden();
+    // Kept as a rule for the file, in the workspace's rules too.
+    await expect.poll(async () => (await a.host.peers!.rules()).rules).toEqual([{ path: 'notes.md', by: [asAda.person.id] }]);
+
+    // Bo: read only; his Permissions… says who can change it, and that admins say.
+    await expect(bo.getByTestId('read-only')).toContainText('Only Ada can change this document', { timeout: 20_000 });
+    await bo.getByTestId('document-menu-button').click();
+    await bo.getByTestId('menu-permissions').click();
+    const his = bo.getByTestId('permissions-dialog');
+    await expect(his.getByTestId('writers-now')).toContainText('Ada, by the rule for notes.md');
+    await expect(his).toContainText('Only the workspace’s admins say who can change what');
+    await expect(his.getByTestId('write-me')).toHaveCount(0);
+    await his.getByRole('button', { name: 'Cancel' }).click();
+
+    // Ada sets it back: as the workspace says (no rule of its own). Bo can change it again.
+    await ada.getByTestId('document-menu-button').click();
+    await ada.getByTestId('menu-permissions').click();
+    await dialog.getByTestId('write-inherit').check();
+    await dialog.getByTestId('permissions-save').click();
+    await expect(dialog).toBeHidden();
+    await expect(bo.getByTestId('read-only')).toHaveCount(0, { timeout: 20_000 });
+    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'true');
+  } finally {
+    await b.close();
+    await a.close();
+    await testnet.destroy();
+  }
+});

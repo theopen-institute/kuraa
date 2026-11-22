@@ -99,7 +99,9 @@ export interface SuggestionInfo {
 /** Who may change a file (0066): whether you may, the rule that says so, and its open suggestions. */
 export interface FileAccess {
   canWrite: boolean;
-  rule: { path: string; by: string[] } | null;
+  rule: { path: string; by: string[]; who: string[] } | null;
+  /** Whether you may make rules (an admin of the workspace). */
+  admin?: boolean;
   suggestions: SuggestionInfo[];
   you: string | null;
   /** Who reads it: null for everyone in the workspace; else its audience, and that in words (0066). */

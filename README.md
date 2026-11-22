@@ -298,8 +298,12 @@ would leave no admin (then neither is, and Workspace settings say so). What some
 a revoked or lost key, signs after that counts for nothing anywhere; merges are made again by
 every device that brings them in, so none can slip a change past the rules.
 
-**Who can read a file** is chosen from its right-click menu or the document's ⋯ menu: everyone in
-the workspace, only you, or people and groups. A file read by fewer is kept in a *space*: a
+A document's **Permissions…** (its ⋯ menu, or its right-click menu) say who can read it and who
+can change it, beside the rules for folders and the whole workspace in Workspace settings: who can
+change it is a rule for the file (as its folder says, only you, or people, groups and admins),
+which admins make ([0067](docs/decisions/0067-permissions-from-the-document.md)).
+
+**Who can read a file** is chosen there too: everyone in the workspace, only you, or people and groups. A file read by fewer is kept in a *space*: a
 history of its own in the repository (`refs/spaces/…`), which devices send only to the devices
 of the people who may read it, so no one else's device ever has it, nor its history. On your
 device its files lie in the folder with the rest, marked with a lock in the file list, and kept

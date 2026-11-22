@@ -27,7 +27,7 @@ import PackagesDialog from './PackagesDialog.vue';
 import PastVersion from './PastVersion.vue';
 import AccessBar from './AccessBar.vue';
 import SuggestDialog from './SuggestDialog.vue';
-import ReadersDialog from './ReadersDialog.vue';
+import PermissionsDialog from './PermissionsDialog.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
 import FolderPicker from './FolderPicker.vue';
@@ -88,11 +88,11 @@ const historyKey = ref(0);
 const viewing = shallowRef<{ commit: CommitInfo | null; outside?: string; text: string; compare?: boolean; suggestion?: SuggestionInfo } | null>(null);
 /** Who may change the open file, and its suggestions (0066); null until known, or where it does not apply. */
 const access = shallowRef<FileAccess | null>(null);
-/** Saying who can read a file (0066): its path, and what it is called. */
-const readersFor = shallowRef<{ path: string; name: string } | null>(null);
-function openReaders(p: string) {
+/** A file's permissions, open (0066, 0067): its path, and what it is called. */
+const permissionsFor = shallowRef<{ path: string; name: string } | null>(null);
+function openPermissions(p: string) {
   const f = files.value.find((x) => x.path === p);
-  readersFor.value = { path: p, name: (f && 'title' in f && f.title) || p.slice(p.lastIndexOf('/') + 1) };
+  permissionsFor.value = { path: p, name: (f && 'title' in f && f.title) || p.slice(p.lastIndexOf('/') + 1) };
 }
 
 /** Suggesting a change to the open document: its text as it is now. */
@@ -691,7 +691,7 @@ function useSettings(s: Settings) {
         @document-settings="openDocumentSettings"
         @created="(p) => (titleFocus = p)"
         @conflicts="showConflicts"
-        @readers="openReaders"
+        @permissions="openPermissions"
         @changed="refreshTree"
         @error="fail"
       >
@@ -874,11 +874,11 @@ function useSettings(s: Settings) {
       @preview="preview"
       @help="toggleHelp"
       @settings="openSettings('document')"
-      @readers="openReaders(path!)"
+      @permissions="openPermissions(path!)"
       @close="docMenu = null"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
-    <ReadersDialog v-if="readersFor" :api="api" :path="readersFor.path" :name="readersFor.name" @close="readersFor = null" @saved="(w) => { readersFor = null; notice = { kind: 'info', text: S.readers.saved(w) }; void refreshTree(); void loadAccess(); }" />
+    <PermissionsDialog v-if="permissionsFor" :api="api" :path="permissionsFor.path" :name="permissionsFor.name" @close="permissionsFor = null" @saved="(what) => { permissionsFor = null; notice = { kind: 'info', text: what }; void refreshTree(); void loadAccess(); }" />
     <SuggestDialog v-if="suggesting" :api="api" :path="suggesting.path" :title="suggesting.title" :text="suggesting.text" @close="suggesting = null" @sent="suggesting = null; notice = { kind: 'info', text: S.access.sent }; void loadAccess()" />
     <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkSyncable()" />
     <AddWorkspaceDialog

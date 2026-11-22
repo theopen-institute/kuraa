@@ -61,11 +61,11 @@ test('a document only two people read: on their devices, marked so, and gone fro
     await ada.getByTestId('file:plan.md').click();
     await expect(ada.getByTestId('editor')).toContainText('surprise party');
     await ada.getByTestId('document-menu-button').click();
-    await ada.getByTestId('menu-readers').click();
-    const dialog = ada.getByTestId('readers-dialog');
-    await dialog.getByTestId('readers-chosen').check();
-    await dialog.getByTestId('readers-person:Bo').check();
-    await dialog.getByTestId('readers-save').click();
+    await ada.getByTestId('menu-permissions').click();
+    const dialog = ada.getByTestId('permissions-dialog');
+    await dialog.getByTestId('read-chosen').check();
+    await dialog.getByTestId('read-person:Bo').check();
+    await dialog.getByTestId('permissions-save').click();
     await expect(dialog).toBeHidden();
     await expect(ada.getByTestId('readers-line')).toContainText('Only you and Bo can read this document.');
     await expect(ada.getByTestId('readers:plan.md')).toBeVisible();

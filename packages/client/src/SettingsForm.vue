@@ -6,7 +6,9 @@
 // it is changed (on leaving it, or Enter; the colour as it is picked), and what
 // is still being typed when the form goes away (the menu closed), with no
 // button. A name left empty goes back to the saved one; an email that is not
-// one is not saved.
+// one is not saved. With `deferred` (the server and access code, in Settings),
+// there is no button either: the window asks what changed as it closes
+// (pending), and uses it then.
 import { onBeforeUnmount, reactive, useTemplateRef } from 'vue';
 import type { Settings } from './settings.js';
 import type { Shell } from './shell.js';
@@ -23,6 +25,8 @@ const props = withDefaults(defineProps<{
   submitLabel?: string;
   /** Save each field as it is changed, with no save button. */
   autosave?: boolean;
+  /** No save button: whoever shows it asks what changed (pending), as it closes. */
+  deferred?: boolean;
 }>(), { part: 'all' });
 const emit = defineEmits<{ save: [settings: Settings]; cancel: [] }>();
 
@@ -60,6 +64,22 @@ function saveField(event: Event) {
   if (next) emit('save', next);
 }
 
+const form = useTemplateRef<HTMLFormElement>('form');
+
+/**
+ * What changed, for whoever shows it to use as it closes (deferred): the
+ * settings to use, null if nothing changed, or 'invalid' if a field is not
+ * valid (said at it).
+ */
+function pending(): Settings | null | 'invalid' {
+  const next = cleaned();
+  const was = props.initial;
+  if (next.hostUrl === was.hostUrl && next.token === was.token) return null;
+  if (form.value && !form.value.reportValidity()) return 'invalid';
+  return next;
+}
+defineExpose({ pending });
+
 // The menu closed (Escape, a click outside) with a field still being typed in: it changes no more, so it is kept.
 onBeforeUnmount(() => {
   if (!props.autosave) return;
@@ -69,7 +89,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <form class="settings-form" @submit.prevent="autosave ? undefined : submit()" @change="saveField" @keydown.enter="autosave && saveField($event)">
+  <form ref="form" class="settings-form" @submit.prevent="autosave || deferred ? undefined : submit()" @change="saveField" @keydown.enter="autosave && saveField($event)">
     <template v-if="part !== 'connection'">
       <label class="field">
         <span>{{ S.settings.name }}</span>
@@ -94,10 +114,7 @@ onBeforeUnmount(() => {
         <input v-model="s.token" name="token" type="password" autocomplete="off" required>
       </label>
     </template>
-    <div v-if="part !== 'connection' && shell.leave" class="modal-shell">
-      <button type="button" @click="shell.leave()">{{ S.settings.join }}</button>
-    </div>
-    <div v-if="!autosave" class="modal-actions">
+    <div v-if="!autosave && !deferred" class="modal-actions">
       <button v-if="cancellable" type="button" @click="emit('cancel')">{{ S.common.cancel }}</button>
       <button type="submit" class="primary">{{ submitLabel ?? (part === 'connection' ? S.settings.saveConnection : S.settings.save) }}</button>
     </div>

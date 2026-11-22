@@ -1,5 +1,7 @@
 # 0054 · Document settings: the open document's own panel of the menu; a file's right-click menu is about the file
 
+*Since [0063](0063-settings-keep-what-you-change.md): the header has no **Save header**; what was changed is written as Document settings closes, however it closes, as one edit that can be undone.*
+
 The menu had grown a section for the open document (views, versions, saving, writing, its code
 session) above the workspace's and yours, and the header was a dialog of its own. The menu is now
 for the workspace and for you; what belongs to one document is in one place, **Document

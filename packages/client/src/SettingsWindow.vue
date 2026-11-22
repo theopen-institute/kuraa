@@ -1,17 +1,20 @@
 <script setup lang="ts">
-// Settings, in one window (decision 0060), in two parts that are kept and
-// saved differently:
+// Settings, in one window (decision 0060). Nothing changed in it is lost by
+// closing it (Done, Escape, or a click outside, all the same), and it has no
+// Save button:
 //
 // - You: your name, email and colour, saved in this browser as each is changed;
 //   you on this computer (your key); and, where the shell does not run the
-//   server, the server and its access code, saved with their own button.
+//   server, the server and its access code, used once the window closes (not as
+//   each is typed: half an address would connect nowhere).
 // - This computer's server: the owner's settings for the server on their own
 //   computer (the host's settings.ts), the same in a browser and in the desktop
 //   app (decision 0047), shown only to its owner. The ones most people need are
-//   in view, the others under Advanced. A value that is wrong is refused, saying
-//   what; a setting a flag overrides says so. Saving reopens every workspace
-//   with them (writing and committing first), then the page reloads, so they
-//   have a button of their own; closing the window leaves them as they were.
+//   in view, the others under Advanced. A setting a flag overrides says so.
+//   Applying them reopens every workspace (writing and committing first), then
+//   the page reloads, so changes are applied once, when the window closes, and
+//   it says so. A value that is wrong is refused, saying what, and the window
+//   stays open on it.
 import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HostApi, HubApi, HubSettings, SettingsView } from './api.js';
 import { personShellFor } from './hostPerson.js';
@@ -71,6 +74,7 @@ if (props.canChangeSettings) props.hub.settings().then((v) => {
     // Kinds of documents: each one the app has, on unless the settings name others.
     formats: v.formats.filter((x) => !p.formats || p.formats.includes(x.id)).map((x) => x.id),
   });
+  loaded = JSON.stringify(f);
   view.value = v;
 }, (e: unknown) => {
   loadError.value = e;
@@ -103,8 +107,13 @@ function chosen(purpose: FolderPurpose, path: string) {
   else f.workspaces = path;
 }
 
-async function save() {
-  if (!view.value || busy.value) return;
+/** The server's settings as loaded: changed since, they are applied on closing. */
+let loaded = '';
+const changed = computed(() => !!view.value && JSON.stringify(f) !== loaded);
+
+/** Apply the server's settings (reopening every workspace, and reloading the page); false if refused. */
+async function save(): Promise<boolean> {
+  if (!view.value || busy.value) return false;
   error.value = '';
   busy.value = true;
   try {
@@ -128,20 +137,50 @@ async function save() {
       workspaces: f.workspaces,
     });
     emit('saved');
+    return true;
   } catch (e) {
     error.value = S.preferences.couldNotSave((e as Error).message);
     busy.value = false;
+    return false;
   }
+}
+
+const connection = useTemplateRef<InstanceType<typeof SettingsForm>>('connection');
+
+/**
+ * Close the window, keeping what was changed: the server and access code (if
+ * changed, and both given), then the server's settings (applied: the page
+ * reloads). Either refused, the window stays open, saying why.
+ */
+async function close() {
+  if (busy.value) return;
+  const conn = connection.value?.pending() ?? null;
+  if (conn === 'invalid') {
+    stuck.value = true;
+    return;
+  }
+  if (changed.value && !(await save())) {
+    stuck.value = true;
+    return;
+  }
+  if (conn) emit('saveSettings', conn);
+  emit('close');
+}
+
+/** Closing was refused (a value not valid): offered a way out that keeps nothing not saved yet. */
+const stuck = ref(false);
+function discard() {
+  emit('close');
 }
 
 const root = useTemplateRef<HTMLElement>('root');
 useDialog(root, () => {
-  if (!busy.value && !picking.value) emit('close');
+  if (!picking.value) void close();
 });
 </script>
 
 <template>
-  <div class="modal-backdrop" @mousedown.self="!busy && emit('close')">
+  <div class="modal-backdrop" @mousedown.self="close()">
     <div ref="root" class="modal preferences" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="settings-window">
       <h2 id="settings-title">{{ S.preferences.title }}</h2>
 
@@ -152,13 +191,13 @@ useDialog(root, () => {
         <fieldset v-if="!shell.managesHost" class="pref-group" data-testid="settings-connection">
           <legend>{{ S.preferences.connection }}</legend>
           <p class="pref-note">{{ S.preferences.connectionAbout }}</p>
-          <SettingsForm :initial="settings" :shell="shell" part="connection" @save="(s) => { emit('saveSettings', s); emit('close'); }" />
+          <SettingsForm ref="connection" :initial="settings" :shell="shell" part="connection" deferred />
         </fieldset>
       </section>
 
       <section v-if="canChangeSettings" class="settings-part">
         <h3>{{ S.preferences.server }}</h3>
-        <form data-testid="preferences" novalidate @submit.prevent="save">
+        <form data-testid="preferences" novalidate @submit.prevent="close()">
           <ErrorBanner v-if="loadError" :error="loadError" inline />
           <p v-if="!view && !loadError" class="muted">{{ S.common.loading }}</p>
           <template v-if="view">
@@ -278,18 +317,17 @@ useDialog(root, () => {
               </details>
             </fieldset>
 
-            <p class="pref-note">{{ S.preferences.restarts }}</p>
           </template>
           <div v-if="error" class="components-error" role="alert" data-testid="pref-error">{{ error }}</div>
-          <div class="modal-actions">
-            <button type="submit" class="primary" data-testid="pref-save" :disabled="!view || busy">{{ busy ? S.preferences.savingNow : S.preferences.saveServer }}</button>
-          </div>
         </form>
       </section>
       <p v-else-if="ownerOff" class="pref-note" data-testid="settings-owner-off">{{ ownerOff }}</p>
 
-      <div class="modal-actions">
-        <button type="button" :disabled="busy" data-testid="settings-close" @click="emit('close')">{{ S.common.close }}</button>
+      <div class="modal-actions settings-done">
+        <!-- Changed: said once, here by Done, where it happens. -->
+        <p v-if="changed" class="pref-note pending" data-testid="pref-pending">{{ S.preferences.applyOnClose }}</p>
+        <button v-if="stuck && !busy" type="button" data-testid="settings-discard" @click="discard()">{{ S.preferences.discard }}</button>
+        <button type="button" class="primary" :disabled="busy" data-testid="settings-close" @click="close()">{{ busy ? S.preferences.applying : S.common.done }}</button>
       </div>
     </div>
     <FolderPicker v-if="picking" :hub="hub" :title="picking.title" :start="picking.start" @chosen="(p) => chosen(picking!.purpose, p)" @cancel="picking = null" />

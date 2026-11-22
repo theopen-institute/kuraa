@@ -1,5 +1,7 @@
 # 0030 · One kind of server: every server is a hub
 
+*Since [0063](0063-settings-keep-what-you-change.md): the workspace menu holds the workspaces, then **Add a workspace…** (where opening a folder now is); inviting and removing are in the menu.*
+
 There used to be two: a host served one folder (`kuraa-host --dir`), and a hub served many
 (`--workspaces`, 0029). The app looked different on each: on a hub the sidebar's header was a menu
 of workspaces with **Add a workspace…**; on a host it was a plain name. People met the difference

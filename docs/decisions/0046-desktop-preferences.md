@@ -1,5 +1,7 @@
 # 0046 · The desktop app's Preferences set what a host's flags set; what stays a flag, and why
 
+*Since [0063](0063-settings-keep-what-you-change.md): the launcher has no **Join**; `--join`/`--token` remain.*
+
 > Superseded in part by [0047](0047-browser-equals-desktop.md): Preferences are one model in the hub
 > (`packages/host/src/settings.ts`), the same dialog in a browser and in the desktop app wherever the
 > host listens only on this computer, applied by the hub reopening its workspaces in place. The

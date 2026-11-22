@@ -58,7 +58,7 @@ const fail = (e: unknown) => {
 };
 
 // The server's workspaces, and the one open (see workspaces.ts).
-const { hubApi, workspaces: hub, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
+const { hubApi, workspaces: hub, canAdd, canOpenFolder, canChangeSettings, ownerOff, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
   settings,
   active: () => !editingSettings.value,
   preferred: () => props.shell.workspace,
@@ -575,13 +575,8 @@ function useSettings(s: Settings) {
             :current="chosen"
             :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
             :can-add="canAdd"
-            :can-invite="canInvite"
-            :can-open-folder="canOpenFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
-            @open-folder="openFolder"
-            @remove="removeWorkspace"
-            @invite="invite"
           />
         </template>
         <template #footer>
@@ -596,12 +591,8 @@ function useSettings(s: Settings) {
             :current="null"
             :name="S.app.workspaces"
             :can-add="canAdd"
-            :can-invite="canInvite"
-            :can-open-folder="canOpenFolder"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
-            @open-folder="openFolder"
-            @remove="removeWorkspace"
           />
         </div>
         <div class="tree-scroll" />
@@ -720,6 +711,7 @@ function useSettings(s: Settings) {
       :shell="shell"
       :api="api"
       :conflicts="file?.conflicts ?? 0"
+      :can-remove-workspace="canAdd && !!chosen"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
@@ -736,11 +728,19 @@ function useSettings(s: Settings) {
       @help="toggleHelp"
       @settings="openSettings"
       @rename-workspace="renameWorkspace"
+      @remove-workspace="chosen && removeWorkspace(chosen)"
       @close="menuOpen = false"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
     <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub()" />
-    <AddWorkspaceDialog v-if="addingWorkspace" :hub="hubApi" @added="workspaceAdded" @cancel="addingWorkspace = false" />
+    <AddWorkspaceDialog
+      v-if="addingWorkspace"
+      :hub="hubApi"
+      :can-open-folder="canOpenFolder"
+      @added="workspaceAdded"
+      @cancel="addingWorkspace = false"
+      @open-folder="addingWorkspace = false; openFolder()"
+    />
     <ComponentsDialog
       v-if="componentsOpen"
       :api="api"

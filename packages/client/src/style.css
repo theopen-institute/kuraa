@@ -268,7 +268,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .field input[type='color'] { padding: 2px; height: 32px; width: 64px; }
 .ask-message { font-size: 14px; color: var(--text); }
 button.primary.danger { background: var(--warn); border-color: var(--warn); }
-.modal-shell { display: flex; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 @media (max-width: 900px) {
@@ -411,6 +410,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button { border: 0; border-radius: 5px; text-align: left; padding: 5px 10px; font-size: 13px; }
 .context-menu button:focus-visible, .context-menu button:hover { background: var(--selected); outline: none; }
 .context-menu button.danger { color: var(--warn); }
+.menu-actions button.danger { color: var(--warn); }
+.context-menu .context-divider { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* The document's title, from its header: the page's top heading, typed in to change it (the rest of the header is in Document settings). */
 .doc-title-block { cursor: default; }
@@ -460,6 +461,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .header-list-remove { border: 0; color: var(--muted); padding: 2px 7px; }
 .header-list-add { justify-self: start; border: 0; color: var(--accent); padding: 2px 4px; font-size: 13px; }
 .header-actions { margin-top: 0; align-items: center; }
+.header-pending { color: var(--muted); font-size: 12.5px; }
 .header-add { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 .header-yaml-body { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px; padding: 8px 0; border: 0; }
 .header-yaml-all {
@@ -706,6 +708,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .pref-status { grid-column: 2; font-size: 12.5px; }
 .pref-status.ok { color: var(--accent); }
 .pref-note { color: var(--muted); font-size: 12.5px; margin: 0; }
+.settings-done { align-items: center; }
+.settings-done .pending { flex: 1; margin: 0; color: var(--text); }
 .pref-row { display: flex; gap: 6px; align-items: center; }
 .pref-row input { flex: 1; min-width: 0; }
 .pref-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

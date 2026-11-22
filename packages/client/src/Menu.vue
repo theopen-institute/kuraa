@@ -49,6 +49,8 @@ const props = defineProps<{
   api: HostApi;
   /** How many conflicts the open document keeps. */
   conflicts?: number;
+  /** The server lets people take this workspace off its list (its folder stays). */
+  canRemoveWorkspace?: boolean;
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -74,6 +76,8 @@ const emit = defineEmits<{
   settings: [];
   /** Rename the workspace, for everyone in it (0061). */
   renameWorkspace: [];
+  /** Take the workspace off this server's list (its folder stays as it is). */
+  removeWorkspace: [];
   close: [];
 }>();
 
@@ -81,11 +85,32 @@ const emit = defineEmits<{
 const panel = ref<MenuPanel>(props.panel === 'document' && props.path ? 'document' : 'menu');
 const root = useTemplateRef<HTMLElement>('root');
 const headerForm = useTemplateRef<InstanceType<typeof HeaderForm>>('headerForm');
+/**
+ * Leaving Document settings, however: what was changed in its header is
+ * written first, as one edit that can be undone (HeaderForm.commit). False:
+ * stay (a field not valid, and the person chose to fix it).
+ */
+async function leaveDocument(): Promise<boolean> {
+  return panel.value !== 'document' || !headerForm.value || headerForm.value.commit();
+}
+
+/** Close the menu (then do `then`), keeping what was changed in Document settings. */
+async function close(then?: () => void) {
+  if (!(await leaveDocument())) return;
+  emit('close');
+  then?.();
+}
+
+/** Back from Document settings to the menu, keeping what was changed there. */
+async function back() {
+  if (await leaveDocument()) panel.value = 'menu';
+}
+
 useDialog(root, () => {
   if (panel.value === 'document' && headerForm.value?.escape()) return;
   // A panel opened from the menu goes back to it; one the menu opened at closes.
-  if (panel.value !== 'menu' && props.panel !== panel.value) panel.value = 'menu';
-  else emit('close');
+  if (panel.value !== 'menu' && props.panel !== panel.value) void back();
+  else void close();
 });
 
 /**
@@ -109,11 +134,11 @@ const runner = computed(() => props.status?.runner ?? null);
 </script>
 
 <template>
-  <div class="modal-backdrop" @mousedown.self="emit('close')">
+  <div class="modal-backdrop" @mousedown.self="close()">
     <div ref="root" class="modal menu" role="dialog" aria-modal="true" :class="{ 'menu-document': panel === 'document' && header }" :aria-label="panel === 'document' ? S.menu.documentSettingsTitle : S.menu.label" data-testid="menu">
       <template v-if="panel === 'document'">
         <div class="menu-panel-head">
-          <button type="button" class="menu-back" data-testid="menu-back" @click="panel = 'menu'">{{ S.menu.backToMenu }}</button>
+          <button type="button" class="menu-back" data-testid="menu-back" @click="back()">{{ S.menu.backToMenu }}</button>
           <h2>{{ S.menu.documentSettingsTitle }}</h2>
         </div>
         <section v-if="path" class="menu-section">
@@ -125,21 +150,21 @@ const runner = computed(() => props.status?.runner ?? null);
               :class="{ active: showSource }"
               :aria-pressed="showSource"
               data-testid="toggle-source"
-              @click="emit('toggleSource'); emit('close')"
+              @click="close(() => emit('toggleSource'))"
             >
               {{ showSource ? S.menu.showDocument : S.menu.editSource }}
             </button>
-            <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="emit('toggleHistory'); emit('close')">
+            <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="close(() => emit('toggleHistory'))">
               {{ historyOpen ? S.menu.hideHistory : S.menu.history }}
             </button>
-            <button type="button" @click="emit('saveVersion'); emit('close')">{{ S.menu.saveVersion }}</button>
-            <button v-if="!type!.editor?.layout" type="button" :title="S.menu.previewTitle(keyLabel(APP_KEYS.preview))" data-testid="menu-preview" @click="emit('preview'); emit('close')">{{ S.menu.preview }}</button>
+            <button type="button" @click="close(() => emit('saveVersion'))">{{ S.menu.saveVersion }}</button>
+            <button v-if="!type!.editor?.layout" type="button" :title="S.menu.previewTitle(keyLabel(APP_KEYS.preview))" data-testid="menu-preview" @click="close(() => emit('preview'))">{{ S.menu.preview }}</button>
           </div>
           <div v-if="doc && !type!.editor?.layout && !showSource" class="menu-actions" data-testid="menu-writing">
-            <button type="button" :title="keyLabel(APP_KEYS.find)" data-testid="menu-find" @click="emit('close'); emit('find')">{{ S.menu.find }}</button>
-            <button type="button" :title="keyLabel(APP_KEYS.outline)" data-testid="menu-outline" @click="emit('close'); emit('outline')">{{ S.menu.outline }}</button>
-            <button type="button" data-testid="menu-insert-table" @click="emit('close'); emit('insertTable')">{{ S.menu.insertTable }}</button>
-            <button v-if="conflicts" type="button" :title="keyLabel('Mod-Alt-n')" data-testid="menu-next-conflict" @click="emit('close'); emit('nextConflict')">{{ S.menu.nextConflict }}</button>
+            <button type="button" :title="keyLabel(APP_KEYS.find)" data-testid="menu-find" @click="close(() => emit('find'))">{{ S.menu.find }}</button>
+            <button type="button" :title="keyLabel(APP_KEYS.outline)" data-testid="menu-outline" @click="close(() => emit('outline'))">{{ S.menu.outline }}</button>
+            <button type="button" data-testid="menu-insert-table" @click="close(() => emit('insertTable'))">{{ S.menu.insertTable }}</button>
+            <button v-if="conflicts" type="button" :title="keyLabel('Mod-Alt-n')" data-testid="menu-next-conflict" @click="close(() => emit('nextConflict'))">{{ S.menu.nextConflict }}</button>
           </div>
           <p v-if="status" class="menu-facts">
             <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
@@ -153,13 +178,13 @@ const runner = computed(() => props.status?.runner ?? null);
           </details>
         </section>
 
-        <CodeSection v-if="doc && runner" :runner="runner" @packages="(engine) => { emit('packages', runner!, engine); emit('close'); }" />
+        <CodeSection v-if="doc && runner" :runner="runner" @packages="(engine) => close(() => emit('packages', runner!, engine))" />
 
         <section v-if="doc && header" class="menu-section">
-          <HeaderForm ref="headerForm" :view="header.view" :spec="header.spec" :path="path!" :version="header.version" @saved="emit('close')" />
+          <HeaderForm ref="headerForm" :view="header.view" :spec="header.spec" :path="path!" :version="header.version" />
         </section>
 
-        <div class="modal-actions"><button type="button" @click="emit('close')">{{ S.common.close }}</button></div>
+        <div class="modal-actions"><button type="button" class="primary" data-testid="document-done" @click="close()">{{ S.common.done }}</button></div>
       </template>
       <template v-else>
         <section v-if="path && type" class="menu-section" data-testid="menu-this-document">
@@ -196,6 +221,7 @@ const runner = computed(() => props.status?.runner ?? null);
           <p v-if="syncable === false" class="menu-facts" data-testid="menu-sync-none">{{ S.sync.nothingToSync }}</p>
           <div v-if="workspace" class="menu-actions">
             <button type="button" :title="S.menu.renameWorkspaceTitle" data-testid="menu-rename-workspace" @click="emit('close'); emit('renameWorkspace')">{{ S.menu.renameWorkspace }}</button>
+            <button v-if="canRemoveWorkspace" type="button" class="danger" :title="S.menu.removeWorkspaceTitle" data-testid="menu-remove-workspace" @click="emit('close'); emit('removeWorkspace')">{{ S.menu.removeWorkspace }}</button>
           </div>
           <details v-if="workspace" class="menu-details">
             <summary>{{ S.common.details }}</summary>
@@ -219,7 +245,6 @@ const runner = computed(() => props.status?.runner ?? null);
           <p v-if="settings.name" class="menu-facts" data-testid="menu-you">{{ settings.email ? `${settings.name} · ${settings.email}` : settings.name }}</p>
           <div class="menu-actions">
             <button type="button" :title="S.menu.settingsTitle(keyLabel(APP_KEYS.preferences))" data-testid="menu-settings" @click="emit('close'); emit('settings')">{{ S.menu.settings }}</button>
-            <button v-if="shell.leave" type="button" @click="shell.leave()">{{ S.settings.join }}</button>
           </div>
         </section>
 

@@ -2,12 +2,15 @@
 // The header, in Document settings (the menu's panel for the open document): the
 // document's YAML header as fields to fill in (a title, authors, a bibliography,
 // …), or as YAML. Fields the format knows (Pandoc's own) are offered when adding
-// one; any other can be added by name. Closing the panel without saving drops
-// what was changed here.
+// one; any other can be added by name. It has no Save button: what was changed
+// here is written as the panel closes, however it closes (commit, from the
+// menu), as one edit that can be undone; a field that is not valid keeps the
+// panel open on it.
 //
-// Saving from Fields writes only the fields changed here, onto the header as it
-// is by then, so someone else's changes to other fields survive. Saving YAML
-// writes the whole header.
+// Writing from Fields writes only the fields changed here, onto the header as
+// it is by then, so someone else's changes to other fields survive. Writing
+// YAML writes the whole header (asking first if that would undo someone
+// else's change).
 import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 import type { HeaderField, HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
@@ -24,7 +27,6 @@ const props = defineProps<{
   /** Goes up whenever the document changes, so the form can tell the header was changed meanwhile. */
   version: number;
 }>();
-const emit = defineEmits<{ saved: [] }>();
 
 const name = computed(() => props.path.slice(props.path.lastIndexOf('/') + 1));
 const live = () => headerText(props.view.state.doc, props.spec);
@@ -140,29 +142,52 @@ function toFields() {
 const label = (e: Entry) => e.field?.label ?? e.key;
 const canSave = computed(() => (mode.value === 'yaml' ? !yamlProblem.value : !entries.value.some((e) => e.error) && !missing.value.length));
 
-/** Write the whole header, asking first if that would undo someone else's change. */
-async function replace(text: string | null) {
-  if (live() !== opened && !(await askConfirm(S.header.overwriteAsk, S.header.saveMine))) return;
-  finish(text);
+/**
+ * What would be written: the header text (null: none), and whether it replaces
+ * the whole header (from YAML, or fields read from YAML typed here) or merges
+ * the fields changed into the header as it is now.
+ */
+function pending(): { text: string | null; whole: boolean } {
+  if (mode.value === 'yaml' && (yamlEdited.value || whole.value || problem.value)) return { text: yaml.value.trim() ? yaml.value.replace(/\n+$/, '') : null, whole: true };
+  if (whole.value) return { text: mergeHeader(base, entries.value, removed.value), whole: true };
+  return { text: mergeHeader(live(), entries.value, removed.value), whole: false };
 }
 
-function finish(text: string | null) {
-  if (text !== live()) writeHeader(props.view, props.spec, text);
-  emit('saved');
-}
-
-function save() {
-  if (!canSave.value) return;
-  if (mode.value === 'yaml') {
-    if (!yamlEdited.value && !whole.value && !problem.value) return finish(mergeHeader(live(), entries.value, removed.value));
-    return void replace(yaml.value.trim() ? yaml.value.replace(/\n+$/, '') : null);
-  }
+/** Something was changed here that is not in the header yet. */
+const changed = computed(() => {
+  void props.version; // the header as it is now, for fields merged into it
   try {
-    if (whole.value) void replace(mergeHeader(base, entries.value, removed.value));
-    else finish(mergeHeader(live(), entries.value, removed.value));
+    const p = pending();
+    return p.text !== (p.whole ? opened : live());
+  } catch {
+    return true;
+  }
+});
+
+/**
+ * Write what was changed here, as the panel closes: true to close (written, or
+ * nothing changed, or let go of), false to keep it open. A field not valid:
+ * asked whether to let go of the changes (or stay and fix it). Someone else
+ * changed the header meanwhile, and writing would undo it: asked; not writing
+ * keeps theirs.
+ */
+async function commit(): Promise<boolean> {
+  if (adding.value) {
+    adding.value = false;
+    search.value = '';
+  }
+  if (!changed.value) return true;
+  if (!canSave.value) return askConfirm(S.header.discardAsk, S.header.discard, true);
+  let p: { text: string | null; whole: boolean };
+  try {
+    p = pending();
   } catch (e) {
     problem.value = (e as Error).message;
+    return false;
   }
+  if (p.whole && live() !== opened && !(await askConfirm(S.header.overwriteAsk, S.header.saveMine))) return true;
+  if (p.text !== live()) writeHeader(props.view, props.spec, p.text);
+  return true;
 }
 
 /** Escape: out of adding a field, if it is adding one (true: it was). */
@@ -172,7 +197,7 @@ function escape(): boolean {
   search.value = '';
   return true;
 }
-defineExpose({ escape });
+defineExpose({ escape, commit });
 
 const asString = (e: Entry) => e.value as string;
 const setString = (e: Entry, ev: Event) => {
@@ -186,7 +211,7 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
 </script>
 
 <template>
-  <form class="header-form" aria-labelledby="header-form-title" data-testid="header" @submit.prevent="save">
+  <form class="header-form" aria-labelledby="header-form-title" data-testid="header" @submit.prevent>
     <div class="header-top">
       <div class="header-heading">
         <h3 id="header-form-title">{{ adding ? S.header.add : S.header.title }}</h3>
@@ -292,7 +317,8 @@ const rows = (text: string) => Math.min(12, Math.max(2, text.split('\n').length)
       <template v-else>
         <button v-if="mode === 'fields'" type="button" class="header-add" data-testid="header-add" @click="adding = true">{{ S.header.addField }}</button>
         <span class="toolbar-spacer" />
-        <button type="submit" class="primary" :disabled="!canSave" data-testid="header-save">{{ S.header.save }}</button>
+        <!-- No Save: written as the panel closes. Said once something is changed (or why it cannot be yet). -->
+        <span v-if="changed" class="header-pending" data-testid="header-pending">{{ canSave ? S.header.keptOnClose : S.header.fixToKeep }}</span>
       </template>
     </div>
   </form>

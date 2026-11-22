@@ -8,7 +8,6 @@ export const D = {
     preferences: 'Settings…',
     yourWorkspaces: 'Your Workspaces',
     openFolder: 'Open Folder…',
-    join: 'Join Shared Server…',
     help: 'Help',
     shortcuts: 'Markdown and Shortcuts',
     checkUpdates: 'Check for Updates…',

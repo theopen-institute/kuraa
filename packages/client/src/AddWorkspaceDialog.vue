@@ -2,17 +2,23 @@
 // Adding a workspace to a hub: a new one (a folder of its own, made a git
 // repository), named here for everyone who joins it later, or one someone
 // shared, joined with the invite link they gave (kuraa-invite:…), which is
-// called what it calls itself (0061).
+// called what it calls itself (0061); or, where the server can open folders of
+// its computer, a folder already there (chosen with the folder dialog: App's
+// openFolder).
 import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HubApi, HubWorkspace, JoinStatus } from './api.js';
 import { S } from './strings.js';
 import { useDialog, vFocus } from './vue.js';
 import ErrorBanner from './ErrorBanner.vue';
 
-const props = defineProps<{ hub: HubApi }>();
-const emit = defineEmits<{ added: [workspace: HubWorkspace]; cancel: [] }>();
+const props = defineProps<{
+  hub: HubApi;
+  /** A folder of the server's computer can be opened as a workspace (the desktop app, or a server's owner). */
+  canOpenFolder?: boolean;
+}>();
+const emit = defineEmits<{ added: [workspace: HubWorkspace]; cancel: []; openFolder: [] }>();
 
-const mode = ref<'new' | 'join'>('new');
+const mode = ref<'new' | 'join' | 'folder'>('new');
 const name = ref('');
 const invitation = ref('');
 const busy = ref(false);
@@ -72,6 +78,8 @@ useDialog(root, () => {
 
 async function submit() {
   error.value = null;
+  // A folder already there: chosen with the folder dialog, which takes over from here.
+  if (mode.value === 'folder') return emit('openFolder');
   if (mode.value === 'new' && !name.value.trim()) {
     error.value = S.addWorkspace.needsName;
     return;
@@ -106,10 +114,12 @@ async function submit() {
       <div class="segmented" role="group" :aria-label="S.addWorkspace.how">
         <button type="button" :class="{ active: mode === 'new' }" :aria-pressed="mode === 'new'" data-testid="add-workspace-new" :disabled="busy" @click="mode = 'new'; error = null">{{ S.addWorkspace.newFolder }}</button>
         <button type="button" :class="{ active: mode === 'join' }" :aria-pressed="mode === 'join'" data-testid="add-workspace-join" :disabled="busy" @click="mode = 'join'; error = null">{{ S.addWorkspace.join }}</button>
+        <button v-if="canOpenFolder" type="button" :class="{ active: mode === 'folder' }" :aria-pressed="mode === 'folder'" data-testid="add-workspace-folder" :disabled="busy" @click="mode = 'folder'; error = null">{{ S.addWorkspace.folder }}</button>
       </div>
       <p class="naming-hint">
         <template v-if="mode === 'new'">{{ S.addWorkspace.newAbout }}</template>
-        <template v-else>{{ S.addWorkspace.joinAbout }}</template>
+        <template v-else-if="mode === 'join'">{{ S.addWorkspace.joinAbout }}</template>
+        <template v-else>{{ S.addWorkspace.folderAbout }}</template>
       </p>
       <label v-if="mode === 'join'" class="field">
         <span>{{ S.addWorkspace.link }}</span>
@@ -146,7 +156,7 @@ async function submit() {
       <div class="modal-actions">
         <button type="button" :disabled="busy" @click="emit('cancel')">{{ S.common.cancel }}</button>
         <button type="submit" class="primary" data-testid="add-workspace-submit" :disabled="busy">
-          {{ busy ? (mode === 'new' ? S.addWorkspace.creating : S.addWorkspace.joining) : mode === 'new' ? S.addWorkspace.create : S.addWorkspace.joinButton }}
+          {{ busy ? (mode === 'new' ? S.addWorkspace.creating : S.addWorkspace.joining) : mode === 'new' ? S.addWorkspace.create : mode === 'join' ? S.addWorkspace.joinButton : S.addWorkspace.chooseFolder }}
         </button>
       </div>
     </form>

@@ -178,6 +178,8 @@ export const S = {
     workspaceDetails: (branch: string, head: string | null) => `Branch ${branch}${head ? `, version ${head}` : ''}`,
     renameWorkspace: 'Rename workspace…',
     renameWorkspaceTitle: 'Rename this workspace for everyone in it',
+    removeWorkspace: 'Remove from this list…',
+    removeWorkspaceTitle: 'Take this workspace off this list; its folder stays as it is',
     search: 'Search…',
     searchTitle: (key: string) => `Search every file (${key})`,
     components: 'Components',
@@ -201,7 +203,6 @@ export const S = {
     colour: 'Cursor colour',
     server: 'Server address',
     code: 'Access code',
-    join: 'Join a shared server…',
     saveConnection: 'Save connection',
     save: 'Save settings',
     start: 'Start writing',
@@ -325,8 +326,10 @@ export const S = {
     how: 'How',
     newFolder: 'A new folder',
     join: 'Join from an invite link',
+    folder: 'An existing folder',
     newAbout: 'A folder of its own. What you write in it is saved as you work, with every version kept. Whoever you invite sees it by the name you give it.',
     joinAbout: 'Paste the invite link someone gave you. Your copy syncs with everyone else’s: what you do reaches them, and what they do reaches you. It keeps the name it has for everyone.',
+    folderAbout: 'A folder already on this computer, as it is. Every version of its files is kept from now on, inside the folder, and other programs can go on using it.',
     link: 'Invite link',
     name: 'Name',
     namePlaceholder: 'Field notes',
@@ -345,6 +348,7 @@ export const S = {
     joining: 'Joining…',
     create: 'Create',
     joinButton: 'Join',
+    chooseFolder: 'Choose a folder…',
   },
 
   invite: {
@@ -600,7 +604,10 @@ export const S = {
 
   header: {
     title: 'Header',
-    save: 'Save header',
+    keptOnClose: 'Saved when you close Document settings',
+    fixToKeep: 'Fix this to keep your changes',
+    discardAsk: 'The header has something that is not valid, so your changes to it cannot be saved. Discard them?',
+    discard: 'Discard changes',
     add: 'Add a field',
     about: (name: string) => `${name} · what Pandoc reads from the top of the file`,
     editAs: 'Edit as',
@@ -662,7 +669,6 @@ export const S = {
     connection: 'Server',
     connectionAbout: 'The server this app works with, and the access code it lets you in with.',
     server: 'This computer’s server',
-    saveServer: 'Save server settings',
     network: 'Other computers',
     syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through the online copy where it has one.',
     advanced: 'Advanced',
@@ -697,9 +703,12 @@ export const S = {
     versionSeconds: 'Save a version after this many seconds without typing',
     choose: 'Choose…',
     default: 'Default',
-    restarts: 'Saving reopens your workspaces, saving any edits first, and reloads the page.',
+    /** Shown by Done once a server setting is changed. */
+    applyOnClose: 'Your changes take effect when you close Settings: your workspaces reopen, saving any edits first, and the page reloads.',
     couldNotSave: (why: string) => `Could not save: ${why}`,
-    savingNow: 'Saving…',
+    applying: 'Applying…',
+    /** Closing was refused (a value not valid): closes, keeping nothing not saved yet. */
+    discard: 'Discard changes',
     fromFlag: (flag: string) => `Set by ${flag} on the command line.`,
     whereNew: 'Where new workspaces go',
     whereData: 'Where packages and tools are kept',
@@ -707,12 +716,7 @@ export const S = {
 
   workspaceSwitcher: {
     cannotOpen: ' (cannot open)',
-    cannotOpenRemove: ' (cannot open: remove…)',
-    synced: ' · synced',
-    invite: (name: string) => `Invite people to ${quote(name)}…`,
     add: 'Add a workspace…',
-    openFolder: 'Open a folder…',
-    remove: (name: string) => `Remove ${quote(name)} from this list…`,
   },
 
   errors: {

@@ -29,7 +29,7 @@ async function yourWorkspaces(): Promise<{ hub: RunningHub; app: string }> {
   return { hub, app };
 }
 
-test('Settings in the browser: a wrong value refused, a kind of document turned off, applied once saved', async ({ page }) => {
+test('Settings in the browser: a wrong value refused, a kind of document turned off, applied on closing', async ({ page }) => {
   const { hub, app } = await yourWorkspaces();
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Owner`);
@@ -43,11 +43,17 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(prefs.getByTestId('pref-format-rmarkdown')).toBeChecked();
     await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
 
-    // A value that is wrong is refused, saying what, and nothing is kept.
+    // No Save button: changes take effect on closing, as said by Done once something is changed.
+    await expect(page.getByTestId('pref-save')).toHaveCount(0);
+    await expect(page.getByTestId('pref-pending')).toHaveCount(0);
+    // A value that is wrong is refused on closing, saying what; the window stays, and nothing is kept.
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();
     await prefs.getByTestId('pref-memory').fill('lots');
-    await prefs.getByTestId('pref-save').click();
+    await expect(page.getByTestId('pref-pending')).toContainText('take effect when you close Settings');
+    await page.getByTestId('settings-close').click();
     await expect(prefs.getByTestId('pref-error')).toContainText('The memory limit should be a size such as 4g or 512m');
+    await expect(page.getByTestId('settings-window')).toBeVisible();
+    await expect(page.getByTestId('settings-discard')).toBeVisible();
     expect(existsSync(join(app, 'settings.json'))).toBe(false);
 
     await prefs.getByTestId('pref-memory').fill('3g');
@@ -55,9 +61,9 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     // A relay to connect through, named by its key (kuraa-host relay prints it).
     await prefs.getByTestId('pref-network-advanced').locator('summary').click();
     await prefs.getByTestId('pref-relays').fill('ab'.repeat(32));
-    // The hub reopens every workspace with them, then the page reloads.
+    // Done: the hub reopens every workspace with them, then the page reloads.
     const reloaded = page.waitForEvent('load', { timeout: 30_000 });
-    await prefs.getByTestId('pref-save').click();
+    await page.getByTestId('settings-close').click();
     await reloaded;
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
     expect(JSON.parse(readFileSync(join(app, 'settings.json'), 'utf8'))).toMatchObject({ memory: '3g', relays: ['ab'.repeat(32)], formats: expect.not.arrayContaining(['rmarkdown']) });
@@ -91,8 +97,11 @@ test('Open a folder… in the browser: chosen in the folder picker, asked before
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Owner`);
     await expect(page.getByTestId('workspace-name')).toHaveText('Notes');
+    // Add a workspace… → An existing folder → Choose a folder…
     await page.getByTestId('workspace-switcher').click();
-    await page.getByTestId('workspace-open-folder').click();
+    await page.getByTestId('workspace-add').click();
+    await page.getByTestId('add-workspace-folder').click();
+    await page.getByTestId('add-workspace-submit').click();
     const picker = page.getByTestId('folder-picker');
     await expect(picker).toBeVisible();
     // It starts at home; a path goes straight there.

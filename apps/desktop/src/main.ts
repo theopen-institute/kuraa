@@ -299,7 +299,6 @@ function buildMenu(): void {
       submenu: [
         { label: D.menu.yourWorkspaces, click: () => void showWorkspaces() },
         { label: D.menu.openFolder, accelerator: 'CmdOrCtrl+O', click: () => void pickFolder() },
-        { label: D.menu.join, click: () => void leave() },
         ...(isMac ? [] : [{ type: 'separator' as const }, preferencesItem]),
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },

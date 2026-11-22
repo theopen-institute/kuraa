@@ -10,6 +10,8 @@ export interface ContextItem {
   run: () => void;
   danger?: boolean;
   testid?: string;
+  /** A line before it: it starts a group of its own (an action after a list, say). */
+  divided?: boolean;
 }
 
 const props = defineProps<{ x: number; y: number; items: ContextItem[] }>();
@@ -81,17 +83,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="menu" class="context-menu" role="menu" :style="pos" data-testid="context-menu" @keydown="onKey">
-    <button
-      v-for="item in items"
-      :key="item.label"
-      type="button"
-      role="menuitem"
-      tabindex="-1"
-      :class="{ danger: item.danger }"
-      :data-testid="item.testid"
-      @click="choose(item)"
-    >
-      {{ item.label }}
-    </button>
+    <template v-for="item in items" :key="item.label">
+      <div v-if="item.divided" class="context-divider" role="separator" />
+      <button
+        type="button"
+        role="menuitem"
+        tabindex="-1"
+        :class="{ danger: item.danger }"
+        :data-testid="item.testid"
+        @click="choose(item)"
+      >
+        {{ item.label }}
+      </button>
+    </template>
   </div>
 </template>

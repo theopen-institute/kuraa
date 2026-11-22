@@ -95,17 +95,19 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.reload();
     await openNotes(page);
 
-    // The app manages this host: the menu offers the shell's actions, and Settings has no host or token.
+    // The app manages this host: Settings has no host or token. Joining a shared server is not offered (only --join).
     await page.getByTestId('menu-button').click();
-    await expect(page.getByRole('button', { name: 'Join a shared server…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /join a shared server/i })).toHaveCount(0);
     await page.getByTestId('menu-settings').click();
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Server address')).toHaveCount(0);
     await expect(page.getByTestId('preferences')).toBeVisible();
     await page.keyboard.press('Escape');
-    // Open a folder… is with the workspaces, as in a browser.
+    // Opening a folder is one of the ways to add a workspace, as in a browser; the list of workspaces offers only that, apart.
     await page.getByTestId('workspace-switcher').click();
-    await expect(page.getByTestId('workspace-open-folder')).toBeVisible();
+    await expect(page.getByTestId('workspace-open-folder')).toHaveCount(0);
+    await page.getByTestId('workspace-add').click();
+    await expect(page.getByTestId('add-workspace-folder')).toBeVisible();
     await page.keyboard.press('Escape');
 
     // New and Rename ask in in-app dialogs (Electron has no window.prompt).
@@ -186,6 +188,10 @@ test('joins a shared host without starting one', async () => {
       await typeAtEnd(page, 'Light rain', ' Joined from the desktop.');
       await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Light rain all morning. Joined from the desktop.');
       await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
+      // Joined, not managed: Settings shows the server and access code.
+      await page.getByTestId('menu-button').click();
+      await page.getByTestId('menu-settings').click();
+      await expect(page.getByLabel('Server address')).toHaveValue(host.url);
     } finally {
       await app.close();
     }
@@ -195,11 +201,9 @@ test('joins a shared host without starting one', async () => {
   expect(existsSync(join(dir, '.git'))).toBe(true);
 });
 
-test('opens a folder that is not yet a repository, and from the launcher joins a host', async () => {
+test('opens a folder that is not yet a repository', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
   writeFileSync(join(dir, 'notes.md'), NOTES);
-  const shared = makeRepo();
-  const host = await startHost({ dir: shared, port: 0, host: '127.0.0.1', timings: { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 } });
   const { app, page } = await launch([], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
   try {
     // Native dialogs cannot be clicked from a test: answer them in the main process.
@@ -219,30 +223,8 @@ test('opens a folder that is not yet a repository, and from the launcher joins a
     expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
     await typeAtEnd(page, 'Light rain', ' Opened from the launcher.');
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Opened from the launcher.');
-
-    // Menu → Join a shared host: back to the launcher; the embedded host stops and commits.
-    await page.getByTestId('menu-button').click();
-    await page.getByRole('button', { name: 'Join a shared server…' }).click();
-    await expect(page.getByRole('button', { name: 'Open folder…' })).toBeVisible();
-    expect(git(dir, 'status', '--porcelain')).toBe('');
-    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Opened from the launcher.');
-
-    await page.getByLabel('Server address').fill(host.url);
-    await page.getByLabel('Access code').fill('wrong');
-    await page.getByRole('button', { name: 'Join' }).click();
-    await expect(page.getByRole('alert')).toContainText('did not accept the access code');
-    await page.getByLabel('Access code').fill(host.token);
-    await page.getByRole('button', { name: 'Join' }).click();
-    await openNotes(page);
-    await expect(page).toHaveTitle(`Field notes · ${basename(shared)} · kuraa`);
-
-    // Joined, not managed: Settings shows them.
-    await page.getByTestId('menu-button').click();
-    await page.getByTestId('menu-settings').click();
-    await expect(page.getByLabel('Server address')).toHaveValue(host.url);
   } finally {
     await app.close();
-    await host.close();
   }
 });
 
@@ -313,19 +295,18 @@ test('updates: says when one is ready, with Restart now; run from the repository
   const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 });
   try {
     await openNotes(page);
-    // Check for Updates… in the app's menu says this copy does not update itself.
-    const said = await app.evaluate(async ({ dialog, Menu }) => {
-      let message = '';
-      dialog.showMessageBox = (async (_w: unknown, o: { message: string }) => {
-        message = o.message;
-        return { response: 0, checkboxChecked: false };
-      }) as unknown as typeof dialog.showMessageBox;
+    // Check for Updates… in the app's menu opens its window, which says this copy does not update itself.
+    const opened = app.waitForEvent('window');
+    await app.evaluate(({ Menu }) => {
       const items = Menu.getApplicationMenu()!.items.flatMap((i) => i.submenu?.items ?? []);
       items.find((i) => i.label === 'Check for Updates…')!.click();
-      for (let i = 0; i < 50 && !message; i++) await new Promise((r) => setTimeout(r, 50));
-      return message;
     });
-    expect(said).toBe('This copy of kuraa does not update itself (run from the repository).');
+    const updates = await opened;
+    await expect(updates.locator('#message')).toHaveText('This copy of kuraa does not update itself (run from the repository).');
+    await expect(updates.locator('#bar')).toBeHidden();
+    // OK closes it.
+    await updates.getByRole('button', { name: 'OK' }).click();
+    await expect.poll(() => app.windows().length).toBe(1);
     // An update downloaded (as updates.ts tells the page): the page says so, with Restart now.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.send('kuraa:update-ready', '9.9.9'));
     await expect(page.getByTestId('notice')).toContainText('kuraa 9.9.9 is ready');
@@ -375,13 +356,13 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     // What a host takes as flags is here too (decision 0046): a value that is wrong is refused, saying what.
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();
     await prefs.getByTestId('pref-memory').fill('lots');
-    await prefs.getByTestId('pref-save').click();
+    await page.getByTestId('settings-close').click();
     await expect(prefs.getByTestId('pref-error')).toContainText('memory limit should be a size');
     await prefs.getByTestId('pref-memory').fill('3g');
     await prefs.getByTestId('pref-format-rmarkdown').uncheck();
     // The hub reopens the workspaces with them (writing and committing first), and the page reloads.
     const reloaded = page.waitForEvent('load', { timeout: 15_000 });
-    await prefs.getByTestId('pref-save').click();
+    await page.getByTestId('settings-close').click();
     await reloaded;
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(false);

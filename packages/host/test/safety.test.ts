@@ -15,6 +15,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { lastResort, startHost, startHub, type RunningHost, type HostTimings } from '../src/index.js';
+import syncGit from '@kuraa/sync-git';
 
 const NOTES = `---
 title: Field notes
@@ -91,7 +92,8 @@ describe('host safety', () => {
   /** The host's record of a room (private): to save it now, or to see that an edit reached it. */
   const record = (path = 'notes.md') => (running.host as unknown as { records: Map<string, Parameters<RunningHost['host']['commitRoom']>[0]> }).records.get(`main:${path}`)!;
   const start = async (timings: Partial<HostTimings> = FAST) => {
-    running = await startHost({ dir, timings });
+    // With the online copy, a component (decision 0059), as every program that starts a host gives it.
+    running = await startHost({ dir, timings, run: { engines: [], components: [syncGit] } });
   };
 
   beforeEach(async () => {
@@ -427,7 +429,7 @@ describe('host safety', () => {
     await running.host.commitRoom(record());
     expect(Date.now() - t0).toBeLessThan(2000);
     expect(git(dir, 'show', 'HEAD:notes.md')).toContain('While syncing: ');
-    // Not synced: said, not thrown (backups.ts, the online copy).
+    // Not synced: said, not thrown (the online copy, @kuraa/sync-git).
     expect((await syncing).status).toBe(409);
   });
 

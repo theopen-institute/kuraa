@@ -63,12 +63,13 @@ export default tseslint.config(
   },
   {
     // Run components and their contract: host side (Node), never the client or editor.
-    // Engines (languages), environments (places to run) and tools (toolchains) are
-    // separate components that meet only through @kuraa/run-kit: none imports another.
-    files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**', 'packages/tool-*/src/**'],
+    // Engines (languages), environments (places to run), tools (toolchains) and syncs
+    // (the online copy) are separate components that meet only through @kuraa/run-kit:
+    // none imports another.
+    files: ['packages/run-kit/src/**', 'packages/engine-*/src/**', 'packages/env-*/src/**', 'packages/tool-*/src/**', 'packages/sync-*/src/**'],
     rules: merge(
       restrict(['@kuraa/client*', '@kuraa/host*', '@kuraa/editor-kit', '@kuraa/format-*', 'vue', '@codemirror/*', 'prosemirror-*'], 'Run components depend on @kuraa/run-kit only.'),
-      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/run-components'], 'Engines, environments and tools meet only through @kuraa/run-kit.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/sync-*', '@kuraa/run-components'], 'Engines, environments, tools and syncs meet only through @kuraa/run-kit.'),
       noYjs,
     ),
   },
@@ -77,13 +78,13 @@ export default tseslint.config(
     rules: merge(restrict(['@kuraa/*', 'vue', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },
   {
-    // The host core knows no language and no place to run code: run components are
+    // The host core knows no language, no place to run code and no online copy: run components are
     // passed in by whoever starts it (the command line here, the desktop app, tests).
     files: ['packages/host/src/**'],
     ignores: ['packages/host/src/cli.ts'],
     rules: merge(
       restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'),
-      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/run-components'], 'The host imports no run component; the program that starts it passes them.'),
+      restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/sync-*', '@kuraa/run-components'], 'The host imports no run component; the program that starts it passes them.'),
       noYjs,
     ),
   },

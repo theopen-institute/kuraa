@@ -95,6 +95,19 @@ export interface PeersStatus {
   network: ReturnType<PeerNode['network']>;
   workspace: { id: string; forkedFrom: string | null };
   devices: DeviceInfo[];
+  /**
+   * This device was removed from the workspace: it took the record of it, and no
+   * longer syncs. A device offline when it was removed is never told (the others
+   * no longer let it reach them): see noContactSince.
+   */
+  removed: boolean;
+  /**
+   * Since when (ms since 1970) no other device has been connected here: the last
+   * time one was, or when syncing started here if later. Null while one is
+   * connected, or if there are no others. A long time may mean they are all
+   * offline, or that this device was removed while it was.
+   */
+  noContactSince: number | null;
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -124,6 +137,8 @@ export class Peers {
   private announceTimer: NodeJS.Timeout | undefined;
   private stopRefs: (() => void) | null = null;
   private closed = false;
+  /** When syncing started here (ms since 1970): no device connected since then, at the most, for noContactSince. */
+  private readonly started = Date.now();
 
   private readonly events: NodeEvents = {
     accepted: (link) => {
@@ -378,11 +393,14 @@ export class Peers {
         lastSeen: this.node.lastSeen(m.key),
       });
     }
+    const connected = devices.some((d) => d.online);
     return {
       device: { name: this.node.name, key: this.node.myKey, person: (await id.personOf(this.node.myKey))?.name ?? null },
       network: this.node.network(),
       workspace: { id: this.node.ws.id, forkedFrom: this.node.ws.forkedFrom },
       devices,
+      removed: (await id.removed()).includes(this.node.myKey),
+      noContactSince: connected || !devices.length ? null : Math.max(this.started, ...devices.map((d) => d.lastSeen ?? 0)),
     };
   }
 

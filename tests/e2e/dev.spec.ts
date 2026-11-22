@@ -99,12 +99,15 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await key.getByText('Advanced').click();
     await expect(key.getByTestId('signing-key')).toHaveText(/^[0-9a-f]{8}…$/);
 
-    // An online copy, added from the menu: a plain git repository each save is pushed to.
+    // An online copy, added in Components (it is a component, decision 0059): a plain git repository each save is pushed to.
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
-    const online = page.getByTestId('online-copy');
-    await online.getByTestId('online-target').fill(bare);
-    await online.getByTestId('online-add').click();
+    await expect(page.getByTestId('menu').getByTestId('sync:online')).toHaveCount(0);
+    await page.getByTestId('menu').getByRole('button', { name: 'Components…' }).click();
+    const online = page.getByTestId('components').getByTestId('sync:online');
+    await expect(online).toContainText('Online copy');
+    await online.getByTestId('sync-address').fill(bare);
+    await online.getByTestId('sync-add').click();
     await expect(online).toContainText('up to date', { timeout: 15_000 });
     expect(execFileSync('git', ['log', '--all', '--format=%s'], { cwd: bare, encoding: 'utf8' })).toContain('Initialise workspace');
   } finally {

@@ -84,6 +84,12 @@ test('people on two devices edit one document, and any member renames its device
     await expect(bo.getByTestId('devices')).toContainText('No one else has joined yet', { timeout: 20_000 });
     // Ada's device learns it, and stops syncing; her files stay as they were.
     await expect.poll(() => { try { return git(dirA, 'config', '--get-all', 'kuraa.removed'); } catch { return ''; } }, { timeout: 20_000 }).toBe(a.host.peers!.node.myKey);
+    // Her Devices section says so, and offers nothing the others would refuse.
+    await ada.getByTestId('menu-button').click();
+    await expect(ada.getByTestId('device-removed')).toContainText('removed from the workspace', { timeout: 10_000 });
+    await expect(ada.getByTestId('invite-button')).toHaveCount(0);
+    await expect(ada.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
+    await ada.keyboard.press('Escape');
     expect(readFileSync(join(dirA, 'notes.md'), 'utf8')).toContain('Ada was here. So was Bo.');
   } finally {
     await b.close();

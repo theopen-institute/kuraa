@@ -428,6 +428,12 @@ describe('equal members, and forks', () => {
     await until(() => !git(dirB, 'remote').split('\n').some((r) => git(dirB, 'remote', 'get-url', r) === `kuraa://${adaKey}`), 20_000, 'Bo’s device forgets Ada’s');
     await until(async () => !(await a.host.peers!.status()).devices.some((d) => d.online), 20_000, 'Ada’s device is turned away');
     expect(git(dirB, 'config', '--get-all', 'kuraa.removed')).toBe(adaKey);
+    // Ada's device knows it was removed, and says since when no device has been connected; the others were not removed.
+    const adas = await a.host.peers!.status();
+    expect(adas.removed).toBe(true);
+    expect(adas.noContactSince).toBeGreaterThan(0);
+    expect((await c.host.peers!.status()).removed).toBe(false);
+    expect((await c.host.peers!.status()).noContactSince).toBeNull();
     // It keeps its copy.
     expect(file(dirA)).toBe(NOTES);
     // Removing a device that is not a member, or this one, is refused.

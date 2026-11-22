@@ -1,5 +1,8 @@
 # 0039 · One online copy, pushed to and fetched from
 
+> Changed by [0059](0059-online-copy-is-a-component.md): the online copy is a component
+> (`@kuraa/sync-git`), set up in **Components…**, not the menu; `backups.ts` is its `online.ts`.
+
 Supersedes the sync remote (0032) and backups (0036). People met two settings for one git server,
 with different rules (one fetched and merged on Sync, the other only pushed to), and had to choose.
 Now there is one: an **online copy** (GitHub, GitLab or any git server, or a folder).

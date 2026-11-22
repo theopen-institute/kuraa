@@ -1,11 +1,12 @@
-// Online copies (docs/decisions/0039-online-copy.md): plain git servers (GitHub,
-// GitLab, any git host, or a folder) that this workspace keeps a copy on, so
-// devices that cannot reach each other directly still meet there.
+// Online copies (docs/decisions/0039-online-copy.md, a component since 0059):
+// plain git servers (GitHub, GitLab, any git host, or a folder) that this
+// workspace keeps a copy on, so devices that cannot reach each other directly
+// still meet there.
 //
 // - Each save is pushed to it (a while after the last), and so is everything
 //   at start.
 // - On Sync, and every few minutes, it is fetched from, its branches are merged
-//   in (the same merges every device makes, merging.ts), and the result pushed.
+//   in (by the host, the same merges every device makes), and the result pushed.
 // - A push refused because the copy moved (another device pushed first) is
 //   followed by the same: fetch, merge, push. Never forced.
 //
@@ -16,20 +17,9 @@
 // credential helper), never asking for any and never waiting forever; only the
 // merge runs in the queue (`bringIn`).
 import { devNull } from 'node:os';
-import { NON_INTERACTIVE, type Git } from './git.js';
+import type { SyncContext, SyncGit, SyncSession, SyncTargetStatus } from '@kuraa/run-kit';
 
-export interface OnlineCopyStatus {
-  /** The git remote it is. */
-  name: string;
-  /** Where, with any password in it left out. */
-  url: string;
-  /** When this device and it last had the same work (ISO), if they have. */
-  lastSync: string | null;
-  /** Why the last sync with it did not go through, if it did not. */
-  error: string | null;
-  /** Syncing with it now. */
-  busy: boolean;
-}
+export type OnlineCopyStatus = SyncTargetStatus;
 
 /** An address as it may be shown: no user:password@ in it. */
 export function shownUrl(url: string): string {
@@ -48,24 +38,7 @@ const NETWORK_MS = 10 * 60_000;
 /** How many times a push refused because the copy moved is tried again (after fetching and merging). */
 const TRIES = 3;
 
-export interface OnlineOptions {
-  /** Push this long after the last save. */
-  delayMs: number;
-  /** Fetch, merge and push this often (0: never on its own). */
-  everyMs: number;
-  log: (m: string) => void;
-  /** Run in turn with the host's commits and merges: reading which commits the branches are at, so none is half made. */
-  serial: <T>(fn: () => Promise<T>) => Promise<T>;
-  /**
-   * Bring the copy's branches (fetched into refs/remotes/<name>/) into this
-   * repository's, merging as every device does, in turn with the host's other
-   * git work. Returns what the merge into the open branch kept, to say.
-   * Without it (the command line), work on the copy is left for a host to bring in.
-   */
-  bringIn?: (name: string) => Promise<string>;
-}
-
-export class OnlineCopies {
+export class OnlineCopies implements SyncSession {
   private readonly status = new Map<string, { lastSync: string | null; error: string | null; busy: boolean }>();
   /** One sync per copy at a time. */
   private readonly running = new Map<string, Promise<string | null>>();
@@ -73,7 +46,11 @@ export class OnlineCopies {
   private every: NodeJS.Timeout | undefined;
   private closed = false;
 
-  constructor(private readonly git: Git, private readonly o: OnlineOptions) {}
+  private readonly git: SyncGit;
+
+  constructor(private readonly o: SyncContext) {
+    this.git = o.git;
+  }
 
   /** Fetch, merge and push every few minutes, so work pushed by others comes in without a save here. */
   start(): void {
@@ -193,7 +170,7 @@ export class OnlineCopies {
           said = (await this.o.bringIn?.(name)) ?? '';
         }
         // Which commits the branches are at, read in turn with commits and merges; the push itself holds up no saving.
-        const refs = await this.o.serial(() => this.git.out(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/']));
+        const refs = await this.o.serial(async () => (await this.git.run(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/'])).stdout.trim());
         const specs = refs.split('\n').filter(Boolean).map((l) => l.replace(' ', ':'));
         if (!specs.length) return null;
         const p = await this.network(['push', '--porcelain', name, ...specs]);
@@ -223,7 +200,7 @@ export class OnlineCopies {
     return this.git.run(['-c', `core.hooksPath=${devNull}`, ...args], {
       allowFail: true,
       timeoutMs: NETWORK_MS,
-      env: NON_INTERACTIVE,
+      env: this.o.nonInteractive,
     });
   }
 

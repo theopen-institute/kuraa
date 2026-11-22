@@ -6,6 +6,8 @@
 //   @kuraa/env-podman   locked-down Podman containers
 //   @kuraa/tool-tinytex TeX, for PDFs made with LaTeX, downloaded on request
 //                       (decision 0045)
+//   @kuraa/sync-git     the online copy: a git server the workspace is kept on
+//                       and synced with (decisions 0039, 0059)
 //
 // No environment that runs code on the host's computer itself ships; one can be
 // written against @kuraa/run-kit and loaded with --component (and, being
@@ -14,5 +16,6 @@ import type { RunComponent } from '@kuraa/run-kit';
 import rComponent from '@kuraa/engine-r';
 import podmanComponent from '@kuraa/env-podman';
 import tinytexComponent from '@kuraa/tool-tinytex';
+import syncGitComponent from '@kuraa/sync-git';
 
-export const standardRunComponents: RunComponent[] = [rComponent, podmanComponent, tinytexComponent];
+export const standardRunComponents: RunComponent[] = [rComponent, podmanComponent, tinytexComponent, syncGitComponent];

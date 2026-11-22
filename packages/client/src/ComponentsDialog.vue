@@ -4,6 +4,8 @@
 // format's editing behaviour. The host's components are set by whoever runs it,
 // with flags; here they are only shown. Tools (TeX, decision 0045) are the
 // exception: where the host allows installs, people download and remove them.
+// So are syncs (the online copy, decision 0059): where the host lets people here
+// manage it, they add and remove its git server (SyncsSection).
 import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue';
 import type { FormatEditor } from '@kuraa/editor-kit';
 import type { HostApi, ComponentsInfo, ToolInfo, ToolsInfo } from './api.js';
@@ -11,6 +13,7 @@ import { megabytes } from './labels.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import ErrorBanner from './ErrorBanner.vue';
+import SyncsSection from './SyncsSection.vue';
 
 const props = defineProps<{
   api: HostApi;
@@ -164,6 +167,8 @@ useDialog(root, () => emit('close'));
         </div>
         <p v-if="!tools.allowInstalls" class="muted components-note">{{ S.components.toolsOff }}</p>
       </section>
+
+      <SyncsSection :api="api" />
 
       <section v-if="modules.length" class="components-group" data-testid="components-editing">
         <h3>{{ S.components.editing }}</h3>

@@ -12,6 +12,9 @@ import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { textSchema } from '@kuraa/format-text';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { gitIdentity, inspectFolder, startHost, type RunningHost } from '../src/index.js';
+import syncGit from '@kuraa/sync-git';
+/** The online copy is a component (decision 0059): hosts here have it, as every program that starts one gives it. */
+const ONLINE = { engines: [], components: [syncGit] };
 
 const NOTES = `---
 title: Field notes
@@ -94,7 +97,7 @@ describe('host', () => {
 
   beforeEach(async () => {
     dir = makeRepo();
-    running = await startHost({ dir, timings: FAST });
+    running = await startHost({ dir, timings: FAST, run: ONLINE });
   });
 
   afterEach(async () => {
@@ -135,7 +138,7 @@ describe('host', () => {
     a.destroy();
     clients.splice(0);
     await running.close();
-    running = await startHost({ dir, timings: FAST, token: running.token });
+    running = await startHost({ dir, timings: FAST, token: running.token, run: ONLINE });
     const after = await roomFor('notes.md');
     expect(after.generation).toBe(generation);
     const b = await connect('notes.md', BOB);
@@ -412,17 +415,17 @@ describe('the online copy: a git server each save is pushed to, and work is fetc
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-online-'));
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare });
     const dir = mkdtempSync(join(tmpdir(), 'kuraa-copied-'));
-    const own = await startHost({ dir, init: true, manageOnline: true, timings: { flushMs: 100, idleCommitMs: 300, maxCommitMs: 3000, dropMs: 300, onlineMs: 200 } });
-    const shared = await startHost({ dir: mkdtempSync(join(tmpdir(), 'kuraa-shared-')), init: true });
+    const own = await startHost({ dir, init: true, manageOnline: true, run: ONLINE, timings: { flushMs: 100, idleCommitMs: 300, maxCommitMs: 3000, dropMs: 300, onlineMs: 200 } });
+    const shared = await startHost({ dir: mkdtempSync(join(tmpdir(), 'kuraa-shared-')), init: true, run: ONLINE });
     try {
       const call = (h: RunningHost, path: string, init: RequestInit = {}) => fetch(h.url + path, { ...init, headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' } });
-      const list = async () => ((await (await call(own, '/api/online')).json()) as { copies: { name: string; url: string; lastSync: string | null; error: string | null }[] }).copies;
+      const list = async () => ((await (await call(own, '/api/syncs')).json()) as { syncs: { id: string; targets: { name: string; url: string; lastSync: string | null; error: string | null }[] }[] }).syncs.find((s) => s.id === 'online')!.targets;
       const branch = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
       const there = () => execFileSync('git', ['log', '--format=%s', branch], { cwd: bare, encoding: 'utf8' }).trim();
       const here = () => execFileSync('git', ['log', '--format=%s'], { cwd: dir, encoding: 'utf8' });
 
       // Added by its address: synced with at once.
-      expect((await call(own, '/api/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(201);
+      expect((await call(own, '/api/syncs/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(201);
       await until(async () => (await list())[0]?.lastSync !== null, 10_000, 'the first push');
       expect(there()).toBe('Initialise workspace');
       // Each save follows, a moment later.
@@ -455,12 +458,12 @@ describe('the online copy: a git server each save is pushed to, and work is fetc
       expect(existsSync(join(dir, 'bo2.md'))).toBe(true);
 
       // A shared host: everyone sees the online copy (Sync uses it); adding and removing are its operator's.
-      expect((await call(shared, '/api/online')).status).toBe(200);
-      expect((await call(shared, '/api/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(403);
+      expect((await call(shared, '/api/syncs')).status).toBe(200);
+      expect((await call(shared, '/api/syncs/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(403);
 
       // Removed: the remote made for it goes; the repository there stays as it is.
       const { name } = (await list())[0]!;
-      expect((await call(own, `/api/online/${name}`, { method: 'DELETE' })).status).toBe(200);
+      expect((await call(own, `/api/syncs/online/${name}`, { method: 'DELETE' })).status).toBe(200);
       expect(await list()).toEqual([]);
       expect(execFileSync('git', ['remote'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
       expect(there()).toContain('From another device');
@@ -471,7 +474,7 @@ describe('the online copy: a git server each save is pushed to, and work is fetc
   });
 
   it('show addresses without the passwords in them, and name copies after them', async () => {
-    const { shownUrl, copyName } = await import('../src/backups.js');
+    const { shownUrl, copyName } = await import('@kuraa/sync-git');
     expect(shownUrl('https://ada:s3cret@github.com/ada/notes.git')).toBe('https://github.com/ada/notes.git');
     expect(shownUrl('git@github.com:ada/notes.git')).toBe('git@github.com:ada/notes.git');
     expect(copyName('git@github.com:ada/notes.git')).toBe('online-ada-notes');

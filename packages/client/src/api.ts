@@ -71,16 +71,30 @@ export type PeersInfo =
       network?: { kind: 'starting' | 'open' | 'router' | 'hard' | 'unreachable'; tcp: string | null; lan: boolean };
       workspace: { id: string; forkedFrom: string | null };
       devices: { name: string; key: string; person: string | null; online: boolean; /** Not connected here, but to these devices (keys), which say so. */ through: string[]; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean; /** It runs a kuraa that does not sync with this one until one of them is updated. */ kuraa?: 'newer' | 'older' | null; /** How it is connected here (0053). */ via?: 'lan' | 'tcp' | 'tunnel' | 'internet' | null; /** When it was last connected here (ms since 1970). */ lastSeen?: number | null }[];
+      /** This device was removed from the workspace, and no longer syncs. */
+      removed?: boolean;
+      /** Since when no other device has been connected here (ms since 1970); null while one is, or if there are none. */
+      noContactSince?: number | null;
     };
 
-/** A git server this workspace keeps a copy on and syncs with (the host's backups.ts). */
-export interface OnlineCopyInfo {
+/** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
+export interface SyncTargetInfo {
   name: string;
   /** Where, with any password left out. */
   url: string;
   lastSync: string | null;
   error: string | null;
   busy: boolean;
+}
+/** A sync the host's components bring (the online copy, @kuraa/sync-git), and its targets. */
+export interface SyncInfo {
+  id: string;
+  label: string;
+  description: string;
+  /** For the form that adds a target: an example address, and how to get one. */
+  placeholder: string;
+  help: string;
+  targets: SyncTargetInfo[];
 }
 
 /** An invite link this device made. */
@@ -208,10 +222,10 @@ export class HostApi {
   /** Remove a device from the workspace, for good (it keeps its copy). */
   removeDevice(key: string) { return this.json(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
   renameDevice(name: string) { return this.json<{ name: string }>('/api/peers/name', { method: 'POST', body: JSON.stringify({ name }) }); }
-  /** The online copies, and whether people here may add and remove them. */
-  online() { return this.json<{ canManage: boolean; copies: OnlineCopyInfo[] }>('/api/online'); }
-  addOnline(target: string) { return this.json<{ copies: OnlineCopyInfo[] }>('/api/online', { method: 'POST', body: JSON.stringify({ target }) }).then((r) => r.copies); }
-  removeOnline(name: string) { return this.json<{ copies: OnlineCopyInfo[] }>(`/api/online/${encodeURIComponent(name)}`, { method: 'DELETE' }).then((r) => r.copies); }
+  /** The syncs the host's components bring (the online copy), their targets, and whether people here may add and remove them. */
+  syncs() { return this.json<{ canManage: boolean; syncs: SyncInfo[] }>('/api/syncs'); }
+  addSyncTarget(sync: string, target: string) { return this.json<SyncInfo>(`/api/syncs/${encodeURIComponent(sync)}`, { method: 'POST', body: JSON.stringify({ target }) }); }
+  removeSyncTarget(sync: string, name: string) { return this.json<SyncInfo>(`/api/syncs/${encodeURIComponent(sync)}/${encodeURIComponent(name)}`, { method: 'DELETE' }); }
   /** You on this computer (keys), where the host lets people using the app manage them (else a 404). */
   person() { return this.json<{ person: PersonInfo }>('/api/person').then((r) => r.person); }
   revokeKey(key: string) { return this.json('/api/person/revoke', { method: 'POST', body: JSON.stringify({ key }) }); }

@@ -8,11 +8,10 @@ import type { AddressInfo } from 'node:net';
 import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type ChunkRef, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
-import { Git } from './git.js';
+import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
 import { commitSigned, signCommitObject } from './signing.js';
-import { OnlineCopies } from './backups.js';
 import { serialQueue } from './serial.js';
 import { initWorkspace } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
@@ -22,6 +21,7 @@ import { createRequestHandler, sameToken } from './http.js';
 import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
+import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 export interface HostTimings {
   /** Serialize this long after the last update. */
@@ -32,7 +32,7 @@ export interface HostTimings {
   maxCommitMs: number;
   /** Drop an empty room after this long. */
   dropMs: number;
-  /** Push to the online copies this long after the last commit (backups.ts). */
+  /** Push to the online copies this long after the last commit (the syncs' delayMs). */
   onlineMs: number;
   /** Fetch from the online copies, merge and push, this often. */
   onlineSyncMs: number;
@@ -85,8 +85,8 @@ export interface HostOptions {
    */
   managePerson?: boolean;
   /**
-   * People using the app may add and remove online copies (backups.ts): git
-   * servers synced with this computer's credentials. A hub turns it on while it
+   * People using the app may add and remove online copies (syncs, from
+   * components such as @kuraa/sync-git): git servers synced with this computer's credentials. A hub turns it on while it
    * listens only on this computer (0047). Everyone sees them, and Sync syncs with them.
    */
   manageOnline?: boolean;
@@ -206,8 +206,12 @@ export class Host {
   readonly dir: string;
   readonly token: string;
   readonly timings: HostTimings;
-  /** Git servers this workspace keeps a copy on, and syncs with (backups.ts). */
-  readonly online: OnlineCopies;
+  /**
+   * Places this workspace keeps a copy on and syncs with, by id: the syncs the
+   * run components bring (the online copy, @kuraa/sync-git, decision 0059),
+   * opened for this workspace at start. None without such a component.
+   */
+  readonly syncs = new Map<string, { sync: Sync; session: SyncSession }>();
   readonly workspace: string;
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
@@ -248,7 +252,6 @@ export class Host {
       GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email,
       GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email,
     } : {});
-    this.online = new OnlineCopies(this.git, { delayMs: this.timings.onlineMs, everyMs: this.timings.onlineSyncMs, log: (m) => this.log(m), serial: (fn) => this.serial(fn), bringIn: (name) => this.bringInFrom(name) });
     this.allTypes = options.types ?? standardTypes;
     const known = this.allTypes.map((t) => t.id);
     for (const id of options.formats ?? []) if (!known.includes(id)) throw new Error(`Unknown format "${id}". Known: ${known.join(', ')}.`);
@@ -285,15 +288,28 @@ export class Host {
     this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
     this.gitState = await this.readGitState();
     this.onBranch = this.gitState.branch;
-    // Online copies take what was committed, a while after; and, at start, whatever was committed while the host was away.
-    this.onRefsChanged(() => this.online.changed());
-    this.online.changed();
-    this.online.start();
     const run = this.options.run;
+    const components = await loadRunComponents(run?.components);
+    // Online copies take what was committed, a while after; and, at start, whatever was committed while the host was away.
+    for (const sync of components.syncs.values()) {
+      const session = sync.open({
+        git: this.git,
+        nonInteractive: NON_INTERACTIVE,
+        delayMs: this.timings.onlineMs,
+        everyMs: this.timings.onlineSyncMs,
+        log: (m) => this.log(m),
+        serial: (fn) => this.serial(fn),
+        bringIn: (name) => this.bringInFrom(name),
+      });
+      this.syncs.set(sync.id, { sync, session });
+      this.onRefsChanged(() => session.changed());
+      session.changed();
+      session.start();
+    }
     this.runner = new Runner({
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
-      components: await loadRunComponents(run?.components),
+      components,
       options: run,
       broadcast: (path, message) => this.broadcastPath(path, message),
       broadcastAll: (message) => {
@@ -364,7 +380,7 @@ export class Host {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.online.close();
+    for (const { session } of this.syncs.values()) session.close();
     this.renders?.close();
     this.watcher?.close();
     clearInterval(this.gitPoll);
@@ -1512,7 +1528,7 @@ export class Host {
     return outcome;
   }
 
-  /** Bring an online copy's branches in, as fetched (backups.ts): what the merge into the open branch kept, to say. */
+  /** Bring an online copy's branches in, as fetched (SyncContext.bringIn): what the merge into the open branch kept, to say. */
   async bringInFrom(name: string): Promise<string> {
     const prefix = `refs/remotes/${name}/`;
     const refs = (await this.git.out(['for-each-ref', '--format=%(refname)', prefix])).split('\n').filter((r) => r && r !== `${prefix}HEAD`);
@@ -1539,9 +1555,10 @@ export class Host {
     const said: string[] = [];
     let ok = true;
     if (this.peers) said.push(await this.peers.syncAll());
-    if ((await this.online.names()).length) {
-      const r = await this.online.syncAll();
-      ok = r.ok;
+    for (const { session } of this.syncs.values()) {
+      if (!(await session.names()).length) continue;
+      const r = await session.syncAll();
+      ok &&= r.ok;
       said.push(...r.messages);
     }
     if (!said.length) return { ok: false, message: 'There is no online copy, and no other device to sync with.' };

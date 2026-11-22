@@ -10,6 +10,9 @@
 //                on this computer, or on a remote server)
 //   Tool         a toolchain those processes may use, downloaded on request and
 //                kept once per computer (tool-tinytex: TeX, for PDFs with LaTeX)
+//   Sync         a place the workspace keeps a copy and syncs with, beyond its
+//                own devices (sync-git: the online copy). Not about running
+//                code, but loaded the same way, so it lives in this contract.
 //
 // The two never know each other's implementation. They meet only through this
 // contract: an engine asks the environment it is given to start a process
@@ -473,6 +476,90 @@ export interface ToolParts {
 }
 
 // ---------------------------------------------------------------------------
+// Syncs: places a workspace keeps a copy of itself beyond its own devices, and
+// syncs with (decision 0059). The online copy (sync-git: GitHub, GitLab, any git
+// server) is the first. Unlike engines, environments and tools, a sync runs in
+// the host, with the host's rights and its person's git credentials: it is given
+// the workspace's repository, never a process to start.
+
+/** The workspace's git repository, as a sync may use it. */
+export interface SyncGit {
+  /** The workspace folder. */
+  readonly dir: string;
+  /** Run git there. Fails (throws) on a non-zero exit unless `allowFail`; past `timeoutMs`, git and what it started are stopped. */
+  run(args: string[], opts?: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): Promise<{ stdout: string; stderr: string; code: number }>;
+}
+
+/** What the host gives a sync for one workspace. */
+export interface SyncContext {
+  git: SyncGit;
+  /** Environment for git talking to other computers: never a prompt for a password or a host key. */
+  nonInteractive: Record<string, string>;
+  /** Push this long after the last commit. */
+  delayMs: number;
+  /** Fetch, merge and push this often (0: never on its own). */
+  everyMs: number;
+  log(message: string): void;
+  /** Run in turn with the host's commits and merges (reading which commits the branches are at, so none is half made). */
+  serial<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Bring the branches fetched into refs/remotes/<name>/ into the workspace's,
+   * merging as every device does, in turn with the host's other git work.
+   * Returns what the merge into the open branch kept, to say. Absent where no
+   * host runs (the command line): the work is left for a host to bring in.
+   */
+  bringIn?(name: string): Promise<string>;
+}
+
+/** One place a sync keeps a copy: an online copy, say. */
+export interface SyncTargetStatus {
+  /** Its name (a git remote, for sync-git). */
+  name: string;
+  /** Where, with any password in it left out. */
+  url: string;
+  /** When this device and it last had the same work (ISO), if they have. */
+  lastSync: string | null;
+  /** Why the last sync with it did not go through, if it did not. */
+  error: string | null;
+  /** Syncing with it now. */
+  busy: boolean;
+}
+
+/** A sync opened for one workspace. */
+export interface SyncSession {
+  /** Sync on its own from now (every `everyMs`). */
+  start(): void;
+  /** The names of its targets. */
+  names(): Promise<string[]>;
+  list(): Promise<SyncTargetStatus[]>;
+  /** Add a target (an address, say), synced with at once. Returns its name. Throws, in words for people, if it cannot be. */
+  add(target: string): Promise<string>;
+  /** No longer a target. The copy there is not touched. */
+  remove(name: string): Promise<void>;
+  /** Something was committed. */
+  changed(): void;
+  /** Sync with every target now: what each brought, or why it did not go through. */
+  syncAll(): Promise<{ ok: boolean; messages: string[] }>;
+  /** Sync with one target: fetching first unless `fetchFirst` is false (only pushing). What it said, or null if it did not go through. */
+  sync(name: string, fetchFirst?: boolean): Promise<string | null>;
+  close(): void;
+}
+
+export interface Sync {
+  /** Its id, which the API names it by: 'online'. */
+  id: string;
+  /** What people call it: 'Online copy'. */
+  label: string;
+  /** A sentence on what it does. */
+  description?: string;
+  /** For adding a target in the app: an example address, and how to get one. */
+  placeholder?: string;
+  help?: string;
+  /** Open it for one workspace. */
+  open(ctx: SyncContext): SyncSession;
+}
+
+// ---------------------------------------------------------------------------
 // Components
 
 export interface RunComponent {
@@ -484,6 +571,8 @@ export interface RunComponent {
   environments?: Environment[];
   /** Toolchains processes may use, downloaded on request (decision 0045). */
   tools?: Tool[];
+  /** Places the workspace keeps a copy and syncs with: the online copy (decision 0059). */
+  syncs?: Sync[];
 }
 
 export function defineRunComponent(component: Omit<RunComponent, 'apiVersion'>): RunComponent {

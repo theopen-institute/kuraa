@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The menu: everything that is not the document. Opened from the bottom of the
 // sidebar (or ⌘,). Sections: the workspace (sync, connection, who is here), its
-// devices and online copy, components, and you (your settings, you on this
+// devices, components (with the online copy, 0059), and you (your settings, you on this
 // computer, and the shell's own actions). The open document's own settings are
 // a panel of their own, Document settings (also opened by right-clicking a file
 // in the sidebar): its views, versions and saving, its header, and its code
@@ -25,7 +25,6 @@ import { useDialog } from './vue.js';
 import CodeSection from './CodeSection.vue';
 import DevicesSection from './DevicesSection.vue';
 import HeaderForm from './HeaderForm.vue';
-import OnlineCopySection from './OnlineCopySection.vue';
 import SettingsForm from './SettingsForm.vue';
 import PersonKey from './PersonKey.vue';
 
@@ -102,8 +101,8 @@ useDialog(root, () => {
 const syncable = ref<boolean | null>(null);
 onMounted(async () => {
   try {
-    const [peers, online] = await Promise.all([props.api.peers(), props.api.online()]);
-    syncable.value = peers.enabled || online.copies.length > 0;
+    const [peers, syncs] = await Promise.all([props.api.peers(), props.api.syncs()]);
+    syncable.value = peers.enabled || syncs.syncs.some((s) => s.targets.length > 0);
   } catch {
     syncable.value = null;
   }
@@ -225,7 +224,6 @@ const runner = computed(() => props.status?.runner ?? null);
         </section>
 
         <DevicesSection :api="api" @invite="emit('invite'); emit('close')" />
-        <OnlineCopySection :api="api" />
 
         <section class="menu-section">
           <h3>{{ S.menu.components }}</h3>

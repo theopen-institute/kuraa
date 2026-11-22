@@ -24,7 +24,9 @@
 // and passed on (records.ts), and every other device takes it.
 import { parseArgs } from 'node:util';
 import { join, resolve } from 'node:path';
-import { Git } from '../git.js';
+import type { RunComponent } from '@kuraa/run-kit';
+import { Git, NON_INTERACTIVE } from '../git.js';
+import { loadRunComponents } from '../components.js';
 import { Identity, decodeLink, type LinkHints } from './identity.js';
 import { readFile } from 'node:fs/promises';
 import { joinWorkspace } from './join.js';
@@ -56,7 +58,8 @@ async function identityAt(dir: string): Promise<{ git: Git; id: Identity }> {
   return { git, id: new Identity(git, join(await git.gitDir(), 'kuraa')) };
 }
 
-export async function peerCommand(argv: string[]): Promise<void> {
+/** `components`: the run components the command line loads (@kuraa/run-components), for the online copy (a sync, decision 0059). */
+export async function peerCommand(argv: string[], o: { components?: (RunComponent | string)[] } = {}): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -207,9 +210,10 @@ export async function peerCommand(argv: string[]): Promise<void> {
     }
     case 'online': {
       const { git } = await identityAt(values.dir!);
-      const { OnlineCopies } = await import('../backups.js');
-      // Merging needs the host's document types: a running host brings the copy's work in, at its next sync.
-      const online = new OnlineCopies(git, { delayMs: 0, everyMs: 0, log: () => undefined, serial: (fn) => fn() });
+      const sync = (await loadRunComponents(o.components)).syncs.get('online');
+      if (!sync) throw new Error('No online copy component is loaded (@kuraa/sync-git, in @kuraa/run-components).');
+      // Merging needs the host's document types: a running host brings the copy's work in, at its next sync (no bringIn).
+      const online = sync.open({ git, nonInteractive: NON_INTERACTIVE, delayMs: 0, everyMs: 0, log: () => undefined, serial: (fn) => fn() });
       if (arg === 'add') {
         const name = await online.add(more.join(' '));
         const said = await online.sync(name, false);

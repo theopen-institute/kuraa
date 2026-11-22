@@ -41,7 +41,7 @@ import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
   try {
-    await peerCommand(process.argv.slice(2));
+    await peerCommand(process.argv.slice(2), { components: standardRunComponents });
     process.exit(0);
   } catch (e) {
     console.error(`[kuraa] ${(e as Error).message}`);

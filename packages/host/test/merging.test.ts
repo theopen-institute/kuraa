@@ -10,6 +10,7 @@ import { standardTypes } from '@kuraa/formats';
 import { Git } from '../src/git.js';
 import { mergeCommits } from '../src/merging.js';
 import { startHost, type RunningHost } from '../src/index.js';
+import syncGit from '@kuraa/sync-git';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const registry = new TypeRegistry();
@@ -116,7 +117,7 @@ describe('Sync', () => {
     writeFileSync(join(dir, 'notes.md'), readFileSync(join(dir, 'notes.md'), 'utf8').replace('It rained.', 'It poured.'));
     git(dir, 'commit', '-q', '-am', 'Local edit');
 
-    running = await startHost({ dir, port: 0 });
+    running = await startHost({ dir, port: 0, run: { engines: [], components: [syncGit] } });
     const api = (p: string, init: RequestInit = {}) => fetch(running!.url + p, { ...init, headers: { authorization: `Bearer ${running!.token}` } });
     const sync = (await (await api('/api/sync', { method: 'POST' })).json()) as { ok: boolean; message: string };
     expect(sync).toEqual({ ok: true, message: 'Synced with origin/main; 1 conflict kept in notes.md, to choose between in the document', head: expect.any(String), brought: expect.any(Number), conflicts: 1 });

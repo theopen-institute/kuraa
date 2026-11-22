@@ -433,31 +433,43 @@ const personRoutes: Route[] = [
   }),
 ];
 
-// Online copies (backups.ts): git servers this workspace keeps a copy on, and syncs with. Everyone
-// sees them (Sync syncs with them); adding and removing them is for the one running the host (manageOnline).
+// Syncs (the online copy, from a component: decision 0059): places this workspace keeps a copy on, and
+// syncs with. Everyone sees them (Sync syncs with them); adding and removing targets is for the one running
+// the host (manageOnline), whose git credentials they use.
 const mayManageOnline = (host: Host) => {
   if (!host.options.manageOnline) throw new HttpError(403, 'The online copy is set up only on the computer running this server, while it is not open to the network');
 };
-const onlineRoutes: Route[] = [
-  route('GET', '/api/online', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageOnline, copies: await host.online.list() })),
-  route('POST', '/api/online', async ({ host, req, res }) => {
+const syncOf = (host: Host, id: string) => {
+  const s = host.syncs.get(id);
+  if (!s) throw new HttpError(404, `No component for ${id} is loaded on this server`);
+  return s;
+};
+const syncInfo = async (host: Host, id: string) => {
+  const { sync, session } = syncOf(host, id);
+  return { id, label: sync.label, description: sync.description ?? '', placeholder: sync.placeholder ?? '', help: sync.help ?? '', targets: await session.list() };
+};
+const syncRoutes: Route[] = [
+  route('GET', '/api/syncs', async ({ host, res }) => send(res, 200, { canManage: !!host.options.manageOnline, syncs: await Promise.all([...host.syncs.keys()].map((id) => syncInfo(host, id))) })),
+  route('POST', /^\/api\/syncs\/([a-z0-9-]+)$/, async ({ host, req, res, params }) => {
+    const { session } = syncOf(host, params[0]!);
     mayManageOnline(host);
     const target = str((await readBody(req)).target, 'target');
     try {
-      await host.online.add(target);
+      await session.add(target);
     } catch (e) {
       throw new HttpError(400, (e as Error).message);
     }
-    send(res, 201, { copies: await host.online.list() });
+    send(res, 201, await syncInfo(host, params[0]!));
   }),
-  route('DELETE', /^\/api\/online\/([A-Za-z0-9._-]+)$/, async ({ host, res, params }) => {
+  route('DELETE', /^\/api\/syncs\/([a-z0-9-]+)\/([A-Za-z0-9._-]+)$/, async ({ host, res, params }) => {
+    const { session } = syncOf(host, params[0]!);
     mayManageOnline(host);
     try {
-      await host.online.remove(params[0]!);
+      await session.remove(params[1]!);
     } catch (e) {
       throw new HttpError(404, (e as Error).message);
     }
-    send(res, 200, { copies: await host.online.list() });
+    send(res, 200, await syncInfo(host, params[0]!));
   }),
 ];
 
@@ -509,7 +521,7 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...onlineRoutes, ...writingRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

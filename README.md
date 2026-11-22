@@ -189,8 +189,9 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 ## An online copy
 
-A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. In the
-menu's **Online copy** section (wherever the host listens only on this computer: the desktop app,
+A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
+component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
+In **Components…**, its **Online copy** section (wherever the host listens only on this computer: the desktop app,
 `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
@@ -604,10 +605,11 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type registry, hook bus and merging (lines, words, blocks). No DOM, no Node, no formats |
-| `packages/run-kit` | The contract between run components: engines (languages), environments (where processes run) and tools (toolchains downloaded on request), the policy |
+| `packages/run-kit` | The contract between run components: engines (languages), environments (where processes run), tools (toolchains downloaded on request) and syncs (the online copy), the policy |
 | `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate`, and rendering R Markdown and Markdown (rmarkdown, pandoc, Typst) |
 | `packages/env-podman` | Environment component: a locked-down Podman container |
 | `packages/tool-tinytex` | Tool component: TinyTeX, for PDFs made with LaTeX, pinned per architecture; reads LaTeX logs for missing packages |
+| `packages/sync-git` | Sync component: the online copy, a git server each save is pushed to and Sync fetches and merges from |
 | `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |

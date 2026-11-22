@@ -62,6 +62,13 @@ const online = (i: Extract<PeersInfo, { enabled: true }>) => i.devices.filter((d
 /** How a device online is connected, in words (0053). */
 const viaText = (d: Device) => (d.via === 'lan' ? S.devices.viaLan : d.via === 'tcp' ? S.devices.viaTcp : d.via === 'tunnel' ? S.devices.viaTunnel : S.devices.isOnline);
 const viaTitle = (d: Device) => (d.via === 'lan' ? S.devices.viaLanTitle : d.via === 'tcp' ? S.devices.viaTcpTitle : d.via === 'tunnel' ? S.devices.viaTunnelTitle : undefined);
+/** How long no other device may be connected before the section says this device may have been removed. */
+const NO_CONTACT_MS = 30 * 60_000;
+/** Since when no device has connected, as words, once that is long enough to mention (and the network is not the reason). */
+const noContact = (i: Extract<PeersInfo, { enabled: true }>) =>
+  !i.removed && i.noContactSince && Date.now() - i.noContactSince >= NO_CONTACT_MS && i.network?.kind !== 'unreachable'
+    ? S.devices.noContact(time(new Date(i.noContactSince).toISOString()))
+    : null;
 /** The devices a device not connected here is reached through, by name. */
 const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.map((k) => i.devices.find((x) => x.key === k)).filter((x) => !!x).map(label).join(', ');
 </script>
@@ -76,10 +83,11 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
     <h3>{{ S.devices.title }}</h3>
     <p class="menu-facts" data-testid="this-device">
       {{ S.devices.youAreOn(info.device.name) }}
-      <template v-if="info.devices.length">{{ S.devices.online(online(info), info.devices.length) }}</template>
-      <template v-else>{{ S.devices.nobody }}</template>
+      <template v-if="!info.removed">{{ info.devices.length ? S.devices.online(online(info), info.devices.length) : S.devices.nobody }}</template>
     </p>
-    <p v-if="info.network && S.devices.network[info.network.kind]" class="menu-facts warn" data-testid="this-network">{{ S.devices.network[info.network.kind] }}</p>
+    <p v-if="info.removed" class="menu-facts warn" role="status" data-testid="device-removed">{{ S.devices.removed }}</p>
+    <p v-else-if="noContact(info)" class="menu-facts warn" data-testid="no-contact">{{ noContact(info) }}</p>
+    <p v-if="!info.removed && info.network && S.devices.network[info.network.kind]" class="menu-facts warn" data-testid="this-network">{{ S.devices.network[info.network.kind] }}</p>
     <ul v-if="info.devices.length" class="menu-devices">
       <li v-for="d in info.devices" :key="d.key" :data-testid="`device:${d.name}`">
         <span :class="['device-dot', { online: d.online, through: !d.online && d.through.length }]" aria-hidden="true" />
@@ -90,10 +98,11 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
         <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`state:${d.name}`">{{ viaText(d) }}</span>
         <span v-else-if="d.through.length" class="device-state" :title="S.devices.throughTitle(via(info, d))" :data-testid="`through:${d.name}`">{{ S.devices.through(via(info, d)) }}</span>
         <span v-else class="device-state" :data-testid="`state:${d.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
-        <button v-if="info.canInvite" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
+        <button v-if="info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.common.removeEllipsis }}</button>
       </li>
     </ul>
-    <div v-if="info.canInvite" class="menu-actions">
+    <!-- A removed device's invitations and removals are refused by the others: none offered. -->
+    <div v-if="info.canInvite && !info.removed" class="menu-actions">
       <button type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button>
       <button type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">{{ S.devices.rename }}</button>
     </div>

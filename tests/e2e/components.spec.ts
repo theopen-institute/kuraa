@@ -61,6 +61,11 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('environment:podman')).not.toContainText('not sandboxed');
     await expect(box(page, 'In a Podman container')).not.toBeChecked();
     await expect(box(page, 'In a Podman container')).toBeDisabled();
+    // The online copy is a component too (0059): shown here; on this host, not set up from the app.
+    const online = page.getByTestId('sync:online');
+    await expect(online).toContainText('Online copy');
+    await expect(online).toContainText('Added and removed on the computer running this server');
+    await expect(online.getByTestId('sync-address')).toHaveCount(0);
   } finally {
     await host.close();
   }

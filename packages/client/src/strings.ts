@@ -135,7 +135,7 @@ export const S = {
     upToDate: 'Up to date.',
     broughtIn: (n: number) => `Brought in ${count(n, 'change', 'changes')}.`,
     withConflicts: (n: number) => `${count(n, 'passage', 'passages')} changed both here and elsewhere: both versions are in the document, to choose between.`,
-    nothingToSync: 'Nothing to sync with yet. Add an online copy, or invite people to work with you, and Sync brings in their work.',
+    nothingToSync: 'Nothing to sync with yet. Add an online copy in Components, or invite people to work with you, and Sync brings in their work.',
   },
 
   /** Saving, as the server reports it (decision 0037). */
@@ -172,7 +172,7 @@ export const S = {
     search: 'Search…',
     searchTitle: (key: string) => `Search every file (${key})`,
     components: 'Components',
-    componentsAbout: 'What runs code and where, the document formats, and your editing behaviour.',
+    componentsAbout: 'What runs code and where, the document formats, the online copy, and your editing behaviour.',
     componentsButton: 'Components…',
     help: 'Markdown and shortcuts',
     helpTitle: (key: string) => `Everything you can type, and the keys (${key})`,
@@ -409,20 +409,22 @@ export const S = {
       unreachable: 'This computer cannot reach other computers over the internet now (no network, or one that blocks how kuraa connects). Devices on the same network, and servers that take connections at an address, still sync.',
     },
     removeAsk: (who: string) => `Remove ${who} from this workspace? This is permanent: it will no longer sync with anyone here, and cannot join again with an old link. Whoever uses it keeps their copy of everything up to now.`,
+    removed: 'This device was removed from the workspace, so it no longer syncs with the others. Everything here up to then is still here. To work with them again, ask someone there for a new invite link.',
+    noContact: (since: string) => `No other device has connected since ${since}. They may all be offline, or this device may have been removed from the workspace while it was offline (it is not told then): someone on another device can tell you.`,
     renameAsk: 'What should this computer be called here?',
     rename: 'Rename this computer…',
   },
 
+  // A sync's own words (its name, what it does, an example address, how to get one) come from its component.
   online: {
-    title: 'Online copy',
-    about: 'A copy of this workspace on GitHub, GitLab or any git server. Each save goes there, and Sync brings in what others put there, so you meet even when your computers cannot reach each other.',
     syncing: 'syncing…',
     behind: 'not up to date',
     upToDate: (t: string) => `up to date ${t}`,
     notYet: 'not yet',
-    address: 'The address of a git repository for the online copy',
+    address: (label: string) => `The address for the ${label.toLowerCase()}`,
     add: 'Add',
-    how: 'Make an empty repository on GitHub or GitLab first, and paste its address. Your own git sign-in is used (an SSH key, or a credential helper for https).',
+    none: 'None yet.',
+    setUpThere: 'Added and removed on the computer running this server, with its git sign-in.',
   },
 
   person: {

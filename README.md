@@ -291,7 +291,12 @@ manages groups). Where nothing is said, anyone may change it. A change by anyone
 where it comes in: every device's merge keeps its own version of the file and keeps the change on
 record, and those who may change the file see it above the document as a suggestion, to compare
 and **Accept** (as their edit) or **Dismiss**. A document you may not change opens read only, saying
-who may, with **Suggest a change…**. This is a signed policy every device holds alike, so no device takes
+who may, with **Suggest a change…**. Changes to the policy made at the same time on different
+devices settle the same way everywhere: someone taken out is not put back in at the same time,
+nothing they did meanwhile counts, and two admins taking each other out are both out, unless that
+would leave no admin (then neither is, and Workspace settings say so). What someone taken out, or
+a revoked or lost key, signs after that counts for nothing anywhere; merges are made again by
+every device that brings them in, so none can slip a change past the rules. This is a signed policy every device holds alike, so no device takes
 a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
 workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
 by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person

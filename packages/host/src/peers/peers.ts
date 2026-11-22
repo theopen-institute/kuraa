@@ -14,7 +14,7 @@
 import { WaitingForPolicy, describeOutcome, type Host } from '../host.js';
 import { RESOLVED_TRAILER, gate, type GateResult } from './gate.js';
 import { suggestions, type Suggestion } from './suggestions.js';
-import { isAncestor } from '../merging.js';
+import { MERGE_VERSION, isAncestor } from '../merging.js';
 import { PROTOCOL, type PeerLink } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
@@ -146,6 +146,8 @@ export interface PeopleInfo {
   /** Whether this person may invite people, remove devices and change who is in it. */
   admin: boolean;
   people: { id: string; role: Role; name: string | null; devices: string[]; you: boolean }[];
+  /** Admins who took each other out at the same time, which would have left none, so neither removal stood: their names. */
+  disputes: string[][];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -244,7 +246,15 @@ export class Peers {
     const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
     const names = new Map(people.map((p) => [p.key, p.name]));
     const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
-    return gate(this.host.git, x, y, { policy, known, personOf: (k) => byKey.get(k) ?? null, nameOf: (p) => names.get(p) ?? null });
+    return gate(this.host.git, x, y, {
+      policy,
+      known,
+      personOf: (k) => byKey.get(k) ?? null,
+      nameOf: (p) => names.get(p) ?? null,
+      cutKeys: await id.cutKeys(),
+      remake: (a, b) => this.host.remakeMergeTree(a, b),
+      mergeVersion: MERGE_VERSION,
+    });
   }
 
   /** Work held back until the policy it names has come: tried again shortly (gate.ts). */
@@ -523,6 +533,8 @@ export class Peers {
       founded: policy.founded,
       admin: policy.founded ? policy.isAdmin(me) : true,
       people: policy.people().map((p) => ({ id: p.id, role: p.role, name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
+      // Admins who took each other out at once, which would have left none: neither stood (step 4).
+      disputes: policy.disputes.map((d) => d.people.map((id) => known.get(id)?.name ?? `${id.slice(0, 8)}…`)),
     };
   }
 
@@ -537,7 +549,8 @@ export class Peers {
    */
   async removePerson(person: string): Promise<void> {
     const devices = (await this.node.identity.people()).find((p) => p.key === person)?.devices ?? [];
-    await this.adminOp({ t: 'revoke', group: WORKSPACE, who: person });
+    // With the commits this device has: what they made among them still counts, and nothing else (their cutoff).
+    await this.adminOp({ t: 'revoke', group: WORKSPACE, who: person, cutoff: await this.node.branchTips() });
     const members = new Set((await this.node.identity.members()).map((m) => m.key));
     const theirs = devices.filter((d) => members.has(d) && d !== this.node.myKey);
     for (const d of theirs) await this.node.identity.removeMember(d);

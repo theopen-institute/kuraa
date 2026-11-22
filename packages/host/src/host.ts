@@ -1480,7 +1480,19 @@ export class Host {
     // Who may change what (0066): judged by the workspace's policy, where it has one (peers/gate.ts).
     const g = this.gate ? await this.gate(x, y) : null;
     if (g?.waitFor.length) throw new WaitingForPolicy(g.waitFor);
-    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused });
+    const outcome = await mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused });
+    // A merge holding a live room's text cannot be made again elsewhere: signed, it is its maker's (0066), and judged as theirs.
+    if (outcome.kind === 'merge' && outcome.overridden?.length && this.peers) {
+      const raw = (await this.git.run(['cat-file', 'commit', outcome.commit])).bytes;
+      outcome.commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers.node.signingKey()) });
+    }
+    return outcome;
+  }
+
+  /** The tree of the merge of two commits as this device makes it, plainly (to check another's merge: peers/gate.ts). */
+  async remakeMergeTree(a: string, b: string): Promise<string> {
+    const outcome = await mergeCommits(this.git, a, b, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), tmpDir: this.tmpDir });
+    return this.git.out(['rev-parse', `${outcome.commit}^{tree}`]);
   }
 
   /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */

@@ -202,6 +202,31 @@ describe('a workspace’s policy, on a device (0066)', () => {
   });
 });
 
+describe('cutoffs for keys no longer a person’s (0066, step 4)', () => {
+  it('a key dropped when its identity was recovered is found, and once revoked with the commits seen, is cut there', async () => {
+    const { id } = repo();
+    const ws = await id.found();
+    await id.addMember(hex(bo), 'bo');
+    const bo1 = identity();
+    const laptop = crypto.keyPair();
+    const stolen = crypto.keyPair();
+    await id.takeRecords([...eventRecords(ws.id, bo1), vouchFor(ws.id, laptop, bo1, 'Bo'), vouchFor(ws.id, stolen, bo1, 'Bo')]);
+    // Recovered, keeping only the laptop's key.
+    const next = crypto.keyPair();
+    const bo2 = { id: bo1.id, key: bo1.recovery, recovery: next, events: [...bo1.events, rotate(bo1.events, bo1.recovery, next, [hex(laptop)])] };
+    await id.takeRecords(eventRecords(ws.id, bo2));
+    expect(await id.droppedKeys(bo1.id)).toEqual([hex(stolen)]);
+    expect((await id.cutKeys()).size).toBe(0);
+    const heads = ['cd'.repeat(20)];
+    await id.takeRecords([signRecord({ kind: 'revoke-key', workspace: ws.id, subject: hex(stolen), person: bo1.id, personKey: hex(bo2.key), proof: sign(revokeKeyMessage(hex(stolen)), bo2.key), heads }, bo)]);
+    expect(await id.droppedKeys(bo1.id)).toEqual([]);
+    expect(await id.cutKeys()).toEqual(new Map([[hex(stolen), { person: bo1.id, heads }]]));
+    // A cutoff's heads are signed with the record: changed after, not a record.
+    const r = (await id.records()).find((x) => x.kind === 'revoke-key')!;
+    expect(readRecord({ ...r, heads: ['ef'.repeat(20)] })).toBeNull();
+  });
+});
+
 describe('recovering an identity', () => {
   const file = () => join(mkdtempSync(join(tmpdir(), 'kuraa-person-')), 'person.json');
 

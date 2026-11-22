@@ -1,6 +1,6 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles) and 3 (write rules, suggestions); see *Built so far* at the end.**
+**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles), 3 (write rules, suggestions) and 4 (changes at the same time, cutoffs, merges checked); see *Built so far* at the end.**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
@@ -459,3 +459,38 @@ differ by person, and how usable plain git is with only the public layer.
 - **Not yet:** checking merges (step 4); rules kept inside private spaces (step 5); suggestions
   are of whole files, on the branch checked out, and suggesting is done on the document's source
   text, not in the rich view.
+
+### 4 · Changes at the same time, cutoffs, and merges checked
+
+- **Each policy operation is judged by its own past** (the operations it descends from), not by
+  where it falls in the one order: whether its maker was an admin there. The same wherever it is
+  judged. The operations allowed are then applied together, in the one order, with the rules for
+  those made at the same time (neither in the other's past):
+  - *removal wins*: someone taken out of a group (or the workspace) is not put in it, nor given a
+    role in it, at the same time;
+  - *cutoffs*: what someone taken out of a group, or out of being its admin, did at the same time
+    in that group (in the workspace: anything) counts for nothing, but leaving a group oneself;
+  - *two taking each other out* in the same group both count: both are out;
+  - *the workspace keeps an admin*: if removals of admins made at the same time would leave none,
+    none of them stands, and the conflict is on record (`Policy.disputes`), which Workspace
+    settings say under People ("Ada and Bo took each other out … neither stands").
+  It costs a fold of each operation's past: fine for the hundreds of operations a workspace has.
+- **Content cutoffs.** Taking someone out of the workspace names the commits the remover's device
+  had (its branch tips, `cutoff` on the `revoke`); revoking a signing key does too (`heads` on
+  `revoke-key`, from the device that publishes it in each workspace); and a key dropped when its
+  identity was recovered is revoked by the recovering person's device in each workspace it syncs,
+  with its heads. A commit signed by such a key, or by someone out of the workspace, counts only
+  if it is among those commits (as its person's, for a key); any other is refused where it comes
+  in, whatever the rules, each file it changes kept as it was there (and on record, as a
+  suggestion). Several cutoffs for one key count together. A person put back in the workspace has
+  no cutoff any more. A removal names only what the remover's device had: someone's commits it
+  had not seen yet are refused too, and can be taken up from the suggestions.
+- **Merges are made again.** Every merge says which version of merging made it
+  (`Kuraa-Merge: <version>`, merge version 4). A device bringing one in makes it again from its
+  parents; where it holds something else, that is the merge's own change, judged as any change:
+  by whoever signed it, or no one's. A file it says it kept as one side had it, holding that
+  side's version, is no change of its own. A merge that took a live room's text (which no other
+  device can make again) is signed by the device that made it, and so judged as its person's. A
+  merge by another version of merging is checked only for what it holds that neither parent did.
+- **Not yet:** cutoffs for spaces the remover cannot read (step 5: the first member of each to see
+  the removal is to sign one).

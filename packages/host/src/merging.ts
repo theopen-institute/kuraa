@@ -24,7 +24,8 @@ export const MERGE_AUTHOR = { name: 'Kuraa', email: 'merge@kuraa.invalid' };
  * type's own merge is covered by its version.)
  */
 // 3: files someone may not change keep this side's version (0066, keeps).
-export const MERGE_VERSION = 3;
+// 4: a merge says which version made it (Kuraa-Merge), so others can make it again to check it (0066).
+export const MERGE_VERSION = 4;
 
 /**
  * How this device merges, as a short text devices compare: the merge version,
@@ -64,6 +65,8 @@ export interface MergeOutcome {
   conflicts: { path: string; count: number }[];
   /** Copies saved beside files that could not be merged as text. */
   copies: string[];
+  /** Files that took a live room's text (override), which another device cannot make again: the merge is then its maker's to sign (0066). */
+  overridden?: string[];
 }
 
 export async function isAncestor(git: Git, a: string, b: string): Promise<boolean> {
@@ -120,6 +123,7 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
   const blob = async (s?: Stage) => (s ? (await git.run(['cat-file', 'blob', s.oid])).bytes : null);
 
   const entries: string[] = [];
+  const overridden: string[] = [];
   const conflicts: { path: string; count: number }[] = [];
   const copies: string[] = [];
   const write = (content: Buffer | string) => git.out(['hash-object', '-w', '--stdin'], { input: content });
@@ -133,7 +137,9 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
     if (!s2 && !s3) continue;
     const override = opts.override?.(path);
     if (override !== undefined) {
-      entries.push(`${mode} ${await write(override)} 0\t${path}`);
+      const oid = await write(override);
+      entries.push(`${mode} ${oid} 0\t${path}`);
+      overridden.push(path);
       continue;
     }
     // Changed on one side, deleted on the other: keep it, changed.
@@ -193,19 +199,17 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
       const r = opts.refused?.find((x) => x.path === path);
       lines.push(`Kept ${path} as it was: not ${r?.by ?? 'theirs'} to change`);
     }
-    const refused = (opts.refused ?? []).filter((x) => keeps.has(x.path));
-    if (refused.length) {
-      lines.push('');
-      for (const x of refused) lines.push(`Kuraa-Refused: ${x.commit} ${x.path}`);
-    }
   }
+  // Trailers: which version of merging made it (to make it again: peers/gate.ts), and the changes it refused.
+  lines.push('', `Kuraa-Merge: ${MERGE_VERSION}`);
+  for (const x of (opts.refused ?? []).filter((r) => keeps.has(r.path))) lines.push(`Kuraa-Refused: ${x.commit} ${x.path}`);
   const commit = await git.out(['commit-tree', '--no-gpg-sign', finalTree, '-p', c1, '-p', c2, '-m', lines.join('\n')], {
     env: {
       GIT_AUTHOR_NAME: MERGE_AUTHOR.name, GIT_AUTHOR_EMAIL: MERGE_AUTHOR.email, GIT_AUTHOR_DATE: at,
       GIT_COMMITTER_NAME: MERGE_AUTHOR.name, GIT_COMMITTER_EMAIL: MERGE_AUTHOR.email, GIT_COMMITTER_DATE: at,
     },
   });
-  return { commit, kind: 'merge', conflicts, copies };
+  return { commit, kind: 'merge', conflicts, copies, ...(overridden.length ? { overridden } : {}) };
 }
 
 /** How many conflicts a file's text keeps, as its type counts them. */

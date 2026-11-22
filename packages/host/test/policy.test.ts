@@ -163,4 +163,72 @@ describe('a workspace’s policy', () => {
     h.add({ t: 'rule', path: 'chapters/', by: [] }, ada);
     expect(h.now().ruleFor('chapters/one.md')).toEqual({ path: '', by: ['admins'] });
   });
+
+  describe('changes made at the same time (step 4)', () => {
+    /** A workspace whose admins are Ada and Bo, Cy a member: the point both branches start from. */
+    const start = () => {
+      const h = history();
+      h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+      h.add(grant(bo, 'admin'), ada);
+      h.add(grant(cy, 'member'), ada);
+      return { h, base: h.now().heads };
+    };
+
+    it('removal wins over putting the same person in at once', () => {
+      const { h, base } = start();
+      h.add({ t: 'revoke', group: 'workspace', who: cy.id }, ada, base);
+      h.add(grant(cy, 'admin'), bo, base);
+      expect(h.now().role(cy.id)).toBeNull();
+    });
+
+    it('what someone taken out does at the same time counts for nothing (their cutoff)', () => {
+      const { h, base } = start();
+      h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
+      // Bo, at the same time, makes Dee an admin and a rule: neither counts.
+      h.add(grant(dee, 'admin'), bo, base);
+      h.add({ t: 'rule', path: '', by: [bo.id] }, bo, base);
+      const p = h.now();
+      expect(p.role(bo.id)).toBeNull();
+      expect(p.role(dee.id)).toBeNull();
+      expect(p.rules.size).toBe(0);
+      // What he did before (in the remover's past) still counts: Cy, whom Ada put in, stays.
+      expect(p.role(cy.id)).toBe('member');
+    });
+
+    it('two admins taking each other out at once are both out, if an admin is left', () => {
+      const h = history();
+      h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+      h.add(grant(bo, 'admin'), ada);
+      h.add(grant(cy, 'admin'), ada);
+      const base = h.now().heads;
+      h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
+      h.add({ t: 'revoke', group: 'workspace', who: ada.id }, bo, base);
+      const p = h.now();
+      expect(p.role(ada.id)).toBeNull();
+      expect(p.role(bo.id)).toBeNull();
+      expect(p.role(cy.id)).toBe('admin');
+      expect(p.disputes).toEqual([]);
+    });
+
+    it('if that would leave no admin, neither stands, and the conflict is on record', () => {
+      const { h, base } = start();
+      h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
+      h.add({ t: 'revoke', group: 'workspace', who: ada.id }, bo, base);
+      const p = h.now();
+      expect(p.role(ada.id)).toBe('admin');
+      expect(p.role(bo.id)).toBe('admin');
+      expect(p.disputes).toHaveLength(1);
+      expect(p.disputes[0]!.people).toEqual([ada.id, bo.id].sort());
+      // Each one's past says they could: the same, whichever device puts them in which order.
+      expect(evaluate([...h.entries].reverse(), h.ctx()).disputes).toEqual(p.disputes);
+    });
+
+    it('keeps a removal’s cutoff: the commits the person had made that still count', () => {
+      const { h } = start();
+      h.add({ t: 'revoke', group: 'workspace', who: cy.id, cutoff: ['ab'.repeat(20)] }, ada);
+      expect(h.now().cutoffs.get(cy.id)).toEqual(['ab'.repeat(20)]);
+      h.add(grant(cy, 'member'), ada);
+      expect(h.now().cutoffs.has(cy.id)).toBe(false);
+    });
+  });
 });

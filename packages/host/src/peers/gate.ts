@@ -12,8 +12,18 @@
 // device that does not hold that much of the policy yet waits before bringing
 // them in, so it never judges by less than their maker knew.
 //
-// Merge commits are judged as no one's change: they bring together what their
-// parents hold (checking that they do, by making them again, is for later).
+// Cutoffs (step 4): a commit signed by a key no longer its person's (revoked, or
+// dropped when their identity was recovered), or by someone taken out of the
+// workspace, counts only if it is among the commits that the revocation or
+// removal named (what its maker had then); any other is refused, whatever the
+// rules, every file it changes kept as it was here.
+//
+// Merge commits are made again (step 4): what one holds beyond the merge of its
+// parents as this device makes it is its own change, by whoever signed it (a
+// merge carrying a live room's text is signed by the device that made it; an
+// ordinary merge is no one's), judged as any change is. A file it kept as one
+// side had it, saying so, is no change of its own. A merge made by another
+// version of merging is checked only for what it holds that neither parent did.
 import type { Git } from '../git.js';
 import { commitSigner } from '../signing.js';
 import type { Policy } from './policy.js';
@@ -38,8 +48,16 @@ export interface GateResult {
   waitFor: string[];
 }
 
+/** A merge's record of which version of merging made it. */
+export const MERGE_TRAILER = 'Kuraa-Merge';
+
 export interface GateContext {
   policy: Policy;
+  /** Signing keys no longer their person's: whose they were, and the commits that still count (Identity.cutKeys). */
+  cutKeys?: Map<string, { person: string; heads: string[] }>;
+  /** The tree of the merge of two commits, as this device makes it; and the version of merging it makes it with. */
+  remake?: (a: string, b: string) => Promise<string>;
+  mergeVersion?: number;
   /** The policy operations this device holds. */
   known: Set<string>;
   /** The person (identity ID) a signing key is; null if no one's. */
@@ -61,23 +79,38 @@ export function trailers(message: string, key: string): string[] {
 /** Judge the commits in `theirs` that `ours` does not hold. */
 export async function gate(git: Git, ours: string, theirs: string, ctx: GateContext): Promise<GateResult> {
   const none: GateResult = { keeps: new Map(), refused: [], waitFor: [] };
-  const list = (await git.run(['rev-list', '--topo-order', '--reverse', '--no-merges', `${ours}..${theirs}`], { allowFail: true })).stdout.split('\n').filter(Boolean);
+  const list = (await git.run(['rev-list', '--topo-order', '--reverse', '--parents', `${ours}..${theirs}`], { allowFail: true })).stdout.split('\n').filter(Boolean).map((l) => l.split(' '));
   if (!list.length) return none;
+  const cutKeys = ctx.cutKeys ?? new Map<string, { person: string; heads: string[] }>();
+  const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0;
   const waitFor = new Set<string>();
   // Last refused change of each file (null once someone who may change it has), and the commit that proposes its text.
   const tainted = new Map<string, { commit: string; by: string | null } | null>();
-  for (const c of list) {
+  const among = async (c: string, heads: string[]) => {
+    for (const h of heads) if (h === c || (await git.run(['merge-base', '--is-ancestor', c, h], { allowFail: true })).code === 0) return true;
+    return false;
+  };
+  for (const [c, ...parents] of list as [string, ...string[]][]) {
     const message = await git.out(['show', '-s', '--format=%B', c]);
     for (const named of trailers(message, POLICY_TRAILER)) for (const h of named.split(/\s+/)) if (/^[0-9a-f]{64}$/.test(h) && !ctx.known.has(h)) waitFor.add(h);
-    if (!ctx.policy.rules.size) continue;
+    if (!judging) continue;
     const signer = await commitSigner(git, c);
-    const by = signer ? ctx.personOf(signer) : null;
-    const changed = (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);
+    let by = signer ? ctx.personOf(signer) : null;
+    // Past a cutoff: refused, whatever the rules.
+    let cut = false;
+    const gone = signer ? cutKeys.get(signer) : undefined;
+    if (gone) {
+      if (await among(c, gone.heads)) by = gone.person;
+      else cut = true;
+    } else if (by && ctx.policy.cutoffs.has(by) && !(await among(c, ctx.policy.cutoffs.get(by)!))) cut = true;
+    const changed = parents.length >= 2
+      ? await mergeChanges(git, c, parents, message, ctx)
+      : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);
     // Taking one's own suggestion back off one's copy proposes nothing: the suggestion before it does.
     const takesBack = trailers(message, SUGGESTED_TRAILER).length > 0;
     for (const path of changed) {
       // By someone who may: taken, and whatever was refused before it with it.
-      if (ctx.policy.mayWrite(by, path)) tainted.set(path, null);
+      if (!cut && ctx.policy.mayWrite(by, path)) tainted.set(path, null);
       // A taking back: still not theirs to change; the suggestion before it, if any, is what is proposed.
       else if (takesBack) tainted.set(path, tainted.get(path) ?? { commit: '', by });
       else tainted.set(path, { commit: c, by });
@@ -93,4 +126,40 @@ export async function gate(git: Git, ours: string, theirs: string, ctx: GateCont
     if (t.commit) refused.push({ commit: t.commit, path, by: t.by ? ctx.nameOf(t.by) ?? null : null });
   }
   return { keeps, refused, waitFor: [] };
+}
+
+/** A file's blob in a commit; null if it has none. */
+async function blobAt(git: Git, commit: string, path: string): Promise<string | null> {
+  const r = await git.run(['rev-parse', '-q', '--verify', `${commit}:${path}`], { allowFail: true });
+  return r.code === 0 ? r.stdout.trim() : null;
+}
+
+/**
+ * What a merge holds of its own: the files where it differs from the merge of
+ * its parents as this device makes it (where it was made by the same version
+ * of merging; else, where it differs from both parents), but for those it kept
+ * as one side had them, saying so.
+ */
+async function mergeChanges(git: Git, merge: string, parents: string[], message: string, ctx: GateContext): Promise<string[]> {
+  const files = async (a: string, b: string) => (await git.run(['diff-tree', '-r', '--name-only', '-z', '--no-renames', a, b])).stdout.split('\0').filter(Boolean);
+  let differs: string[];
+  const version = trailers(message, MERGE_TRAILER)[0];
+  if (parents.length === 2 && ctx.remake && version === String(ctx.mergeVersion)) {
+    differs = await files(await ctx.remake(parents[0]!, parents[1]!), `${merge}^{tree}`);
+  } else {
+    const sets = await Promise.all(parents.map((p) => files(p, merge)));
+    differs = sets[0]!.filter((p) => sets.every((s) => s.includes(p)));
+  }
+  const kept = new Set(message.split('\n').map((l) => /^Kept (.+) as it was: not .+ to change$/.exec(l)?.[1]).filter((x): x is string => !!x));
+  const out: string[] = [];
+  for (const path of differs) {
+    if (kept.has(path)) {
+      const mine = await blobAt(git, merge, path);
+      let fromSide = false;
+      for (const p of parents) if ((await blobAt(git, p, path)) === mine) fromSide = true;
+      if (fromSide) continue;
+    }
+    out.push(path);
+  }
+  return out;
 }

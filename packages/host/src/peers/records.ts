@@ -47,6 +47,8 @@ export interface MemberRecord {
   personKey?: string;
   /** key-event: one event of the identity's log (kel.ts), as it was signed. */
   event?: KeyEvent;
+  /** revoke-key: the commits (branch tips) its maker's device had when it said so: what the key signed among them still counts (its cutoff, 0066). */
+  heads?: string[];
   /** policy: the operation (policy.ts), the operations its maker had seen, and the signing key that signed it (`proof`). */
   op?: PolicyOp;
   parents?: string[];
@@ -77,7 +79,8 @@ function message(r: Omit<MemberRecord, 'sig'>): Buffer {
   const event = r.event !== undefined ? ['event', eventHash(r.event)] : [];
   // A policy operation is signed in itself, and named by its hash (the subject), which covers it.
   const policy = r.signer !== undefined ? ['signer', r.signer] : [];
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy].join('\0'));
+  const heads = r.heads !== undefined ? ['heads', r.heads.join(',')] : [];
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy, ...heads].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
@@ -125,6 +128,7 @@ export function readRecord(v: unknown): MemberRecord | null {
   if ((kind === 'policy') !== (op !== null) || (r.op !== undefined && !op)) return null;
   if (op && (!Array.isArray(r.parents) || !r.parents.every((p) => typeof p === 'string') || typeof r.signer !== 'string' || typeof r.proof !== 'string')) return null;
   if (!op && (r.parents !== undefined || r.signer !== undefined)) return null;
+  if (r.heads !== undefined && (kind !== 'revoke-key' || !Array.isArray(r.heads) || r.heads.length > 1000 || !r.heads.every((h) => typeof h === 'string' && /^[0-9a-f]{40,64}$/.test(h)))) return null;
   const aboutLink = kind === 'revoke-link' || kind === 'link';
   if (!aboutLink && !hexKey.test(r.subject)) return null;
   if (aboutLink && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
@@ -142,6 +146,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(r.personKey !== undefined ? { personKey: r.personKey as string } : {}),
     ...(event ? { event } : {}),
     ...(op ? { op, parents: r.parents as string[], signer: r.signer as string } : {}),
+    ...(r.heads !== undefined ? { heads: r.heads as string[] } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
     ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
   };

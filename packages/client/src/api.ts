@@ -116,6 +116,8 @@ export interface PeopleInfo {
   /** Whether you may invite people, remove devices and change who is in it. */
   admin: boolean;
   people: { id: string; role: 'admin' | 'member'; name: string | null; devices: string[]; you: boolean }[];
+  /** Admins who took each other out at the same time, which would have left none, so neither removal stood. */
+  disputes?: string[][];
 }
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */

@@ -14,6 +14,7 @@ import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
 import type { Policy } from './policy.js';
+import crypto from 'hypercore-crypto';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 import { stat } from 'node:fs/promises';
@@ -30,7 +31,7 @@ import type { Socket } from 'node:net';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { dialTcp, listenTcp, parseAddress } from './tcp.js';
-import { traced } from './records.js';
+import { revokeKeyMessage, traced } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
 import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
@@ -888,6 +889,12 @@ export class PeerNode {
     this.personRead = null;
   }
 
+  /** The commits this device's branches are at: a cutoff's heads (0066). */
+  async branchTips(): Promise<string[]> {
+    const out = await this.o.git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads'], { allowFail: true });
+    return [...new Set(out.stdout.split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40,64}$/.test(l)))].sort();
+  }
+
   /** Write the workspace's policy down if it has none (Identity.ensureGenesis). */
   private async ensureGenesis(fresh: boolean): Promise<void> {
     const person = await this.person();
@@ -933,8 +940,14 @@ export class PeerNode {
       this.o.log(`peers: your identity was recovered on another computer; copy it here again for what you save here to be marked as yours`);
     } else if (person) {
       await this.identity.vouch(person, key);
+      // Each with the commits this device has: what the key signed among them still counts (its cutoff, 0066).
+      const heads = await this.branchTips();
       // Revocations kept before identities had logs were signed by the identity's first key.
-      for (const r of await revokedKeys()) await this.identity.revokeKey(person.id, r.by ?? person.events[0]!.key, r.key, r.proof);
+      for (const r of await revokedKeys()) await this.identity.revokeKey(person.id, r.by ?? person.events[0]!.key, r.key, r.proof, heads);
+      // Keys no longer theirs since their identity was recovered: revoked here too, for their cutoff.
+      for (const k of await this.identity.droppedKeys(person.id)) {
+        await this.identity.revokeKey(person.id, person.publicKey.toString('hex'), k, crypto.sign(revokeKeyMessage(k), person.secretKey).toString('hex'), heads);
+      }
     }
     this.saidFor = said;
     return true;

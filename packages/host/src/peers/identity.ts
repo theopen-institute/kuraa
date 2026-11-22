@@ -378,11 +378,45 @@ export class Identity {
     await this.decide('vouch', k, { person: person.id, personKey: pk, name: person.name, proof: sign(m, person), keyProof: sign(m, key) });
   }
 
-  /** Pass on a person's revocation of one of their signing keys (signed by `personKey`, one of their identity's keys), in this workspace. */
-  async revokeKey(person: string, personKey: string, key: string, proof: string): Promise<void> {
+  /**
+   * Pass on a person's revocation of one of their signing keys (signed by
+   * `personKey`, one of their identity's keys), in this workspace, with the
+   * commits this device has (`heads`): what the key signed among them still
+   * counts, and nothing else it signs (its cutoff, 0066).
+   */
+  async revokeKey(person: string, personKey: string, key: string, proof: string, heads: string[] = []): Promise<void> {
     if (!(await this.workspace())) return;
-    if ((await this.records()).some((r) => r.kind === 'revoke-key' && r.person === person && r.subject === key)) return;
-    await this.decide('revoke-key', key, { person, personKey, proof });
+    if ((await this.records()).some((r) => r.kind === 'revoke-key' && r.person === person && r.subject === key && r.personKey === personKey)) return;
+    await this.decide('revoke-key', key, { person, personKey, proof, heads: [...new Set(heads)].sort() });
+  }
+
+  /**
+   * Signing keys whose word no longer counts here (revoked by their person, or
+   * no longer theirs since their identity was recovered), with whose they were
+   * and the commits that still count as theirs (every cutoff said of them,
+   * together); for judging commits (gate.ts).
+   */
+  async cutKeys(): Promise<Map<string, { person: string; heads: string[] }>> {
+    const list = await this.records();
+    const ids = this.identities(list);
+    const now = this.who(list).personOf;
+    const out = new Map<string, { person: string; heads: string[] }>();
+    for (const r of list) {
+      if (r.kind !== 'revoke-key') continue;
+      const state = ids.get(r.person!);
+      if (!state || !revocationCounts(state, r.personKey!, r.subject) || now.has(r.subject)) continue;
+      const had = out.get(r.subject);
+      out.set(r.subject, { person: r.person!, heads: [...new Set([...(had?.heads ?? []), ...(r.heads ?? [])])].sort() });
+    }
+    return out;
+  }
+
+  /** Signing keys an identity vouched for here whose vouches no longer count (dropped when it was recovered): to revoke, with a cutoff. */
+  async droppedKeys(person: string): Promise<string[]> {
+    const list = await this.records();
+    const counting = this.who(list).personOf;
+    const revoked = new Set(list.filter((r) => r.kind === 'revoke-key' && r.person === person).map((r) => r.subject));
+    return [...new Set(list.filter((r) => r.kind === 'vouch' && r.person === person && !counting.has(r.subject) && !revoked.has(r.subject)).map((r) => r.subject))];
   }
 
   // The policy (policy.ts, 0066) -----------------------------------------------
@@ -609,7 +643,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');

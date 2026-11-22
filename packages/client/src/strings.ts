@@ -474,6 +474,7 @@ export const S = {
     makeAdmin: 'Make admin',
     makeMember: 'Make member',
     adminTitle: 'Admins invite people, remove devices, and decide who is an admin.',
+    dispute: (names: string[]) => `${list(names)} took each other out of the workspace at the same time. That would have left it with no admin, so neither stands: talk it over, and take someone out again if need be.`,
     removeAsk: (who: string) => `Take ${who} out of this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
   },
 

@@ -48,7 +48,9 @@ syncing makes that worse: devices running different versions may not understand 
   Windows build made without signing takes updates checked only against the checksums in the
   release's `latest.yml`, which comes from the same host.
 - **Releases are made on GitHub, from a tag** (`pnpm release <version>`: sets the version, commits,
-  tags, pushes). The Release workflow checks (tests, and the tag is the version), makes one draft
+  tags, pushes). The tests run once, in the Check workflow on `main`; once it passes on a commit with
+  a version tag, the Release workflow starts (it no longer runs them again: the two ran side by side
+  on every release). It checks the tag is the version, makes one draft
   release, builds each platform on its own runner in the `release` environment that holds the
   signing secrets, adds each to the draft, and publishes it once all are in: the app is developed
   quickly by a small group, and a release goes out as soon as it is built. Installed apps look only

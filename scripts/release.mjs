@@ -1,9 +1,10 @@
 // pnpm release <version>: release the desktop app (decision 0051).
 //
 // Sets the app's version (apps/desktop/package.json), commits it, tags it
-// v<version>, and pushes both. The tag starts the Release workflow on GitHub
-// (.github/workflows/release.yml), which tests, builds and signs it, and
-// publishes it: installed apps update to it within hours.
+// v<version>, and pushes both. The push runs the Check workflow (lint,
+// typecheck, tests) on main; once it passes on the tagged commit, the Release
+// workflow (.github/workflows/release.yml) builds and signs it, and publishes
+// it: installed apps update to it within hours.
 //
 //   pnpm release 0.2.0           a release
 //   pnpm release 0.3.0-beta.1    a pre-release: installed apps do not update to it
@@ -72,7 +73,7 @@ if (last) {
 const steps = [
   `set apps/desktop/package.json version ${current} → ${version}`,
   `commit "Release ${tag}" and tag it ${tag}`,
-  `push main and ${tag} to origin, which starts the Release workflow`,
+  `push main and ${tag} to origin: Check runs on it, then, once it passes, the Release workflow`,
 ];
 if (dry) {
   console.log(['release: would', ...steps.map((s) => `  - ${s}`)].join('\n'));
@@ -83,4 +84,4 @@ git('commit', '-q', '-m', `Release ${tag}`, '--', 'apps/desktop/package.json');
 git('tag', '-a', tag, '-m', `kuraa ${version}`);
 // Both or neither: a tag without its commit on main, or the other way round, is no release.
 git('push', '--atomic', 'origin', 'main', tag);
-console.log(`release: pushed ${tag}. The Release workflow tests, builds and publishes it (Actions on GitHub shows how it is going).`);
+console.log(`release: pushed ${tag}. Check tests it, then the Release workflow builds and publishes it (Actions on GitHub shows how it is going).`);

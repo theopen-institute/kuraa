@@ -1,7 +1,11 @@
-# A release, from a version tag (pnpm release <version> makes and pushes one;
-# decision 0051):
+# A release, of a commit on main with a version tag (pnpm release <version>
+# makes both and pushes them together; decision 0051). It starts once the Check
+# workflow has passed on that commit, so lint, typecheck and the tests run once,
+# there, and nothing is built from a commit that failed them. Check failed (a
+# flaky test, say)? Re-run it: once it passes, this starts.
 #
-#   check   lint, typecheck, unit tests, and the tag is the app's version
+#   tag     the commit's version tag, if it has one (none: nothing to do), and
+#           that it is the app's version
 #   draft   a draft GitHub release for the tag, with notes from the commits
 #           (a pre-release for a tag like v1.2.0-beta.1, which installed apps
 #           never update to)
@@ -17,42 +21,55 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [Check]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 jobs:
-  check:
+  tag:
+    # Check passed, on a push to main (not a pull request).
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: The tag is the app's version
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: The commit's version tag, if any, is the app's version
+        id: tag
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          # A tag made with -a points at a tag object; its line ending ^{} names the commit.
+          tag=$(git ls-remote --tags origin 'v*' | awk -v s="$SHA" '$1 == s { n = $2; sub("refs/tags/", "", n); sub(/\^\{\}$/, "", n); print n }' | sort -V | tail -1)
+          if [ -z "$tag" ]; then
+            echo "No version tag on $SHA: nothing to release."
+            exit 0
+          fi
           v=$(node -p "require('./apps/desktop/package.json').version")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::The tag is $GITHUB_REF_NAME, but apps/desktop/package.json says $v. Make releases with pnpm release <version>."
+          if [ "v$v" != "$tag" ]; then
+            echo "::error::The tag is $tag, but apps/desktop/package.json says $v. Make releases with pnpm release <version>."
             exit 1
           fi
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
+          echo "Releasing $tag ($SHA)."
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+  # Each job after this one is given the tag (TAG): the ref this runs on is main, not the tag.
   draft:
-    needs: check
+    needs: tag
+    if: needs.tag.outputs.tag != ''
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
     permissions:
       contents: write
     steps:
@@ -62,11 +79,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           pre=""
-          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "kuraa ${GITHUB_REF_NAME#v}" $pre
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "kuraa ${TAG#v}" $pre
 
   build:
-    needs: draft
+    needs: [tag, draft]
     environment: release
     permissions:
       contents: write
@@ -86,8 +103,11 @@ jobs:
       # Where the app built looks for updates, and where electron-builder adds the builds.
       KURAA_UPDATES: github:${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -132,13 +152,17 @@ jobs:
         run: pnpm --filter @kuraa/desktop release:linux
 
   server:
-    needs: draft
+    needs: [tag, draft]
     environment: release
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -154,15 +178,17 @@ jobs:
       - name: Add it to the draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/server/kuraa-server-*.tar.gz*
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/server/kuraa-server-*.tar.gz*
 
   publish:
-    needs: [build, server]
+    needs: [tag, build, server]
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
     permissions:
       contents: write
     steps:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

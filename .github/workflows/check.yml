@@ -1,5 +1,6 @@
 # Lint, typecheck and the unit tests, on every push to main and every pull
-# request. The release workflow runs the same before it builds anything.
+# request. A release runs them here only: the Release workflow starts once this
+# passes on a commit of main with a version tag (release.yml).
 name: Check
 
 on:

@@ -526,10 +526,12 @@ pnpm release 0.2.0              # or 0.3.0-beta.1 for a pre-release; --dry-run s
 
 From `main`, with nothing uncommitted, it sets the app's version, commits, tags `v0.2.0`, and
 pushes both. It says so when the protocol devices speak changed since the last release: then the
-release notes should say that every device must be updated to go on syncing. The tag starts the
-**Release** workflow (`.github/workflows/release.yml`):
+release notes should say that every device must be updated to go on syncing. The push runs the
+**Check** workflow (lint, typecheck and the unit tests) once, on `main`; once it passes on a commit
+with a version tag, the **Release** workflow (`.github/workflows/release.yml`) builds it. If Check
+fails (a flaky test, say), re-running it starts the release once it passes.
 
-1. **check**: lint, typecheck and the unit tests, and the tag is the app's version.
+1. **tag**: the commit's version tag, and that it is the app's version.
 2. **draft**: a draft GitHub release, with notes from the commits since the last (a pre-release for
    a tag with a `-`: installed apps never update to one).
 3. **build**: builds for macOS (Apple silicon and Intel, signed and notarized), Windows (signed) and

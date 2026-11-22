@@ -137,12 +137,20 @@ function requireRunning(host: Host, hint = ''): void {
 
 const workspaceRoutes: Route[] = [
   route('GET', '/api/workspace', async ({ host, res }) => send(res, 200, {
-    name: host.options.label ?? host.workspace,
+    // Its own name, the same on every device (0061), read again in case it was changed outside the app.
+    name: (await host.refreshName()) ?? host.name,
+    named: host.sharedName !== null,
     branch: await host.git.branch(),
     head: await host.git.head(),
     types: host.registry.all().map((t) => ({ id: t.id, label: t.label, version: t.version })),
     run: await host.runner.describe(),
   })),
+
+  // Rename the workspace for everyone (0061): a commit, synced to every device.
+  route('PATCH', '/api/workspace/name', async ({ host, req, res }) => {
+    const body = await readBody(req);
+    send(res, 200, { name: await host.rename(body.name, personOf(body.by) ?? undefined) });
+  }),
 
   // Components: which engines and formats are on. Set by the host's flags; the app only shows them.
   route('GET', '/api/components', async ({ host, res }) => send(res, 200, await host.components())),
@@ -489,6 +497,8 @@ const peerRoutes: Route[] = [
     const hours = body.hours === null ? null : Number(body.hours);
     if (hours !== null && !(hours > 0 && hours <= 24 * 366)) throw new HttpError(400, 'A link lasts some hours (up to a year), or has no expiry (null)');
     const peers = await host.peersForInvites();
+    // Named before it is shared: whoever joins gets the name (0061).
+    await host.ensureName();
     const link = await peers.inviteLink({ hours, once: body.once === true });
     send(res, 201, { link, ...(await peers.links()).at(-1)! });
   }),

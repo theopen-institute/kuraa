@@ -72,6 +72,8 @@ const emit = defineEmits<{
   help: [];
   /** The Settings window: yours, and this computer's server's. */
   settings: [];
+  /** Rename the workspace, for everyone in it (0061). */
+  renameWorkspace: [];
   close: [];
 }>();
 
@@ -192,6 +194,9 @@ const runner = computed(() => props.status?.runner ?? null);
             </button>
           </div>
           <p v-if="syncable === false" class="menu-facts" data-testid="menu-sync-none">{{ S.sync.nothingToSync }}</p>
+          <div v-if="workspace" class="menu-actions">
+            <button type="button" :title="S.menu.renameWorkspaceTitle" data-testid="menu-rename-workspace" @click="emit('close'); emit('renameWorkspace')">{{ S.menu.renameWorkspace }}</button>
+          </div>
           <details v-if="workspace" class="menu-details">
             <summary>{{ S.common.details }}</summary>
             <span class="menu-facts" data-testid="workspace-details">{{ S.menu.workspaceDetails(workspace.branch, workspace.head?.slice(0, 7) ?? null) }}</span>

@@ -4,7 +4,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
@@ -359,9 +359,12 @@ describe('workspace helpers', () => {
       const running = await startHost({ dir, port: 0, init: true, timings: FAST });
       try {
         expect(git(dir, 'log', '--format=%s')).toBe('Initialise workspace');
-        expect(git(dir, 'ls-files')).toBe('notes.md');
+        // Made a workspace, it is named, by its folder's name (0061).
+        expect(git(dir, 'ls-files')).toBe('.kuraa/workspace.json\nnotes.md');
         const res = await fetch(`${running.url}/api/tree`, { headers: { authorization: `Bearer ${running.token}` } });
         expect(res.status).toBe(200);
+        const info = await (await fetch(`${running.url}/api/workspace`, { headers: { authorization: `Bearer ${running.token}` } })).json();
+        expect(info).toMatchObject({ name: basename(dir), named: true });
       } finally {
         await running.close();
       }

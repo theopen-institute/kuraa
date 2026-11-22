@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Adding a workspace to a hub: a new one (a folder of its own, made a git
-// repository), or one someone shared, joined with the invite link they gave
-// (kuraa-invite:…).
+// repository), named here for everyone who joins it later, or one someone
+// shared, joined with the invite link they gave (kuraa-invite:…), which is
+// called what it calls itself (0061).
 import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef } from 'vue';
 import type { HubApi, HubWorkspace, JoinStatus } from './api.js';
 import { S } from './strings.js';
@@ -86,7 +87,7 @@ async function submit() {
     else {
       const id = joinId();
       watch(id);
-      w = await props.hub.join(invitation.value.trim(), name.value, id);
+      w = await props.hub.join(invitation.value.trim(), id);
     }
     emit('added', w);
   } catch (e) {
@@ -124,13 +125,14 @@ async function submit() {
           @input="error = null"
         />
       </label>
-      <label class="field">
+      <!-- A workspace joined is called what it calls itself, the same for everyone (0061): only a new one is named here. -->
+      <label v-if="mode === 'new'" class="field">
         <span>{{ S.addWorkspace.name }}</span>
         <input
           v-model="name"
-          v-focus="mode === 'new'"
+          v-focus
           name="name"
-          :placeholder="mode === 'new' ? S.addWorkspace.namePlaceholder : S.addWorkspace.joinNamePlaceholder"
+          :placeholder="S.addWorkspace.namePlaceholder"
           data-testid="add-workspace-name"
           :disabled="busy"
           @input="error = null"

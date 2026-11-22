@@ -3,7 +3,11 @@ import type { ChunkRef, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 
 export interface WorkspaceInfo {
-  name: string; branch: string; head: string | null; types: { id: string; label: string; version: number }[];
+  /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
+  name: string;
+  /** Whether the workspace has a name of its own yet (0061). */
+  named?: boolean;
+  branch: string; head: string | null; types: { id: string; label: string; version: number }[];
   /** Whether this host runs code chunks: with which engines, in which environment. */
   run?: RunInfo;
 }
@@ -188,6 +192,10 @@ export class HostApi {
   }
 
   workspace() { return this.json<WorkspaceInfo>('/api/workspace'); }
+  /** Rename the workspace for everyone (0061): committed, and synced to every device. */
+  async renameWorkspace(name: string, by: { name: string; email: string }) {
+    return (await this.json<{ name: string }>('/api/workspace/name', { method: 'PATCH', body: JSON.stringify({ name, by }) })).name;
+  }
   tree() { return this.json<{ files: TreeFile[] }>('/api/tree').then((r) => r.files); }
   room(path: string) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
@@ -370,9 +378,9 @@ export class HubApi extends HostApi {
     return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name }) })).workspace;
   }
 
-  /** A workspace joined from an invite link; `progress`: an id to ask how it is going by (joinStatus) meanwhile. */
-  async join(invitation: string, name: string, progress?: string): Promise<HubWorkspace> {
-    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, name, progress }) })).workspace;
+  /** A workspace joined from an invite link, called what it calls itself (0061); `progress`: an id to ask how it is going by (joinStatus) meanwhile. */
+  async join(invitation: string, progress?: string): Promise<HubWorkspace> {
+    return (await this.json<{ workspace: HubWorkspace }>('/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation, progress }) })).workspace;
   }
 
   /** How a join is going, by the id given to join; null if it is not under way (yet, or any more). */

@@ -13,7 +13,7 @@ import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
 import { commitSigned, signCommitObject } from './signing.js';
 import { serialQueue } from './serial.js';
-import { initWorkspace } from './workspace.js';
+import { NAME_FILE, cleanName, initWorkspace, readWorkspaceName, writeWorkspaceName } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
 import { Renders } from './renders.js';
 import { loadRunComponents } from './components.js';
@@ -42,8 +42,10 @@ export interface HostTimings {
 
 export interface HostOptions {
   dir: string;
-  /** What the workspace is called to people (default: its folder's name). */
+  /** What the workspace is called to people where it names itself nowhere (default: its folder's name). Its own name wins (0061). */
   label?: string;
+  /** The workspace's own name (0061) is now this: read at start, and again when a rename is made here or comes from another device. */
+  onName?: (name: string) => void;
   token: string;
   host?: string;
   port?: number;
@@ -280,9 +282,10 @@ export class Host {
   async start(): Promise<AddressInfo> {
     if (!(await this.git.isRepo())) {
       if (!this.options.init) throw new Error(`Not a git repository: ${this.dir}`);
-      await initWorkspace(this.dir);
+      await initWorkspace(this.dir, this.options.label ?? this.workspace);
       this.log(`initialised a git repository in ${this.dir}`);
     }
+    await this.refreshName();
     this.gitDirPath = await this.git.gitDir();
     this.realDir = realpathSync(this.dir);
     this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
@@ -1317,6 +1320,68 @@ export class Host {
   // Merging
 
   /** Start syncing with this workspace's devices (at start, for a shared workspace, or when the first invitation is made). */
+  // -------------------------------------------------------------------------
+  // The workspace's name (decision 0061)
+
+  /** The workspace's own name, the same on every device (.kuraa/workspace.json); null where it names itself nowhere. */
+  sharedName: string | null = null;
+
+  /** What the workspace is called: its own name, else what this device calls it. */
+  get name(): string {
+    return this.sharedName ?? this.options.label ?? this.workspace;
+  }
+
+  /** Read the workspace's name again (a rename here, from another device, or made outside the app), saying so if it changed. */
+  async refreshName(): Promise<string | null> {
+    const name = await readWorkspaceName(this.dir);
+    if (name !== null && name !== this.sharedName) {
+      if (this.sharedName !== null) this.log(`the workspace is now called ${name}`);
+      this.sharedName = name;
+      this.options.onName?.(name);
+    }
+    return this.sharedName;
+  }
+
+  /**
+   * Rename the workspace for everyone: its name file, committed, and so synced
+   * to every device, like any other change. `by`: who renamed it, credited on
+   * the commit. Anyone in the workspace may (every member has the same say, 0038).
+   */
+  rename(raw: unknown, by?: PresenceUser): Promise<string> {
+    return this.serial(async () => {
+      let name: string;
+      try {
+        name = cleanName(raw);
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      await this.requireWritable();
+      if (name === this.sharedName) return name;
+      await writeWorkspaceName(this.dir, name);
+      await this.commitPaths([NAME_FILE], `Rename the workspace to “${name}”`, by && by.email ? [by] : []);
+      await this.refreshName();
+      // Whoever has a file open here sees the new name (as they do a rename from another device).
+      for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at: new Date().toISOString() });
+      return name;
+    });
+  }
+
+  /**
+   * Give a workspace that names itself nowhere (made before 0061) the name this
+   * device calls it, before it is shared: whoever first invites someone names
+   * it, as whoever makes a workspace does now.
+   */
+  ensureName(): Promise<void> {
+    return this.serial(async () => {
+      if ((await this.refreshName()) !== null) return;
+      await this.requireWritable();
+      const name = cleanName(this.options.label ?? this.workspace);
+      await writeWorkspaceName(this.dir, name);
+      await this.commitPaths([NAME_FILE], `Name the workspace “${name}”`);
+      await this.refreshName();
+    });
+  }
+
   async startPeers(options: PeerOptions): Promise<Peers> {
     if (this.peers) return this.peers;
     // Loaded only when on: it brings Hyperswarm and its native parts.
@@ -1397,7 +1462,9 @@ export class Host {
       this.log(`${outcome.kind === 'merge' ? 'merged' : 'moved to'} ${outcome.commit.slice(0, 7)}${outcome.conflicts.length ? ` (conflicts kept in ${outcome.conflicts.map((c) => c.path).join(', ')})` : ''}`);
       await this.checkAll();
       this.refsChanged();
-      // The files may have changed: everyone with something open reloads the list.
+      // The workspace may have been renamed on another device.
+      await this.refreshName();
+      // The files may have changed: everyone with something open reloads the list (and the workspace's name).
       for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at: new Date().toISOString() });
     }
     return outcome;

@@ -112,6 +112,13 @@ export const S = {
     thisWorkspace: 'this workspace',
   },
 
+  /** Renaming the workspace for everyone in it (0061). */
+  workspaceName: {
+    prompt: 'Rename this workspace for everyone in it',
+    rename: 'Rename',
+    renamed: (name: string) => `Renamed the workspace ${quote(name)}, for everyone in it.`,
+  },
+
   versions: {
     namePrompt: 'Name this version',
     defaultName: (title: string) => `${title}, ${new Date().toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' })}`,
@@ -169,6 +176,8 @@ export const S = {
     unsent: (n: number) => `${count(n, 'change', 'changes')} not yet sent`,
     versionDetails: (hash: string) => `Latest version: ${hash}`,
     workspaceDetails: (branch: string, head: string | null) => `Branch ${branch}${head ? `, version ${head}` : ''}`,
+    renameWorkspace: 'Rename workspace…',
+    renameWorkspaceTitle: 'Rename this workspace for everyone in it',
     search: 'Search…',
     searchTitle: (key: string) => `Search every file (${key})`,
     components: 'Components',
@@ -316,12 +325,11 @@ export const S = {
     how: 'How',
     newFolder: 'A new folder',
     join: 'Join from an invite link',
-    newAbout: 'A folder of its own. What you write in it is saved as you work, with every version kept.',
-    joinAbout: 'Paste the invite link someone gave you. Your copy syncs with everyone else’s: what you do reaches them, and what they do reaches you.',
+    newAbout: 'A folder of its own. What you write in it is saved as you work, with every version kept. Whoever you invite sees it by the name you give it.',
+    joinAbout: 'Paste the invite link someone gave you. Your copy syncs with everyone else’s: what you do reaches them, and what they do reaches you. It keeps the name it has for everyone.',
     link: 'Invite link',
     name: 'Name',
     namePlaceholder: 'Field notes',
-    joinNamePlaceholder: 'What to call it here',
     progress: {
       waiting: 'Waiting for another workspace to finish being added…',
       looking: 'Looking for a computer the workspace is on…',

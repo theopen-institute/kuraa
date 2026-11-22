@@ -395,6 +395,11 @@ watch([api, editingSettings, ready], () => {
   if (!editingSettings.value && ready.value) void refreshTree();
 }, { immediate: true });
 
+// The workspace renamed (here, or on another device: 0061): the list of workspaces says so too.
+watch(() => workspace.value?.name, (now, was) => {
+  if (now && was && now !== was) void loadHub();
+});
+
 // The open file, per workspace, for this tab: a reload opens it again.
 const openKey = () => `${OPEN_KEY}:${api.value.baseUrl}`;
 watch(api, () => {
@@ -489,6 +494,21 @@ async function saveVersion() {
   try {
     await api.value.version(p, message);
     notice.value = { kind: 'info', text: S.versions.saved(message) };
+    historyKey.value++;
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** Rename the workspace, for everyone in it (0061): the host commits its new name, which syncs to every device. */
+async function renameWorkspace() {
+  const was = workspace.value?.name ?? '';
+  const name = (await askText(S.workspaceName.prompt, was, S.workspaceName.rename))?.replace(/\s+/g, ' ').trim();
+  if (!name || name === was) return;
+  try {
+    const now = await api.value.renameWorkspace(name, { name: settings.value.name, email: settings.value.email });
+    notice.value = { kind: 'info', text: S.workspaceName.renamed(now) };
+    await refreshTree();
     historyKey.value++;
   } catch (e) {
     fail(e);
@@ -715,6 +735,7 @@ function useSettings(s: Settings) {
       @search="openSearch"
       @help="toggleHelp"
       @settings="openSettings"
+      @rename-workspace="renameWorkspace"
       @close="menuOpen = false"
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />

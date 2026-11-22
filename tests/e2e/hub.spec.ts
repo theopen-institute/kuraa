@@ -2,7 +2,7 @@
 // joined from an invite link; switching between them.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,9 @@ test('workspaces are added from the app: a new folder, or one joined from a link
   git(theirs, 'config', 'user.name', 'Bo');
   git(theirs, 'config', 'user.email', 'bo@example.org');
   writeFileSync(join(theirs, 'plan.md'), '---\ntitle: Survey plan\n---\n\nWalk the transect.\n');
+  // Named by Bo, who made it (0061): whoever joins sees this name.
+  mkdirSync(join(theirs, '.kuraa'));
+  writeFileSync(join(theirs, '.kuraa', 'workspace.json'), '{"name":"Bo’s survey"}\n');
   git(theirs, 'add', '-A');
   git(theirs, 'commit', '-q', '-m', 'Initial');
   const other = await startHost({ dir: theirs, timings: TIMINGS, peers });
@@ -55,7 +58,8 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await page.getByTestId('workspace-add').click();
     await dialog.getByTestId('add-workspace-join').click();
     await dialog.getByTestId('add-workspace-invitation').fill(link);
-    await dialog.getByTestId('add-workspace-name').fill('Bo’s survey');
+    // Nobody joining names it: it is called what it calls itself.
+    await expect(dialog.getByTestId('add-workspace-name')).toHaveCount(0);
     await dialog.getByTestId('add-workspace-submit').click();
     await expect(dialog).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByTestId('workspace-name')).toHaveText('Bo’s survey');
@@ -66,6 +70,22 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await page.keyboard.press('End');
     await page.keyboard.type(' Then the dunes.');
     await expect.poll(() => readFileSync(join(theirs, 'plan.md'), 'utf8'), { timeout: 30_000 }).toContain('Then the dunes.');
+
+    // Renamed here, from the menu, for everyone: Bo's copy takes the new name.
+    await page.getByTestId('menu-button').click();
+    await page.getByTestId('menu-rename-workspace').click();
+    await expect(page.getByTestId('ask').locator('input')).toHaveValue('Bo’s survey');
+    await page.getByTestId('ask').locator('input').fill('Dune survey');
+    await page.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
+    await expect(page.getByTestId('notice')).toContainText('Renamed the workspace “Dune survey”, for everyone in it.');
+    await expect(page.getByTestId('workspace-name')).toHaveText('Dune survey');
+    await expect.poll(() => other.host.sharedName, { timeout: 30_000 }).toBe('Dune survey');
+    // Renamed on Bo's device: the page says so, in the list of workspaces too.
+    await other.host.rename('Dune and shore survey');
+    await expect(page.getByTestId('workspace-name')).toHaveText('Dune and shore survey', { timeout: 30_000 });
+    await page.getByTestId('workspace-switcher').click();
+    await expect(page.getByTestId('workspace:shared-workspace')).toContainText('Dune and shore survey');
+    await page.keyboard.press('Escape');
 
     // Switching back opens the first, as it was.
     await page.getByTestId('workspace-switcher').click();

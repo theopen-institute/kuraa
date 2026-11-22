@@ -38,7 +38,7 @@ import { Git } from './git.js';
 import { renameOver, reservedName } from './files.js';
 import { serialQueue } from './serial.js';
 import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from './http.js';
-import { initWorkspace, inspectFolder } from './workspace.js';
+import { cleanName, initWorkspace, inspectFolder, readWorkspaceName } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
 import type { JoinProgress } from './peers/join.js';
 import type { PeerNode } from './peers/node.js';
@@ -341,6 +341,8 @@ export class Hub {
       const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
         ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers, log: (m) => this.log(`[${e.id}] ${m}`),
+        // The list says what the workspace calls itself (0061), and keeps it for when it is not open.
+        onName: (name) => this.named(e, name),
         // People may invite others to a hub's workspaces from the app (every member has the same say, 0038);
         // the first invitation turns syncing on, for good (the workspace is shared from then on).
         invites: { peers: peerOptions },
@@ -390,16 +392,27 @@ export class Hub {
     return this.list().find((w) => w.id === e.id)!;
   }
 
-  /** A new workspace: a new folder in the hub's folder, made a git repository. */
+  /** The workspace says it is called `name` now (0061): the list follows, and keeps it. */
+  private named(e: Entry, name: string): void {
+    if (e.name === name) return;
+    e.name = name;
+    if (this.entries.includes(e)) void this.save().catch((err: Error) => this.log(`could not save the list of workspaces: ${err.message}`));
+  }
+
+  /** A new workspace: a new folder in the hub's folder, made a git repository, named by whoever makes it (0061). */
   create(name: string): Promise<HubWorkspace> {
     return this.serial(async () => {
       this.mayAdd();
-      const label = name.trim();
-      if (!label) throw new HttpError(400, 'A workspace needs a name');
+      let label: string;
+      try {
+        label = cleanName(name);
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
       const id = this.freeId(label);
       const dir = join(this.root, id);
       await mkdir(dir, { recursive: true });
-      await initWorkspace(dir);
+      await initWorkspace(dir, label);
       return this.add({ id, name: label, dir, added: new Date().toISOString() });
     });
   }
@@ -407,9 +420,12 @@ export class Hub {
   /**
    * A workspace joined from an invite link, into a new folder in the hub's
    * folder. Its host goes on with the connections the join made. `progress`: an
-   * id the app asks how it is going by (joinStatus) until it is done.
+   * id the app asks how it is going by (joinStatus) until it is done. It is
+   * called what it calls itself (0061), known once it is copied; a workspace
+   * that names itself nowhere (shared before 0061) is "Shared workspace" until
+   * someone renames it.
    */
-  async join(invitation: string, name: string, progress?: string): Promise<HubWorkspace> {
+  async join(invitation: string, progress?: string): Promise<HubWorkspace> {
     const tell = (s: JoinStatus) => {
       if (progress) this.joins.set(progress, s);
     };
@@ -417,7 +433,7 @@ export class Hub {
     try {
       return await this.serial(async () => {
         this.mayAdd();
-        const label = name.trim() || 'Shared workspace';
+        const label = 'Shared workspace';
         const id = this.freeId(label);
         const dir = join(this.root, id);
         let joined;
@@ -430,7 +446,7 @@ export class Hub {
           throw new HttpError(400, (err as Error).message);
         }
         tell({ step: 'opening', slowNetwork: false, from: joined.inviter });
-        return this.add({ id, name: label, dir, added: new Date().toISOString() }, joined.node);
+        return this.add({ id, name: (await readWorkspaceName(dir)) ?? label, dir, added: new Date().toISOString() }, joined.node);
       });
     } finally {
       if (progress) this.joins.delete(progress);
@@ -457,7 +473,7 @@ export class Hub {
       if (known) return this.list().find((w) => w.id === known.id)!;
       if (!info.repoRoot) {
         if (!init) throw new HttpError(400, `${dir} is not a git repository`);
-        await initWorkspace(dir);
+        await initWorkspace(dir, name?.trim() || basename(dir));
       }
       const label = name?.trim() || basename(dir);
       return this.add({ id: this.freeId(label), name: label, dir, added: new Date().toISOString() });
@@ -636,7 +652,7 @@ export class Hub {
       if (b.kind === 'join') {
         if (typeof b.invitation !== 'string' || !b.invitation.trim()) throw new HttpError(400, 'Paste an invitation or subscription link');
         const progress = typeof b.progress === 'string' && JOIN_ID.test(b.progress) ? b.progress : undefined;
-        return send(res, 201, { workspace: await this.join(b.invitation, String(b.name ?? ''), progress) });
+        return send(res, 201, { workspace: await this.join(b.invitation, progress) });
       }
       throw new HttpError(400, 'Add a new workspace (kind: new) or join one (kind: join)');
     }

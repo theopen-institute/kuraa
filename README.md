@@ -220,6 +220,16 @@ for the open workspace, to send to whoever should join it. The desktop app works
 new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
 any folder on the computer.
 
+**A workspace has one name, the same for everyone in it**
+([0061](docs/decisions/0061-one-name-for-a-workspace.md)). Whoever makes it names it; it is kept in
+the workspace itself, in `.kuraa/workspace.json`, so whoever joins sees it by that name and is not
+asked for one. **Rename workspace…** in the menu renames it for everyone: the rename is a commit,
+crediting who made it, which reaches every device as any change does, and each device's list of
+workspaces follows. A workspace made before then goes by what each device calls it until it is
+first shared (its first invite link names it, as that device calls it) or renamed. Two renames at
+once keep the first of them, the same on every device, until someone renames it again. The folder
+a joined workspace is copied into is `shared-workspace` (or `-2`, …): only its name is shared.
+
 ## A server that updates itself
 
 For a computer that serves kuraa all the time (to browsers, or as an always-on device of shared

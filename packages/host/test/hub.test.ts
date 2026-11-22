@@ -2,7 +2,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
@@ -225,12 +225,15 @@ describe('a hub', () => {
     await until(() => existsSync(join(root, 'thesis', '.git', 'kuraa', 'bin', 'git-remote-kuraa')), 10_000, 'syncing started');
   });
 
-  it('joins a workspace from an invite link, as a device that syncs', async () => {
+  it('joins a workspace from an invite link, as a device that syncs, called what it calls itself; a rename on either reaches the other', async () => {
     const source = temp('kuraa-hub-src-');
     git(source, 'init', '-q', '-b', 'main');
     git(source, 'config', 'user.name', 'Ada');
     git(source, 'config', 'user.email', 'ada@example.org');
     writeFileSync(join(source, 'notes.md'), '---\ntitle: Notes\n---\n\nHello.\n');
+    // Its name, as whoever made it gave it (0061).
+    mkdirSync(join(source, '.kuraa'));
+    writeFileSync(join(source, '.kuraa', 'workspace.json'), '{"name":"Ada’s notes"}\n');
     git(source, 'add', '-A');
     git(source, 'commit', '-q', '-m', 'Initial');
     const a = await startHost({ dir: source, timings: FAST, peers: { bootstrap: testnet.bootstrap as never } });
@@ -244,7 +247,7 @@ describe('a hub', () => {
     const id = 'join-progress-1';
     const steps = new Set<string>();
     let done = false;
-    const posted = call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, name: 'Ada’s notes', progress: id }) }).finally(() => {
+    const posted = call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link, progress: id }) }).finally(() => {
       done = true;
     });
     while (!done) {
@@ -257,12 +260,50 @@ describe('a hub', () => {
     for (const step of steps) expect(['waiting', 'looking', 'letting-in', 'copying', 'opening']).toContain(step);
     expect((await call(h, `/hub/api/joins/${id}`)).status).toBe(404);
     expect(res.status).toBe(201);
-    const { workspace } = (await res.json()) as { workspace: { id: string; path: string; peers: boolean } };
-    expect(workspace).toMatchObject({ id: 'ada-s-notes', peers: true });
+    const { workspace } = (await res.json()) as { workspace: { id: string; path: string; peers: boolean; name: string } };
+    // Called what it calls itself: nobody joining names it.
+    expect(workspace).toMatchObject({ id: 'shared-workspace', name: 'Ada’s notes', peers: true });
+    expect(await (await call(h, `/w/${workspace.id}/api/workspace`)).json()).toMatchObject({ name: 'Ada’s notes', named: true });
     expect(readFileSync(join(workspace.path, 'notes.md'), 'utf8')).toContain('Hello.');
     // It syncs: a file made through the hub reaches Ada's device.
     await call(h, `/w/${workspace.id}/api/files`, { method: 'POST', body: JSON.stringify({ path: 'reply.md', content: '# Reply\n' }) });
     await until(() => existsSync(join(source, 'reply.md')), 20_000, 'the reply on Ada’s device');
+
+    // Renamed here, for everyone: a commit crediting who did it, which reaches Ada's device.
+    const renamed = await call(h, `/w/${workspace.id}/api/workspace/name`, { method: 'PATCH', body: JSON.stringify({ name: '  Field   notes ', by: { name: 'Bo', email: 'bo@example.org' } }) });
+    expect(await renamed.json()).toEqual({ name: 'Field notes' });
+    expect(git(workspace.path, 'log', '-1', '--format=%s%n%b')).toMatch(/^Rename the workspace to “Field notes”[\s\S]*Co-authored-by: Bo <bo@example\.org>/);
+    expect(((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { name: string }[] }).workspaces[0]!.name).toBe('Field notes');
+    await until(() => a.host.sharedName === 'Field notes', 20_000, 'the new name on Ada’s device');
+    // And renamed there: the hub's list follows.
+    await a.host.rename('Shore survey');
+    const listed = async () => ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { name: string }[] }).workspaces[0]!.name;
+    await until(async () => (await listed()) === 'Shore survey', 20_000, 'Ada’s rename in the hub’s list');
+    // A name must be something, and not too long.
+    expect((await call(h, `/w/${workspace.id}/api/workspace/name`, { method: 'PATCH', body: JSON.stringify({ name: '   ' }) })).status).toBe(400);
+    expect((await call(h, `/w/${workspace.id}/api/workspace/name`, { method: 'PATCH', body: JSON.stringify({ name: 'x'.repeat(101) }) })).status).toBe(400);
+  });
+
+  it('names a new workspace in it, for whoever joins it later; a workspace made before is named when it is first shared', async () => {
+    const h = await hub();
+    const made = (await (await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Field notes' }) })).json()) as { workspace: { path: string } };
+    expect(readFileSync(join(made.workspace.path, '.kuraa', 'workspace.json'), 'utf8')).toBe('{"name":"Field notes"}\n');
+    expect(git(made.workspace.path, 'ls-files')).toContain('.kuraa/workspace.json');
+    expect((await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: ' ' }) })).status).toBe(400);
+
+    // A workspace that names itself nowhere (made before 0061) goes by what this device calls it, until it is shared.
+    const old = temp('kuraa-hub-old-');
+    git(old, 'init', '-q', '-b', 'main');
+    writeFileSync(join(old, 'notes.md'), '# Notes\n');
+    git(old, 'add', '-A');
+    git(old, '-c', 'user.name=Ada', '-c', 'user.email=ada@example.org', 'commit', '-q', '-m', 'Initial');
+    const opened = (await (await call(h, '/hub/api/workspaces/open', { method: 'POST', body: JSON.stringify({ path: old }) })).json()) as { workspace: { id: string } };
+    expect(await (await call(h, `/w/${opened.workspace.id}/api/workspace`)).json()).toMatchObject({ name: basename(old), named: false });
+    expect(existsSync(join(old, '.kuraa', 'workspace.json'))).toBe(false);
+    // Its first invite link names it, so whoever joins sees that name.
+    expect((await call(h, `/w/${opened.workspace.id}/api/peers/links`, { method: 'POST', body: JSON.stringify({ hours: 1 }) })).status).toBe(201);
+    expect(git(old, 'log', '-1', '--format=%s')).toBe(`Name the workspace “${basename(old)}”`);
+    expect(await (await call(h, `/w/${opened.workspace.id}/api/workspace`)).json()).toMatchObject({ name: basename(old), named: true });
   });
 });
 

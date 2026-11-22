@@ -21,6 +21,7 @@ import { createRequestHandler, sameToken } from './http.js';
 import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
+import { POLICY_TRAILER, SUGGESTED_TRAILER, SUGGESTION_TRAILER, type GateResult } from './peers/gate.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 export interface HostTimings {
@@ -905,7 +906,7 @@ export class Host {
           const before = await this.git.run(['show', `refs/heads/${rec.branch}:${rec.path}`], { allowFail: true });
           text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, now, people.map((u) => u.name));
         }
-        committed = await this.commitToBranch(rec.branch, rec.path, now, withTrailers(text, people, extra));
+        committed = await this.commitToBranch(rec.branch, rec.path, now, withTrailers(text, people, [...extra, ...(await this.policyTrailer())]));
         rec.previous = rec.type.parse(now);
         rec.lastHash = hashText(now);
         rec.dirty = false;
@@ -955,6 +956,13 @@ export class Host {
     this.broadcast(rec, { type: 'save-status', at: new Date().toISOString(), state: 'ok', message: 'Saving again: everything is saved.' });
   }
 
+  /** The policy a commit made here is made under (0066: peers/gate.ts), as a trailer: none where there is no policy. */
+  private async policyTrailer(): Promise<string[]> {
+    if (!this.peers) return [];
+    const policy = await this.peers.node.identity.policy();
+    return policy.founded && policy.heads.length ? [`${POLICY_TRAILER}: ${policy.heads.join(' ')}`] : [];
+  }
+
   /** Stage and commit the given paths. Returns the commit, or null if nothing changed. */
   async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = [], extra: string[] = []): Promise<string | null> {
     // Never in the middle of a git operation, or with no branch checked out.
@@ -973,7 +981,7 @@ export class Host {
     await this.git.stage(paths);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
     if (diff.code === 0) return null;
-    const full = withTrailers(message, coAuthors, extra);
+    const full = withTrailers(message, coAuthors, [...extra, ...(await this.policyTrailer())]);
     // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
     // Signed with this host's person's key if it keeps one, else its device's (0034).
     if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
@@ -986,6 +994,53 @@ export class Host {
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
     return head;
+  }
+
+  /**
+   * Suggest a text for a file this person may not change (0066: peers/gate.ts):
+   * committed as theirs on the current branch (`Kuraa-Suggestion`), then taken
+   * back off this copy at once (`Kuraa-Suggested`), so the file here stays as it
+   * is. Every device bringing the two in keeps its own version and has the
+   * suggestion on record for those who may change the file. Neither the working
+   * tree nor the index changes: the branch's tree ends as it began.
+   */
+  async suggest(path: string, text: string): Promise<string> {
+    if (!this.peers) throw new Error('Suggestions are for a workspace shared with other devices');
+    return this.serial(async () => {
+      await this.requireWritable();
+      const branch = await this.git.branch();
+      if (!branch) throw new Error('No branch is checked out');
+      const before = await this.git.run(['show', `HEAD:${path}`], { allowFail: true });
+      if (before.code !== 0) throw new Error(`${path} is not in this workspace's history yet`);
+      if (before.stdout === text) throw new Error('That is the text it has already');
+      const policy = await this.policyTrailer();
+      const name = this.typeFor(path)?.title?.read(before.stdout) || path;
+      const proposed = await this.commitToBranch(branch, path, text, withTrailers(`Suggest a change to ${name}`, [], [`${SUGGESTION_TRAILER}: ${path}`, ...policy]));
+      if (!proposed) throw new Error('That is the text it has already');
+      await this.commitToBranch(branch, path, before.stdout, withTrailers(`Keep ${name} as it was here, until someone who may change it takes the suggestion`, [], [`${SUGGESTED_TRAILER}: ${proposed}`, ...policy]));
+      return proposed;
+    });
+  }
+
+  /**
+   * A commit that changes no file, signed, saying something to every device
+   * through history: here, that a suggestion was seen to (`Kuraa-Resolved`).
+   */
+  async commitNote(message: string, extra: string[]): Promise<string> {
+    if (!this.peers) throw new Error('Not a workspace shared with other devices');
+    return this.serial(async () => {
+      await this.requireWritable();
+      const head = await this.git.head();
+      if (!head) throw new Error('Nothing is committed yet');
+      const tree = await this.git.out(['rev-parse', `${head}^{tree}`]);
+      const unsigned = await this.git.out(['commit-tree', tree, '-p', head, '-F', '-'], { input: `${withTrailers(message, [], [...extra, ...(await this.policyTrailer())]).trimEnd()}\n` });
+      const raw = (await this.git.run(['cat-file', 'commit', unsigned])).bytes;
+      const commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers!.node.signingKey()) });
+      await this.git.run(['update-ref', '-m', `commit: ${message}`, 'HEAD', commit, head]);
+      this.log(`committed ${commit.slice(0, 7)} ${message}`);
+      this.refsChanged();
+      return commit;
+    });
   }
 
   /**
@@ -1421,9 +1476,15 @@ export class Host {
    * Merge commits as every device does (see merging.ts), reading files with
    * this host's document types.
    */
-  merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
-    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir });
+  async merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    // Who may change what (0066): judged by the workspace's policy, where it has one (peers/gate.ts).
+    const g = this.gate ? await this.gate(x, y) : null;
+    if (g?.waitFor.length) throw new WaitingForPolicy(g.waitFor);
+    return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused });
   }
+
+  /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */
+  gate: ((x: string, y: string) => Promise<GateResult>) | null = null;
 
   /**
    * Bring a commit into the current branch: a fast-forward, or a merge made as
@@ -1818,6 +1879,13 @@ async function readNoFollow(abs: string): Promise<Buffer> {
 }
 
 /** A commit message with its trailers: co-authors (those with an email), then any others, each once. */
+/** Work names a policy this device does not hold yet (peers/gate.ts): it is brought in once the policy has come. */
+export class WaitingForPolicy extends Error {
+  constructor(readonly heads: string[]) {
+    super(`waiting for the workspace's policy (${heads.map((h) => h.slice(0, 8)).join(', ')}) before bringing this work in`);
+  }
+}
+
 function withTrailers(message: string, coAuthors: PresenceUser[], extra: string[]): string {
   const trailers = coAuthors
     .filter((u) => u.email)

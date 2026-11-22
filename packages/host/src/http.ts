@@ -583,6 +583,50 @@ const peerRoutes: Route[] = [
     send(res, 200, await peers.people());
   }),
 
+  // Who may change what (0066): a file's access and suggestions; suggesting; seeing to a suggestion; rules and groups.
+  route('GET', '/api/access', async ({ host, res, q }) => {
+    const path = str(q.get('path'), 'path');
+    send(res, 200, host.peers ? await host.peers.access(path) : { canWrite: true, rule: null, suggestions: [], you: null });
+  }),
+  route('POST', '/api/suggestions', async ({ host, req, res }) => {
+    const peers = host.peers;
+    if (!peers) throw new HttpError(400, 'Suggestions are for a workspace shared with other devices');
+    const b = await readBody(req);
+    const path = str(b.path, 'path');
+    if (typeof b.text !== 'string') throw new HttpError(400, 'A suggestion has a text');
+    const text = b.text;
+    send(res, 201, { commit: await allowed(() => peers.suggest(path, text)) });
+  }),
+  route('POST', '/api/suggestions/resolve', async ({ host, req, res }) => {
+    const peers = host.peers;
+    if (!peers) throw new HttpError(400, 'Suggestions are for a workspace shared with other devices');
+    const b = await readBody(req);
+    const commit = str(b.commit, 'commit');
+    const path = str(b.path, 'path');
+    await allowed(() => peers.resolveSuggestion(commit, path, b.accepted === true));
+    send(res, 200, { ok: true });
+  }),
+  route('GET', '/api/rules', async ({ host, res }) => {
+    send(res, 200, host.peers ? await host.peers.rules() : { admin: false, rules: [], groups: [] });
+  }),
+  route('POST', '/api/rules', async ({ host, req, res }) => {
+    const peers = await host.peersForInvites();
+    const b = await readBody(req);
+    if (typeof b.path !== 'string' || !Array.isArray(b.by) || !b.by.every((w: unknown) => typeof w === 'string')) throw new HttpError(400, 'A rule has a path and whom it names');
+    const path = b.path;
+    const by = b.by as string[];
+    await allowed(() => peers.setRule(path, by));
+    send(res, 200, await peers.rules());
+  }),
+  route('POST', /^\/api\/groups\/([a-z0-9][a-z0-9-]{0,39})$/, async ({ host, req, res, params }) => {
+    const peers = await host.peersForInvites();
+    const b = await readBody(req);
+    const who = str(b.who, 'who');
+    const role = b.role === 'admin' || b.role === 'member' ? b.role : null;
+    await allowed(() => peers.setGroupRole(params[0]!, who, role));
+    send(res, 200, await peers.rules());
+  }),
+
   route('POST', '/api/peers/name', async ({ host, req, res }) => {
     const peers = await host.peersForInvites();
     try {

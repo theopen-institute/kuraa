@@ -154,3 +154,44 @@ async function startSignature(dir: string): Promise<string> {
     await other.close();
   }
 }
+
+describe('merges that keep what was not theirs to change (0066)', () => {
+  const opts = (dir: string, keeps: Map<string, string | null>) => ({
+    typeFor: (p: string, h: string) => registry.resolve(p, h),
+    tmpDir: join(dir, '.git', 'tmp'),
+    keeps,
+    refused: [{ commit: 'ab'.repeat(20), path: 'notes.md', by: 'Bo' }],
+  });
+
+  it('keep this side’s version of a file, even where the other side holds this one (a merge all the same, on record)', async () => {
+    const dir = repo();
+    const g = new Git(dir);
+    const base = git(dir, 'rev-parse', 'HEAD');
+    const before = git(dir, 'rev-parse', 'HEAD:notes.md');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nBo was here.\n');
+    writeFileSync(join(dir, 'extra.md'), 'Bo’s, where anyone may.\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Bo');
+    const theirs = git(dir, 'rev-parse', 'HEAD');
+    const out = await mergeCommits(g, base, theirs, opts(dir, new Map([['notes.md', before]])));
+    expect(out.kind).toBe('merge');
+    expect(git(dir, 'rev-parse', `${out.commit}:notes.md`)).toBe(before);
+    expect(git(dir, 'show', `${out.commit}:extra.md`)).toBe('Bo’s, where anyone may.');
+    const message = git(dir, 'show', '-s', '--format=%B', out.commit);
+    expect(message).toContain('Kept notes.md as it was: not Bo to change');
+    expect(message).toContain(`Kuraa-Refused: ${'ab'.repeat(20)} notes.md`);
+    // The same merge, made again (as another device would).
+    expect((await mergeCommits(g, base, theirs, opts(dir, new Map([['notes.md', before]])))).commit).toBe(out.commit);
+  });
+
+  it('keep a file away that this side does not have', async () => {
+    const dir = repo();
+    const g = new Git(dir);
+    const base = git(dir, 'rev-parse', 'HEAD');
+    writeFileSync(join(dir, 'chapter.md'), 'Not his to add.\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Bo');
+    const out = await mergeCommits(g, base, git(dir, 'rev-parse', 'HEAD'), opts(dir, new Map([['chapter.md', null]])));
+    expect(git(dir, 'ls-tree', '--name-only', out.commit)).not.toContain('chapter.md');
+  });
+});

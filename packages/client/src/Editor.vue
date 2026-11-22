@@ -47,6 +47,8 @@ const props = defineProps<{
   jumpToConflict?: boolean;
   /** Put the cursor in the document's title once it is open (New file made it), if the page shows one. */
   focusTitle?: boolean;
+  /** This person may not change the document (0066): shown, not editable (others' edits still arrive live). */
+  readOnly?: boolean;
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -260,6 +262,7 @@ function open(): () => void {
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins, findPlugin()] });
     pmView = new EditorView(mount.value!, {
       state,
+      editable: () => !props.readOnly,
       nodeViews: nodeViewsFor(type, ctx, formatEditor, { runner }),
       attributes: layout
         ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
@@ -438,6 +441,9 @@ watch([() => props.focusTitle, view], async ([want, v]) => {
 
 defineExpose({ openFind, toggleOutline, command, view, docVersion, ...documentActions });
 
+// Becoming read-only, or editable again (the workspace's rules changed): the view asks `editable` again.
+watch(() => props.readOnly, () => view.value?.setProps({}));
+
 // The editable Source view, while it is shown. It starts from the file as it is
 // on disk, so blocks nobody has touched show exactly as written.
 watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
@@ -447,7 +453,7 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
   api.fileText(path).catch(() => '').then((onDisk) => {
     if (cancelled || !sourceMount.value || v.isDestroyed) return;
     const initial = type.serialize(v.state.doc, onDisk ? type.parse(onDisk) : undefined);
-    source = new SourceEditor(sourceMount.value, v, type, initial);
+    source = new SourceEditor(sourceMount.value, v, type, initial, !!props.readOnly);
     source.focus();
   });
   onCleanup(() => {

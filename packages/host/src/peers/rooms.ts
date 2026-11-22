@@ -10,11 +10,15 @@
 // every device in the end shares the lowest seed among them, and nothing is
 // lost (Host.adoptRoom).
 //
-// Every device takes every member's live edits (0038). Of the devices with a
-// room open, the one with the lowest key commits it (Host.commitNow asks
-// `commits`); the others write the file but leave committing to it, and its
-// commit reaches them within moments. Every device sees the same devices in the
-// room, so they agree without any setting they share.
+// A device takes live edits from the devices whose person may change the
+// document (0066: the workspace's write rules; everyone, where there are none),
+// and sends its own to every device with it open, so all can read along. Of the
+// devices with a room open that may change it, the one with the lowest key
+// commits it (Host.commitNow asks `commits`); the others write the file but
+// leave committing to it, and its commit reaches them within moments. A device
+// that may not change it takes the room of one that may, never the other way
+// round. Every device sees the same devices in the room, and holds the same
+// policy, so they agree without any setting they share.
 import type { PresenceUser } from '@kuraa/session/server';
 import type { Host, RoomView } from '../host.js';
 import type { PeerLink } from './link.js';
@@ -152,19 +156,21 @@ export class Rooms {
         theirs.set(m.key, String(m.seed));
         if (fresh) this.onOpened?.(link, path);
         if (!room) return;
+        const theyMay = this.node.mayWrite(link.key, room.path);
+        const iMay = this.node.mayWrite(this.node.myKey, room.path);
         if (m.seed === room.seed) {
           // A room handed over is theirs now too.
           if (this.handedTo.get(room.key) === link.key) this.handedTo.delete(room.key);
           // Who edited it there since its last commit: credited by whichever device commits.
-          if (Array.isArray(m.people)) this.host.addContributors(room.name, m.people);
-          if (m.op === 'sync') relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, null);
+          if (Array.isArray(m.people) && theyMay) this.host.addContributors(room.name, m.people);
+          if (m.op === 'sync' && theyMay) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, null);
           const update = relay.diff(room.name, bytesOf(m.sv));
           if (m.op === 'open') this.send(link, { type: 'room', op: 'sync', key: room.key, seed: room.seed, sv: relay.stateVector(room.name) ?? EMPTY, update: update ?? EMPTY, people: this.host.roomContributors(room.name) });
           else if (update) this.send(link, { type: 'room', op: 'update', key: room.key, update });
           const people = relay.awarenessState(room.name);
           if (people) this.send(link, { type: 'room', op: 'awareness', key: room.key, update: people });
-        } else if (String(m.seed) < room.seed) {
-          // Theirs is the room to share: take it, with what this one has brought in.
+        } else if (theyMay && (String(m.seed) < room.seed || !iMay)) {
+          // Theirs is the room to share (the lower seed, or theirs to change and not this one's): take it.
           this.send(link, { type: 'room', op: 'want', key: room.key });
         } else if (m.op === 'open') {
           // This one is: make sure they know of it, so they ask for it.
@@ -180,7 +186,8 @@ export class Rooms {
         }
         return;
       case 'update':
-        if (room && theirs.get(m.key) === room.seed) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, m.by ?? null);
+        // Only from a device whose person may change the document (0066): any other's edits are not taken.
+        if (room && theirs.get(m.key) === room.seed && this.node.mayWrite(link.key, room.path)) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, m.by ?? null);
         return;
       case 'awareness':
         if (room && theirs.get(m.key) === room.seed) relay.applyPeerAwareness(room.name, bytesOf(m.update), link.key);
@@ -200,7 +207,9 @@ export class Rooms {
         return;
       }
       case 'state': {
-        if (!room || !(String(m.seed) < room.seed)) return;
+        // A room taken only from a device that may change the document: with the lower seed, or where this one may not.
+        if (!room || !this.node.mayWrite(link.key, room.path)) return;
+        if (!(String(m.seed) < room.seed) && this.node.mayWrite(this.node.myKey, room.path)) return;
         const base = typeof m.base === 'string' && /^[0-9a-f]{40,64}$/.test(m.base) ? m.base : null;
         void (async () => {
           // Their room's starting commit is needed to merge from where the two meet: fetch it if it is not here yet.
@@ -257,11 +266,15 @@ export class Rooms {
     return this.override(link)(path) !== undefined;
   }
 
-  /** Whether this device commits the room: it has the lowest key of the devices with it open. */
+  /**
+   * Whether this device commits the room: it may change the document, and has
+   * the lowest key of the devices with it open that may (0066).
+   */
   commits(name: string): boolean {
     const room = this.host.roomView(name);
     if (!room) return true;
-    return this.peersIn(room).every((l) => this.node.myKey < l.key);
+    if (!this.node.mayWrite(this.node.myKey, room.path)) return false;
+    return this.peersIn(room).filter((l) => this.node.mayWrite(l.key, room.path)).every((l) => this.node.myKey < l.key);
   }
 
   close(): void {

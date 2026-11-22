@@ -284,9 +284,14 @@ pnpm host --dir ~/notes --static apps/web/dist
 ```
 
 **A workspace has admins and members** ([decision 0066](docs/decisions/0066-permissions-without-a-centre.md)):
-everyone's work comes in, on every branch, and everyone reads and changes everything (rules for
-who may change what come next); only admins invite people, remove devices, and make others admins
-or members or take them out. This is a signed policy every device holds alike, so no device takes
+everyone reads everything; only admins invite people, remove devices, make others admins or
+members or take them out, and say who may change a file or folder (Workspace settings' **Who can
+change what**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists them, `group`
+manages groups). Where nothing is said, anyone may change it. A change by anyone else is kept out
+where it comes in: every device's merge keeps its own version of the file and keeps the change on
+record, and those who may change the file see it above the document as a suggestion, to compare
+and **Accept** (as their edit) or **Dismiss**. A document you may not change opens read only, saying
+who may, with **Suggest a change…**. This is a signed policy every device holds alike, so no device takes
 a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
 workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
 by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person

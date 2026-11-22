@@ -134,4 +134,33 @@ describe('a workspace’s policy', () => {
     expect(h.now().sealed).toBe(true);
     expect(h.now().role(cy.id)).toBe('admin');
   });
+
+  it('says who may change what: the most specific rule for a file, people, groups or admins; anyone where none', () => {
+    const h = history();
+    h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+    h.add(grant(bo, 'member'), ada);
+    h.add(grant(cy, 'member'), ada);
+    h.add(grant(cy, 'member', 'editors'), ada);
+    expect(h.now().mayWrite(bo.id, 'notes.md')).toBe(true);
+    expect(h.now().mayWrite(null, 'notes.md')).toBe(true);
+    // A member may not make rules; an admin may.
+    h.add({ t: 'rule', path: '', by: ['admins'] }, bo);
+    expect(h.now().rules.size).toBe(0);
+    h.add({ t: 'rule', path: '', by: ['admins'] }, ada);
+    h.add({ t: 'rule', path: 'chapters/', by: ['group:editors'] }, ada);
+    h.add({ t: 'rule', path: 'chapters/bo.md', by: [bo.id] }, ada);
+    const p = h.now();
+    expect(p.mayWrite(ada.id, 'notes.md')).toBe(true);
+    expect(p.mayWrite(bo.id, 'notes.md')).toBe(false);
+    expect(p.mayWrite(null, 'notes.md')).toBe(false);
+    expect(p.mayWrite(cy.id, 'chapters/one.md')).toBe(true);
+    // The folder's rule counts in it, not the whole workspace's: Ada is no editor.
+    expect(p.mayWrite(ada.id, 'chapters/one.md')).toBe(false);
+    expect(p.mayWrite(bo.id, 'chapters/bo.md')).toBe(true);
+    expect(p.mayWrite(cy.id, 'chapters/bo.md')).toBe(false);
+    expect(p.ruleFor('chapters/sub/x.md')).toEqual({ path: 'chapters/', by: ['group:editors'] });
+    // A rule naming no one is taken away.
+    h.add({ t: 'rule', path: 'chapters/', by: [] }, ada);
+    expect(h.now().ruleFor('chapters/one.md')).toEqual({ path: '', by: ['admins'] });
+  });
 });

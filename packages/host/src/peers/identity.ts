@@ -452,15 +452,19 @@ export class Identity {
    * In a workspace from before, the first seals its legacy geneses, so none
    * made later counts.
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
-    if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
+    if (op.t === 'rule') {
+      if (!policy.isAdmin(me)) throw new Error('Only an admin of this workspace can say who may change what');
+    } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
+      throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
+    }
     if (!(await this.pin()) && !policy.sealed) await this.makePolicy({ t: 'seal', geneses: policy.geneses }, key);
     const id = await this.makePolicy(op, key);
     if (!(await this.policy()).applied.includes(id)) {
-      throw new Error(op.group === WORKSPACE && op.t === 'revoke' ? 'The workspace needs an admin: make someone else one first' : 'That change is not allowed');
+      throw new Error(op.t === 'revoke' && op.group === WORKSPACE ? 'The workspace needs an admin: make someone else one first' : 'That change is not allowed');
     }
   }
 

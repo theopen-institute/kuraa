@@ -11,14 +11,16 @@
 // trust: between two devices that merge differently (another version of
 // kuraa), only the one with the lower key makes the merges, and the other
 // takes them.
-import { describeOutcome, type Host } from '../host.js';
+import { WaitingForPolicy, describeOutcome, type Host } from '../host.js';
+import { RESOLVED_TRAILER, gate, type GateResult } from './gate.js';
+import { suggestions, type Suggestion } from './suggestions.js';
 import { isAncestor } from '../merging.js';
 import { PROTOCOL, type PeerLink } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
-import { WORKSPACE, type PolicyOp, type Role } from './policy.js';
+import { WORKSPACE, isGroupName, isRulePath, type PolicyOp, type Role } from './policy.js';
 import { NotAllowed } from '../errors.js';
 import type { KeyPair } from '../keys.js';
 
@@ -119,6 +121,24 @@ export interface PeersStatus {
   people: PeopleInfo;
 }
 
+/** Who may change a file (0066). */
+export interface FileAccess {
+  canWrite: boolean;
+  /** The rule that counts for it: its path and who it names, in words; null if none (anyone may). */
+  rule: { path: string; by: string[] } | null;
+  suggestions: Suggestion[];
+  /** This person (identity ID). */
+  you: string | null;
+}
+
+/** The workspace's groups and write rules (0066). */
+export interface RulesInfo {
+  /** Whether this person may change them. */
+  admin: boolean;
+  rules: { path: string; by: string[] }[];
+  groups: { name: string; entries: { who: string; role: Role; name: string | null }[] }[];
+}
+
 /** The workspace's people, by its policy (0066). */
 export interface PeopleInfo {
   /** Whether the workspace has a policy yet (no: every member has the same say, 0038). */
@@ -208,9 +228,27 @@ export class Peers {
       }
     };
     this.stateDir = stateDir;
+    // Who may change what, where work comes in (0066).
+    host.gate = (x, y) => this.gate(x, y);
   }
 
   private readonly stateDir: string;
+
+  /** The workspace's write rules, applied to the commits `y` brings to `x` (gate.ts). */
+  private async gate(x: string, y: string): Promise<GateResult> {
+    const id = this.node.identity;
+    const records = await id.records();
+    const policy = await id.policy(records);
+    if (!policy.founded) return { keeps: new Map(), refused: [], waitFor: [] };
+    const people = await id.people();
+    const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
+    const names = new Map(people.map((p) => [p.key, p.name]));
+    const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
+    return gate(this.host.git, x, y, { policy, known, personOf: (k) => byKey.get(k) ?? null, nameOf: (p) => names.get(p) ?? null });
+  }
+
+  /** Work held back until the policy it names has come: tried again shortly (gate.ts). */
+  private readonly waitingForPolicy = new Set<string>();
 
   /** What the node needs of this host (the same for a node just joined). */
   private memberOptions() {
@@ -396,7 +434,18 @@ export class Peers {
         return;
       }
       this.waiting.delete(`${from}/${branch}`);
-      const outcome = await this.host.bringBranch(branch, ref, this.rooms.override(link));
+      let outcome;
+      try {
+        outcome = await this.host.bringBranch(branch, ref, this.rooms.override(link));
+      } catch (e) {
+        if (!(e instanceof WaitingForPolicy)) throw e;
+        // The policy travels with the records, which come with every hello: soon.
+        if (!this.waitingForPolicy.has(`${from}/${branch}`)) this.host.log(`peers: ${from}'s work on ${branch} is ${e.message}`);
+        this.waitingForPolicy.add(`${from}/${branch}`);
+        setTimeout(() => void this.syncFrom(link), 2000).unref();
+        return;
+      }
+      this.waitingForPolicy.delete(`${from}/${branch}`);
       if (branch === current && outcome.kind !== 'same') this.host.log(`peers: brought in ${branch} from ${from}${describeOutcome(outcome)}`);
     });
   }
@@ -496,7 +545,84 @@ export class Peers {
     await this.node.membersChanged();
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' }>): Promise<void> {
+  /**
+   * Who may change a file (0066), for the editor: whether this person may, the
+   * rule that says so (its path, and who it names, in words), and the file's
+   * open suggestions.
+   */
+  async access(path: string): Promise<FileAccess> {
+    const { policy, me } = await this.node.policy();
+    const rule = policy.founded ? policy.ruleFor(path) : null;
+    const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
+    return {
+      canWrite: !policy.founded || policy.mayWrite(me, path),
+      rule: rule && { path: rule.path, by: rule.by.map(words) },
+      suggestions: await this.suggestions(path),
+      you: me,
+    };
+  }
+
+  /** The open suggestions on the current branch (of one file, if given). */
+  async suggestions(path?: string): Promise<Suggestion[]> {
+    const branch = await this.host.git.branch();
+    if (!branch) return [];
+    const { policy } = await this.node.policy();
+    const people = await this.node.identity.people();
+    const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
+    const names = new Map(people.map((p) => [p.key, p.name]));
+    return suggestions(this.host.git, branch, { personOf: (k) => byKey.get(k) ?? null, nameOf: (p) => names.get(p) ?? null, mayWrite: (p, f) => !policy.founded || policy.mayWrite(p, f) }, path);
+  }
+
+  /** Suggest a text for a file this person may not change (Host.suggest); one they may, they change. */
+  async suggest(path: string, text: string): Promise<string> {
+    if ((await this.access(path)).canWrite) throw new NotAllowed('You may change this document: edit it instead');
+    const commit = await this.host.suggest(path, text);
+    await this.node.membersChanged();
+    return commit;
+  }
+
+  /**
+   * A suggestion seen to (accepted, its text put in the document as an edit; or
+   * dismissed): on record, for every device. By someone who may change the file,
+   * or whoever suggested it.
+   */
+  async resolveSuggestion(commit: string, path: string, accepted: boolean): Promise<void> {
+    const s = (await this.suggestions(path)).find((x) => x.commit === commit);
+    if (!s) throw new Error('No such suggestion is open');
+    const { me } = await this.node.policy();
+    if (!(await this.access(path)).canWrite && s.person !== me) throw new NotAllowed('Only someone who may change this document, or who suggested it, sees to a suggestion');
+    await this.host.commitNote(`${accepted ? 'Took' : 'Left'} ${s.name ?? 'someone'}’s suggestion for ${path}`, [`${RESOLVED_TRAILER}: ${commit} ${path}`]);
+  }
+
+  /** Say who may change a path (an admin's to do): people's IDs, `group:<name>`, or `admins`; none takes the rule away. */
+  async setRule(path: string, by: string[]): Promise<void> {
+    if (!isRulePath(path)) throw new NotAllowed('Not a path a rule can name: a file, a folder ending in /, or nothing for the whole workspace');
+    if (!by.every((w) => /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/.test(w))) throw new NotAllowed('A rule names people, groups or admins');
+    await this.adminOp({ t: 'rule', path, by: [...new Set(by)].sort() });
+  }
+
+  /** Put someone in a group, or take them out (role null): an admin's of the group, or the workspace's. */
+  async setGroupRole(group: string, who: string, role: Role | null): Promise<void> {
+    if (!isGroupName(group)) throw new NotAllowed('A group’s name is lowercase letters, digits and dashes');
+    await this.adminOp(role ? { t: 'grant', group, who, role } : { t: 'revoke', group, who });
+  }
+
+  /** The workspace's groups and rules, as its policy says, for those who manage them. */
+  async rules(): Promise<RulesInfo> {
+    const { policy, me } = await this.node.policy();
+    const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    return {
+      admin: policy.founded ? policy.isAdmin(me) : false,
+      rules: [...policy.rules].map(([path, by]) => ({ path, by })).sort((a, b) => (a.path < b.path ? -1 : 1)),
+      groups: [...policy.groups].filter(([g]) => g !== WORKSPACE).map(([name, entries]) => ({
+        name,
+        entries: [...entries].map(([who, role]) => ({ who, role, name: who.startsWith('group:') ? who.slice(6) : names.get(who) ?? null })),
+      })),
+    };
+  }
+
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());
@@ -538,6 +664,7 @@ export class Peers {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.host.gate = null;
     clearTimeout(this.announceTimer);
     this.stopRefs?.();
     this.stopOutputs?.();

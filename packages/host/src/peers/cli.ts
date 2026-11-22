@@ -41,7 +41,7 @@ import { createPerson, exportPerson, importPerson, personFile, readPerson, readR
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
 
-export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'remove-person', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
+export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'remove-person', 'rules', 'rule', 'group', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
 
 /** The ways into a workspace besides the DHT this device knows (node.ts keeps them in hints.json), for an invite link. */
 async function storedHints(dir: string, id: Identity, relays: string[]): Promise<LinkHints> {
@@ -208,6 +208,36 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const { key } = await asPerson(git, id, false);
       await id.adminOp({ t: 'grant', group: WORKSPACE, who: await personNamed(id, arg), role }, key);
       return say(`Done: ${arg} is ${role === 'admin' ? 'an admin' : 'a member'} of this workspace. Other devices learn of it when they next meet this one.`);
+    }
+    case 'rules': {
+      const { id } = await identityAt(values.dir!);
+      const policy = await id.policy();
+      const named = new Map((await id.people()).map((p) => [p.key, p.name]));
+      const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? `group ${w.slice(6)}` : named.get(w) ?? w.slice(0, 12));
+      if (!policy.rules.size) say('No rules: anyone in the workspace can change everything.');
+      for (const [path, by] of [...policy.rules].sort()) say(`  ${path || '(everything)'}  ${by.map(words).join(', ')}`);
+      for (const [g, entries] of policy.groups) if (g !== WORKSPACE) say(`group ${g}: ${[...entries].map(([w, r]) => `${words(w)} (${r})`).join(', ')}`);
+      return;
+    }
+    case 'rule': {
+      // kuraa-host rule <path> [<who>…]: who may change it (people, group:<name>, admins); none takes the rule away.
+      if (arg === undefined) throw new Error('Usage: kuraa-host rule <file, folder/ or ""> [<person> | group:<name> | admins]…');
+      const { git, id } = await identityAt(values.dir!);
+      const { key } = await asPerson(git, id, false);
+      const by: string[] = [];
+      for (const w of more) by.push(w === 'admins' || w.startsWith('group:') ? w : await personNamed(id, w));
+      await id.adminOp({ t: 'rule', path: arg, by: [...new Set(by)].sort() }, key);
+      return say(by.length ? `Only ${more.join(', ')} can change ${arg || 'anything'} now; others' changes become suggestions.` : `No rule for ${arg || 'everything'} now.`);
+    }
+    case 'group': {
+      // kuraa-host group <name> add|admin|remove <person>
+      const [action, who] = more;
+      if (!arg || !who || !['add', 'admin', 'remove'].includes(action ?? '')) throw new Error('Usage: kuraa-host group <name> add|admin|remove <person>');
+      const { git, id } = await identityAt(values.dir!);
+      const { key } = await asPerson(git, id, false);
+      const person = await personNamed(id, who);
+      await id.adminOp(action === 'remove' ? { t: 'revoke', group: arg, who: person } : { t: 'grant', group: arg, who: person, role: action === 'admin' ? 'admin' : 'member' }, key);
+      return say(action === 'remove' ? `Took ${who} out of ${arg}.` : `${who} is ${action === 'admin' ? 'an admin' : 'a member'} of ${arg}.`);
     }
     case 'remove-person': {
       if (!arg) throw new Error('Usage: kuraa-host remove-person <person>');

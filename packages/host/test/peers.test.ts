@@ -3,7 +3,7 @@
 // devices editing one document live, and every member with the same say (0038).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -442,6 +442,91 @@ describe('equal members, and forks', () => {
     expect(await role(a, bo.id)).toBeNull();
     await until(async () => (await b.host.peers!.status()).removed, 15_000, 'Bo’s device removed');
     await expect(a.host.peers!.removePerson(ada.id)).rejects.toThrow('needs an admin');
+  });
+
+  it('keep what someone may not change as it was, with their change on record as a suggestion (0066)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const bo = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const dirA = repo();
+    mkdirSync(join(dirA, 'chapters'));
+    writeFileSync(join(dirA, 'chapters', 'one.md'), '# One\n\nAda’s.\n');
+    git(dirA, 'add', '-A');
+    git(dirA, 'commit', '-q', '-m', 'Chapter one');
+    const a = await start(dirA, { person: ada });
+    const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+    dirs.push(parent);
+    const dirB = join(parent, 'notes');
+    signingKeys.set(dirB, crypto.keyPair());
+    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: bo, signing: signingKeys.get(dirB) });
+    const b = await start(dirB, { person: bo });
+    await until(async () => (await a.host.peers!.people()).people.some((p) => p.id === bo.id), 15_000, 'Bo in the workspace');
+    // Only Ada may change chapters/.
+    await a.host.peers!.setRule('chapters/', [ada.id]);
+    await until(async () => !(await b.host.peers!.access('chapters/one.md')).canWrite, 15_000, 'the rule on Bo’s device');
+    expect((await b.host.peers!.access('chapters/one.md')).rule).toEqual({ path: 'chapters/', by: ['Ada'] });
+    expect((await b.host.peers!.access('notes.md')).canWrite).toBe(true);
+    await expect(b.host.peers!.setRule('', [bo.id])).rejects.toThrow('Only an admin');
+
+    // Bo adds a chapter anyway, and a note where anyone may.
+    expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'chapters/two.md', content: '# Two\n\nBo’s.\n' }) })).status).toBe(201);
+    expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'bo.md', content: '# Bo’s note\n' }) })).status).toBe(201);
+    // His note comes in; his chapter does not: Ada's copy keeps chapters/ as it was, and the merge says why.
+    await until(() => existsSync(join(dirA, 'bo.md')), 20_000, 'Bo’s note on Ada’s device');
+    await until(async () => (await a.host.peers!.suggestions()).some((x) => x.path === 'chapters/two.md'), 20_000, 'Bo’s chapter a suggestion');
+    expect(existsSync(join(dirA, 'chapters', 'two.md'))).toBe(false);
+    expect(git(dirA, 'log', '-1', '--merges', '--format=%B')).toMatch(/Kept chapters\/two\.md as it was: not Bo to change/);
+    const refused = (await a.host.peers!.suggestions()).find((x) => x.path === 'chapters/two.md')!;
+    expect(refused).toMatchObject({ person: bo.id, name: 'Bo', text: '# Two\n\nBo’s.\n' });
+    // Ada's merge reaches Bo's device: his copy has the chapter no longer either.
+    await until(() => !existsSync(join(dirB, 'chapters', 'two.md')), 20_000, 'Bo’s copy in step');
+
+    // Bo suggests a change to chapter one, as a suggestion: his copy stays as it was.
+    await b.host.peers!.suggest('chapters/one.md', '# One\n\nAda’s, with Bo’s line.\n');
+    expect(readFileSync(join(dirB, 'chapters', 'one.md'), 'utf8')).toBe('# One\n\nAda’s.\n');
+    expect((await b.host.peers!.suggestions('chapters/one.md'))).toHaveLength(1);
+    await until(async () => (await a.host.peers!.suggestions('chapters/one.md')).length === 1, 20_000, 'Bo’s suggestion on Ada’s device');
+    const s = (await a.host.peers!.suggestions('chapters/one.md'))[0]!;
+    expect(readFileSync(join(dirA, 'chapters', 'one.md'), 'utf8')).toBe('# One\n\nAda’s.\n');
+    // Ada takes it: its text, as her edit; then it is seen to, on both devices.
+    writeFileSync(join(dirA, 'chapters', 'one.md'), s.text!);
+    await a.host.peers!.resolveSuggestion(s.commit, 'chapters/one.md', true);
+    expect(await a.host.peers!.suggestions('chapters/one.md')).toEqual([]);
+    await until(async () => (await b.host.peers!.suggestions('chapters/one.md')).length === 0, 20_000, 'seen to on Bo’s device');
+    // Bo takes back his refused chapter (his own suggestion, his to dismiss): gone on Ada's device too.
+    await until(async () => (await b.host.peers!.suggestions('chapters/two.md')).length === 1, 20_000, 'Bo sees his refused chapter');
+    await b.host.peers!.resolveSuggestion(refused.commit, 'chapters/two.md', false);
+    await until(async () => (await a.host.peers!.suggestions('chapters/two.md')).length === 0, 20_000, 'dismissed on Ada’s device');
+  });
+
+  it('take live edits only from those who may change the document; theirs reach everyone (0066)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const adaP = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const boP = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const dirA = repo();
+    const a = await start(dirA, { person: adaP });
+    const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+    dirs.push(parent);
+    const dirB = join(parent, 'notes');
+    signingKeys.set(dirB, crypto.keyPair());
+    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: boP, signing: signingKeys.get(dirB) });
+    const b = await start(dirB, { person: boP });
+    await until(async () => (await a.host.peers!.people()).people.some((p) => p.id === boP.id), 15_000, 'Bo in the workspace');
+    await a.host.peers!.setRule('notes.md', [adaP.id]);
+    await until(async () => !(await b.host.peers!.access('notes.md')).canWrite, 15_000, 'the rule on Bo’s device');
+    const ada = await connect(a, ADA);
+    const bo = await connect(b, BO);
+    ada.write(insertAt(ada.read(), 'The tide', 'Ada: '));
+    await until(() => bo.read().textContent.includes('Ada: '), 15_000, 'Ada’s edit on Bo’s device');
+    // Bo types anyway (as an app that let him would): his room has it, Ada's does not take it.
+    bo.write(insertAt(bo.read(), 'It rained', 'Bo: '));
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(ada.read().textContent).not.toContain('Bo: ');
+    // Ada's device commits the room: hers to change.
+    await until(() => file(dirA).includes('Ada: The tide') && git(dirA, 'status', '--porcelain') === '', 20_000, 'Ada’s edit committed');
+    expect(file(dirA)).not.toContain('Bo: ');
   });
 
   it('take any member’s work, and name it by the person whose it is', async () => {

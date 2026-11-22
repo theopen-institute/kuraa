@@ -93,7 +93,8 @@ export class SourceEditor {
   /** The last text parsed, and its parse: each keystroke parses the source before and after, and the next one's before is this one's after. */
   private parsed: { text: string; result: ParsedDocument } | null = null;
 
-  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string) {
+  /** `readOnly`: this person may not change the document (0066): the source is shown, not editable. */
+  constructor(parent: HTMLElement, private readonly view: PMView, private readonly type: DocumentType, initial: string, readOnly = false) {
     this.base = initial;
     this.cm = new EditorView({
       parent,
@@ -109,6 +110,8 @@ export class SourceEditor {
           markdown(),
           syntaxHighlighting(highlighter),
           EditorView.lineWrapping,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           EditorView.contentAttributes.of({ 'data-testid': 'source-editor', spellcheck: 'true' }),
           EditorView.updateListener.of((u) => {
             if (!u.docChanged || u.transactions.every((t) => t.annotation(fromDocument))) return;

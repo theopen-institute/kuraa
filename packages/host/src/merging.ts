@@ -23,7 +23,8 @@ export const MERGE_AUTHOR = { name: 'Kuraa', email: 'merge@kuraa.invalid' };
  * here, in git's part of it, or in the kernel's line and word merges. (A
  * type's own merge is covered by its version.)
  */
-export const MERGE_VERSION = 2;
+// 3: files someone may not change keep this side's version (0066, keeps).
+export const MERGE_VERSION = 3;
 
 /**
  * How this device merges, as a short text devices compare: the merge version,
@@ -45,6 +46,14 @@ export interface MergeOptions {
   override?(path: string): string | undefined;
   /** Somewhere to put a temporary index. */
   tmpDir: string;
+  /**
+   * Who may change what (peers/gate.ts, 0066): files that keep this side's
+   * (`x`'s) version, whatever the other side did (path → blob; null: not
+   * there), and the changes refused, kept on record in the merge's message. A
+   * merge is made even where `y` holds `x`, so the refusal is on record.
+   */
+  keeps?: Map<string, string | null>;
+  refused?: { commit: string; path: string; by: string | null }[];
 }
 
 export interface MergeOutcome {
@@ -95,10 +104,13 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
   const none = { conflicts: [], copies: [] };
   if (x === y) return { commit: x, kind: 'same', ...none };
   if (await isAncestor(git, y, x)) return { commit: x, kind: 'same', ...none };
-  if (await isAncestor(git, x, y)) return { commit: y, kind: 'fast-forward', ...none };
+  const keeps = opts.keeps ?? new Map<string, string | null>();
+  const forward = await isAncestor(git, x, y);
+  if (forward && !keeps.size) return { commit: y, kind: 'fast-forward', ...none };
   // The same order everywhere: the first side is the lower commit id.
   const [c1, c2] = [x, y].sort() as [string, string];
-  const r = await git.run(['merge-tree', '--write-tree', '-z', c1, c2], { allowFail: true });
+  // Where `y` holds `x`, its tree is the merge (but for what is kept).
+  const r = forward ? { code: 0, stdout: `${await git.out(['rev-parse', `${y}^{tree}`])}\0`, stderr: '' } : await git.run(['merge-tree', '--write-tree', '-z', c1, c2], { allowFail: true });
   if (r.code !== 0 && r.code !== 1) throw new Error(`git merge-tree failed: ${r.stderr}`);
   const { tree, files } = parseMergeTree(r.stdout);
 
@@ -113,6 +125,7 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
   const write = (content: Buffer | string) => git.out(['hash-object', '-w', '--stdin'], { input: content });
   // By code unit, never by locale: the order reaches the commit message, which must be the same on every device.
   for (const [path, stages] of [...files.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (keeps.has(path)) continue;
     const s1 = stages.get(1);
     const s2 = stages.get(2);
     const s3 = stages.get(3);
@@ -147,6 +160,15 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
     entries.push(`${mode} ${await write(merged.text)} 0\t${path}`);
   }
 
+  // What is kept: this side's version, or none (index-info: mode 0 takes a path out).
+  for (const [path, oid] of [...keeps].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (oid) {
+      const mode = (await git.out(['ls-tree', x, '--', path])).split(/\s+/)[0] || '100644';
+      entries.push(`${mode} ${oid} 0\t${path}`);
+    } else {
+      entries.push(`0 ${'0'.repeat(40)}\t${path}`);
+    }
+  }
   let finalTree = tree;
   if (entries.length) {
     await mkdir(opts.tmpDir, { recursive: true });
@@ -163,10 +185,19 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
   }
   const at = `@${Math.max(Number(t1), Number(t2))} +0000`;
   const lines = [`Merge ${c1.slice(0, 7)} and ${c2.slice(0, 7)}`];
-  if (conflicts.length || copies.length) {
+  if (conflicts.length || copies.length || keeps.size) {
     lines.push('');
     for (const c of conflicts) lines.push(`Conflict kept in ${c.path} (${c.count})`);
     for (const c of copies) lines.push(`Other version saved as ${c}`);
+    for (const path of [...keeps.keys()].sort()) {
+      const r = opts.refused?.find((x) => x.path === path);
+      lines.push(`Kept ${path} as it was: not ${r?.by ?? 'theirs'} to change`);
+    }
+    const refused = (opts.refused ?? []).filter((x) => keeps.has(x.path));
+    if (refused.length) {
+      lines.push('');
+      for (const x of refused) lines.push(`Kuraa-Refused: ${x.commit} ${x.path}`);
+    }
   }
   const commit = await git.out(['commit-tree', '--no-gpg-sign', finalTree, '-p', c1, '-p', c2, '-m', lines.join('\n')], {
     env: {

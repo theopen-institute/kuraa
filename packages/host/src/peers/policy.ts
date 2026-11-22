@@ -23,6 +23,12 @@
 //   link names, as it says, signed by an admin of it (the link's grant). A link
 //   for one person puts one in.
 //
+// - rule: who may change what (0066, step 3): a path (the whole workspace `''`,
+//   a folder `dir/`, or a file) and who may write there: people, groups
+//   (`group:<name>`), or the workspace's admins (`admins`). The most specific
+//   rule for a file counts; with none, anyone may. Only the workspace's admins
+//   make rules; a rule naming no one is taken away.
+//
 // Groups: `workspace` (everyone in it), and any an admin of the workspace makes
 // by putting someone in it. A group may hold people (identity IDs) and, as
 // members, other groups (`group:<name>`).
@@ -37,7 +43,8 @@ export type PolicyOp =
   | { t: 'grant'; group: string; who: string; role: Role }
   | { t: 'revoke'; group: string; who: string }
   | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string }
-  | { t: 'seal'; geneses: string[] };
+  | { t: 'seal'; geneses: string[] }
+  | { t: 'rule'; path: string; by: string[] };
 
 /** A policy operation as a record carries it (records.ts, kind `policy`). */
 export interface PolicyEntry {
@@ -66,6 +73,7 @@ function encodeOp(op: PolicyOp): string {
     case 'revoke': return ['revoke', op.group, op.who].join('\0');
     case 'join': return ['join', op.group, op.role, op.link, op.once ? 'once' : 'anyone', op.granter, op.grant].join('\0');
     case 'seal': return ['seal', op.geneses.join(',')].join('\0');
+    case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
   }
 }
 
@@ -94,6 +102,15 @@ const sortedUnique = (list: unknown, test: RegExp): string[] | null => {
 };
 
 const whoTest = /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39})$/;
+const writerTest = /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/;
+
+/** Whether a path is one a rule can name: `''` (everything), `dir/` (a folder), or a file; relative, with no `.` or `..` parts. */
+export function isRulePath(path: string): boolean {
+  if (path === '') return true;
+  if (path.length > 500 || path.startsWith('/') || path.includes('\0') || path.includes('\\')) return false;
+  const parts = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+  return parts.every((p) => p !== '' && p !== '.' && p !== '..');
+}
 
 /** An operation from elsewhere, checked for shape (not for who may make it); null if it is not one. */
 export function readOp(v: unknown): PolicyOp | null {
@@ -118,6 +135,10 @@ export function readOp(v: unknown): PolicyOp | null {
     case 'seal': {
       const geneses = sortedUnique(o.geneses, hexKey);
       return geneses && geneses.length ? { t: 'seal', geneses } : null;
+    }
+    case 'rule': {
+      const by = sortedUnique(o.by, writerTest);
+      return typeof o.path === 'string' && isRulePath(o.path) && by ? { t: 'rule', path: o.path, by } : null;
     }
     default:
       return null;
@@ -154,7 +175,27 @@ export class Policy {
     readonly usedLinks: Set<string>,
     /** A workspace from before: an admin sealed its legacy geneses. */
     readonly sealed = false,
+    /** Who may write where: path → who (rule). */
+    readonly rules = new Map<string, string[]>(),
   ) {}
+
+  /** The rule that counts for a file: the most specific path that holds it; null if none. */
+  ruleFor(path: string): { path: string; by: string[] } | null {
+    let best: string | null = null;
+    for (const r of this.rules.keys()) {
+      const holds = r === '' || r === path || (r.endsWith('/') && path.startsWith(r));
+      if (holds && (best === null || r.length > best.length)) best = r;
+    }
+    return best === null ? null : { path: best, by: this.rules.get(best)! };
+  }
+
+  /** Whether a person (null: no one's, as an unsigned commit) may change a file: by its rule, or anyone if it has none. */
+  mayWrite(id: string | null, path: string): boolean {
+    const rule = this.ruleFor(path);
+    if (!rule) return true;
+    if (!id) return false;
+    return rule.by.some((w) => w === id || (w === 'admins' && this.isAdmin(id)) || (w.startsWith('group:') && this.role(id, w.slice(6)) !== null));
+  }
 
   /** Whether there is a policy at all (a genesis that counts). */
   get founded(): boolean {
@@ -237,12 +278,13 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
   const applied: string[] = [];
   const usedLinks = new Set<string>();
   let seal: string[] | null = null;
+  const rules = new Map<string, string[]>();
   const ws = group(WORKSPACE);
   for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) ws.set(id, 'admin');
   applied.push(...order.filter((e) => counted.has(e.id)).map((e) => e.id));
   // Operations that descend from a genesis that counts.
   const rooted = new Set(counted);
-  const view = () => new Policy(groups, [...counted], applied, [], usedLinks);
+  const view = () => new Policy(groups, [...counted], applied, [], usedLinks, false, rules);
   const admins = () => [...ws].filter(([, r]) => r === 'admin').length;
   for (const e of order) {
     if (e.op.t === 'genesis') continue;
@@ -293,10 +335,16 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
         seal = op.geneses;
         ok = true;
       }
+    } else if (op.t === 'rule') {
+      if (now.isAdmin(by)) {
+        if (op.by.length) rules.set(op.path, op.by);
+        else rules.delete(op.path);
+        ok = true;
+      }
     }
     if (ok) applied.push(e.id);
   }
   const parents = new Set(order.flatMap((e) => e.parents));
   const heads = order.filter((e) => rooted.has(e.id) && !parents.has(e.id)).map((e) => e.id).sort();
-  return { policy: new Policy(groups, [...counted], applied, heads, usedLinks, !!seal), seal };
+  return { policy: new Policy(groups, [...counted], applied, heads, usedLinks, !!seal, rules), seal };
 }

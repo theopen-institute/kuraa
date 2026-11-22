@@ -31,6 +31,9 @@ export function listOf(items: string[]): string {
 const quote = (s: string) => `“${s}”`;
 const dateTime = (d: Date | string) => new Date(d).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
+/** Names as words: "Ada", "Ada and Bo", "Ada, Bo and Cy". */
+const list = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
 export const S = {
   common: {
     cancel: 'Cancel',
@@ -415,6 +418,51 @@ export const S = {
     renameAsk: 'What should this computer be called here?',
     rename: 'Rename this computer…',
     notAdmin: 'Only the workspace’s admins invite people and remove devices.',
+  },
+
+  access: {
+    readOnly: (by: string[]) => (by.length ? `Only ${list(by)} can change this document. You can read it, and suggest changes.` : 'You cannot change this document. You can read it, and suggest changes.'),
+    suggest: 'Suggest a change…',
+    suggestions: (n: number) => (n === 1 ? '1 suggestion:' : `${n.toLocaleString()} suggestions:`),
+    suggestionBy: (name: string | null, date: string) => `${name ?? 'Someone'}, ${date}`,
+    suggestTitle: (title: string) => `Suggest a change to ${title}`,
+    suggestAbout: 'Change the text below and send it. Those who can change this document see it as a suggestion, to take or leave; your copy stays as it is until they do.',
+    suggestLabel: 'The document’s text, as you suggest it',
+    send: 'Send suggestion',
+    sent: 'Suggestion sent. Those who can change this document see it when it reaches them.',
+    by: (name: string | null) => `Suggested by ${name ?? 'someone'}`,
+    accept: 'Accept…',
+    acceptTitle: 'Put this text in the document, as your edit (it can be undone), and mark the suggestion taken',
+    dismiss: 'Dismiss',
+    acceptAsk: (name: string | null) => `Accept ${name ?? 'this'}’s suggestion? Its text replaces the document’s, as your edit.`,
+    accepted: (name: string | null) => `Took ${name ?? 'the'}’s suggestion.`,
+    dismissed: 'Suggestion dismissed.',
+    removes: 'This suggestion takes the file away.',
+    onlyNow: 'Taken out',
+    onlySuggested: 'Put in',
+  },
+
+  rules: {
+    title: 'Who can change what',
+    about: 'Everyone in the workspace can read everything. Here, admins say who can change a file or folder; where nothing is said, anyone can. Changes by anyone else become suggestions.',
+    none: 'Anyone in the workspace can change everything.',
+    everything: 'Everything',
+    by: (who: string[]) => list(who),
+    admins: 'admins',
+    path: 'File or folder',
+    pathHint: 'A file (chapters/one.md), a folder ending in / (chapters/), or empty for everything',
+    who: 'Who can change it',
+    add: 'Add',
+    remove: 'Remove',
+    groups: 'Groups',
+    groupsAbout: 'Groups name several people at once, in rules. Admins of a group can change who is in it.',
+    noGroups: 'No groups yet.',
+    newGroup: 'New group’s name, e.g. editors',
+    newGroupWho: 'Its first admin',
+    addTo: 'Add',
+    member: 'member',
+    admin: 'admin',
+    takeOut: 'Take out',
   },
 
   people: {

@@ -10,6 +10,7 @@ import type { HostApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { S } from './strings.js';
 import DevicesSection from './DevicesSection.vue';
+import RulesSection from './RulesSection.vue';
 import SyncsSection from './SyncsSection.vue';
 
 const props = defineProps<{
@@ -50,6 +51,7 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
         </fieldset>
       </section>
       <DevicesSection :api="api" @invite="emit('invite')" />
+      <RulesSection :api="api" />
       <SyncsSection :api="api" />
       <details class="settings-part menu-details">
         <summary>{{ S.common.details }}</summary>

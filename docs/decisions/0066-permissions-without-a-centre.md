@@ -1,6 +1,6 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: being built, in the order below. Built: 1 (identities) and 2 (the policy, groups, roles); see *Built so far* at the end.**
+**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles) and 3 (write rules, suggestions); see *Built so far* at the end.**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
@@ -409,3 +409,53 @@ differ by person, and how usable plain git is with only the public layer.
 - **Not yet:** concurrent changes are settled only by the order above (removal-wins and cutoffs
   are step 4); group management in the app beyond the workspace's roles comes with step 3, where
   groups first matter.
+
+### 3 · Who may change what, and suggestions (`peers/gate.ts`, `peers/suggestions.ts`)
+
+- **Rules** are `rule` operations (a path: `''`, `dir/` or a file; and who: people, `group:<name>`,
+  `admins`); only the workspace's admins make them; a rule naming no one is taken away. The most
+  specific counts; with none, anyone may change a file, so a workspace without rules works as before.
+- **Where work comes in** (every merge the host makes: from devices and from the online copy),
+  each commit new to this side, merges left out, is judged by the person whose signing key signed
+  it (an unsigned one is no one's). A file whose last such change is by someone who may not change
+  it keeps this side's version (or stays away); the merge says so in words ("Kept chapters/two.md
+  as it was: not Bo to change") and keeps the change on record (`Kuraa-Refused: <commit> <path>`).
+  Where the other side holds this one, a merge is made all the same. A later change by someone who
+  may takes the file up, refused change and all. The merge brings the refusal back to the device
+  that made the change, so its copy comes back into step too.
+- **Which policy judges** (a deviation from *Content commits say which policy they were made
+  under*): signed commits name the policy's heads (`Kuraa-Policy`), and a device that does not hold
+  them yet waits before bringing that work in (tried again every few seconds; records come with
+  every hello). It then judges by the policy it holds, which is that much or more: a rule made at
+  the same time as someone's edit applies to it, as yet unmerged, which is the outcome wanted. Two
+  devices holding different amounts of policy may make different merges, but every merge brings
+  what was kept to the other side, so they end the same; the stricter judgement holds once any device
+  has made it.
+- **Merges are trusted**, still: one carrying changes of its own beyond its parents' would slip
+  them past the rules. Checking merges by making them again is for step 4, with the cutoffs.
+- **Live rooms**: a device takes edits only from devices whose person may change the document,
+  and sends its own to every device with it open, so all read along; of the devices that may, the
+  lowest key commits it, and one that may not never does; a device that may not takes the room of
+  one that may, never the other way round, and never takes a room's state from one that may not.
+- **On this person's own copy** nothing is held back: the editor opens a document they may not
+  change read only, saying who may (the rich view and Source), and their app sends no edits; one
+  made anyway (another editor, plain git) is committed as theirs, and becomes a suggestion on
+  every other device, and leaves their copy when the merge that kept it comes back.
+- **Suggestions** are read from the branch's history: commits refused by a merge, and commits made
+  as suggestions. **Suggest a change…** (or `POST /api/suggestions`) commits the text as the
+  person's, marked `Kuraa-Suggestion`, then at once commits the file back as it was, marked
+  `Kuraa-Suggested` (so their copy does not change, and every device bringing the two in keeps its
+  own version and has the suggestion on record). A suggestion stays open until seen to: a commit
+  that changes nothing, `Kuraa-Resolved: <commit> <path>`, by someone who may change the file
+  (Accept, which first puts its text in the live document as their edit; or Dismiss) or by whoever
+  suggested it (taking it back); or until the file has that text anyway. A document's open
+  suggestions are listed above it; each opens like a past version, compared with now as a change
+  (what it takes out, what it puts in).
+- **Where it shows**: Workspace settings' **Who can change what** lists the rules and the groups;
+  admins add and remove rules (a path, and who, from the admins, the groups and the people) and make
+  groups and change who is in them. CLI: `rules`, `rule <path> [<who>…]`, `group <name>
+  add|admin|remove <person>`. HTTP: `GET /api/access?path=`, `POST /api/suggestions`, `POST
+  /api/suggestions/resolve`, `GET`/`POST /api/rules`, `POST /api/groups/<name>`.
+- **Not yet:** checking merges (step 4); rules kept inside private spaces (step 5); suggestions
+  are of whole files, on the branch checked out, and suggesting is done on the document's source
+  text, not in the rich view.

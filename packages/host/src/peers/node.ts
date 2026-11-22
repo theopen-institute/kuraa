@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
+import type { Policy } from './policy.js';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 import { stat } from 'node:fs/promises';
@@ -949,9 +950,33 @@ export class PeerNode {
     return this.signingKeyNow();
   }
 
+  /** Who may write where, as the policy said when the members last changed (mayWrite). */
+  private access: { policy: Policy; personOf: Map<string, string> } | null = null;
+
+  /**
+   * Whether a device's person may change a file, by the workspace's write rules
+   * (0066): for live rooms, which take edits only from devices that may make
+   * them. Anyone may where there is no policy, or no rule for the file.
+   */
+  mayWrite(device: string, path: string): boolean {
+    const a = this.access;
+    if (!a || !a.policy.founded || !a.policy.rules.size) return true;
+    return a.policy.mayWrite(a.personOf.get(device) ?? null, path);
+  }
+
+  private async updateAccess(): Promise<void> {
+    const personOf = new Map<string, string>();
+    for (const d of [this.myKey, ...(await this.identity.members()).map((m) => m.key)]) {
+      const id = await this.identity.personIdOf(d);
+      if (id) personOf.set(d, id);
+    }
+    this.access = { policy: await this.identity.policy(), personOf };
+  }
+
   /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
   async refresh(): Promise<void> {
     this.removedKeys = new Set(await this.identity.removed());
+    await this.updateAccess().catch((e: Error) => this.o.log(`peers: could not read the workspace's policy: ${e.message}`));
     // The keys commits here are signed with, named by their person (or device), as git checks them.
     const signers: { name: string; key: string }[] = [];
     for (const d of [{ key: this.myKey, name: this.name }, ...(await this.identity.members())]) {

@@ -83,6 +83,32 @@ export type PeersInfo =
       people?: PeopleInfo;
     };
 
+/** A change someone suggested to a file they may not change (0066). */
+export interface SuggestionInfo {
+  commit: string;
+  path: string;
+  person: string | null;
+  name: string | null;
+  date: string;
+  /** The text proposed; null to take the file away. */
+  text: string | null;
+}
+
+/** Who may change a file (0066): whether you may, the rule that says so, and its open suggestions. */
+export interface FileAccess {
+  canWrite: boolean;
+  rule: { path: string; by: string[] } | null;
+  suggestions: SuggestionInfo[];
+  you: string | null;
+}
+
+/** The workspace's write rules and groups (0066). */
+export interface RulesInfo {
+  admin: boolean;
+  rules: { path: string; by: string[] }[];
+  groups: { name: string; entries: { who: string; role: 'admin' | 'member'; name: string | null }[] }[];
+}
+
 /** The workspace's people, by its policy (0066). */
 export interface PeopleInfo {
   /** Whether the workspace has a policy yet (no: every member has the same say). */
@@ -236,6 +262,17 @@ export class HostApi {
   peers() { return this.json<PeersInfo>('/api/peers'); }
   peerLinks() { return this.json<{ links: InviteLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
   /** An invite link: for one person (`once`) or anyone, lasting `hours` (null: no expiry). Turns syncing on if it is not. */
+  /** Who may change a file, and its open suggestions (0066). */
+  access(path: string) { return this.json<FileAccess>(`/api/access?path=${encodeURIComponent(path)}`); }
+  /** Suggest a text for a file you may not change. */
+  suggest(path: string, text: string) { return this.json<{ commit: string }>('/api/suggestions', { method: 'POST', body: JSON.stringify({ path, text }) }); }
+  /** See to a suggestion: accepted (its text put in the document first) or dismissed. */
+  resolveSuggestion(commit: string, path: string, accepted: boolean) { return this.json('/api/suggestions/resolve', { method: 'POST', body: JSON.stringify({ commit, path, accepted }) }); }
+  rules() { return this.json<RulesInfo>('/api/rules'); }
+  /** Say who may change a path (people's IDs, `group:<name>`, `admins`); none takes the rule away. */
+  setRule(path: string, by: string[]) { return this.json<RulesInfo>('/api/rules', { method: 'POST', body: JSON.stringify({ path, by }) }); }
+  /** Put someone in a group as admin or member, or take them out (null). */
+  setGroupRole(group: string, who: string, role: 'admin' | 'member' | null) { return this.json<RulesInfo>(`/api/groups/${group}`, { method: 'POST', body: JSON.stringify({ who, role }) }); }
   /** Make someone of the workspace an admin or a member (an admin's to do, 0066). */
   setRole(id: string, role: 'admin' | 'member') { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'POST', body: JSON.stringify({ role }) }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */

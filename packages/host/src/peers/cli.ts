@@ -245,7 +245,7 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const { key } = await asPerson(git, id, false);
       const who = await personNamed(id, arg);
       const devices = (await id.people()).find((p) => p.key === who)?.devices ?? [];
-      const tips = (await git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads'], { allowFail: true })).stdout.split('\n').filter((l) => /^[0-9a-f]{40,64}$/.test(l.trim())).map((l) => l.trim());
+      const tips = (await git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads', 'refs/spaces/'], { allowFail: true })).stdout.split('\n').filter((l) => /^[0-9a-f]{40,64}$/.test(l.trim())).map((l) => l.trim());
       await id.adminOp({ t: 'revoke', group: WORKSPACE, who, cutoff: [...new Set(tips)].sort() }, key);
       const members = new Set((await id.members()).map((m) => m.key));
       for (const d of devices.filter((x) => members.has(x))) await id.removeMember(d);

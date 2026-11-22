@@ -442,6 +442,22 @@ export const S = {
     onlySuggested: 'Put in',
   },
 
+  readers: {
+    title: (words: string) => `Who can read it: ${words}`,
+    line: (words: string) => (words === 'Only you' ? 'Only you can read this document.' : `Only ${words.replace(/^You/, 'you')} can read this document.`),
+    menu: 'Who can read…',
+    dialogTitle: (name: string) => `Who can read ${name}`,
+    about: 'Only the people chosen get this file, on their devices; no one else’s device is ever sent it. Its history so far stays with whoever could read it then.',
+    everyone: 'Everyone in the workspace',
+    onlyMe: 'Only you',
+    chosen: 'These people and groups:',
+    you: ' (you)',
+    admins: 'The workspace’s admins',
+    save: 'Save',
+    notShared: 'Who reads what is for a workspace you share with other people: invite someone first.',
+    saved: (words: string) => (words ? `${words} can read it now.` : 'Everyone in the workspace can read it now.'),
+  },
+
   rules: {
     title: 'Who can change what',
     about: 'Everyone in the workspace can read everything. Here, admins say who can change a file or folder; where nothing is said, anyone can. Changes by anyone else become suggestions.',

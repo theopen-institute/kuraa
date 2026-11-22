@@ -4,7 +4,7 @@
 // skipped where Podman is not installed.
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_POLICY, type StartRequest } from '@kuraa/run-kit';
@@ -30,6 +30,16 @@ describe('podman run arguments', () => {
     expect(args.filter((a) => a.startsWith('--volume='))).toHaveLength(3);
     expect(args.slice(-3)).toEqual(['--entrypoint=["Rscript"]', 'localhost/kuraa-env:abc', '/kuraa/driver.R']);
     expect(runArgs({ ...base, policy: { ...DEFAULT_POLICY, disk: '100m' } })).toContain(`--tmpfs=/tmp:rw,size=${100 * 1024 ** 2},mode=1777`);
+  });
+
+  it('hide a file by putting an empty one over it, and a folder by an empty, closed one (0066)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-podman-hide-'));
+    mkdirSync(join(dir, 'private'));
+    writeFileSync(join(dir, 'plan.md'), 'secret');
+    const args = runArgs({ ...base, workspace: dir, policy: { ...DEFAULT_POLICY, hide: ['.git', 'plan.md', 'private'] } });
+    expect(args).toContain('--mount=type=bind,source=/dev/null,destination=/work/plan.md,readonly');
+    expect(args).toContain('--mount=type=tmpfs,destination=/work/private,tmpfs-size=4k,tmpfs-mode=0,notmpcopyup');
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('open up only what the policy allows', () => {

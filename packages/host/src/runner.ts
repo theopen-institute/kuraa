@@ -179,6 +179,8 @@ export class Runner {
     commit: (paths: string[], message: string, by: PresenceUser | null) => Promise<void>;
     log: (m: string) => void;
     idleMs?: number;
+    /** Workspace files code run for a document must not see (0066: files not everyone who reads the document reads). */
+    hidden?: (path: string) => Promise<string[]>;
   }) {
     for (const id of o.options?.engines ?? []) if (!o.components.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.components.engines.keys()].join(', ') || 'none'}.`);
     this.on = [...(o.options?.engines ?? [])];
@@ -352,12 +354,13 @@ export class Runner {
    * network, whatever the workspace asks for. Throws, saying why, if the
    * environment is not there.
    */
-  async renderContext(engine: Engine, scratch: string, signal: AbortSignal, status: (m: string) => void, tools?: RenderTools): Promise<RenderContext> {
+  async renderContext(engine: Engine, scratch: string, signal: AbortSignal, status: (m: string) => void, tools?: RenderTools, path?: string): Promise<RenderContext> {
     await this.available();
     const ctx = this.context(engine, await this.config());
+    const hide = path ? (await this.o.hidden?.(path)) ?? [] : [];
     return {
       ...ctx,
-      policy: { ...ctx.policy, workspace: 'read-only', network: false },
+      policy: { ...ctx.policy, workspace: 'read-only', network: false, hide: [...ctx.policy.hide, ...hide] },
       scratch,
       timeLimitMs: this.o.options?.renderTimeoutMs ?? 10 * 60_000,
       signal,
@@ -775,8 +778,12 @@ export class Runner {
     await mkdir(scratch, { recursive: true });
     await emptyDir(scratch);
     if (s.dropped) throw new Error('The session was stopped before it started.');
+    // What code run for this document may read: not files some of its readers may not (0066).
+    const ctx = this.context(engine, config);
+    const hide = (await this.o.hidden?.(path)) ?? [];
     const session = engine.open({
-      ...this.context(engine, config),
+      ...ctx,
+      policy: { ...ctx.policy, hide: [...ctx.policy.hide, ...hide] },
       scratch,
       install: (refs) => this.installPackages(engine.id, refs, byNow()),
       remove: (names) => this.removePackages(engine.id, names, byNow()),

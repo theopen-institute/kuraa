@@ -296,7 +296,15 @@ devices settle the same way everywhere: someone taken out is not put back in at 
 nothing they did meanwhile counts, and two admins taking each other out are both out, unless that
 would leave no admin (then neither is, and Workspace settings say so). What someone taken out, or
 a revoked or lost key, signs after that counts for nothing anywhere; merges are made again by
-every device that brings them in, so none can slip a change past the rules. This is a signed policy every device holds alike, so no device takes
+every device that brings them in, so none can slip a change past the rules.
+
+**Who can read a file** is chosen from its right-click menu or the document's ⋯ menu: everyone in
+the workspace, only you, or people and groups. A file read by fewer is kept in a *space*: a
+history of its own in the repository (`refs/spaces/…`), which devices send only to the devices
+of the people who may read it, so no one else's device ever has it, nor its history. On your
+device its files lie in the folder with the rest, marked with a lock in the file list, and kept
+out of plain git's way (`.git/info/exclude`). Code run for a document cannot see files fewer
+people read than the document, and nothing of a space goes to the online copy. This is a signed policy every device holds alike, so no device takes
 a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
 workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
 by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person

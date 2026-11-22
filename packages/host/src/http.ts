@@ -237,9 +237,17 @@ const fileRoutes: Route[] = [
   route('GET', '/api/tree', async ({ host, res }) => {
     const out = await host.git.out(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
     const branch = await host.git.branch();
-    const paths = [...new Set(out.split('\0').filter(Boolean))].sort();
+    // With the files of the spaces this device holds (plain git is kept off them: spaces.ts).
+    const spaced = host.spaces.entries().map(([p]) => p).filter((p) => existsSync(join(host.dir, p)));
+    const paths = [...new Set([...out.split('\0').filter(Boolean), ...spaced])].sort();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
     const files = await host.treeEntries(paths, branch);
+    // Who reads each file in a space, in words (0066).
+    const readers = host.peers ? await host.peers.readersInWords() : new Map<string, string>();
+    for (const f of files) {
+      const space = host.spaceOf(f.path);
+      if (space) Object.assign(f, { readers: readers.get(space) ?? '' });
+    }
     send(res, 200, { files });
   }),
 
@@ -353,8 +361,10 @@ const historyRoutes: Route[] = [
     const path = host.relPath(str(q.get('path'), 'path'));
     // --follow crosses renames, so each entry also gives the path the file had in that commit
     // (from --name-only, which git prints after the formatted header).
+    // A space's file, from its space's history (0066).
+    const ref = host.refFor(path);
     const log = await host.git.run(
-      ['log', '--follow', '-n', '200', '--name-only', '--format=%x1e%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1d', '--', path],
+      ['log', ...(ref === 'HEAD' ? [] : [ref]), '--follow', '-n', '200', '--name-only', '--format=%x1e%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1d', '--', path],
       { allowFail: true },
     );
     const commits = log.stdout.split('\x1e').filter((s) => s.trim()).map((entry) => {
@@ -605,6 +615,17 @@ const peerRoutes: Route[] = [
     const path = str(b.path, 'path');
     await allowed(() => peers.resolveSuggestion(commit, path, b.accepted === true));
     send(res, 200, { ok: true });
+  }),
+  // Who reads a file (0066): everyone in the workspace (null), or an audience; it moves to that audience's space.
+  route('POST', '/api/audience', async ({ host, req, res }) => {
+    const peers = host.peers;
+    if (!peers) throw new HttpError(400, 'Who reads what is for a workspace shared with other devices');
+    const b = await readBody(req);
+    const path = host.relPath(str(b.path, 'path'));
+    if (b.audience !== null && (!Array.isArray(b.audience) || !b.audience.every((w: unknown) => typeof w === 'string'))) throw new HttpError(400, 'An audience is a list of people, groups or admins, or null for everyone');
+    const audience = b.audience as string[] | null;
+    await allowed(() => peers.setAudience(path, audience));
+    send(res, 200, await peers.access(path));
   }),
   route('GET', '/api/rules', async ({ host, res }) => {
     send(res, 200, host.peers ? await host.peers.rules() : { admin: false, rules: [], groups: [] });

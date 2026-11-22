@@ -502,6 +502,13 @@ export class Identity {
     }
   }
 
+  /** Make a space, or change who reads it (0066): checked after, as the policy judges it. */
+  async makeSpace(id: string, audience: string[], key: KeyPair): Promise<void> {
+    const op: PolicyOp = { t: 'space', id, audience: [...new Set(audience)].sort() };
+    const made = await this.makePolicy(op, key);
+    if (!(await this.policy()).applied.includes(made)) throw new Error('That audience is not one you may make');
+  }
+
   /**
    * Write the policy down if there is none: for a workspace just made (`fresh`),
    * its genesis, naming this person its admin, pinned; for one from before, a

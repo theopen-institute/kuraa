@@ -14,6 +14,7 @@ import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
 import type { Policy } from './policy.js';
+import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
@@ -96,6 +97,9 @@ export interface NodeOptions {
 }
 
 /** What a node joining a workspace (join.ts) takes on when it goes on as the workspace's device for its host. */
+/** Where another device's spaces are fetched to: `<remote>/<id>/heads/<branch>` (0066). */
+export const PEER_SPACES = 'refs/kuraa/peer-spaces/';
+
 export type MemberOptions = Pick<NodeOptions, 'git' | 'branch' | 'log' | 'merges' | 'person' | 'signing'>;
 
 /**
@@ -889,9 +893,9 @@ export class PeerNode {
     this.personRead = null;
   }
 
-  /** The commits this device's branches are at: a cutoff's heads (0066). */
+  /** The commits this device's branches, and the spaces it holds, are at: a cutoff's heads (0066). */
   async branchTips(): Promise<string[]> {
-    const out = await this.o.git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads'], { allowFail: true });
+    const out = await this.o.git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads', SPACES], { allowFail: true });
     return [...new Set(out.stdout.split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40,64}$/.test(l)))].sort();
   }
 
@@ -1055,6 +1059,8 @@ export class PeerNode {
       digest: paired ? digestOf(await this.identity.records()) : '',
       merges: this.o.merges ?? '',
       heads: await this.heads(),
+      // The spaces its person may read, as this device has them (0066): fetched when they differ.
+      ...(paired ? { spaces: await this.spaceHeads(link.key) } : {}),
       ...(paired ? { outputs: await outputRefs(this.o.git) } : {}),
       // For members only: how to reach this device besides the DHT (a device not known yet learns
       // nothing of it): the relay it offers and whether it is on a public address, the relays named in
@@ -1113,6 +1119,7 @@ export class PeerNode {
     if (!link.accepted) return;
     if (m.type === 'refs') {
       link.heads = readHeads(m.heads);
+      link.spaces = readHeads(m.spaces);
       link.outputs = readOutputs(m.outputs);
       this.events.refs?.(link);
     }
@@ -1158,6 +1165,7 @@ export class PeerNode {
     if (link.accepted) {
       link.hello = h;
       link.heads = readHeads(h.heads);
+      link.spaces = readHeads(h.spaces);
       link.outputs = readOutputs(h.outputs);
       if (h.workspace === this.ws.id) this.noteHints(link.key, h);
       if (h.workspace === this.ws.id) await this.gossip(link, h);
@@ -1338,10 +1346,46 @@ export class PeerNode {
     this.events.members?.();
   }
 
-  /** Let a paired device fetch: `git upload-pack`, nothing that writes. */
+  /**
+   * Refs a device may not fetch (0066): every space but those its person may
+   * read, and every other device's spaces as fetched here. Git sends nothing
+   * that only hidden refs reach, and takes no want for what it did not show.
+   */
+  private hiddenRefs(device: string): string[] {
+    const args = ['-c', `transfer.hideRefs=${PEER_SPACES}`, '-c', `transfer.hideRefs=${SPACES}`];
+    const a = this.access;
+    if (!a) return args;
+    const person = a.personOf.get(device) ?? null;
+    for (const id of a.policy.spaces.keys()) if (a.policy.mayRead(person, id)) args.push('-c', `transfer.hideRefs=!${SPACES}${id}/`);
+    return args;
+  }
+
+  /** The tips of the spaces a device's person may read, as this device has them (`<id>/<branch>` → commit), for its hello (0066). */
+  private async spaceHeads(device: string): Promise<Record<string, string>> {
+    const out = await this.o.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', SPACES], { allowFail: true });
+    const a = this.access;
+    const person = a?.personOf.get(device) ?? null;
+    const heads: Record<string, string> = {};
+    for (const line of out.stdout.split('\n').filter(Boolean)) {
+      const [ref, oid] = line.split('\0');
+      const m = /^refs\/spaces\/([0-9a-f]{32})\/heads\/(.+)$/.exec(ref!);
+      if (m && a?.policy.mayRead(person, m[1]!)) heads[`${m[1]}/${m[2]}`] = oid!;
+    }
+    return heads;
+  }
+
+  /** Whether a device's person may read a file of a space (null: the workspace's own, which anyone in it reads) (0066). */
+  mayReadSpace(device: string, space: string | null): boolean {
+    if (space === null) return true;
+    const a = this.access;
+    if (!a || !a.policy.founded) return false;
+    return a.policy.mayRead(a.personOf.get(device) ?? null, space);
+  }
+
+  /** Let a paired device fetch: `git upload-pack`, nothing that writes; no space its person may not read (0066). */
   private serveGit(link: PeerLink, service: string, protocol: string, stream: Duplex): void {
     if (!link.accepted || service !== 'git-upload-pack') return void stream.destroy();
-    const child = spawnGit(['upload-pack', '--strict', '--timeout=600', join(this.o.dir, '.git')], {
+    const child = spawnGit([...this.hiddenRefs(link.key), 'upload-pack', '--strict', '--timeout=600', join(this.o.dir, '.git')], {
       env: gitEnv(protocol ? { GIT_PROTOCOL: protocol } : {}),
       detached: false,
     });
@@ -1355,9 +1399,13 @@ export class PeerNode {
 
   private readonly fetches = new Map<string, Promise<boolean>>();
 
-  /** Fetch a paired device's branches into `<its remote>/…`, one fetch per device at a time. Returns whether it worked. */
+  /**
+   * Fetch a paired device's branches into `<its remote>/…`, and the spaces it
+   * lets this one fetch (0066) into `refs/kuraa/peer-spaces/<its remote>/…`; one
+   * fetch per device at a time. Returns whether it worked.
+   */
   fetch(remote: string): Promise<boolean> {
-    return this.queueFetch(remote, `+refs/heads/*:refs/remotes/${remote}/*`);
+    return this.queueFetch(remote, `+refs/heads/*:refs/remotes/${remote}/*`, `+${SPACES}*:${PEER_SPACES}${remote}/*`);
   }
 
   /**
@@ -1369,10 +1417,10 @@ export class PeerNode {
     return this.queueFetch(remote, outputsRefspec(remote));
   }
 
-  private queueFetch(remote: string, refspec: string): Promise<boolean> {
-    const queue = `${remote}\0${refspec}`;
+  private queueFetch(remote: string, ...refspecs: string[]): Promise<boolean> {
+    const queue = `${remote}\0${refspecs.join('\0')}`;
     const before = this.fetches.get(queue) ?? Promise.resolve(true);
-    const run = before.catch(() => false).then(() => this.fetchNow(remote, refspec));
+    const run = before.catch(() => false).then(() => this.fetchNow(remote, refspecs));
     this.fetches.set(queue, run);
     // Its failure is the caller's to handle (run is returned): not this bookkeeping's, which would leave it unhandled.
     const forget = () => {
@@ -1382,11 +1430,11 @@ export class PeerNode {
     return run;
   }
 
-  private async fetchNow(remote: string, refspec: string): Promise<boolean> {
+  private async fetchNow(remote: string, refspecs: string[]): Promise<boolean> {
     if (this.closing) return false;
     const r = await this.o.git.run([
       '-c', `core.hooksPath=${devNull}`, '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
-      'fetch', '--prune', '--no-write-fetch-head', remote, refspec,
+      'fetch', '--prune', '--no-write-fetch-head', remote, ...refspecs,
     ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: gitPath(this.bridge.binDir) } });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;
@@ -1395,6 +1443,11 @@ export class PeerNode {
   /** Something that went wrong in the background, logged; not once this device is closing (what it worked on may be gone). */
   private logUnlessClosing(e: Error): void {
     if (!this.closing) this.o.log(`peers: ${e.message}`);
+  }
+
+  /** Tell every connected device where this one's branches and outputs are, and the spaces each may read (0066). */
+  async broadcastRefs(heads: Record<string, string>, outputs: Record<string, string>): Promise<void> {
+    for (const link of this.links.values()) if (link.accepted) link.send({ type: 'refs', heads, outputs, spaces: await this.spaceHeads(link.key) });
   }
 
   /** Tell every connected device something. */

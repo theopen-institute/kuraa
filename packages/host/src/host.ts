@@ -22,6 +22,7 @@ import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
 import { POLICY_TRAILER, SUGGESTED_TRAILER, SUGGESTION_TRAILER, type GateResult } from './peers/gate.js';
+import { Spaces, spaceRef } from './spaces.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 export interface HostTimings {
@@ -208,6 +209,8 @@ export class Host {
   /** How this device merges, for other devices to compare (merging.ts). */
   readonly mergeSignature: string;
   readonly git: Git;
+  /** The spaces this device holds: files read only by an audience (spaces.ts, 0066); set at start. */
+  spaces!: Spaces;
   readonly dir: string;
   readonly token: string;
   readonly timings: HostTimings;
@@ -294,6 +297,8 @@ export class Host {
     this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
     this.gitState = await this.readGitState();
     this.onBranch = this.gitState.branch;
+    this.spaces = new Spaces(this.git, this.dir, this.tmpDir);
+    await this.spaces.refresh(this.onBranch);
     const run = this.options.run;
     const components = await loadRunComponents(run?.components);
     // Online copies take what was committed, a while after; and, at start, whatever was committed while the host was away.
@@ -325,6 +330,7 @@ export class Host {
         await this.serial(() => this.commitPaths(paths, message, by && by.email ? [by] : []));
       },
       log: (m) => this.log(m),
+      hidden: (path) => this.hiddenFrom(path),
     });
     this.renders = new Renders({
       root: this.dir,
@@ -896,7 +902,7 @@ export class Host {
       if (st.branch === rec.branch) {
         // A named version says what it is; otherwise say what changed, and mark it as a save the host made.
         if (text === undefined) {
-          const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
+          const before = await this.git.run(['show', `${this.refFor(rec.path)}:${rec.path}`], { allowFail: true });
           text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, people.map((u) => u.name));
         }
         committed = await this.commitPaths([rec.path], text, people, extra);
@@ -963,10 +969,82 @@ export class Host {
     return policy.founded && policy.heads.length ? [`${POLICY_TRAILER}: ${policy.heads.join(' ')}`] : [];
   }
 
+  /** The ref a file is committed on and read from: its space's (spaces.ts), or HEAD for the workspace's own. */
+  refFor(path: string): string {
+    const space = this.spaces?.spaceOf(path);
+    return (space && this.spaces.refOf(space)) || 'HEAD';
+  }
+
+  /**
+   * The files code run for a document must not see (0066): those of spaces
+   * whose readers are not everyone who reads the document. Data flows from
+   * wider to narrower audiences, never back.
+   */
+  async hiddenFrom(path: string): Promise<string[]> {
+    const entries = this.spaces?.entries() ?? [];
+    if (!entries.length || !this.peers) return [];
+    const policy = await this.peers.node.identity.policy();
+    const readers = policy.readers(this.spaceOf(path));
+    const wide = new Map<string, boolean>();
+    const holds = (space: string) => {
+      if (!wide.has(space)) {
+        const theirs = policy.readers(space);
+        wide.set(space, [...readers].every((r) => theirs.has(r)));
+      }
+      return wide.get(space)!;
+    };
+    return entries.filter(([, space]) => !holds(space)).map(([p]) => p);
+  }
+
+  /** The space a file is in (null: the workspace's own). */
+  spaceOf(path: string): string | null {
+    return this.spaces?.spaceOf(path) ?? null;
+  }
+
+  /** Sign a commit object with this device's signing key (spaces' commits; there are spaces only where devices sync). */
+  private async signRaw(raw: Buffer): Promise<Buffer> {
+    if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
+    return signCommitObject(raw, await this.peers.node.signingKey());
+  }
+
+  /**
+   * Commit files of spaces (0066), each in its own space's history: those of
+   * `paths` in a space, and those in a space under a folder of them. Returns
+   * the paths left for the workspace's own commit, and the last commit made.
+   */
+  private async commitSpaces(paths: string[], message: string): Promise<{ rest: string[]; commit: string | null }> {
+    if (!this.spaces?.entries().length) return { rest: paths, commit: null };
+    const branch = await this.git.branch();
+    if (!branch) return { rest: paths, commit: null };
+    const bySpace = new Map<string, string[]>();
+    const rest: string[] = [];
+    for (const p of paths) {
+      const own = this.spaces.spaceOf(p);
+      if (own) {
+        bySpace.set(own, [...(bySpace.get(own) ?? []), p]);
+        continue;
+      }
+      for (const [f, id] of this.spaces.entries()) if (f.startsWith(`${p}/`)) bySpace.set(id, [...(bySpace.get(id) ?? []), f]);
+      rest.push(p);
+    }
+    let commit: string | null = null;
+    for (const [id, files] of bySpace) commit = (await this.spaces.commit(id, branch, files.map((path) => ({ path })), message, (raw) => this.signRaw(raw))) ?? commit;
+    if (bySpace.size) {
+      await this.spaces.refresh(branch);
+      if (commit) this.log(`committed ${commit.slice(0, 7)} ${message.split('\n')[0]} (in a space)`);
+    }
+    return { rest, commit };
+  }
+
   /** Stage and commit the given paths. Returns the commit, or null if nothing changed. */
   async commitPaths(paths: string[], message: string, coAuthors: PresenceUser[] = [], extra: string[] = []): Promise<string | null> {
     // Never in the middle of a git operation, or with no branch checked out.
     await this.requireWritable();
+    // A space's files, in its own history (0066); the rest, the workspace's own.
+    const spaced = await this.commitSpaces(paths, withTrailers(message, coAuthors, [...extra, ...(await this.policyTrailer())]));
+    if (spaced.commit) this.refsChanged();
+    paths = spaced.rest;
+    if (!paths.length) return spaced.commit;
     // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
     // Git is asked only about paths gone from the working tree (a move's old path, a deleted file): most commits have none.
     const here = (p: string) => existsSync(this.resolvePath(p, { link: 'self' }));
@@ -977,10 +1055,10 @@ export class Host {
     const inHead = await listed(['ls-tree', '-r', '--name-only', '-z', 'HEAD']);
     const inIndex = await listed(['ls-files', '-z']);
     paths = paths.filter((p) => here(p) || known(p, inIndex) || known(p, inHead));
-    if (!paths.length) return null;
+    if (!paths.length) return spaced.commit;
     await this.git.stage(paths);
     const diff = await this.git.run(['diff', '--cached', '--quiet', '--', ...paths], { allowFail: true });
-    if (diff.code === 0) return null;
+    if (diff.code === 0) return spaced.commit;
     const full = withTrailers(message, coAuthors, [...extra, ...(await this.policyTrailer())]);
     // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
     // Signed with this host's person's key if it keeps one, else its device's (0034).
@@ -1010,7 +1088,7 @@ export class Host {
       await this.requireWritable();
       const branch = await this.git.branch();
       if (!branch) throw new Error('No branch is checked out');
-      const before = await this.git.run(['show', `HEAD:${path}`], { allowFail: true });
+      const before = await this.git.run(['show', `${this.refFor(path)}:${path}`], { allowFail: true });
       if (before.code !== 0) throw new Error(`${path} is not in this workspace's history yet`);
       if (before.stdout === text) throw new Error('That is the text it has already');
       const policy = await this.policyTrailer();
@@ -1026,17 +1104,20 @@ export class Host {
    * A commit that changes no file, signed, saying something to every device
    * through history: here, that a suggestion was seen to (`Kuraa-Resolved`).
    */
-  async commitNote(message: string, extra: string[]): Promise<string> {
+  async commitNote(message: string, extra: string[], path?: string): Promise<string> {
     if (!this.peers) throw new Error('Not a workspace shared with other devices');
     return this.serial(async () => {
       await this.requireWritable();
-      const head = await this.git.head();
+      // About a space's file: in that space's history, where its suggestions are (0066).
+      const space = path ? this.spaces.spaceOf(path) : null;
+      const ref = space ? this.spaces.refOf(space)! : 'HEAD';
+      const head = space ? (await this.git.out(['rev-parse', `${ref}^{commit}`])) : await this.git.head();
       if (!head) throw new Error('Nothing is committed yet');
       const tree = await this.git.out(['rev-parse', `${head}^{tree}`]);
       const unsigned = await this.git.out(['commit-tree', tree, '-p', head, '-F', '-'], { input: `${withTrailers(message, [], [...extra, ...(await this.policyTrailer())]).trimEnd()}\n` });
       const raw = (await this.git.run(['cat-file', 'commit', unsigned])).bytes;
       const commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers!.node.signingKey()) });
-      await this.git.run(['update-ref', '-m', `commit: ${message}`, 'HEAD', commit, head]);
+      await this.git.run(['update-ref', '-m', `commit: ${message}`, ref, commit, head]);
       this.log(`committed ${commit.slice(0, 7)} ${message}`);
       this.refsChanged();
       return commit;
@@ -1050,6 +1131,16 @@ export class Host {
    * The working tree and the checked-out branch are not touched.
    */
   private async commitToBranch(branch: string, path: string, text: string, message: string): Promise<string | null> {
+    // A space's file, in its space's history on that branch (0066).
+    const space = this.spaces?.spaceOf(path);
+    if (space) {
+      const commit = await this.spaces.commit(space, branch, [{ path, content: Buffer.from(text, 'utf8') }], message, (raw) => this.signRaw(raw));
+      if (commit) {
+        await this.spaces.refresh(await this.git.branch());
+        this.refsChanged();
+      }
+      return commit;
+    }
     const ref = `refs/heads/${branch}`;
     const tip = (await this.git.run(['rev-parse', '--verify', '-q', `${ref}^{commit}`], { allowFail: true })).stdout.trim();
     if (!tip) throw new Error(`The branch ${branch} is gone: the edits to ${path} are kept in its room`);
@@ -1162,6 +1253,8 @@ export class Host {
     }
     const from = this.onBranch;
     this.onBranch = st.branch;
+    // Spaces follow the branch by name.
+    if (from !== st.branch) await this.spaces.refresh(st.branch);
     if (from && from !== st.branch) await this.branchMoved(from, st.branch!);
     else if (resumed) {
       // The operation may have changed files: bring that into the rooms, then write and commit what waited.
@@ -1676,6 +1769,98 @@ export class Host {
       this.refsChanged();
     }
     return outcome;
+  }
+
+  /**
+   * Bring another device's history of a space in (0066): onto this device's
+   * history of it on that branch, as branches are (a merge, judged by the write
+   * rules), and the space's files that changed into the working tree, if it is
+   * the branch checked out. Call inside serial().
+   */
+  async bringSpace(id: string, branch: string, ref: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
+    const theirs = await this.git.out(['rev-parse', '--verify', `${ref}^{commit}`]);
+    const own = spaceRef(id, branch);
+    const mine = (await this.git.run(['rev-parse', '-q', '--verify', `${own}^{commit}`], { allowFail: true })).stdout.trim();
+    const current = (await this.git.branch()) === branch;
+    if (current) {
+      await this.requireWritable();
+      await this.commitAll();
+    }
+    // What the working tree has of the space now (its branch, or the one it is read from).
+    const readNow = current && this.spaces.refOf(id) ? (await this.git.run(['rev-parse', '-q', '--verify', `${this.spaces.refOf(id)}^{commit}`], { allowFail: true })).stdout.trim() : '';
+    const base = mine || readNow;
+    const outcome = base ? await this.merge(base, theirs, override) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
+    if (outcome.commit === mine) return outcome;
+    await this.git.run(['update-ref', '-m', `bring in a space's ${branch}`, own, outcome.commit, mine]);
+    if (current) {
+      for (const c of await this.spaces.changes(readNow || null, outcome.commit)) {
+        // A file the workspace's own branch has stays the workspace's (spaces.ts).
+        if ((await this.git.run(['cat-file', '-e', `HEAD:${c.path}`], { allowFail: true })).code === 0) continue;
+        const abs = this.resolvePath(c.path);
+        if (c.blob) {
+          await mkdir(dirname(abs), { recursive: true });
+          await this.writeAtomic(abs, (await this.git.run(['cat-file', 'blob', c.blob])).bytes);
+        } else {
+          await rm(abs, { force: true });
+        }
+      }
+      await this.spaces.refresh(branch);
+      await this.checkAll();
+      for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at: new Date().toISOString() });
+    }
+    this.refsChanged();
+    return outcome;
+  }
+
+  /**
+   * Move a file to a space (or, null, to the workspace's own files) (0066): out
+   * of where it is, as a commit there (its history stays there, with those who
+   * read it then), and into the other, as it is now.
+   */
+  async moveToSpace(path: string, target: string | null): Promise<void> {
+    if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
+    await this.serial(async () => {
+      await this.requireWritable();
+      await this.commitAll();
+      const branch = await this.git.branch();
+      if (!branch) throw new Error('No branch is checked out');
+      const from = this.spaces.spaceOf(path);
+      if (from === target) return;
+      const abs = this.resolvePath(path);
+      const bytes = await readFile(abs);
+      const policy = await this.policyTrailer();
+      const message = (what: string) => withTrailers(what, [], policy);
+      if (from) await this.spaces.commit(from, branch, [{ path, content: null }], message(`Move ${path} to ${target ? 'another audience' : 'everyone in the workspace'}`), (raw) => this.signRaw(raw));
+      else await this.commitRemoval(path, message(`Move ${path} to a narrower audience`));
+      if (target) await this.spaces.commit(target, branch, [{ path, content: bytes }], message(`Move ${path} here`), (raw) => this.signRaw(raw));
+      await this.spaces.refresh(branch);
+      if (!target) await this.commitPaths([path], message(`Move ${path} to everyone in the workspace`));
+      this.refsChanged();
+      for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at: new Date().toISOString() });
+    });
+  }
+
+  /** Take a file out of the workspace's own branch, as a signed commit, leaving it in the working tree (for a space to take). */
+  private async commitRemoval(path: string, message: string): Promise<void> {
+    const head = await this.git.head();
+    if (!head) return;
+    await mkdir(this.tmpDir, { recursive: true });
+    const env = { GIT_INDEX_FILE: join(this.tmpDir, `remove-index-${process.pid}-${randomBytes(4).toString('hex')}`) };
+    let tree: string;
+    try {
+      await this.git.run(['read-tree', head], { env });
+      await this.git.run(['update-index', '--force-remove', '--', path], { env });
+      tree = await this.git.out(['write-tree'], { env });
+    } finally {
+      await rm(env.GIT_INDEX_FILE, { force: true });
+    }
+    if (tree === (await this.git.out(['rev-parse', `${head}^{tree}`]))) return;
+    const unsigned = await this.git.out(['commit-tree', tree, '-p', head, '-F', '-'], { input: `${message.trimEnd()}\n` });
+    const raw = (await this.git.run(['cat-file', 'commit', unsigned])).bytes;
+    const commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: await this.signRaw(raw) });
+    await this.git.run(['update-ref', '-m', `commit: ${message.split('\n')[0]}`, 'HEAD', commit, head]);
+    await this.git.run(['rm', '--cached', '-q', '--ignore-unmatch', '--', path], { allowFail: true });
+    this.log(`committed ${commit.slice(0, 7)} ${message.split('\n')[0]}`);
   }
 
   /** Bring an online copy's branches in, as fetched (SyncContext.bringIn): what the merge into the open branch kept, to say. */

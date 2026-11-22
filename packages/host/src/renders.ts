@@ -181,7 +181,7 @@ export class Renders {
       let result: RenderResult;
       const added: string[] = [];
       for (let round = 0; ; round++) {
-        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools);
+        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools, path);
         result = await found.renderer.render(ctx, { input: resolve(this.o.root, path), format });
         if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;
         // Parts its tools lacked (LaTeX packages): added, then rendered again.

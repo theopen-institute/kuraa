@@ -83,6 +83,7 @@ const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.con
   >
     <div class="tree-row" :style="indent" :title="tip(f)" :data-testid="`file:${f.path}`">
       <FileIcon class="tree-icon" :icon="t.iconFor(f)" /><span class="tree-name">{{ shownName(f) }}</span>
+      <svg v-if="f.readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers.title(f.readers)" :data-testid="`readers:${f.path}`"><title>{{ S.readers.title(f.readers) }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
       <span
         v-if="f.conflicts"
         class="tree-conflict"

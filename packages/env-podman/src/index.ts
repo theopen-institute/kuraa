@@ -30,7 +30,7 @@
 // Operator options: { "podman": "/path/to/podman" }.
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import type { Dirent } from 'node:fs';
+import { statSync, type Dirent } from 'node:fs';
 import { lstat, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -110,7 +110,13 @@ export function runArgs(opts: {
       // Hidden paths: an empty, inaccessible tmpfs over each. notmpcopyup matters:
       // by default Podman copies what is already at the path into the tmpfs, which
       // would put a copy of .git inside instead of hiding it.
-      ...policy.hide.map((p) => `--mount=type=tmpfs,destination=${INSIDE.workspace}/${p.replace(/^\/+|\/+$/g, '')},tmpfs-size=4k,tmpfs-mode=0,notmpcopyup`),
+      // A file (a document of a narrower audience, 0066): an empty one in its place, as /dev/null is.
+      ...policy.hide.map((p) => {
+        const rel = p.replace(/^\/+|\/+$/g, '');
+        return isFile(join(opts.workspace, rel))
+          ? `--mount=type=bind,source=/dev/null,destination=${INSIDE.workspace}/${rel},readonly`
+          : `--mount=type=tmpfs,destination=${INSIDE.workspace}/${rel},tmpfs-size=4k,tmpfs-mode=0,notmpcopyup`;
+      }),
     ]),
     `--volume=${opts.scratch}:${INSIDE.scratch}:rw`,
     `--volume=${opts.files}:${INSIDE.files}:ro`,
@@ -319,3 +325,12 @@ export const podmanEnvironment: Environment = {
 };
 
 export default defineRunComponent({ name: '@kuraa/env-podman', environments: [podmanEnvironment] });
+
+/** Whether a path is a file (not a folder, and there): hidden by a file put over it, not a folder. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}

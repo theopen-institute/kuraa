@@ -24,6 +24,8 @@ const props = defineProps<{
   registry: TypeRegistry;
   /** The workspace folder's name, shown at the top. */
   workspaceName: string;
+  /** The workspace is shared with other people's devices: Who can read… is offered (0066). */
+  shared?: boolean;
 }>();
 const emit = defineEmits<{
   select: [path: string];
@@ -36,6 +38,8 @@ const emit = defineEmits<{
   created: [path: string];
   /** Open this file at its first conflict. */
   conflicts: [path: string];
+  /** Say who can read this file (0066). */
+  readers: [path: string];
 }>();
 
 const tree = computed(() => buildTree(props.files));
@@ -252,6 +256,7 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
     const file = props.files.find((f) => f.path === path);
     return [
       ...(file?.type ? [{ label: S.tree.documentSettings, run: () => emit('documentSettings', path), testid: 'context:document-settings' }] : []),
+      ...(props.shared ? [{ label: S.readers.menu, run: () => emit('readers', path), testid: 'context:readers' }] : []),
       { label: S.common.renameEllipsis, run: () => void rename(path), testid: 'context:rename' },
       { label: S.common.deleteEllipsis, run: () => void remove(path), danger: true, testid: 'context:delete' },
     ];

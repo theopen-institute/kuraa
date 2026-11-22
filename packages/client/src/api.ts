@@ -61,6 +61,8 @@ export interface TreeFile {
   conflicts?: number;
   /** Why the app does not open it (a link, a file not in UTF-8): its type is then null. */
   cannotOpen?: string;
+  /** Who reads it, in words, if not everyone in the workspace (a space's file, 0066). */
+  readers?: string;
 }
 /** The workspace's devices, as the host reports them: every member has the same say. */
 export type PeersInfo =
@@ -100,6 +102,8 @@ export interface FileAccess {
   rule: { path: string; by: string[] } | null;
   suggestions: SuggestionInfo[];
   you: string | null;
+  /** Who reads it: null for everyone in the workspace; else its audience, and that in words (0066). */
+  readers?: { audience: string[]; words: string } | null;
 }
 
 /** The workspace's write rules and groups (0066). */
@@ -271,6 +275,8 @@ export class HostApi {
   /** See to a suggestion: accepted (its text put in the document first) or dismissed. */
   resolveSuggestion(commit: string, path: string, accepted: boolean) { return this.json('/api/suggestions/resolve', { method: 'POST', body: JSON.stringify({ commit, path, accepted }) }); }
   rules() { return this.json<RulesInfo>('/api/rules'); }
+  /** Who reads a file: everyone in the workspace (null), or an audience (people's IDs, `group:<name>`, `admins`) (0066). */
+  setAudience(path: string, audience: string[] | null) { return this.json<FileAccess>('/api/audience', { method: 'POST', body: JSON.stringify({ path, audience }) }); }
   /** Say who may change a path (people's IDs, `group:<name>`, `admins`); none takes the rule away. */
   setRule(path: string, by: string[]) { return this.json<RulesInfo>('/api/rules', { method: 'POST', body: JSON.stringify({ path, by }) }); }
   /** Put someone in a group as admin or member, or take them out (null). */

@@ -84,9 +84,14 @@ export class Rooms {
     link.sendRoom(m);
   }
 
+  /** Whether a device's person may read a document: one in a space, only its audience (0066); nothing of it is said to anyone else. */
+  private reads(link: PeerLink, path: string): boolean {
+    return this.node.mayReadSpace(link.key, this.host.spaceOf(path));
+  }
+
   /** Connected devices of this workspace with the same room open, from the same seed. */
   private peersIn(room: RoomView): PeerLink[] {
-    return [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id && this.remote.get(l.key)?.get(room.key) === room.seed);
+    return [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id && this.remote.get(l.key)?.get(room.key) === room.seed && this.reads(l, room.path));
   }
 
   private openMessage(room: RoomView): RoomMessage {
@@ -95,13 +100,13 @@ export class Rooms {
 
   /** The connected devices of this workspace with a document open, on any branch. */
   devicesWith(path: string): PeerLink[] {
-    return [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id && [...(this.remote.get(l.key)?.keys() ?? [])].some((key) => pathOf(key) === path));
+    return [...this.node.links.values()].filter((l) => l.accepted && l.hello?.workspace === this.node.ws.id && this.reads(l, path) && [...(this.remote.get(l.key)?.keys() ?? [])].some((key) => pathOf(key) === path));
   }
 
   /** A device connected: tell it which rooms are open here. */
   connected(link: PeerLink): void {
     if (link.hello?.workspace !== this.node.ws.id) return;
-    for (const room of this.host.liveRooms()) this.send(link, this.openMessage(room));
+    for (const room of this.host.liveRooms()) if (this.reads(link, room.path)) this.send(link, this.openMessage(room));
   }
 
   /** A device went away: its people leave the rooms, and rooms it committed are committed here now. */
@@ -124,12 +129,13 @@ export class Rooms {
   opened(name: string): void {
     const room = this.host.roomView(name);
     if (!room) return;
-    for (const link of this.node.links.values()) if (link.accepted && link.hello?.workspace === this.node.ws.id) this.send(link, this.openMessage(room));
+    for (const link of this.node.links.values()) if (link.accepted && link.hello?.workspace === this.node.ws.id && this.reads(link, room.path)) this.send(link, this.openMessage(room));
   }
 
   /** A room closed here (no one has it open). */
   closed(key: string): void {
-    for (const link of this.node.links.values()) if (link.accepted) this.send(link, { type: 'room', op: 'close', key });
+    const path = pathOf(key);
+    for (const link of this.node.links.values()) if (link.accepted && (path === null || this.reads(link, path))) this.send(link, { type: 'room', op: 'close', key });
   }
 
   message(link: PeerLink, raw: { type: 'room'; [k: string]: unknown }): void {
@@ -144,6 +150,9 @@ export class Rooms {
     if (link.hello?.workspace !== this.node.ws.id) return;
     const m = raw as unknown as RoomMessage;
     if (typeof m.key !== 'string') return;
+    // A document in a space: nothing taken from, or given to, a device whose person may not read it (0066).
+    const about = pathOf(m.key);
+    if (about !== null && !this.reads(link, about)) return;
     const relay = this.host.sessionRelay;
     const room = this.host.liveRoom(m.key);
     const theirs = this.remote.get(link.key) ?? new Map<string, string>();

@@ -15,6 +15,9 @@ import { WaitingForPolicy, describeOutcome, type Host } from '../host.js';
 import { RESOLVED_TRAILER, gate, type GateResult } from './gate.js';
 import { suggestions, type Suggestion } from './suggestions.js';
 import { MERGE_VERSION, isAncestor } from '../merging.js';
+import { randomBytes } from 'node:crypto';
+import { PEER_SPACES } from './node.js';
+import { spaceRef } from '../spaces.js';
 import { PROTOCOL, type PeerLink } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
@@ -129,6 +132,17 @@ export interface FileAccess {
   suggestions: Suggestion[];
   /** This person (identity ID). */
   you: string | null;
+  /** Who reads it: null for everyone in the workspace; else its space's audience, and that in words (0066). */
+  readers: { audience: string[]; words: string } | null;
+}
+
+/** An audience in words: "Only you", "Ada and Bo", "editors", "admins". */
+export function audienceWords(audience: string[], me: string | null, names: Map<string, string>): string {
+  if (audience.length === 1 && audience[0] === me) return 'Only you';
+  // You first: "You and Bo".
+  const ordered = [...audience].sort((x, y) => Number(y === me) - Number(x === me));
+  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
 }
 
 /** The workspace's groups and write rules (0066). */
@@ -284,7 +298,8 @@ export class Peers {
       signing: () => this.node.signingKey(),
       members: () => identity.members(),
       signerOf: (key) => identity.signingKeyOf(key),
-      cached: () => this.host.runner.cached(),
+      // Not a space's documents' (0066): this ref goes to every device of the workspace. Their outputs stay here.
+      cached: async () => (await this.host.runner.cached()).filter((c) => !this.host.spaceOf(c.path)),
       forget: (ids) => this.host.runner.forgetRuns(ids),
       changed: (path, added, removed) => {
         for (const run of added) this.host.broadcastPath(path, { type: 'run', run });
@@ -320,7 +335,7 @@ export class Peers {
     this.announceAt = Date.now() + ms;
     this.announceTimer = setTimeout(() => {
       this.announceTimer = undefined;
-      void Promise.all([this.node.heads(), outputRefs(this.host.git)]).then(([heads, outputs]) => this.node.broadcast({ type: 'refs', heads, outputs })).catch((e: Error) => this.host.log(`peers: ${e.message}`));
+      void Promise.all([this.node.heads(), outputRefs(this.host.git)]).then(([heads, outputs]) => this.node.broadcastRefs(heads, outputs)).catch((e: Error) => this.host.log(`peers: ${e.message}`));
     }, ms);
   }
 
@@ -343,6 +358,13 @@ export class Peers {
       if (!here || !(await isAncestor(this.host.git, oid, here))) return false;
     }
     const remote = link.remote!;
+    // Its spaces this person may read, likewise (0066): each held here as far, in this device's history of it.
+    for (const [name, oid] of Object.entries(link.spaces ?? {})) {
+      const m = /^([0-9a-f]{32})\/(.+)$/.exec(name);
+      if (!m) continue;
+      const here = (await this.host.git.run(['rev-parse', '-q', '--verify', `${spaceRef(m[1]!, m[2]!)}^{commit}`], { allowFail: true })).stdout.trim();
+      if (here !== oid && (!here || !(await isAncestor(this.host.git, oid, here)))) return false;
+    }
     const tracking = new Map((await this.branchesOf(remote)).map((b) => [b.branch, b.oid]));
     const moves = Object.entries(theirs).filter(([b, oid]) => tracking.get(b) !== oid).map(([b, oid]) => `update refs/remotes/${remote}/${b} ${oid}\n`);
     if (moves.length) await this.host.git.run(['update-ref', '--stdin'], { input: moves.join(''), allowFail: true });
@@ -427,6 +449,26 @@ export class Peers {
     const remote = link.remote!;
     const forwardOnly = this.node.mergesDiffer(link.key) && link.key < this.node.myKey;
     for (const { branch, oid } of await this.branchesOf(remote)) await this.bringBranch(branch, `refs/remotes/${remote}/${branch}`, oid, link, forwardOnly);
+    // Its spaces this person may read (0066): only those come, as it judged (node.ts serves no others), so
+    // a space whose operation has not reached this device yet is not held back.
+    const out = await this.host.git.run(['for-each-ref', '--format=%(refname)', `${PEER_SPACES}${remote}/`], { allowFail: true });
+    for (const ref of out.stdout.split('\n').filter(Boolean)) {
+      const m = new RegExp(`^${PEER_SPACES}${remote}/([0-9a-f]{32})/heads/(.+)$`).exec(ref);
+      if (!m) continue;
+      const [, id, branch] = m;
+      await this.host.serial(async () => {
+        try {
+          const outcome = await this.host.bringSpace(id!, branch!, ref, this.rooms.override(link));
+          this.waitingForPolicy.delete(`${remote}/${ref}`);
+          if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${remote}${describeOutcome(outcome)}`);
+        } catch (e) {
+          if (!(e instanceof WaitingForPolicy)) throw e;
+          if (!this.waitingForPolicy.has(`${remote}/${ref}`)) this.host.log(`peers: ${remote}'s work in a space is ${e.message}`);
+          this.waitingForPolicy.add(`${remote}/${ref}`);
+          setTimeout(() => void this.syncFrom(link), 2000).unref();
+        }
+      });
+    }
   }
 
   /**
@@ -565,6 +607,7 @@ export class Peers {
    */
   async access(path: string): Promise<FileAccess> {
     const { policy, me } = await this.node.policy();
+    const space = this.host.spaceOf(path);
     const rule = policy.founded ? policy.ruleFor(path) : null;
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
     const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
@@ -573,6 +616,8 @@ export class Peers {
       rule: rule && { path: rule.path, by: rule.by.map(words) },
       suggestions: await this.suggestions(path),
       you: me,
+      // Who reads it: everyone in the workspace (null), or a space's audience (0066).
+      readers: space ? { audience: policy.spaces.get(space)?.audience ?? [], words: audienceWords(policy.spaces.get(space)?.audience ?? [], me, names) } : null,
     };
   }
 
@@ -584,7 +629,50 @@ export class Peers {
     const people = await this.node.identity.people();
     const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
     const names = new Map(people.map((p) => [p.key, p.name]));
-    return suggestions(this.host.git, branch, { personOf: (k) => byKey.get(k) ?? null, nameOf: (p) => names.get(p) ?? null, mayWrite: (p, f) => !policy.founded || policy.mayWrite(p, f) }, path);
+    const ctx = { personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? null, mayWrite: (p: string | null, f: string) => !policy.founded || policy.mayWrite(p, f) };
+    // The workspace's own history, and each space's (0066): a space's file's suggestions are in its space's.
+    const refs = path !== undefined
+      ? [this.host.refFor(path) === 'HEAD' ? branch : this.host.refFor(path)]
+      : [branch, ...this.host.spaces.ids().map((id) => this.host.spaces.refOf(id)!)];
+    const all: Suggestion[] = [];
+    for (const ref of refs) all.push(...(await suggestions(this.host.git, ref, ctx, path)));
+    return all.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+
+  /** Who reads each space, in words ("Only you", "Ada and Bo", "editors"), for the file list (0066). */
+  async readersInWords(): Promise<Map<string, string>> {
+    const { policy, me } = await this.node.policy();
+    const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    const out = new Map<string, string>();
+    for (const [id, s] of policy.spaces) out.set(id, audienceWords(s.audience, me, names));
+    return out;
+  }
+
+  /**
+   * Who may read a file (0066): everyone in the workspace (`null`), or an
+   * audience (people's IDs, `group:<name>`, `admins`), which must include this
+   * person. Files with the same audience share a space: one is made for an
+   * audience no space has yet. The file moves there as it is now; its history
+   * stays where it was, with those who read it then.
+   */
+  async setAudience(path: string, audience: string[] | null): Promise<void> {
+    const { policy, me } = await this.node.policy();
+    if (!policy.founded || !me) throw new NotAllowed('Who reads what is for a workspace shared with other people, once it has a policy');
+    if (!(await this.access(path)).canWrite) throw new NotAllowed('Only someone who may change this file says who reads it');
+    let target: string | null = null;
+    if (audience) {
+      const wanted = [...new Set(audience)].sort();
+      if (!wanted.length || !wanted.every((w) => /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/.test(w))) throw new NotAllowed('An audience names people, groups or admins');
+      const same = [...policy.spaces].find(([, s]) => s.audience.join() === wanted.join());
+      if (same) target = same[0];
+      else {
+        target = randomBytes(16).toString('hex');
+        await this.node.identity.makeSpace(target, wanted, await this.node.signingKeyNow());
+        await this.node.membersChanged();
+      }
+      if (!(await this.node.policy()).policy.mayRead(me, target)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
+    }
+    await this.host.moveToSpace(path, target);
   }
 
   /** Suggest a text for a file this person may not change (Host.suggest); one they may, they change. */

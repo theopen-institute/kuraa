@@ -11,7 +11,8 @@ const emit = defineEmits<{ suggest: []; view: [suggestion: SuggestionInfo] }>();
 </script>
 
 <template>
-  <div v-if="!access.canWrite || access.suggestions.length" class="banner info access-bar" data-testid="access">
+  <div v-if="!access.canWrite || access.suggestions.length || access.readers" class="banner info access-bar" data-testid="access">
+    <span v-if="access.readers" data-testid="readers-line">{{ S.readers.line(access.readers.words) }}</span>
     <span v-if="!access.canWrite" data-testid="read-only">{{ S.access.readOnly(access.rule?.by ?? []) }}</span>
     <button v-if="!access.canWrite" type="button" data-testid="suggest" @click="emit('suggest')">{{ S.access.suggest }}</button>
     <span v-if="access.suggestions.length" class="access-suggestions" data-testid="suggestions">

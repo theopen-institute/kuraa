@@ -29,6 +29,12 @@
 //   rule for a file counts; with none, anyone may. Only the workspace's admins
 //   make rules; a rule naming no one is taken away.
 //
+// - space: who may read a set of files (0066, step 5): a space's ID and its
+//   audience (people, `group:<name>`, `admins`), like a rule's. Anyone in the
+//   workspace may make one they are in themselves; its audience may be changed
+//   by whoever made it, or by the workspace's admins. Files not in a space are
+//   the workspace's: everyone in it reads them.
+//
 // Groups: `workspace` (everyone in it), and any an admin of the workspace makes
 // by putting someone in it. A group may hold people (identity IDs) and, as
 // members, other groups (`group:<name>`).
@@ -44,7 +50,8 @@ export type PolicyOp =
   | { t: 'revoke'; group: string; who: string; cutoff?: string[] }
   | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string }
   | { t: 'seal'; geneses: string[] }
-  | { t: 'rule'; path: string; by: string[] };
+  | { t: 'rule'; path: string; by: string[] }
+  | { t: 'space'; id: string; audience: string[] };
 
 /** A policy operation as a record carries it (records.ts, kind `policy`). */
 export interface PolicyEntry {
@@ -74,6 +81,7 @@ function encodeOp(op: PolicyOp): string {
     case 'join': return ['join', op.group, op.role, op.link, op.once ? 'once' : 'anyone', op.granter, op.grant].join('\0');
     case 'seal': return ['seal', op.geneses.join(',')].join('\0');
     case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
+    case 'space': return ['space', op.id, op.audience.join(',')].join('\0');
   }
 }
 
@@ -143,6 +151,10 @@ export function readOp(v: unknown): PolicyOp | null {
       const by = sortedUnique(o.by, writerTest);
       return typeof o.path === 'string' && isRulePath(o.path) && by ? { t: 'rule', path: o.path, by } : null;
     }
+    case 'space': {
+      const audience = sortedUnique(o.audience, writerTest);
+      return typeof o.id === 'string' && /^[0-9a-f]{32}$/.test(o.id) && audience && audience.length ? { t: 'space', id: o.id, audience } : null;
+    }
     default:
       return null;
   }
@@ -184,7 +196,32 @@ export class Policy {
     readonly disputes: { people: string[]; ops: string[] }[] = [],
     /** People out of the workspace, and the commits they had made that still count (their removals' cutoffs, gate.ts). */
     readonly cutoffs = new Map<string, string[]>(),
+    /** Spaces (step 5): ID → who may read it, and who made it. */
+    readonly spaces = new Map<string, { audience: string[]; by: string }>(),
   ) {}
+
+  /** Whether an audience entry (a person, `group:<name>`, `admins`) holds a person. */
+  private holds(entry: string, id: string): boolean {
+    return entry === id || (entry === 'admins' && this.isAdmin(id)) || (entry.startsWith('group:') && this.role(id, entry.slice(6)) !== null);
+  }
+
+  /**
+   * Whether a person may read a space (null: the workspace's own files, which
+   * everyone in it reads; anyone, where there is no policy). A space unknown
+   * here (its operation not yet come) is read by no one.
+   */
+  mayRead(id: string | null, space: string | null): boolean {
+    if (!this.founded) return space === null;
+    if (!id || !this.groups.get(WORKSPACE)?.has(id)) return false;
+    if (space === null) return true;
+    const s = this.spaces.get(space);
+    return !!s && s.audience.some((e) => this.holds(e, id));
+  }
+
+  /** Everyone in the workspace who may read a space now: for whether one audience holds another (what code may read). */
+  readers(space: string | null): Set<string> {
+    return new Set([...(this.groups.get(WORKSPACE)?.keys() ?? [])].filter((id) => !id.startsWith('group:') && this.mayRead(id, space)));
+  }
 
   /** The rule that counts for a file: the most specific path that holds it; null if none. */
   ruleFor(path: string): { path: string; by: string[] } | null {
@@ -278,6 +315,7 @@ function linearize(byId: Map<string, PolicyEntry>): PolicyEntry[] {
 interface State {
   groups: Map<string, Map<string, Role>>;
   rules: Map<string, string[]>;
+  spaces: Map<string, { audience: string[]; by: string }>;
   usedLinks: Set<string>;
   seal: string[] | null;
   applied: string[];
@@ -293,12 +331,12 @@ interface Removal {
   wasAdmin: boolean;
 }
 
-const view = (s: State, geneses: string[] = []) => new Policy(s.groups, geneses, s.applied, [], s.usedLinks, !!s.seal, s.rules);
+const view = (s: State, geneses: string[] = []) => new Policy(s.groups, geneses, s.applied, [], s.usedLinks, !!s.seal, s.rules, [], new Map(), s.spaces);
 
 function freshState(order: PolicyEntry[], counted: Set<string>): State {
   const groups = new Map<string, Map<string, Role>>([[WORKSPACE, new Map()]]);
   for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) groups.get(WORKSPACE)!.set(id, 'admin');
-  return { groups, rules: new Map(), usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
+  return { groups, rules: new Map(), spaces: new Map(), usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
 }
 
 const adminCount = (s: State) => [...s.groups.get(WORKSPACE)!].filter(([, r]) => r === 'admin').length;
@@ -332,6 +370,13 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
       return !s.seal && now.isAdmin(by);
     case 'rule':
       return now.isAdmin(by);
+    case 'space': {
+      // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
+      const had = s.spaces.get(op.id);
+      if (!ws.has(by)) return false;
+      const holdsMaker = op.audience.some((e) => e === by || (e === 'admins' && now.isAdmin(by)) || (e.startsWith('group:') && now.role(by, e.slice(6)) !== null));
+      return had ? had.by === by || now.isAdmin(by) : holdsMaker;
+    }
     case 'genesis':
       return false;
   }
@@ -373,6 +418,9 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
     case 'rule':
       if (op.by.length) s.rules.set(op.path, op.by);
       else s.rules.delete(op.path);
+      return true;
+    case 'space':
+      s.spaces.set(op.id, { audience: op.audience, by: s.spaces.get(op.id)?.by ?? by });
       return true;
     case 'genesis':
       return false;
@@ -506,5 +554,5 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
     if (!m || m.group !== WORKSPACE || m.kind !== 'out' || state.groups.get(WORKSPACE)!.has(m.person) || e.op.t !== 'revoke') continue;
     cutoffs.set(m.person, [...new Set([...(cutoffs.get(m.person) ?? []), ...(e.op.cutoff ?? [])])].sort());
   }
-  return { policy: new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.rules, disputes, cutoffs), seal: state.seal };
+  return { policy: new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.rules, disputes, cutoffs, state.spaces), seal: state.seal };
 }

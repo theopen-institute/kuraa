@@ -89,6 +89,8 @@ export type ControlMessage =
       digest: string;
       /** Its branches: name → commit (a device fetches only when it lacks one). */
       heads?: Record<string, string>;
+      /** The tips of the spaces the receiving device's person may read (`<id>/<branch>` → commit), 0066. */
+      spaces?: Record<string, string>;
       /** The run outputs it has, its own and other members' (peers/outputs.ts): device key → commit. Only to a device it is paired with. */
       outputs?: Record<string, string>;
       /** The key of the relay it offers members (relay.ts): only to a device it is paired with. */
@@ -105,7 +107,7 @@ export type ControlMessage =
   /** The answer to a joining device: what it needs to set itself up, and the records (the joining device checks who welcomed it by them). */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; branch: string; records: unknown[]; /** The workspace's secret: the link does not carry it (0050). */ secret?: string }
   /** This device's branches changed, to these (name → commit): fetch them, unless this device has them already. */
-  | { type: 'refs'; heads?: Record<string, string>; outputs?: Record<string, string> }
+  | { type: 'refs'; heads?: Record<string, string>; outputs?: Record<string, string>; spaces?: Record<string, string> }
   /** Signed membership records the other device lacks: just taken or made here, or asked for (want). */
   | { type: 'records'; records: unknown[] }
   /** Asking for the records this device lacks: it says which it has (the start of each signature). */
@@ -173,6 +175,8 @@ export class PeerLink {
   said: Promise<void> = Promise.resolve();
   /** Its branches as it last said (name → commit); null: not said, so fetched to know. */
   heads: Record<string, string> | null = null;
+  /** The tips of its spaces this device's person may read, as it last said (0066). */
+  spaces: Record<string, string> | null = null;
   /** The run outputs it has, as it last said (device key → commit); null: not said. */
   outputs: Record<string, string> | null = null;
 

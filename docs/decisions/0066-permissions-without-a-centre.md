@@ -1,6 +1,6 @@
 # 0066 · Who may read and change what, without a centre
 
-**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles), 3 (write rules, suggestions) and 4 (changes at the same time, cutoffs, merges checked); see *Built so far* at the end.**
+**Status: being built, in the order below. Built: 1 (identities), 2 (the policy, groups, roles), 3 (write rules, suggestions), 4 (changes at the same time, cutoffs, merges checked) and 5 (who reads what: spaces); see *Built so far* at the end.**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends
 [0031](0031-signed-membership.md) (signed records) and [0035](0035-identities-and-signing-keys.md)
@@ -494,3 +494,55 @@ differ by person, and how usable plain git is with only the public layer.
   merge by another version of merging is checked only for what it holds that neither parent did.
 - **Not yet:** cutoffs for spaces the remover cannot read (step 5: the first member of each to see
   the removal is to sign one).
+
+### 5 · Who reads what: spaces (`spaces.ts`)
+
+- **One repository, histories apart (a deviation from *On disk, one ordinary folder*).** A space is
+  a history of its own on refs of its own, `refs/spaces/<id>/heads/<branch>`, its first commit a
+  root, sharing no commit with the workspace's branches or another space; not a git directory of
+  its own. A device serving a fetch hides every space but those the fetching device's person may
+  read (`transfer.hideRefs`, all of `refs/spaces/` hidden, then those unhidden), and every space
+  it fetched from others (`refs/kuraa/peer-spaces/`); git sends nothing only hidden refs reach, and
+  takes no want for what it did not show. So the read boundary is the same, with one object store,
+  one fetch and one remote per device. Fetching brings a device's spaces into
+  `refs/kuraa/peer-spaces/<remote>/…`, and hellos and ref announcements carry, to each device, the
+  tips of the spaces its person may read, so a change in one is fetched.
+- **The policy** has `space` operations: an ID and an audience (people, `group:<name>`, `admins`).
+  Anyone in the workspace may make one they are in themselves; whoever made it, or an admin,
+  changes it. Space IDs and audiences are in the policy every member holds (not encrypted to the
+  audience, as *Each space is a whole workspace* hoped): members learn that an audience exists,
+  never a file of it, its name or its history. Spaces have no names; files are named by their paths
+  and badged with who reads them.
+- **Who can read…** (a file's right-click menu, the document's ⋯ menu; `POST /api/audience`,
+  only by someone who may change the file) chooses everyone in the workspace, only you, or people
+  and groups (always with you). Files with the same audience share a space; one is made for an
+  audience no space has. The file moves as it is now: taken out of where it was (its history stays
+  there, with those who read it then) and put into the other. Widening never shares the old history.
+- **On a device**, the files of the spaces it holds lie in the working folder at their paths and
+  are listed in `.git/info/exclude` (a block kuraa writes), so plain git shows a clean tree and
+  never commits them to a branch. Committing splits by space (each its own signed commit, with the
+  same message and trailers); the file list, search (by name, past the exclude), a file's history,
+  suggestions and run outputs all read the space a file is in. A space's history comes in as a
+  branch's does (a merge, judged by the write rules and gated alike), and its changed files are
+  written to the folder. A path the workspace's own branch has stays the workspace's: a space's
+  file at the same path is not shown (not *both, the narrower labelled*, for now).
+- **Rooms** of a space's documents: nothing of them is said to, or taken from, a device whose person
+  may not read the space (not even that the room is open).
+- **What code may read**: a code session or render for a document hides every space's file whose
+  readers are not all of the document's readers (a file: `/dev/null` mounted over it in Podman; a
+  folder: an empty, closed tmpfs, as `.git` is). Data flows from wider to narrower, never back.
+  An unsandboxed environment hides nothing.
+- **Run outputs** of a space's documents go live only to devices with the document open (its
+  readers) and are not published on the outputs ref, which every device fetches: they stay on the
+  device that ran them.
+- **Branches** span spaces by name: a space without the branch checked out is read at its `main`,
+  and its first commit on the branch starts from there.
+- **The online copy** pushes branches only: a space has none.
+- **Cutoffs** name the tips of the spaces the remover's device holds as well as its branches; a
+  removed person's commits in a space the remover does not hold are refused (the first member to
+  see the removal signing a cutoff for it is still to do).
+- **Not yet:** folder defaults (a new file is everyone's until **Who can read…**); write rules kept
+  inside a space (rules are in the policy, so a rule naming a private file names its path to every
+  member); sharing a file's history when its audience widens; two spaces with one path; outputs of
+  a space's documents on other devices after the fact; moving files between audiences from the
+  command line.

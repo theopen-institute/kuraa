@@ -529,6 +529,69 @@ describe('equal members, and forks', () => {
     expect(file(dirA)).not.toContain('Bo: ');
   });
 
+  it('give a file read only by some to them alone: never to anyone else, not even its objects (0066)', async () => {
+    const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
+    dirs.push(people);
+    const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
+    const bo = await createPerson('Bo', join(people, 'bo', 'person.json'));
+    const cy = await createPerson('Cy', join(people, 'cy', 'person.json'));
+    const dirA = repo();
+    const a = await start(dirA, { person: ada });
+    const join_ = async (who: typeof bo, name: string) => {
+      const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
+      dirs.push(parent);
+      const dir = join(parent, 'notes');
+      signingKeys.set(dir, crypto.keyPair());
+      await joinWorkspace({ dir, invitation: await inviteFrom(a), name, bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: who, signing: signingKeys.get(dir) });
+      return { dir, h: await start(dir, { person: who }) };
+    };
+    const { dir: dirB, h: b } = await join_(bo, 'bee');
+    const { dir: dirC, h: c } = await join_(cy, 'cee');
+    await until(async () => (await a.host.peers!.people()).people.length === 3, 15_000, 'all three in');
+
+    // Ada writes a plan, and gives it to herself and Bo alone.
+    expect((await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n\nThe surprise party is on Friday.\n' }) })).status).toBe(201);
+    await until(() => existsSync(join(dirC, 'plan.md')), 20_000, 'the plan, first everyone’s, on Cy’s device');
+    const res = await api(a, '/api/audience', { method: 'POST', body: JSON.stringify({ path: 'plan.md', audience: [ada.id, bo.id] }) });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { readers: { words: string } }).readers.words).toBe('You and Bo');
+    // Off the workspace's own branch, into a space of its own; plain git sees nothing out of place.
+    expect(git(dirA, 'ls-tree', '--name-only', 'HEAD')).not.toContain('plan.md');
+    expect(git(dirA, 'status', '--porcelain')).toBe('');
+    expect(git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/')).toMatch(/^refs\/spaces\/[0-9a-f]{32}\/heads\/main$/);
+
+    // Bo's device has it, read from the space; the file list says who reads it.
+    const treeOf = async (h: RunningHost) => ((await (await api(h, '/api/tree')).json()) as { files: { path: string; readers?: string }[] }).files;
+    await until(async () => (await treeOf(b)).some((f) => f.path === 'plan.md' && f.readers), 20_000, 'the plan in a space on Bo’s device');
+    expect(readFileSync(join(dirB, 'plan.md'), 'utf8')).toContain('Friday');
+    const treeB = { files: await treeOf(b) };
+    expect(treeB.files.find((f) => f.path === 'plan.md')?.readers).toBe('You and Ada');
+    expect(((await (await api(b, '/api/search?q=surprise')).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('plan.md');
+    // Bo changes it: it comes back to Ada, in the space.
+    writeFileSync(join(dirB, 'plan.md'), '# Plan\n\nThe surprise party is on Friday. Bo brings cake.\n');
+    await b.host.serial(() => b.host.commitPaths(['plan.md'], 'Cake'));
+    await until(() => readFileSync(join(dirA, 'plan.md'), 'utf8').includes('cake'), 20_000, 'Bo’s change on Ada’s device');
+    expect(git(dirA, 'status', '--porcelain')).toBe('');
+
+    // Code run for a document everyone reads does not see the plan; code run for the plan sees everything.
+    expect(await a.host.hiddenFrom('notes.md')).toEqual(['plan.md']);
+    expect(await a.host.hiddenFrom('plan.md')).toEqual([]);
+
+    // Cy's device: the old version, from when everyone read it, is still in the history it has; the space, nothing of it.
+    await until(async () => (await c.host.peers!.status()).devices.filter((d) => d.online).length === 2, 15_000, 'Cy connected');
+    await c.host.peers!.syncAll();
+    await new Promise((r) => setTimeout(r, 1500));
+    await c.host.peers!.syncAll();
+    expect(git(dirC, 'for-each-ref', 'refs/spaces/', 'refs/kuraa/peer-spaces/')).toBe('');
+    const cakeBlob = git(dirA, 'rev-parse', `${git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/')}:plan.md`);
+    expect(() => git(dirC, 'cat-file', '-e', cakeBlob)).toThrow();
+    const treeC = (await (await api(c, '/api/tree')).json()) as { files: { path: string }[] };
+    expect(treeC.files.map((f) => f.path)).not.toContain('plan.md');
+    expect(((await (await api(c, '/api/search?q=cake')).json()) as { files: { path: string }[] }).files).toEqual([]);
+    // Its file went from Cy's working tree with the workspace's branch.
+    await until(() => !existsSync(join(dirC, 'plan.md')), 20_000, 'the plan gone from Cy’s copy');
+  });
+
   it('take any member’s work, and name it by the person whose it is', async () => {
     const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
     dirs.push(people);

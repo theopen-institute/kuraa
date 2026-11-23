@@ -285,14 +285,14 @@ describe('a workspace’s policy', () => {
       expect(p.role(ada.id)).toBe('admin');
     });
 
-    it('what someone did as an admin made by a grant that was cut off: not counted', () => {
-      const h = history(false);
-      h.add({ t: 'genesis', admins: [ada.id, bo.id, cy.id], legacy: true }, ada);
-      const base = h.now().heads;
-      const made = h.add(grant(dee, 'admin'), cy, base);
-      h.add({ t: 'revoke', group: 'workspace', who: cy.id }, ada, base);
+    it('what someone did, let in by a grant that was cut off: not counted', () => {
+      const { h, base } = start();
+      // Bo (an admin) lets Dee in, as Ada (the owner, who ranks above him) takes Bo out; Dee then makes a space.
+      const made = h.add(grant(dee, 'member'), bo, base);
+      h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
       h.add({ t: 'space', id: '44'.repeat(16), audience: [dee.id] }, dee, [made.id]);
       const p = h.now();
+      expect(p.role(bo.id)).toBeNull();
       expect(p.role(dee.id)).toBeNull();
       expect(p.spaces.size).toBe(0);
     });

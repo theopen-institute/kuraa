@@ -617,3 +617,28 @@ describe('signed commits', () => {
     expect(await commitSigner(git, unsigned)).toBeNull();
   });
 });
+
+describe('records read while they are written', () => {
+  it('are never found half written: the policy stays founded while records are taken (0075)', { timeout: 60_000 }, async () => {
+    const { id } = repo();
+    const { ws } = await founded(id);
+    const before = (await id.records()).length;
+    const taking = Array.from({ length: 300 }, () => eventRecords(ws.id, identity())).flat();
+    let reading = true;
+    let least = Infinity;
+    let unfounded = 0;
+    const reader = (async () => {
+      while (reading) {
+        least = Math.min(least, (await id.records()).length);
+        if (!(await id.policy()).founded) unfounded++;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    })();
+    for (let i = 0; i < taking.length; i += 10) await id.takeRecords(taking.slice(i, i + 10));
+    reading = false;
+    await reader;
+    expect(least).toBeGreaterThanOrEqual(before);
+    expect(unfounded).toBe(0);
+    expect((await id.records()).length).toBeGreaterThan(before);
+  });
+});

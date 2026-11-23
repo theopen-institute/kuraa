@@ -58,7 +58,9 @@ has a test.
     expired ones.
 - **Records from a stranger are not kept.** A hello's proof is taken only for records about the
   device that sent it, and kept only if they show it is in; checked once a second for a device,
-  60 a minute in all. Records are written once a batch.
+  60 a minute in all. Records are written once a batch, and whole (a file beside them, put in
+  their place), and stay the ones read until they are: a read while they were written found none,
+  and a policy with nothing in it (no grant in an invite link made just then).
 - **No clock in the policy.** An attestation's expiry counted by each device's clock, so two
   devices could disagree about who may write. Now an attestation lapses once its verifier has
   made another dated after its expiry.

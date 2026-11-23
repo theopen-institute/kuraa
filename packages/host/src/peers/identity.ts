@@ -18,7 +18,7 @@
 // - A workspace from before policies: the legacy geneses this device holds as its
 //   own, and the seal it keeps to (policy.ts): .git/kuraa/legacy.json.
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -427,23 +427,34 @@ export class Identity {
   /** Records kept while others are being taken (batch): written once, after, not the whole file again for each. */
   private pending: { list: MemberRecord[]; changed: boolean } | null = null;
 
-  /** Keep the records `fn` keeps, and write them down once, after it. */
+  /**
+   * Keep the records `fn` keeps, and write them down once, after it. They stay
+   * the records read (pending) until they are written: a read while the file is
+   * being written would find it as it was, without them. Records kept while it
+   * is written are written after.
+   */
   private async batch<T>(fn: () => Promise<T>): Promise<T> {
     if (this.pending) return fn();
     this.pending = { list: await this.records(), changed: false };
     try {
       return await fn();
     } finally {
-      const { list, changed } = this.pending;
-      this.pending = null;
-      if (changed) await this.writeRecords(list);
+      try {
+        while (this.pending.changed) {
+          const list: MemberRecord[] = this.pending.list;
+          this.pending = { list, changed: false };
+          await this.writeRecords(list);
+        }
+      } finally {
+        this.pending = null;
+      }
     }
   }
 
   private async writeRecords(list: MemberRecord[]): Promise<void> {
     await mkdir(this.stateDir, { recursive: true });
     // Readable only by this computer's user: they hold the workspace's secret (records.ts, secret).
-    await writeFile(this.recordsFile, JSON.stringify(list, null, 1), { mode: 0o600 });
+    await writeWhole(this.recordsFile, JSON.stringify(list, null, 1));
     // As written: not read again (each record's signatures checked) until another process changes the file.
     const stamp = await this.stamp(this.recordsFile);
     this.recordsCache = stamp ? { stamp, value: list } : null;
@@ -773,7 +784,7 @@ export class Identity {
 
   private async writeLegacy(value: LegacyState): Promise<LegacyState> {
     await mkdir(this.stateDir, { recursive: true });
-    await writeFile(this.legacyFile, JSON.stringify(value), { mode: 0o600 });
+    await writeWhole(this.legacyFile, JSON.stringify(value));
     this.legacyCache = { stamp: await this.stamp(this.legacyFile), value };
     return value;
   }
@@ -1287,7 +1298,7 @@ export class Identity {
     const list = await this.links();
     list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true } : {}) });
     await mkdir(this.stateDir, { recursive: true });
-    await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
+    await writeWhole(this.linksFile, JSON.stringify(list));
     await this.decide('link', id, { topic, expires });
     return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}) });
   }
@@ -1560,4 +1571,16 @@ export function checkLink(l: InviteLink, o: { workspace: string; members: string
 /** Whether a link is as the device it names made it: its signature over all it says but the workspace's secret. */
 export function linkSigned(l: InviteLink): boolean {
   return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
+}
+
+/**
+ * Write a file whole, readable only by this computer's user: to a file beside it,
+ * then put in its place, so whoever reads it meanwhile (this process too, as it
+ * takes records from several devices at once) finds it as it was, or as it is
+ * now, never half written.
+ */
+async function writeWhole(file: string, text: string): Promise<void> {
+  const part = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.part`;
+  await writeFile(part, text, { mode: 0o600 });
+  await rename(part, file);
 }

@@ -1,5 +1,7 @@
 # 0065 · No menu: ⚙ is Settings, ⋯ is the document's
 
+*Since [0076](0076-a-quieter-sidebar.md): no ⚙ and no Sync. Workspace settings… is in the menu of the workspace's name, and the connection's light is beside it.*
+
 > Follows [0064](0064-four-kinds-of-settings.md), which took the settings out of the menu. Replaces
 > the menu ([0044](0044-polish.md), [0054](0054-document-settings.md)).
 

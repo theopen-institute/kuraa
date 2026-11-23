@@ -62,7 +62,7 @@ export const S = {
     compare: 'Compare',
   },
 
-  /** The connection to the server, at the bottom of the sidebar and in the menu. */
+  /** The connection to the server: the light beside the workspace's name, and the document's menu. */
   connection: {
     connecting: 'Connecting…',
     connected: 'Connected',
@@ -138,16 +138,6 @@ export const S = {
     date: dateTime,
   },
 
-  sync: {
-    sync: 'Sync',
-    syncing: 'Syncing…',
-    title: 'Bring in what others have done on their computers and the online copy, and send them yours',
-    upToDate: 'Up to date.',
-    broughtIn: (n: number) => `Brought in ${count(n, 'change', 'changes')}.`,
-    withConflicts: (n: number) => `${count(n, 'passage', 'passages')} changed both here and elsewhere: both versions are in the document, to choose between.`,
-    nothingToSync: 'Nothing to sync with yet. Invite people, or add an online copy, in Workspace settings, and Sync brings in their work.',
-  },
-
   /** Saving, as the server reports it (decision 0037). */
   saving: {
     paused: 'Saving is paused',
@@ -157,8 +147,6 @@ export const S = {
   },
 
   menu: {
-    /** The button at the bottom of the sidebar: Settings, at what is in front of you (decision 0065). */
-    button: (key: string) => `Settings (${key})`,
     source: 'Source',
     documentSettings: 'Document settings…',
     history: 'History',
@@ -539,7 +527,7 @@ export const S = {
     who: 'Who can change it',
     add: 'Add',
     remove: 'Remove',
-    groups: 'Groups',
+    groups: 'Workspace groups',
     groupsAbout: 'Groups name several people at once, in rules. Admins of a group can change who is in it.',
     noGroups: 'No groups yet.',
     newGroup: 'New group’s name, e.g. editors',
@@ -597,21 +585,30 @@ export const S = {
     here: 'You on this computer: ',
     marked: '. What you save here is marked as yours.',
     setName: 'Set your name above, and what you save here is marked as yours.',
-    advanced: 'Advanced',
     signing: 'This computer’s signing key, for you: ',
     signingAbout: '. It was made here, never leaves, and signs what you save here.',
     identity: 'Your identity ',
     identityAbout: ' vouches for your signing keys, so your work counts as yours from each of your computers.',
     thisComputer: 'this computer',
     revoke: 'Revoke',
-    toUseAnother: 'To use another computer as you, copy your identity here and import it there.',
+    signInTitle: 'Sign in from another device',
+    signInAbout: 'Use kuraa as yourself on more than one computer.',
+    recoveryTitle: 'Account recovery',
+    recoveryAbout: 'Your recovery key, and the people who can help you get your identity back.',
+    back: (to: string) => `‹ ${to}`,
+    toAnother: 'Sign in on another computer',
+    toUseAnother: 'Copy your identity here, then paste it on the other computer, in Settings › You › Sign in from another device. Keep it to yourself: anyone with it can act as you.',
+    fromAnother: 'Sign in here, as you on another computer',
+    computers: 'Your computers',
+    keys: 'Keys',
+    recoverHeading: 'Recover with your recovery key',
     copy: 'Copy identity',
-    second: 'On a second computer: paste the identity copied on your first, so both count as you. It replaces the one made here.',
+    second: 'Paste the identity you copied on your other computer, so both count as you. It replaces the one made here.',
     linePlaceholder: 'kuraa-id:… (Copy identity on your other computer)',
     lineLabel: 'Your identity, from another computer',
-    import: 'Import',
+    import: 'Sign in',
     imported: (after: string) => `Your identity is here now. ${after}`,
-    copied: 'Copied. Paste it under Advanced on your other computer. Anyone with it can vouch for keys as you: send it privately.',
+    copied: 'Copied. Paste it on your other computer, in Settings › You › Sign in from another device. Anyone with it can act as you: send it privately.',
     nothing: 'Nothing to copy.',
     revoked: (key: string) => `${key} is no longer yours: what it signs stops counting as yours on each device as your workspaces tell it, as they next save (work a device already has stays yours).`,
     afterChangeHost: 'What you save from now on is marked as yours.',
@@ -645,6 +642,14 @@ export const S = {
     formatOff: 'A file whose format is off opens as a Text file, while that is on.',
     editing: 'Editing · just you',
     tools: 'Downloaded when needed',
+    syncs: 'Copies beyond your devices',
+    on: 'On',
+    off: 'Off',
+    syncSettings: 'Settings…',
+    syncFor: (workspace: string) => `For ${workspace}: each workspace has its own.`,
+    syncTargets: (urls: string[]) => `This workspace: ${urls.join(', ')}`,
+    syncNone: 'This workspace: not set up.',
+    syncNoWorkspace: 'Open a workspace to set up its copy.',
     toolsAbout: 'Kept once on this computer, for every workspace, and used only where code runs.',
     toolsOff: 'Downloading tools is turned off in this server’s settings (Let documents install packages and download tools).',
     toolSize: (mb: string) => `About ${mb} to download.`,
@@ -920,6 +925,8 @@ export const S = {
   workspaceSwitcher: {
     cannotOpen: ' (cannot open)',
     add: 'Add a workspace…',
+    settings: 'Workspace settings…',
+    allSettings: 'Settings…',
   },
 
   errors: {

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-// Settings › You, more of your identity (0066, step 6): your email addresses, as
-// a verifier checked them (a code sent there); your recovery key kept by a
-// verifier, locked with a passphrase it never sees, and had back; and your
-// trustees, who together may give your identity back if both its keys are lost
-// (naming them takes the recovery key; asking them, a line to send each;
-// vouching for someone, as their trustee, a line to send back).
+// Settings › You, more of your identity (0066, step 6), shown one way at a time
+// (`view`): on You itself (email), your email addresses, as a verifier checked
+// them (a code sent there); in Account recovery (recovery), your recovery key
+// kept by a verifier, locked with a passphrase it never sees, and had back; and
+// your trustees, who together may give your identity back if both its keys are
+// lost (naming them takes the recovery key; asking them, a line to send each;
+// vouching for someone, as their trustee, a line to send back). Email and the
+// recovery key kept by a verifier show once a workspace names a verifier.
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, PeopleInfo } from './api.js';
 import type { PersonInfo } from './shell.js';
 import { S } from './strings.js';
 
-const props = defineProps<{ api: HostApi }>();
+const props = defineProps<{ api: HostApi; view: 'email' | 'recovery' }>();
 const me = shallowRef<PersonInfo | null>(null);
 const people = shallowRef<PeopleInfo['people']>([]);
 const verifiers = shallowRef<{ key: string; url: string }[]>([]);
@@ -115,10 +117,8 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
 </script>
 
 <template>
-  <details v-if="me?.identity" class="person-advanced person-more" data-testid="person-more">
-    <summary>{{ S.more.title }}</summary>
-
-    <template v-if="checking">
+  <div v-if="me?.identity && (view === 'recovery' || checking)" class="person-more" data-testid="person-more">
+    <div v-if="view === 'email'" class="pref-group subpanel-group">
     <h4>{{ S.more.email }}</h4>
     <ul v-if="me.identity.emails?.length" class="person-keys" data-testid="emails">
       <li v-for="e in me.identity.emails" :key="e.email + e.verifier">{{ e.email }} <span class="muted">{{ S.more.checkedBy(verifierLabel(e.verifier)) }}</span></li>
@@ -138,6 +138,9 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
       <button type="submit" :disabled="busy || !code" data-testid="email-verify">{{ S.more.verify }}</button>
     </form>
 
+    </div>
+
+    <div v-if="view === 'recovery' && checking" class="pref-group subpanel-group">
     <h4>{{ S.more.escrow }}</h4>
     <template v-if="me.identity.recovery === 'here'">
       <p class="menu-facts">{{ S.more.escrowAbout }}</p>
@@ -161,8 +164,9 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
       <input :value="back.line" readonly data-testid="back-line">
       <button type="button" @click="copy(back.line)">{{ S.common.copy }}</button>
     </div>
-    </template>
+    </div>
 
+    <div v-if="view === 'recovery'" class="pref-group subpanel-group">
     <h4>{{ S.more.trustees }}</h4>
     <p class="menu-facts" data-testid="trustees">{{ trustees ? S.more.yourTrustees(trustees.ids.map(nameOf), trustees.threshold) : S.more.noTrustees }}</p>
     <form class="rule-form" @submit.prevent="nameThem">
@@ -197,6 +201,8 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => (m
       <div v-if="vouching.answer" class="person-row"><input :value="vouching.answer" readonly data-testid="vouch-answer"><button type="button" @click="copy(vouching.answer)">{{ S.common.copy }}</button></div>
     </template>
 
+    </div>
+
     <p v-if="message" :class="['menu-facts', message.ok ? '' : 'person-error']" role="status" data-testid="more-status">{{ message.text }}</p>
-  </details>
+  </div>
 </template>

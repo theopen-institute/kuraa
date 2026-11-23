@@ -12,7 +12,7 @@ export { OnlineCopies, copyName, shownUrl, type OnlineCopyStatus } from './onlin
 export const onlineCopy: Sync = {
   id: 'online',
   label: 'Online copy',
-  description: 'A copy of this workspace on GitHub, GitLab or any git server. Each save goes there, and Sync brings in what others put there, so you meet even when your computers cannot reach each other.',
+  description: 'A copy of this workspace on GitHub, GitLab or any git server. Each save goes there, and what others put there comes in every few minutes, so you meet even when your computers cannot reach each other.',
   placeholder: 'git@github.com:you/notes.git',
   help: 'Make an empty repository on GitHub or GitLab first, and paste its address. Your own git sign-in is used (an SSH key, or a credential helper for https).',
   open: (ctx) => new OnlineCopies(ctx),

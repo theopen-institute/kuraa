@@ -431,7 +431,6 @@ provide(TREE, {
         @contextmenu="contextMenu($event, '', 'top')"
       />
     </div>
-    <div v-if="$slots.footer" class="pane-footer"><slot name="footer" /></div>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menu = null" />
     <RenameDialog
       v-if="renaming"

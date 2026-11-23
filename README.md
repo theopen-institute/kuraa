@@ -156,20 +156,22 @@ and **History**, ticked when shown; **Preview** (below); **Find and replace…**
 table**; **Save version…**; its code session (**Run all**, **Restart**, **Packages…**); and
 **Permissions…**, **Document settings…** and **Markdown and shortcuts**, each with its keys; below
 them, when it was last saved and kept in the history. **Search** (⇧⌘F: every text file, and open documents as they are being
-typed; a result opens the file at the match, [0042](docs/decisions/0042-search.md)) and **Sync**
-(once there is an online copy or another device; it says "Up to date" or how many changes it brought
-in) are beside **+** at the top of the sidebar ([decision 0065](docs/decisions/0065-no-menu.md)).
+typed; a result opens the file at the match, [0042](docs/decisions/0042-search.md)) is beside **+**
+at the top of the sidebar ([decision 0065](docs/decisions/0065-no-menu.md)). There is no Sync button:
+devices sync as they connect and the online copy every few minutes
+([0076](docs/decisions/0076-a-quieter-sidebar.md)).
 
 Settings are in one window of four sections, each saying who it applies to and where it is kept
 ([decision 0064](docs/decisions/0064-four-kinds-of-settings.md)): **You** (your name, email and
 colour, your key, and how each kind of document is edited for you; in this browser), **Document**
-(the open document's header; in its file), **Workspace** (its name, packages, devices and invite
-links, online copy, and removing it from the list; in the workspace) and **Server** (what the server
-runs and how; only its owner changes it). **⚙** at the bottom of the sidebar, or ⌘, (Ctrl+,), opens it
-at the open document (else the workspace); **Document settings…** and right-clicking a file at the
-document; ⌥⌘, where you left it. Commit ids and branch names are
-behind **Details**. The bottom of the sidebar shows whether you are connected and how many others are
-here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
+(the open document's header; in its file), **Workspace** (its name, as its heading, with **Rename
+workspace…**; packages, people and computers, its groups and permissions, and removing it from the
+list; in the workspace) and **Server** (its settings, only its owner changes them; and every component
+it has, the online copy among them, with its settings for the open workspace). **Workspace settings…**,
+in the menu of the workspace's name, opens it at the workspace; ⌘, (Ctrl+,) at the open document
+(else the workspace); **Document settings…** and right-clicking a file at the document; ⌥⌘, where you
+left it. Commit ids and branch names are behind **Details**. A light left of the workspace's name
+says whether you are connected (green), and its tooltip who else is here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
 **Try again now**. Saving paused or failing (git busy outside the app) is a banner while it lasts.
 Passing news (an outside edit merged) appears as a note in the corner; an outside edit that
 conflicted has **Open** and **Compare** in its note. Errors are said in plain words, with what was
@@ -201,12 +203,12 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
 component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Workspace settings**, its **Online copy** section (wherever the host listens only on this computer: the desktop app,
-`pnpm dev`, `pnpm host`), add the address of an empty repository, such as
+In **Settings › Server**, under its components, the online copy's **Settings…** (for the open workspace;
+wherever the host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
-with your own git credentials (an SSH key, or a credential helper for https). On **Sync**, and
-every few minutes, it is fetched from and its work merged in, as another device's would be, so
+with your own git credentials (an SSH key, or a credential helper for https). Every few minutes it is
+fetched from and its work merged in, as another device's would be, so
 computers that cannot reach each other directly still meet through it: add the same address on
 each. If someone else pushed first, this device fetches, merges and pushes again; it never
 force-pushes ([decision 0039](docs/decisions/0039-online-copy.md)).
@@ -292,7 +294,7 @@ pnpm host --dir ~/notes --static apps/web/dist
 who makes and unmakes admins; they hand the role to someone else with **Make owner…**, staying an
 admin.
 everyone reads everything; only admins invite people, remove devices, make others admins or
-members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, a
+members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, below its **Workspace groups**; a
 file's or folder's **Permissions…**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists
 them, `group` manages groups). Where nothing is said, anyone may change it. A document you may not
 change opens read only, saying who may. A change by anyone else (made outside the app) is kept out
@@ -334,8 +336,8 @@ document, and nothing of a space goes to the online copy.
 people's email addresses: `pnpm host --verify-emails "sendmail -t" --verifier-name "Lab server"`
 sends a code to the address and signs, once it is typed in, that it is theirs; add `--escrow` to
 keep recovery keys locked with a passphrase it never sees, given back for a code sent to the
-address. A workspace counts the checks of the servers its admins name (Workspace settings › Who
-can change what › Email checked by); then people are known by their address, and **Invite
+address. A workspace counts the checks of the servers its admins name (Workspace settings › Permissions
+› Email checked by); then people are known by their address, and **Invite
 people…** can keep a place for one (`email:` entries name people in groups, rules and audiences
 too). Your **trustees**, named with your recovery key, can together give you your identity back
 if both its keys are lost: you send each a line, each vouches in their own app, and their answers
@@ -384,12 +386,12 @@ document open on several devices is one live room there, saved by one of them (t
 lowest key). Commits are signed, for attribution only: each person has a signing key on each
 computer, which their identity vouches for, so `git log --show-signature` and the app can say who
 wrote what ([0035](docs/decisions/0035-identities-and-signing-keys.md)). Your identity is made for
-you, from your name, the first time the app knows it; the menu's **You** section says "You on this
-computer", and keeps the keys under **Advanced**: copy your identity there to a second computer
-(it replaces the one made there), or revoke a lost computer's key. Your identity is a stable ID
-whose key can change: Settings shows its **recovery key** until you say it is saved somewhere safe
-(then it is removed from the computer), and with it **Advanced** recovers your identity on any
-computer if its key is lost or stolen; what the old key signs from then on is no one's
+you, from your name, the first time the app knows it; Settings › **You** says "You on this
+computer". Its **Sign in from another device** copies your identity to a second computer (it replaces
+the one made there) or takes one copied on another, lists your computers to revoke a lost one's key,
+and shows the keys themselves. Your identity is a stable ID whose key can change: Settings shows its
+**recovery key** until you say it is saved somewhere safe (then it is removed from the computer), and
+with it **Account recovery** (where your trustees are too) recovers your identity on any computer if its key is lost or stolen; what the old key signs from then on is no one's
 ([0066](docs/decisions/0066-permissions-without-a-centre.md)). From the command line, `pnpm host
 person [create | export | import | recovery [saved] | recover <recovery key> | revoke <key>]`;
 `pnpm host signing-key` prints this computer's signing key, to add to GitHub as a signing key.
@@ -695,7 +697,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate`, and rendering R Markdown and Markdown (rmarkdown, pandoc, Typst) |
 | `packages/env-podman` | Environment component: a locked-down Podman container |
 | `packages/tool-tinytex` | Tool component: TinyTeX, for PDFs made with LaTeX, pinned per architecture; reads LaTeX logs for missing packages |
-| `packages/sync-git` | Sync component: the online copy, a git server each save is pushed to and Sync fetches and merges from |
+| `packages/sync-git` | Sync component: the online copy, a git server each save is pushed to and fetched and merged from every few minutes |
 | `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |

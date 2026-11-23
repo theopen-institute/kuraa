@@ -8,18 +8,20 @@
 //   Applying them reopens every workspace (writing and committing first), then
 //   the page reloads, so the window applies them once, as it closes (save); a
 //   value that is wrong is refused, saying what (0063).
-// - What it runs: the engines and environments its components bring (set by
-//   whoever runs it, with flags: here only shown), the document formats (shown,
-//   for whoever is not its owner, who turns them on and off above), and the
-//   tools it downloads (TeX, decision 0045), which anyone may download where it
-//   allows installs.
+// - Its components, every one it has: the engines and environments (set by
+//   whoever runs it, with flags: here only shown), the document formats (turned
+//   on and off above, by its owner), the tools it downloads (TeX, decision 0045),
+//   which anyone may download where it allows installs, and its syncs (the online
+//   copy, 0059), each with its settings for the open workspace in a subpanel.
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
-import type { ComponentsInfo, HostApi, HubApi, HubSettings, SettingsView, ToolInfo, ToolsInfo } from './api.js';
+import type { ComponentsInfo, HostApi, HubApi, HubSettings, SettingsView, SyncInfo, ToolInfo, ToolsInfo } from './api.js';
 import type { FolderPurpose, Shell } from './shell.js';
 import { megabytes } from './labels.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 import FolderPicker from './FolderPicker.vue';
+import SubpanelLink from './SubpanelLink.vue';
+import SyncsSection from './SyncsSection.vue';
 
 const props = defineProps<{
   hub: HubApi;
@@ -31,6 +33,8 @@ const props = defineProps<{
   ownerOff: string | null;
   /** Goes up when the host says a tool changed. */
   toolsKey?: number;
+  /** The open workspace's name: a sync's settings are that workspace's. */
+  workspaceName: string | null;
 }>();
 const emit = defineEmits<{ saved: [] }>();
 
@@ -41,6 +45,18 @@ const FLAGS: Partial<Record<keyof HubSettings, string>> = {
   allowNetwork: '--allow-network', rImages: '--r-image', dataDir: '--data-dir', workspaces: '--workspaces',
   saveSeconds: '--flush-ms', versionSeconds: '--commit-ms',
 };
+
+// Syncs (the online copy): listed with the components; each one's settings, for the open workspace, in a subpanel.
+const syncs = shallowRef<SyncInfo[]>([]);
+watch(() => props.api, (api) => {
+  syncs.value = [];
+  api.syncs().then((r) => {
+    if (api === props.api) syncs.value = r.syncs;
+  }, () => undefined);
+}, { immediate: true });
+/** The sync whose settings show, if any. */
+const sub = ref<string | null>(null);
+const subSync = computed(() => syncs.value.find((x) => x.id === sub.value) ?? null);
 
 const view = shallowRef<SettingsView | null>(null);
 const loadError = shallowRef<unknown>(null);
@@ -182,6 +198,17 @@ defineExpose({ changed, save, busy, picking });
 
 <template>
   <div class="settings-server">
+    <template v-if="sub">
+      <div class="subpanel-head">
+        <button type="button" class="subpanel-back" data-testid="subpanel-back" @click="sub = null">{{ S.person.back(S.sections.server) }}</button>
+        <h4 data-testid="subpanel-title">{{ subSync?.label ?? '' }}</h4>
+      </div>
+      <section class="settings-part" :data-testid="`subpanel-sync:${sub}`">
+        <p class="pref-note">{{ S.components.syncFor(workspaceName ?? '') }}</p>
+        <SyncsSection :api="api" :only="sub" />
+      </section>
+    </template>
+    <div v-show="!sub">
     <section v-if="canChangeSettings" class="settings-part">
       <form data-testid="preferences" novalidate @submit.prevent>
         <ErrorBanner v-if="loadError" :error="loadError" inline />
@@ -339,11 +366,13 @@ defineExpose({ changed, save, busy, picking });
           </details>
         </fieldset>
 
-        <!-- Its owner turns formats on and off above; everyone else sees which are on. -->
-        <div v-if="!canChangeSettings" class="pref-group" data-testid="components-formats">
+        <!-- Which are on: its owner turns them on and off above. -->
+        <div class="pref-group" data-testid="components-formats">
           <h4>{{ S.components.formats }}</h4>
           <label v-for="t in components.formats" :key="t.id" class="component">
-            <input type="checkbox" :checked="t.on" disabled :aria-label="t.label">
+            <!-- Its owner's checkboxes are above: here, only whether each is on. -->
+            <span v-if="canChangeSettings" :class="['component-state', { on: t.on }]">{{ t.on ? S.components.on : S.components.off }}</span>
+            <input v-else type="checkbox" :checked="t.on" disabled :aria-label="t.label">
             <span class="component-text">
               <span class="component-name">{{ t.label }}</span>
               <span class="component-about">{{ t.description || S.components.files(t.extensions.join(', ')) }}</span>
@@ -387,7 +416,30 @@ defineExpose({ changed, save, busy, picking });
         </div>
         <p v-if="!tools.allowInstalls" class="muted components-note">{{ S.components.toolsOff }}</p>
       </div>
+
+      <!-- Syncs (0059): where a workspace keeps a copy beyond its devices; each one's settings are the open workspace's. -->
+      <div v-if="syncs.length" class="pref-group" data-testid="components-syncs">
+        <h4>{{ S.components.syncs }}</h4>
+        <div v-for="x in syncs" :key="x.id" class="component tool" :data-testid="`component-sync:${x.id}`">
+          <span class="component-text">
+            <span class="component-name">{{ x.label }}</span>
+            <span class="component-about">{{ x.description }}</span>
+            <span class="component-about">{{ x.targets.length ? S.components.syncTargets(x.targets.map((t) => t.url)) : S.components.syncNone }}</span>
+          </span>
+          <span class="tool-actions">
+            <SubpanelLink
+              class="inline"
+              :title="S.components.syncSettings"
+              :testid="`sync-settings:${x.id}`"
+              :disabled="!workspaceName"
+              @open="sub = x.id"
+            />
+          </span>
+        </div>
+        <p v-if="!workspaceName" class="muted components-note">{{ S.components.syncNoWorkspace }}</p>
+      </div>
     </section>
+    </div>
     <FolderPicker v-if="picking" :hub="hub" :title="picking.title" :start="picking.start" @chosen="(p) => chosen(picking!.purpose, p)" @cancel="picking = null" />
   </div>
 </template>

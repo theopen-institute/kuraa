@@ -14,6 +14,7 @@ import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
 import { sign, signRecord, signsMessage, vouchMessage } from '../../packages/host/src/peers/records.js';
+import { openSettings } from './settings.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -68,7 +69,7 @@ test('people on two devices edit one document; a member made owner renames their
     await expect.poll(() => git(dirA, 'rev-parse', 'HEAD') === git(dirB, 'rev-parse', 'HEAD') && git(dirB, 'status', '--porcelain') === '', { timeout: 20_000 }).toBe(true);
 
     // Workspace settings list the devices, in plain words: online or offline, no keys or branches.
-    await ada.getByTestId('settings-button').click();
+    await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device online');
     await expect(ada.getByTestId('device:laptop')).toContainText('online');
@@ -92,7 +93,7 @@ test('people on two devices edit one document; a member made owner renames their
     await expect(ada.getByTestId('role:Bo')).toHaveText('member', { timeout: 15_000 });
 
     // On Bo's device: a member, he may rename his device, but not invite or remove anyone.
-    await bo.getByTestId('settings-button').click();
+    await openSettings(bo);
     await bo.getByTestId('settings-tab-workspace').click();
     await expect(bo.getByTestId('not-admin')).toContainText('Only the workspace’s admins');
     await expect(bo.getByTestId('invite-button')).toHaveCount(0);
@@ -128,7 +129,7 @@ test('people on two devices edit one document; a member made owner renames their
     // Ada's device learns it, and stops syncing; her files stay as they were.
     await expect.poll(async () => (await a.host.peers!.status()).removed, { timeout: 20_000 }).toBe(true);
     // Her Devices section says so, and offers nothing the others would refuse.
-    await ada.getByTestId('settings-button').click();
+    await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('device-removed')).toContainText('removed from the workspace', { timeout: 10_000 });
     await expect(ada.getByTestId('invite-button')).toHaveCount(0);

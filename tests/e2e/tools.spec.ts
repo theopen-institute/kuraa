@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { E2E } from './env.js';
+import { openSettings } from './settings.js';
 
 const TOOLS = fileURLToPath(new URL('../../packages/host/test/fixtures/tools.mjs', import.meta.url));
 
@@ -36,7 +37,7 @@ async function fakeHost(): Promise<RunningHost> {
 
 /** Settings › Server, where the tools are (decision 0064). */
 async function openComponents(page: Page): Promise<void> {
-  await page.getByTestId('settings-button').click();
+  await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
   await page.getByTestId('settings-tab-server').click();
   await expect(page.getByTestId('components')).toBeVisible();

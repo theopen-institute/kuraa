@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // Settings › You (decision 0064): what is yours alone, kept in this browser.
 // Your name, email and colour, saved as each is changed (others see your name
-// and colour beside what you type); you on this computer (your key); how each
-// kind of document is edited for you (its editor module, on or off); and, where
-// the shell does not run the server, the server and its access code, used as
-// the window closes (pending): half an address would connect nowhere.
-import { computed, onMounted, shallowRef, useTemplateRef } from 'vue';
+// and colour beside what you type); you on this computer (your key), with two
+// subpanels of its own, Sign in from another device and Account recovery; how
+// each kind of document is edited for you (its editor module, on or off); and,
+// where the shell does not run the server, the server and its access code, used
+// as the window closes (pending): half an address would connect nowhere. The rest
+// of You stays while a subpanel shows (hidden), so nothing typed there is lost.
+import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
 import type { FormatEditor } from '@kuraa/editor-kit';
 import type { HostApi } from './api.js';
 import { personShellFor } from './hostPerson.js';
@@ -15,6 +17,7 @@ import { S } from './strings.js';
 import PersonKey from './PersonKey.vue';
 import PersonMore from './PersonMore.vue';
 import SettingsForm from './SettingsForm.vue';
+import SubpanelLink from './SubpanelLink.vue';
 
 const props = defineProps<{
   api: HostApi;
@@ -38,6 +41,10 @@ function toggleEditor(id: string, on: boolean) {
   emit('editorsOff', on ? props.editorsOff.filter((x) => x !== id) : [...props.editorsOff, id]);
 }
 
+/** A subpanel of You, if one is open. */
+const sub = ref<'devices' | 'recovery' | null>(null);
+const subTitle = computed(() => (sub.value === 'devices' ? S.person.signInTitle : sub.value === 'recovery' ? S.person.recoveryTitle : ''));
+
 const connection = useTemplateRef<InstanceType<typeof SettingsForm>>('connection');
 /** The server and access code changed here, to use as the window closes (SettingsForm.pending). */
 const pending = () => connection.value?.pending() ?? null;
@@ -46,12 +53,22 @@ defineExpose({ pending });
 
 <template>
   <div data-testid="settings-you">
-    <section class="settings-part">
+    <div v-if="sub" class="subpanel-head">
+      <button type="button" class="subpanel-back" data-testid="subpanel-back" @click="sub = null">{{ S.person.back(S.sections.you) }}</button>
+      <h4 data-testid="subpanel-title">{{ subTitle }}</h4>
+    </div>
+    <section v-show="!sub" class="settings-part">
       <SettingsForm :initial="settings" :shell="shell" part="profile" autosave @save="(s) => emit('saveSettings', s)" />
-      <PersonKey v-if="personShell" :person="personShell" :display-name="settings.name" />
-      <PersonMore v-if="personShell" :api="api" />
     </section>
-    <section v-if="modules.length" class="settings-part" data-testid="components-editing">
+    <section v-if="personShell" class="settings-part" :data-testid="sub ? `subpanel-${sub}` : undefined">
+      <PersonKey :person="personShell" :display-name="settings.name" :view="sub ?? 'summary'" />
+      <template v-if="!sub">
+        <SubpanelLink :title="S.person.signInTitle" :about="S.person.signInAbout" testid="open-sign-in" @open="sub = 'devices'" />
+        <SubpanelLink :title="S.person.recoveryTitle" :about="S.person.recoveryAbout" testid="open-recovery" @open="sub = 'recovery'" />
+      </template>
+      <PersonMore v-if="sub !== 'devices'" :api="api" :view="sub === 'recovery' ? 'recovery' : 'email'" />
+    </section>
+    <section v-if="modules.length" v-show="!sub" class="settings-part" data-testid="components-editing">
       <fieldset class="pref-group">
         <legend>{{ S.components.editing }}</legend>
         <label v-for="m in modules" :key="m.id" class="component">
@@ -63,7 +80,7 @@ defineExpose({ pending });
         </label>
       </fieldset>
     </section>
-    <section v-if="!shell.managesHost" class="settings-part" data-testid="settings-connection">
+    <section v-if="!shell.managesHost" v-show="!sub" class="settings-part" data-testid="settings-connection">
       <fieldset class="pref-group">
         <legend>{{ S.preferences.connection }}</legend>
         <p class="pref-note">{{ S.preferences.connectionAbout }}</p>

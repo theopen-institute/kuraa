@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Settings › Workspace's Who can change what (0066): the workspace's write rules
-// (a file or folder, and who may change it: people, groups, or its admins) and
-// its groups. Everyone sees them; admins change them. Where there is no policy
+// Settings › Workspace's groups and permissions (0066, 0069): its groups first
+// (who is in each, as admin or member), then its permissions (a file or folder,
+// and who may read and change it: people, groups, or its admins), which name
+// the groups. Everyone sees them; admins change them. Where there is no policy
 // yet (a workspace on this computer only), nothing is shown.
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, PeopleInfo, RulesInfo } from './api.js';
@@ -77,28 +78,6 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
 
 <template>
   <section v-if="rules && people?.founded" class="menu-section" data-testid="rules">
-    <h3>{{ S.rules.title }}</h3>
-    <p class="menu-facts">{{ S.rules.about }}</p>
-    <!-- Every permission (0069): the whole workspace's first, then by path; each changed in its Permissions… -->
-    <ul class="menu-devices permissions-list" data-testid="permission-list">
-      <li data-testid="permission:*">
-        <span class="device-who">{{ S.rules.everything }}</span>
-        <span class="device-state">{{ everythingWords }}</span>
-        <button type="button" data-testid="change:*" @click="emit('permissions', '')">{{ S.rules.change }}</button>
-      </li>
-      <li v-for="(p, i) in listed" :key="p.path ?? `private-${i}`" :data-testid="`permission:${p.path ?? 'private'}`">
-        <code v-if="p.path" class="device-who">{{ p.path }}</code>
-        <span v-else class="device-who muted">{{ S.rules.private }}</span>
-        <span class="device-state">{{ S.rules.says(p.read?.map(nameOf) ?? null, p.write?.map(nameOf) ?? null) }}</span>
-        <button v-if="p.path" type="button" :data-testid="`change:${p.path}`" @click="emit('permissions', p.path)">{{ S.rules.change }}</button>
-      </li>
-    </ul>
-    <p v-if="!listed.length" class="menu-facts" data-testid="no-rules">{{ S.rules.none }}</p>
-    <form v-if="rules.admin" class="person-row rule-new-group" @submit.prevent="emit('permissions', newPath.trim())">
-      <input v-model="newPath" :placeholder="S.rules.pathHint" spellcheck="false" data-testid="rule-path">
-      <button type="submit" :disabled="!newPath.trim()" data-testid="rule-open">{{ S.rules.setFor }}</button>
-    </form>
-
     <h3>{{ S.rules.groups }}</h3>
     <p class="menu-facts">{{ S.rules.groupsAbout }}</p>
     <p v-if="!rules.groups.length" class="menu-facts">{{ S.rules.noGroups }}</p>
@@ -124,6 +103,29 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
         <option v-for="p in people.people" :key="p.id" :value="p.id">{{ p.name ?? `${p.id.slice(0, 8)}…` }}</option>
       </select>
       <button type="submit" :disabled="busy || !newGroup.trim()" data-testid="new-group-add">{{ S.rules.addTo }}</button>
+    </form>
+
+
+    <h3>{{ S.rules.title }}</h3>
+    <p class="menu-facts">{{ S.rules.about }}</p>
+    <!-- Every permission (0069): the whole workspace's first, then by path; each changed in its Permissions… -->
+    <ul class="menu-devices permissions-list" data-testid="permission-list">
+      <li data-testid="permission:*">
+        <span class="device-who">{{ S.rules.everything }}</span>
+        <span class="device-state">{{ everythingWords }}</span>
+        <button type="button" data-testid="change:*" @click="emit('permissions', '')">{{ S.rules.change }}</button>
+      </li>
+      <li v-for="(p, i) in listed" :key="p.path ?? `private-${i}`" :data-testid="`permission:${p.path ?? 'private'}`">
+        <code v-if="p.path" class="device-who">{{ p.path }}</code>
+        <span v-else class="device-who muted">{{ S.rules.private }}</span>
+        <span class="device-state">{{ S.rules.says(p.read?.map(nameOf) ?? null, p.write?.map(nameOf) ?? null) }}</span>
+        <button v-if="p.path" type="button" :data-testid="`change:${p.path}`" @click="emit('permissions', p.path)">{{ S.rules.change }}</button>
+      </li>
+    </ul>
+    <p v-if="!listed.length" class="menu-facts" data-testid="no-rules">{{ S.rules.none }}</p>
+    <form v-if="rules.admin" class="person-row rule-new-group" @submit.prevent="emit('permissions', newPath.trim())">
+      <input v-model="newPath" :placeholder="S.rules.pathHint" spellcheck="false" data-testid="rule-path">
+      <button type="submit" :disabled="!newPath.trim()" data-testid="rule-open">{{ S.rules.setFor }}</button>
     </form>
 
     <!-- Email checks (0066, step 6): shown once a verifier is named; naming the first is under Advanced, for admins. -->

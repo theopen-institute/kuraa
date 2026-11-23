@@ -40,8 +40,8 @@ test('the first run welcomes you and asks your name; the menu changes it', async
   await openFile(page, path);
   await expect(page.getByTestId('peers')).toHaveText('First Run (you)');
 
-  // A new name, from Settings (⚙ at the bottom of the sidebar: at the open document, decision 0065), reaches the others at once (and is kept).
-  await page.getByTestId('settings-button').click();
+  // A new name, from Settings (⌘,: at the open document, decision 0065), reaches the others at once (and is kept).
+  await page.keyboard.press('ControlOrMeta+,');
   await expect(page.getByTestId('settings-tab-document')).toHaveAttribute('aria-current', 'page');
   await page.getByTestId('settings-tab-you').click();
   const settings = page.getByTestId('settings-window');

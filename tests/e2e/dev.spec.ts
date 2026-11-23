@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { NOTES } from './env.js';
+import { openSettings } from './settings.js';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const PORT = 5199;
@@ -49,7 +50,7 @@ test('pnpm dev serves the client against a live host with nothing to configure',
     await page.keyboard.press('Escape');
 
     // The dev server supplies the host, so Settings has no host or token.
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await expect(page.getByLabel('Server address')).toHaveCount(0);
   } finally {
@@ -91,26 +92,30 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     expect(existsSync(join(root, 'field-notes', '.git'))).toBe(true);
 
     // You on this computer, in the browser too: pnpm dev runs the host on your own computer, and lets the app
-    // manage it. Your identity is made for you from your name; the keys are under Advanced, in Settings.
-    await page.getByTestId('settings-button').click();
+    // manage it. Your identity is made for you from your name; the keys are in Sign in from another device, in Settings.
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer:');
     await expect.poll(() => existsSync(person), { timeout: 10_000 }).toBe(true);
+    await page.getByTestId('open-sign-in').click();
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Sign in from another device');
     await expect(key.getByTestId('signing-key')).toBeHidden();
-    await key.getByText('Advanced').click();
+    await key.getByText('Keys', { exact: true }).click();
     await expect(key.getByTestId('signing-key')).toHaveText(/^[0-9a-f]{8}…$/);
+    await page.getByTestId('subpanel-back').click();
+    await expect(key.getByTestId('you-here')).toBeVisible();
     await page.getByTestId('settings-close').click();
 
-    // An online copy, added in Workspace settings (it is a component, decision 0059): a plain git repository each save is pushed to.
+    // An online copy, added from its component in Settings › Server (decision 0059): a plain git repository each save is pushed to.
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-dev-online-'));
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
-    // Nothing to sync with yet: no Sync beside Search.
-    await expect(page.getByTestId('sync-button')).toHaveCount(0);
-    await page.getByTestId('settings-button').click();
-    await page.getByTestId('settings-tab-workspace').click();
-    const online = page.getByTestId('settings-workspace').getByTestId('sync:online');
-    await expect(online).toContainText('Online copy');
+    await openSettings(page);
+    await page.getByTestId('settings-tab-server').click();
+    await expect(page.getByTestId('component-sync:online')).toContainText('not set up');
+    await page.getByTestId('sync-settings:online').click();
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
+    const online = page.getByTestId('subpanel-sync:online').getByTestId('sync:online');
     await online.getByTestId('sync-address').fill(bare);
     await online.getByTestId('sync-add').click();
     await expect(online).toContainText('up to date', { timeout: 15_000 });

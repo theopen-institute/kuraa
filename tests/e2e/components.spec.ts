@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { standardRunComponents } from '../../packages/run-components/src/index.js';
 import { E2E } from './env.js';
+import { openSettings } from './settings.js';
 
 const RMD = '# Chunks\n\n```{r}\n1 + 1\n```\n';
 
@@ -34,8 +35,8 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
 }
 
 /** Settings, at a section. */
-async function openSettings(page: Page, section: 'you' | 'server'): Promise<void> {
-  await page.getByTestId('settings-button').click();
+async function openSettingsAt(page: Page, section: 'you' | 'server'): Promise<void> {
+  await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
   await page.getByTestId(`settings-tab-${section}`).click();
   await expect(page.getByTestId('settings-scope')).toBeVisible();
@@ -52,7 +53,7 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await expect(page.getByTestId('editor')).toContainText('```{r}');
 
-    await openSettings(page, 'server');
+    await openSettingsAt(page, 'server');
     await expect(page.getByTestId('components')).toContainText('--format');
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R')).toBeDisabled();
@@ -65,10 +66,12 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('environment:podman')).not.toContainText('not sandboxed');
     await expect(box(page, 'In a Podman container')).not.toBeChecked();
     await expect(box(page, 'In a Podman container')).toBeDisabled();
-    // The online copy is a component too (0059): in the workspace's settings; on this host, not set up from the app.
-    await page.getByTestId('settings-tab-workspace').click();
-    const online = page.getByTestId('sync:online');
-    await expect(online).toContainText('Online copy');
+    // The online copy is a component too (0059), listed with the others; its settings, for the open workspace, a
+    // subpanel of its own. On this host, not set up from the app.
+    await expect(page.getByTestId('component-sync:online')).toContainText('Online copy');
+    await page.getByTestId('sync-settings:online').click();
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
+    const online = page.getByTestId('subpanel-sync:online').getByTestId('sync:online');
     await expect(online).toContainText('Added and removed on the computer running this server');
     await expect(online.getByTestId('sync-address')).toHaveCount(0);
   } finally {
@@ -99,7 +102,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     const editor = page.getByTestId('editor');
     await expect(editor).toContainText('Plain text here.');
 
-    await openSettings(page, 'you');
+    await openSettingsAt(page, 'you');
     await box(page, 'Markdown editing').uncheck();
     await page.keyboard.press('Escape');
     await editor.locator('p', { hasText: 'Plain text here.' }).click();
@@ -112,7 +115,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     // Kept in this browser; turned back on, typing formats again.
     await page.reload();
     await page.getByTestId('file:notes.md').click();
-    await openSettings(page, 'you');
+    await openSettingsAt(page, 'you');
     await expect(box(page, 'Markdown editing')).not.toBeChecked();
     await box(page, 'Markdown editing').check();
     await page.keyboard.press('Escape');
@@ -129,7 +132,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
 test('on the shared host too, only your editing behaviour can change', async ({ page }) => {
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
-  await openSettings(page, 'server');
+  await openSettingsAt(page, 'server');
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();

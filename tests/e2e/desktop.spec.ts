@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
+import { openSettings } from './settings.js';
 
 const DESKTOP = resolve(import.meta.dirname, '../../apps/desktop');
 const MAIN = join(DESKTOP, 'build/main.cjs');
@@ -97,7 +98,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
 
     // The app manages this host: Settings has no host or token. Joining a shared server is not offered (only --join).
     await expect(page.getByRole('button', { name: /join a shared server/i })).toHaveCount(0);
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await expect(page.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('Desk Top');
     await expect(page.getByLabel('Server address')).toHaveCount(0);
@@ -188,7 +189,7 @@ test('joins a shared host without starting one', async () => {
       await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Light rain all morning. Joined from the desktop.');
       await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
       // Joined, not managed: Settings shows the server and access code.
-      await page.getByTestId('settings-button').click();
+      await openSettings(page);
       await page.getByTestId('settings-tab-you').click();
       await expect(page.getByLabel('Server address')).toHaveValue(host.url);
     } finally {
@@ -263,7 +264,7 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await expect(page.getByTestId('r-state')).toHaveCount(0);
     await page.keyboard.press('Escape');
     // Settings › Server says what runs (decision 0064).
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-server').click();
     const components = page.getByTestId('settings-window');
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
@@ -338,7 +339,7 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
   const data = mkdtempSync(join(tmpdir(), 'kuraa-desktop-data-'));
   const timings = { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 };
   const rOn = async (page: Page) => {
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-server').click();
     const on = await page.getByTestId('components-run').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
@@ -372,7 +373,7 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
       runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
     });
     // R Markdown is off now: Settings › Server says so.
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-server').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
@@ -437,17 +438,18 @@ test('you on this computer: made from your name, said in each workspace that syn
       }
     };
     await expect.poll(said, { timeout: 15_000 }).toBe(true);
-    // Settings says so in plain words; the keys are under Advanced.
-    await page.getByTestId('settings-button').click();
+    // Settings says so in plain words; copying it to another computer is in Sign in from another device.
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
-    await key.getByText('Advanced').click();
+    await page.getByTestId('open-sign-in').click();
     await key.getByTestId('person-copy').click();
     await expect(page.getByTestId('person-status')).toContainText('Copied');
     line = await app.evaluate(({ clipboard }) => clipboard.readText());
     expect(line).toMatch(/^kuraa-id:/);
-    // Its recovery key, shown until it is saved elsewhere; then removed from this computer (0066).
+    // Its recovery key, shown until it is saved elsewhere (on You, and in Account recovery); then removed from this computer (0066).
+    await page.getByTestId('subpanel-back').click();
     const notice = key.getByTestId('person-recovery');
     await notice.getByTestId('recovery-copy').click();
     await expect(page.getByTestId('person-status')).toContainText('Keep it somewhere safe');
@@ -465,15 +467,20 @@ test('you on this computer: made from your name, said in each workspace that syn
   try {
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     await expect.poll(() => existsSync(elsewhere), { timeout: 15_000 }).toBe(true);
-    await page.getByTestId('settings-button').click();
+    await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     const key = page.getByTestId('person-key');
-    await key.getByText('Advanced').click();
+    await page.getByTestId('open-sign-in').click();
     await key.getByTestId('person-line').fill(line);
     await key.getByTestId('person-import').click();
     await expect(page.getByTestId('person-status')).toContainText('Your identity is here now');
     expect(JSON.parse(readFileSync(elsewhere, 'utf8')).publicKey).toBe(JSON.parse(readFileSync(person, 'utf8')).publicKey);
+    await page.getByTestId('subpanel-back').click();
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
+    // Account recovery: the recovery key, and trustees.
+    await page.getByTestId('open-recovery').click();
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Account recovery');
+    await expect(page.getByTestId('trustees')).toBeVisible();
     // The first computer is stolen: recovered here with the recovery key, the identity keeps its ID, with a new key.
     const before = JSON.parse(readFileSync(elsewhere, 'utf8')) as { id: string; publicKey: string };
     await key.getByTestId('recover-line').fill(recovery);

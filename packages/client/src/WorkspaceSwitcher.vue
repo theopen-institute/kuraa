@@ -2,8 +2,9 @@
 // The workspace's name in the sidebar's header: a menu of the server's
 // workspaces to switch between and, apart below them where the server allows
 // it, Add a workspace… (a new one, one joined from an invite link, or a folder
-// opened). Inviting people and removing a workspace are in the menu. A server
-// of one folder shows just that one.
+// opened); and Workspace settings… (where inviting people and removing the
+// workspace are), or Settings… with none open. A server of one folder shows
+// just that one.
 import { ref } from 'vue';
 import type { HubWorkspace } from './api.js';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
@@ -17,7 +18,7 @@ const props = defineProps<{
   /** The server lets people add workspaces. */
   canAdd: boolean;
 }>();
-const emit = defineEmits<{ switch: [id: string]; add: [] }>();
+const emit = defineEmits<{ switch: [id: string]; add: []; settings: [] }>();
 
 const menu = ref<{ x: number; y: number; items: ContextItem[] } | null>(null);
 
@@ -31,7 +32,10 @@ function open(e: MouseEvent) {
       run: () => emit('switch', w.id),
       testid: `workspace:${w.id}`,
     })),
-    ...(props.canAdd ? [{ label: S.workspaceSwitcher.add, run: () => emit('add'), testid: 'workspace-add', divided: props.workspaces.length > 0 }] : []),
+    props.current !== null
+      ? { label: S.workspaceSwitcher.settings, run: () => emit('settings'), testid: 'workspace-settings', divided: props.workspaces.length > 0 }
+      : { label: S.workspaceSwitcher.allSettings, run: () => emit('settings'), testid: 'workspace-settings', divided: props.workspaces.length > 0 },
+    ...(props.canAdd ? [{ label: S.workspaceSwitcher.add, run: () => emit('add'), testid: 'workspace-add' }] : []),
   ];
   menu.value = { x: box.left, y: box.bottom + 4, items };
 }

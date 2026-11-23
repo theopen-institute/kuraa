@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// Settings › Workspace's syncs (decisions 0059, 0064): places this workspace keeps a
+// A sync's settings, in its subpanel under Settings › Server's components (decisions 0059, 0064): places this workspace keeps a
 // copy on and syncs with, beyond its own devices, each from a component the host
 // loads. The online copy (@kuraa/sync-git) is the one that ships: a git server
-// (GitHub, GitLab, any) each save is pushed to, and Sync (and every few minutes)
+// (GitHub, GitLab, any) each save is pushed to, which every few minutes
 // brings in what others pushed there, so people whose computers cannot reach
 // each other directly still meet through it. Everyone sees them; adding and
 // removing them is for whoever runs the host (the desktop app, pnpm dev), with
@@ -14,7 +14,7 @@ import { time } from './labels.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 
-const props = defineProps<{ api: HostApi }>();
+const props = defineProps<{ api: HostApi; /** Only this sync (its subpanel, under Server's components). */ only?: string }>();
 const syncs = shallowRef<SyncInfo[]>([]);
 const canManage = ref(false);
 const target = ref<Record<string, string>>({});
@@ -59,8 +59,8 @@ const state = (c: SyncTargetInfo) => (c.busy ? S.online.syncing : c.error ? S.on
 </script>
 
 <template>
-  <section v-for="s in syncs" :key="s.id" class="components-group" :data-testid="`sync:${s.id}`">
-    <h3>{{ s.label }}</h3>
+  <section v-for="s in syncs.filter((x) => !only || x.id === only)" :key="s.id" class="components-group" :data-testid="`sync:${s.id}`">
+    <h3 v-if="!only">{{ s.label }}</h3>
     <p v-if="s.description" class="muted components-note">{{ s.description }}</p>
     <ul v-if="s.targets.length" class="menu-devices">
       <li v-for="c in s.targets" :key="c.name" :data-testid="`sync-target:${c.name}`">

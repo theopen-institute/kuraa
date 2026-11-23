@@ -21,7 +21,7 @@ import FileTree from './FileTree.vue';
 import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
 import DocumentMenu from './DocumentMenu.vue';
-import MenuButton from './MenuButton.vue';
+import ConnectionLight from './ConnectionLight.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
 import PastVersion from './PastVersion.vue';
@@ -98,7 +98,6 @@ function openPermissions(p: string) {
 }
 
 let viewAsked = 0;
-const syncing = ref(false);
 const historyOpen = ref(false);
 const showSource = ref(false);
 /** The document's ⋯ menu, if open: where it opens (under its button). */
@@ -146,23 +145,16 @@ function openDocMenu(e: MouseEvent) {
 }
 
 /**
- * Whether Sync has anything to sync with: other devices, or an online copy.
- * Asked when a workspace opens, and after inviting people or closing Settings
- * (where an online copy is added); Sync is offered only once it has.
+ * The workspace syncs with other devices (so it has people, and who reads what:
+ * 0066). Asked when a workspace opens, and after inviting people or closing Settings.
  */
-const syncable = ref(false);
-/** The workspace syncs with other devices (so it has people, and who reads what: 0066). */
 const sharedWithDevices = ref(false);
-async function checkSyncable() {
+async function checkShared() {
   const asked = api.value;
   try {
-    const [peers, syncs] = await Promise.all([asked.peers(), asked.syncs()]);
-    if (asked === api.value) {
-      syncable.value = peers.enabled || syncs.syncs.some((s) => s.targets.length > 0);
-      sharedWithDevices.value = peers.enabled;
-    }
+    const peers = await asked.peers();
+    if (asked === api.value) sharedWithDevices.value = peers.enabled;
   } catch {
-    syncable.value = false;
     sharedWithDevices.value = false;
   }
 }
@@ -280,7 +272,7 @@ function openSettings(section?: SettingsSection) {
   if (section) settingsSection.value = section;
   settingsOpen.value = true;
 }
-/** ⚙ and ⌘,: Settings, at what is in front of you: the open document, else the workspace. */
+/** ⌘,: Settings, at what is in front of you: the open document, else the workspace. */
 function openSettingsHere() {
   openSettings(path.value && type.value && !viewing.value ? 'document' : workspace.value ? 'workspace' : 'you');
 }
@@ -460,11 +452,10 @@ watch([api, editingSettings, ready], () => {
   if (!editingSettings.value && ready.value) void refreshTree();
 }, { immediate: true });
 
-// Whether Sync is offered: asked of each workspace as it opens.
+// Whether it syncs with other devices: asked of each workspace as it opens.
 watch([api, ready], () => {
-  syncable.value = false;
   sharedWithDevices.value = false;
-  if (ready.value) void checkSyncable();
+  if (ready.value) void checkShared();
 }, { immediate: true });
 
 // The workspace renamed (here, or on another device: 0061): the list of workspaces says so too.
@@ -599,22 +590,6 @@ async function renameWorkspace() {
   }
 }
 
-async function sync() {
-  syncing.value = true;
-  try {
-    const r = await api.value.sync();
-    error.value = null;
-    const text = r.brought ? S.sync.broughtIn(r.brought) : S.sync.upToDate;
-    notice.value = r.conflicts ? { kind: 'warn', text: `${text} ${S.sync.withConflicts(r.conflicts)}` } : { kind: 'info', text };
-    await refreshTree();
-    historyKey.value++;
-  } catch (e) {
-    fail(e);
-  } finally {
-    syncing.value = false;
-  }
-}
-
 function useSettings(s: Settings) {
   saveSettings(s);
   settings.value = s;
@@ -657,35 +632,24 @@ function useSettings(s: Settings) {
         @error="fail"
       >
         <template v-if="hub" #title>
-          <WorkspaceSwitcher
-            :workspaces="hub"
-            :current="chosen"
-            :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
-            :can-add="canAdd"
-            @switch="switchWorkspace"
-            @add="addingWorkspace = true"
-          />
+          <span class="workspace-title">
+            <ConnectionLight :status="status" :has-document="!!path && !!type" />
+            <WorkspaceSwitcher
+              :workspaces="hub"
+              :current="chosen"
+              :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
+              :can-add="canAdd"
+              @switch="switchWorkspace"
+              @add="addingWorkspace = true"
+              @settings="openSettings('workspace')"
+            />
+          </span>
         </template>
-        <!-- The workspace's own actions, beside New file: search it, and sync it (once there is something to sync with). -->
+        <!-- The workspace's own action, beside New file: search it. -->
         <template #actions>
           <button type="button" :title="S.menu.searchTitle(keyLabel(APP_KEYS.search))" :aria-label="S.menu.search" data-testid="search-button" @click="openSearch">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
           </button>
-          <button
-            v-if="syncable"
-            type="button"
-            :disabled="syncing"
-            :title="syncing ? S.sync.syncing : S.sync.title"
-            :aria-label="S.sync.sync"
-            :class="{ spinning: syncing }"
-            data-testid="sync-button"
-            @click="sync"
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /><path d="M11.8 1.8v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-          </button>
-        </template>
-        <template #footer>
-          <MenuButton :status="status" :has-document="!!path && !!type" @open="openSettingsHere()" />
         </template>
       </FileTree>
       <nav v-else class="pane pane-left" :aria-label="S.app.workspaces">
@@ -698,10 +662,10 @@ function useSettings(s: Settings) {
             :can-add="canAdd"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
+            @settings="openSettings('you')"
           />
         </div>
         <div class="tree-scroll" />
-        <div class="pane-footer"><MenuButton :status="status" :has-document="false" @open="openSettingsHere()" /></div>
       </nav>
 
       <main class="pane pane-centre">
@@ -839,7 +803,7 @@ function useSettings(s: Settings) {
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
     <PermissionsDialog v-if="permissionsFor" :api="api" :path="permissionsFor.path" :name="permissionsFor.name" @close="permissionsFor = null" @saved="(what) => { permissionsFor = null; notice = { kind: 'info', text: what }; void refreshTree(); void loadAccess(); }" />
-    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkSyncable()" />
+    <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkShared()" />
     <AddWorkspaceDialog
       v-if="addingWorkspace"
       :hub="hubApi"
@@ -875,7 +839,7 @@ function useSettings(s: Settings) {
       @invite="invite"
       @permissions="openPermissions"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @close="settingsOpen = false; void checkSyncable()"
+      @close="settingsOpen = false; void checkShared()"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />

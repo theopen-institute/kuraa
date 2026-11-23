@@ -11,6 +11,7 @@ import createTestnet from 'hyperdht/testnet.js';
 import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
+import { openSettings } from './settings.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -50,7 +51,7 @@ test('an admin says who can change a document; to someone else it is read only, 
     await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'true');
 
     // Ada, the workspace's admin: only she may change notes.md.
-    await ada.getByTestId('settings-button').click();
+    await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
     const rules = ada.getByTestId('rules');
     await expect(rules.getByTestId('permission:*')).toContainText('Anyone in the workspace can change it');
@@ -63,7 +64,7 @@ test('an admin says who can change a document; to someone else it is read only, 
     await perms.getByTestId('permissions-save').click();
     await expect(perms).toBeHidden();
     // The overview lists it.
-    await ada.getByTestId('settings-button').click();
+    await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('rules').getByTestId('permission:notes.md')).toContainText('changed by Ada');
     await ada.keyboard.press('Escape');

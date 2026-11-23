@@ -118,7 +118,10 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .pane-left .pane-header { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); gap: 8px; }
 .workspace-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* The workspace's name fills the header; its actions sit at the right. */
-.pane-left .pane-header > .workspace-name, .pane-left .pane-header > .workspace-switcher { flex: 1; }
+.pane-left .pane-header > .workspace-name, .pane-left .pane-header > .workspace-switcher, .pane-left .pane-header > .workspace-title { flex: 1; }
+/* The connection's light, then the workspace's name and its menu. */
+.workspace-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.connection-light { display: inline-flex; align-items: center; flex: none; cursor: default; }
 .pane-header-actions { display: flex; gap: 2px; flex: none; margin-left: auto; }
 .pane-header-actions button { padding: 1px 7px; font-size: 14px; line-height: 1.2; border-color: transparent; background: none; color: var(--muted); }
 .pane-header-actions button:hover { color: var(--text); background: var(--selected); }
@@ -219,16 +222,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .history-meta, .history-people { font-size: 12px; color: var(--muted); }
 
 /* The bottom of the sidebar: connection, who is here, and the menu. */
-.pane-footer { border-top: 1px solid var(--border); padding: 4px; }
-.menu-button {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px;
-  background: none; color: var(--muted); font-size: 12px; text-align: left;
-}
-.menu-button:hover { background: var(--selected); color: var(--text); }
-.menu-button-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.menu-gear { font-size: 14px; }
-.menu-people { display: flex; align-items: center; gap: 3px; }
-.menu-person { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.conn-connected { background: #30a46c; }
 .dot.conn-connecting { background: #f5a524; }
@@ -752,8 +745,15 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .settings-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 /* One line between parts: a part's first group draws none of its own, nor does the first part (the heading's line is above it). */
 .settings-content .settings-part > .pref-group:first-child, .settings-content .settings-part > form > .pref-group:first-child { border-top: 0; padding-top: 0; }
-.settings-content > div > .settings-part:first-child { border-top: 0; padding-top: 4px; }
-.settings-head h3 { margin: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; }
+.settings-content > div > .settings-part:first-child, .settings-content > div > .menu-section:first-child { border-top: 0; padding-top: 4px; }
+/* In a subpanel, its head draws the line under it. */
+.settings-content .subpanel-head { border-bottom: 1px solid var(--border); }
+.settings-content .subpanel-head + .settings-part, .settings-content .subpanel-head + section { border-top: 0; }
+/* Account recovery: its parts from PersonMore apart from the recovery key's. */
+.person-key ~ .person-more > .subpanel-group:first-child { border-top: 1px solid var(--border); padding-top: 12px; }
+.settings-head-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.settings-head h3 { margin: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.settings-head-title button { flex: none; font-size: 12px; padding: 3px 9px; }
 .settings-scope { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .settings-none { padding: 12px 0; }
 .settings-value { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
@@ -798,3 +798,26 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .preferences details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .preferences details[open] > summary { margin-bottom: 8px; }
 .preferences details > div { display: grid; gap: 10px; }
+
+/* Subpanels of a Settings section (SubpanelLink): a row with ›, opening the subpanel in the section's place, with a way back. */
+.subpanel-link {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer;
+}
+.subpanel-link:hover { background: var(--selected); }
+.subpanel-link-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.subpanel-link-title { font-weight: 600; font-size: 13.5px; }
+.subpanel-link-about { font-size: 12px; color: var(--muted); }
+.subpanel-link-go { color: var(--muted); font-size: 18px; line-height: 1; }
+.subpanel-link.inline { width: auto; padding: 3px 10px; border-radius: 6px; flex: none; }
+.subpanel-head { display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; }
+.subpanel-head h4 { margin: 0; font-size: 14px; }
+.subpanel-back { border: 0; background: none; color: var(--accent, var(--muted)); padding: 2px 4px; font-size: 13px; cursor: pointer; }
+.subpanel-back:hover { text-decoration: underline; }
+/* In a subpanel, each part apart, its heading over it. */
+.subpanel-group { padding: 12px 0; }
+.subpanel-group:first-child { border-top: 0; padding-top: 0; }
+.subpanel-group h4 { margin: 0 0 2px; font-size: 13px; color: var(--text); }
+.person-key .person-advanced { padding-top: 10px; border-top: 1px solid var(--border); }
+.component-state { flex: none; min-width: 28px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+.component-state.on { color: #30a46c; }

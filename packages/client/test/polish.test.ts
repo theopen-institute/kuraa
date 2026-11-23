@@ -49,7 +49,6 @@ describe('counts', () => {
     expect(plural(1, 'part differs', 'parts differ')).toBe('part differs');
     expect(S.search.summary(1, 1, false)).toBe('1 match in 1 file.');
     expect(S.search.summary(3, 2, true)).toBe('3 matches in 2 files (only the first are shown).');
-    expect(S.sync.broughtIn(1)).toBe('Brought in 1 change.');
     expect(S.offline.unsent(4)).toBe('4 changes not yet sent.');
   });
 });

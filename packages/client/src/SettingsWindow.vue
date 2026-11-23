@@ -171,7 +171,11 @@ useDialog(root, () => {
         </nav>
         <div class="settings-content">
           <header class="settings-head">
-            <h3 data-testid="settings-title">{{ heading.title }}</h3>
+            <div class="settings-head-title">
+              <h3 data-testid="settings-title"><span :data-testid="section === 'workspace' && workspace ? 'settings-workspace-name' : undefined">{{ heading.title }}</span></h3>
+              <!-- The workspace's name is its heading: renamed here, for everyone in it (0061). -->
+              <button v-if="section === 'workspace' && workspace" type="button" :title="S.menu.renameWorkspaceTitle" data-testid="menu-rename-workspace" @click="emit('renameWorkspace')">{{ S.menu.renameWorkspace }}</button>
+            </div>
             <p v-if="heading.scope" class="settings-scope" data-testid="settings-scope">{{ heading.scope }}</p>
           </header>
           <SettingsYou
@@ -192,7 +196,6 @@ useDialog(root, () => {
             :workspace="workspace"
             :runner="runner"
             :can-remove="canRemoveWorkspace"
-            @rename="emit('renameWorkspace')"
             @remove="thenClose(() => emit('removeWorkspace'))"
             @invite="thenClose(() => emit('invite'))"
             @permissions="(p) => thenClose(() => emit('permissions', p))"
@@ -207,6 +210,7 @@ useDialog(root, () => {
             :can-change-settings="canChangeSettings"
             :owner-off="ownerOff"
             :tools-key="toolsKey"
+            :workspace-name="workspace?.name ?? null"
             @saved="emit('saved')"
           />
         </div>

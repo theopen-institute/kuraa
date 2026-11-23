@@ -55,6 +55,15 @@
 // - verifier: a server whose attestations count here (attest.ts, step 6): its
 //   key and where it is; an admin's to add, or take away (with no address).
 //
+// - witness (0072): a person (a server's identity, usually) whose devices'
+//   acknowledgements confirm removals, in the app's words; an admin's to name or
+//   unname. It decides nothing: removals count without it.
+//
+// - drop (0072): a person's signing key (one computer of theirs) no longer counts
+//   here, with the commits the dropper had (`cutoff`): its devices stop syncing,
+//   and what it signs from then on counts for nothing. Its own person's to make,
+//   or an admin's (the owner's, for an admin's computer). For good.
+//
 // Anywhere a person can be named (a group, a rule, an audience), `email:<address>`
 // names whoever holds an attestation of that address by a verifier counted here.
 //
@@ -76,11 +85,17 @@ export type PolicyOp =
   | { t: 'rule'; path: string; by: string[] }
   | { t: 'space'; id: string; audience: string[] }
   | { t: 'verifier'; key: string; url: string }
-  | { t: 'perm'; path: string; write?: string[]; read?: string[] }
-  | { t: 'owner'; who: string };
+  | { t: 'perm'; path: string; write?: string[]; read?: string[]; space?: string }
+  | { t: 'owner'; who: string }
+  | { t: 'drop'; key: string; cutoff?: string[] }
+  | { t: 'witness'; who: string; on: boolean };
 
-/** A file's or folder's permission (0069): who may change it, and (a folder's) who reads what is made in it. */
-export interface Perm { write?: string[]; read?: string[] }
+/**
+ * A file's or folder's permission (0069): who may change it, and (a folder's)
+ * who reads what is in it; with the space that holds what is in it (0072: the
+ * folder's own, whose audience is who reads it).
+ */
+export interface Perm { write?: string[]; read?: string[]; space?: string }
 
 /** A policy operation as a record carries it (records.ts, kind `policy`). */
 export interface PolicyEntry {
@@ -112,8 +127,10 @@ function encodeOp(op: PolicyOp): string {
     case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
     case 'space': return ['space', op.id, op.audience.join(',')].join('\0');
     case 'verifier': return ['verifier', op.key, op.url].join('\0');
-    case 'perm': return ['perm', op.path, op.write ? op.write.join(',') : '-', op.read ? op.read.join(',') : '-'].join('\0');
+    case 'perm': return ['perm', op.path, op.write ? op.write.join(',') : '-', op.read ? op.read.join(',') : '-', ...(op.space ? [op.space] : [])].join('\0');
     case 'owner': return ['owner', op.who].join('\0');
+    case 'drop': return ['drop', op.key, ...(op.cutoff ? [op.cutoff.join(',')] : [])].join('\0');
+    case 'witness': return ['witness', op.who, op.on ? 'on' : 'off'].join('\0');
   }
 }
 
@@ -217,12 +234,22 @@ export function readOp(v: unknown): PolicyOp | null {
         ? { t: 'verifier', key: o.key, url: o.url } : null;
     case 'owner':
       return typeof o.who === 'string' && hexKey.test(o.who) ? { t: 'owner', who: o.who } : null;
+    case 'witness':
+      return typeof o.who === 'string' && hexKey.test(o.who) && typeof o.on === 'boolean' ? { t: 'witness', who: o.who, on: o.on } : null;
+    case 'drop': {
+      if (typeof o.key !== 'string' || !hexKey.test(o.key)) return null;
+      if (o.cutoff === undefined) return { t: 'drop', key: o.key };
+      const cutoff = sortedUnique(o.cutoff, /^[0-9a-f]{40,64}$/);
+      return cutoff ? { t: 'drop', key: o.key, cutoff } : null;
+    }
     case 'perm': {
       if (typeof o.path !== 'string' || !(isRulePath(o.path) || /^h:[0-9a-f]{64}$/.test(o.path))) return null;
       const write = o.write === undefined ? undefined : sortedUnique(o.write, writerTest);
       const read = o.read === undefined ? undefined : sortedUnique(o.read, writerTest);
       if (write === null || read === null || (write && !write.length) || (read && !read.length)) return null;
-      return { t: 'perm', path: o.path, ...(write ? { write } : {}), ...(read ? { read } : {}) };
+      // A folder's own space (0072): only with who reads it.
+      if (o.space !== undefined && (typeof o.space !== 'string' || !/^[0-9a-f]{32}$/.test(o.space) || !read)) return null;
+      return { t: 'perm', path: o.path, ...(write ? { write } : {}), ...(read ? { read } : {}), ...(typeof o.space === 'string' ? { space: o.space } : {}) };
     }
     default:
       return null;
@@ -247,6 +274,13 @@ export interface PolicyContext {
   claimsOf?: (id: string) => string[];
   /** Every email attested of anyone by those verifiers (who has been invited by email and is in: step 6). */
   claimed?: Set<string>;
+  /**
+   * A signing key its person revoked (0072): the policy operations its revoker
+   * had seen, of which those it signed still count, and nothing else it signs;
+   * null where no revocation said (one from before: all it signed counts);
+   * undefined, not revoked.
+   */
+  cutKey?: (signingKey: string) => string[] | null | undefined;
 }
 
 export class Policy {
@@ -279,6 +313,10 @@ export class Policy {
     readonly claimed = new Set<string>(),
     /** The workspace's owner (0070); null: one from before that has none yet, its admins equal. */
     readonly owner: string | null = null,
+    /** Signing keys dropped here (0072): key → the commits they signed that still count (their cutoff, gate.ts). */
+    readonly dropped = new Map<string, string[]>(),
+    /** People whose devices' acknowledgements confirm removals (0072). */
+    readonly witnesses = new Set<string>(),
   ) {}
 
   /** Whether a person is the workspace's owner. */
@@ -337,7 +375,7 @@ export class Policy {
   }
 
   /** The nearest permission up the tree that says something of a kind: its path (in the clear, as the caller knows it), its key, and what it says. */
-  private nearest(path: string, kind: keyof Perm, from = 0): { path: string; key: string; who: string[] } | null {
+  private nearest(path: string, kind: 'write' | 'read', from = 0): { path: string; key: string; who: string[] } | null {
     for (const p of pathsAbove(path).slice(from)) {
       const at = this.permAt(p);
       if (at?.perm[kind]) return { path: p, key: at.key, who: at.perm[kind]! };
@@ -353,12 +391,21 @@ export class Policy {
 
   /**
    * Who reads what is made at a path, as the folders above it say (0069): the
-   * nearest folder's read audience; null if none (everyone in the workspace).
-   * For a folder, its own counts.
+   * nearest folder's read audience, and its space (0072: whose audience it is,
+   * where the folder has one); null if none (everyone in the workspace). For a
+   * folder, its own counts.
    */
-  readFor(path: string): { path: string; audience: string[]; key: string } | null {
+  readFor(path: string): { path: string; audience: string[]; key: string; space?: string } | null {
     const n = this.nearest(path, 'read', path.endsWith('/') ? 0 : 1);
-    return n && { path: n.path, audience: n.who, key: n.key };
+    if (!n) return null;
+    const space = this.permAt(n.path)?.perm.space;
+    const own = space ? this.spaces.get(space) : undefined;
+    return { path: n.path, audience: own?.audience ?? n.who, key: n.key, ...(space ? { space } : {}) };
+  }
+
+  /** Whether a space is a folder's own (0072): named by a folder's permission. */
+  isFolderSpace(space: string): boolean {
+    return [...this.perms.values()].some((p) => p.space === space);
   }
 
   /** Whether a person (null: no one's, as an unsigned commit) may change a file: by its rule, or anyone if it has none. */
@@ -456,6 +503,14 @@ interface State {
   usedLinks: Set<string>;
   seal: string[] | null;
   applied: string[];
+  /** When each person took the place they have in the workspace: the position, in the one order, of the operation that gave it them (0072: seniority). */
+  since: Map<string, number>;
+  /** When the owner became the owner. */
+  ownerSince: number;
+  /** Signing keys dropped (0072), and their cutoffs. */
+  dropped: Map<string, string[]>;
+  /** Witnesses (0072). */
+  witnesses: Set<string>;
 }
 
 /** An operation that takes someone out of a group, or makes them no longer its admin: what its cutoff is about (step 4). */
@@ -472,20 +527,42 @@ const view = (s: State, claims?: (id: string) => string[]) => new Policy(s.group
 
 function freshState(order: PolicyEntry[], counted: Set<string>): State {
   const groups = new Map<string, Map<string, Role>>([[WORKSPACE, new Map()]]);
-  for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) groups.get(WORKSPACE)!.set(id, 'admin');
+  const since = new Map<string, number>();
+  for (const e of order) if (counted.has(e.id) && e.op.t === 'genesis') for (const id of e.op.admins) {
+    groups.get(WORKSPACE)!.set(id, 'admin');
+    since.set(id, 0);
+  }
   // A workspace's own genesis names its first admin, its owner (0070); legacy geneses name none.
   const own = order.find((e) => counted.has(e.id) && e.op.t === 'genesis' && !e.op.legacy);
   const owner = own && own.op.t === 'genesis' ? own.op.admins[0] ?? null : null;
-  return { groups, perms: new Map(), spaces: new Map(), verifiers: new Map(), owner, usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id) };
+  return { groups, perms: new Map(), spaces: new Map(), verifiers: new Map(), owner, usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id), since, ownerSince: 0, dropped: new Map(), witnesses: new Set() };
 }
 
 const adminCount = (s: State) => [...s.groups.get(WORKSPACE)!].filter(([, r]) => r === 'admin').length;
+
+/**
+ * A person's rank in a policy (0072), as a key to sort by, the highest first:
+ * the owner; then the workspace's admins, the longest an admin first; then its
+ * members, the longest in first; then everyone else. Ties (people given their
+ * place by one operation) by ID.
+ */
+function rankKey(s: State, id: string): [number, number, string] {
+  if (id === s.owner) return [0, s.ownerSince, id];
+  const role = s.groups.get(WORKSPACE)!.get(id);
+  if (role) return [role === 'admin' ? 1 : 2, s.since.get(id) ?? Number.MAX_SAFE_INTEGER, id];
+  return [3, 0, id];
+}
+
+const compareKeys = (a: [number, number, string], b: [number, number, string]) =>
+  a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0);
 
 /** Whether `by` may make operation `e`, with the policy as `s` (its past) has it. */
 function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): boolean {
   const now = view(s, ctx.claimsOf);
   const ws = s.groups.get(WORKSPACE)!;
   const op = e.op;
+  // Signed by a key dropped in its past: no one's word (0072).
+  if (s.dropped.has(e.signer)) return false;
   switch (op.t) {
     case 'grant': {
       const nested = op.who.startsWith('group:');
@@ -521,11 +598,20 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
     case 'owner':
       // The owner gives the role to someone in the workspace.
       return !!s.owner && by === s.owner && op.who !== by && ws.has(op.who);
+    case 'drop': {
+      // One's own computer; or an admin, a member's (the owner, anyone's: 0070).
+      if (s.dropped.has(op.key) || !now.role(by)) return false;
+      const whose = ctx.personOf(op.key);
+      if (whose === by) return true;
+      const ofAdmin = !!whose && (ws.get(whose) === 'admin' || whose === s.owner);
+      return now.isAdmin(by) && (!ofAdmin || now.mayAssignAdmins(by));
+    }
     case 'seal':
       return !s.seal && now.isAdmin(by);
     case 'rule':
     case 'verifier':
     case 'perm':
+    case 'witness':
       return now.isAdmin(by);
     case 'space': {
       // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
@@ -539,8 +625,8 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
   }
 }
 
-/** Apply an operation allowed in its past to a policy; whether it changed anything it could. */
-function effect(e: PolicyEntry, by: string, s: State): boolean {
+/** Apply an operation allowed in its past to a policy, at its place in the one order; whether it changed anything it could. */
+function effect(e: PolicyEntry, by: string, s: State, at: number): boolean {
   const op = e.op;
   const group = (name: string) => {
     let g = s.groups.get(name);
@@ -548,35 +634,51 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
     return g;
   };
   const ws = group(WORKSPACE);
+  // A person's place in the workspace, and since when (seniority: 0072).
+  const place = (who: string, role: Role) => {
+    if (ws.get(who) !== role) s.since.set(who, at);
+    ws.set(who, role);
+  };
   switch (op.t) {
     case 'grant':
       // Into another group, only someone (still) in the workspace, or named by email.
       if (op.group !== WORKSPACE && !op.who.startsWith('group:') && !op.who.startsWith('email:') && !ws.has(op.who)) return false;
-      group(op.group).set(op.who, op.role);
+      if (op.group === WORKSPACE) place(op.who, op.role);
+      else group(op.group).set(op.who, op.role);
       return true;
     case 'revoke':
       if (!s.groups.get(op.group)?.has(op.who)) return false;
       s.groups.get(op.group)!.delete(op.who);
       // Out of the workspace: out of every group.
-      if (op.group === WORKSPACE) for (const g of s.groups.values()) g.delete(op.who);
+      if (op.group === WORKSPACE) {
+        for (const g of s.groups.values()) g.delete(op.who);
+        s.since.delete(op.who);
+      }
       return true;
     case 'join':
       // A link for one person puts one in: the first, in the order every device puts them in.
       if (op.once && s.usedLinks.has(op.link)) return false;
       if (op.once) s.usedLinks.add(op.link);
-      if (op.group !== WORKSPACE && !ws.has(by)) ws.set(by, 'member');
+      if (op.group !== WORKSPACE && !ws.has(by)) place(by, 'member');
       // Never less than they are already.
-      if (group(op.group).get(by) !== 'admin') group(op.group).set(by, op.role);
+      if (group(op.group).get(by) !== 'admin') {
+        if (op.group === WORKSPACE) place(by, op.role);
+        else group(op.group).set(by, op.role);
+      }
       return true;
     case 'seal':
       if (s.seal) return false;
       s.seal = op.geneses;
       // A workspace from before: whoever sealed it is its owner (0070).
-      s.owner ??= by;
+      if (!s.owner) {
+        s.owner = by;
+        s.ownerSince = at;
+      }
       return true;
     case 'owner':
       s.owner = op.who;
-      ws.set(op.who, 'admin');
+      s.ownerSince = at;
+      place(op.who, 'admin');
       return true;
     case 'rule': {
       // As a perm's write, keeping what it says of reading.
@@ -587,7 +689,7 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
       return true;
     }
     case 'perm':
-      if (op.write || op.read) s.perms.set(op.path, { ...(op.write ? { write: op.write } : {}), ...(op.read ? { read: op.read } : {}) });
+      if (op.write || op.read) s.perms.set(op.path, { ...(op.write ? { write: op.write } : {}), ...(op.read ? { read: op.read } : {}), ...(op.space ? { space: op.space } : {}) });
       else s.perms.delete(op.path);
       return true;
     case 'space':
@@ -597,84 +699,150 @@ function effect(e: PolicyEntry, by: string, s: State): boolean {
       if (op.url) s.verifiers.set(op.key, op.url);
       else s.verifiers.delete(op.key);
       return true;
+    case 'drop':
+      s.dropped.set(op.key, op.cutoff ?? []);
+      return true;
+    case 'witness':
+      if (op.on) s.witnesses.add(op.who);
+      else s.witnesses.delete(op.who);
+      return true;
     case 'genesis':
       return false;
   }
 }
 
-/** The group an operation acts on, and whom it puts in (grant, join). */
-const groupOf = (e: PolicyEntry, by: string): { group: string | null; adds: string | null } => {
+/** The group an operation acts in, for a cutoff: what it changes there. */
+const groupOf = (e: PolicyEntry): string | null => {
   const op = e.op;
-  if (op.t === 'grant') return { group: op.group, adds: op.who };
-  if (op.t === 'join') return { group: op.group, adds: by };
-  if (op.t === 'revoke') return { group: op.group, adds: null };
-  return { group: null, adds: null };
+  return op.t === 'grant' || op.t === 'join' || op.t === 'revoke' ? op.group : null;
 };
+
+/**
+ * What an operation says of someone's place in a group (0072): taken out,
+ * a member, an admin, or in (as they are, or more: a join). Two made at the
+ * same time that say different things of the same place are in conflict.
+ */
+type Place = 'out' | 'member' | 'admin' | 'in';
+interface Claim { group: string; who: string; place: Place; leaving: boolean }
+
+function claimsOf(e: PolicyEntry, by: string): Claim[] {
+  const op = e.op;
+  switch (op.t) {
+    case 'grant': return [{ group: op.group, who: op.who, place: op.role, leaving: false }];
+    case 'revoke': return [{ group: op.group, who: op.who, place: 'out', leaving: op.who === by }];
+    case 'owner': return [{ group: WORKSPACE, who: op.who, place: 'admin', leaving: false }];
+    case 'join': return op.group === WORKSPACE
+      ? [{ group: WORKSPACE, who: by, place: op.role, leaving: false }]
+      : [{ group: op.group, who: by, place: op.role, leaving: false }, { group: WORKSPACE, who: by, place: 'in', leaving: false }];
+    default: return [];
+  }
+}
+
+const differ = (a: Place, b: Place) => a !== b && !((a === 'in' && b !== 'out') || (b === 'in' && a !== 'out'));
+/** Less first: of two by the same person at once, the one that gives less stands. */
+const PLACE_ORDER: Record<Place, number> = { out: 0, member: 1, in: 2, admin: 3 };
+
+/** What judging operations together needs: their order, their pasts, who made each, and the policy each was made under. */
+interface Env {
+  counted: Set<string>;
+  order: PolicyEntry[];
+  at: Map<string, number>;
+  anc: Map<string, Set<string>>;
+  by: Map<string, string>;
+  meta: Map<string, Removal>;
+  /** The policy as each operation's past made it (what it was judged by). */
+  before: Map<string, State>;
+  ctx: PolicyContext;
+}
 
 interface Folded { state: State; disputes: { people: string[]; ops: string[] }[] }
 
 /**
- * Apply operations, each allowed in its own past, together (step 4): in the
- * order every device puts them in, where those made at the same time (neither
- * in the other's past) are settled by rules, the same on every device:
- * - a removal's cutoff: what the person taken out (of a group, or of being
- *   its admin) did at the same time, in that group (all of it, for the
- *   workspace), counts for nothing; but two people taking each other out both
- *   count (each is taken out);
- * - removal wins: someone taken out of a group is not put in it at the same time;
- * - the workspace keeps an admin: if the removals made at the same time would
- *   leave none, none of those stands, and the conflict is on record.
+ * Apply operations, each allowed in its own past, together (0072). Two made at
+ * the same time (neither in the other's past) may not both be able to count:
+ * - one takes the other's maker out of a group, or out of being its admin,
+ *   and the other acts in that group (in the workspace: anything); their
+ *   leaving it themselves excepted;
+ * - they say different things of one person's place in one group (taken
+ *   out, a member, an admin).
+ * Then the one ranked first counts, and the other does not: leaving oneself
+ * first; then by its maker's rank (rankKey: the owner, then admins by how
+ * long they have been, then members), as the policy it was made under had it;
+ * then the one that gives less; then by hash. Taken in that order, each counts
+ * if none counting before it rules it out. Whatever else someone taken out did
+ * at the same time counts for nothing (their cutoff).
+ *
+ * What counts must be allowed by what counts of its past: an operation whose
+ * maker's say came from one that does not count does not count either, and
+ * the rest are settled again without it.
+ *
+ * The workspace keeps an admin: where it has no owner and what counts would
+ * leave it with none, the highest-ranked of the admins taken out at the same
+ * time as another stays (on record in `disputes`).
  */
-function fold(ops: PolicyEntry[], counted: Set<string>, all: PolicyEntry[], anc: Map<string, Set<string>>, meta: Map<string, Removal>, by: Map<string, string>): Folded {
-  const concurrent = (a: string, b: string) => a !== b && !anc.get(a)!.has(b) && !anc.get(b)!.has(a);
+function fold(ops: PolicyEntry[], env: Env): Folded {
+  const concurrent = (a: string, b: string) => a !== b && !env.anc.get(a)!.has(b) && !env.anc.get(b)!.has(a);
+  const keyOf = (e: PolicyEntry) => rankKey(env.before.get(e.id)!, env.by.get(e.id)!);
+  const leaving = (e: PolicyEntry) => e.op.t === 'revoke' && e.op.who === env.by.get(e.id);
+  /** Whether removal `r` cuts off `e`: by the person it takes out (a drop: signed by the key it drops), at the same time, where it applies. */
+  const cuts = (r: PolicyEntry, e: PolicyEntry) => {
+    if (r.op.t === 'drop') return r !== e && e.signer === r.op.key && concurrent(r.id, e.id);
+    const m = env.meta.get(r.id);
+    if (!m || env.by.get(e.id) !== m.person || !concurrent(r.id, e.id) || leaving(e)) return false;
+    return m.group === WORKSPACE || groupOf(e) === m.group;
+  };
   const disputes: Folded['disputes'] = [];
   const excluded = new Set<string>();
-  for (let round = 0; ; round++) {
-    // Cutoffs, until nothing more is voided (a voided removal voids nothing).
-    let voided = new Set<string>();
-    // At most a few rounds: removals in different groups that would void each other in turn settle as the last round left them.
-    for (let changed = true, n = 0; changed && n < 8; n++) {
-      changed = false;
-      const next = new Set<string>();
-      for (const r of ops) {
-        const m = meta.get(r.id);
-        if (!m || excluded.has(r.id) || voided.has(r.id)) continue;
-        for (const e of ops) {
-          if (by.get(e.id) !== m.person || !concurrent(e.id, r.id)) continue;
-          const em = meta.get(e.id);
-          // Each taking the other out, at once, in the same group: both count.
-          if (em && em.group === m.group && em.person === by.get(r.id)) continue;
-          // Leaving a group oneself is no power to take away.
-          if (e.op.t === 'revoke' && e.op.who === m.person) continue;
-          const { group } = groupOf(e, m.person);
-          if (m.group === WORKSPACE || group === m.group) next.add(e.id);
-        }
+  for (;;) {
+    const voided = new Set(excluded);
+    // The operations that may rule others out: removals, and those that say where someone is.
+    const deciding = ops.filter((e) => !excluded.has(e.id) && (env.meta.has(e.id) || e.op.t === 'drop' || claimsOf(e, env.by.get(e.id)!).length))
+      .map((e) => ({ e, claims: claimsOf(e, env.by.get(e.id)!), key: keyOf(e), least: Math.min(4, ...claimsOf(e, env.by.get(e.id)!).map((c) => PLACE_ORDER[c.place])) }))
+      .sort((a, b) => Number(leaving(b.e)) - Number(leaving(a.e)) || compareKeys(a.key, b.key) || a.least - b.least || (a.e.id < b.e.id ? -1 : a.e.id > b.e.id ? 1 : 0));
+    const counting: typeof deciding = [];
+    for (const x of deciding) {
+      const out = counting.some((s) => cuts(s.e, x.e) || cuts(x.e, s.e)
+        || s.claims.some((c) => x.claims.some((d) => c.group === d.group && c.who === d.who && differ(c.place, d.place) && concurrent(s.e.id, x.e.id))));
+      if (out) voided.add(x.e.id);
+      else counting.push(x);
+    }
+    // Cutoffs: whatever else those taken out did at the same time.
+    const removals = counting.filter((x) => env.meta.has(x.e.id) || x.e.op.t === 'drop').map((x) => x.e);
+    for (const e of ops) if (!voided.has(e.id) && removals.some((r) => cuts(r, e))) voided.add(e.id);
+    // What counts must be allowed by what counts of its past: an operation whose maker had their say from
+    // one that does not count (a grant cut off, a handover that lost) does not count either; and so on.
+    const kept = ops.filter((e) => !voided.has(e.id));
+    let unfounded = false;
+    for (const e of kept) {
+      const past = env.anc.get(e.id)!;
+      const then = freshState(env.order, env.counted);
+      for (const x of kept) if (past.has(x.id)) effect(x, env.by.get(x.id)!, then, env.at.get(x.id)!);
+      if (!allowed(e, env.by.get(e.id)!, then, env.ctx)) {
+        excluded.add(e.id);
+        unfounded = true;
       }
-      if ([...next].some((x) => !voided.has(x)) || [...voided].some((x) => !next.has(x))) changed = true;
-      voided = next;
     }
-    const state = freshState(all, counted);
+    if (unfounded) continue;
+    const state = freshState(env.order, env.counted);
     for (const e of ops) {
-      if (voided.has(e.id) || excluded.has(e.id)) continue;
-      const who = by.get(e.id)!;
-      // Removal wins: not put in a group someone takes them out of at the same time.
-      const { group, adds } = groupOf(e, who);
-      if (adds && group && ops.some((r) => {
-        const m = meta.get(r.id);
-        return m && m.kind === 'out' && !voided.has(r.id) && !excluded.has(r.id) && m.person === adds && (m.group === group || m.group === WORKSPACE) && concurrent(r.id, e.id);
-      })) continue;
-      if (effect(e, who, state)) state.applied.push(e.id);
+      if (voided.has(e.id)) continue;
+      if (effect(e, env.by.get(e.id)!, state, env.at.get(e.id)!)) state.applied.push(e.id);
     }
-    // No admin left: the removals of admins made at the same time as another do not stand.
-    if (adminCount(state) === 0 && round < 3) {
-      const clash = ops.filter((r) => {
-        const m = meta.get(r.id);
-        return m && m.group === WORKSPACE && m.wasAdmin && !excluded.has(r.id) && !voided.has(r.id)
-          && ops.some((o) => o !== r && meta.get(o.id)?.group === WORKSPACE && meta.get(o.id)!.wasAdmin && concurrent(o.id, r.id));
-      });
-      if (clash.length) {
-        for (const r of clash) excluded.add(r.id);
-        disputes.push({ people: [...new Set(clash.map((r) => meta.get(r.id)!.person))].sort(), ops: clash.map((r) => r.id).sort() });
+    // No admin left, and no owner: the highest-ranked of the admins taken out at the same time as another stays.
+    if (adminCount(state) === 0 && !state.owner) {
+      const taken = ops.filter((r) => {
+        const m = env.meta.get(r.id);
+        return m && m.group === WORKSPACE && m.wasAdmin && !voided.has(r.id)
+          && ops.some((o) => o !== r && env.meta.get(o.id)?.group === WORKSPACE && env.meta.get(o.id)!.wasAdmin && !voided.has(o.id) && concurrent(o.id, r.id));
+      }).map((r) => ({ r, key: rankKey(env.before.get(r.id)!, env.meta.get(r.id)!.person) }))
+        .sort((a, b) => compareKeys(a.key, b.key) || (a.r.id < b.r.id ? -1 : 1));
+      const keep = taken[0];
+      if (keep) {
+        const person = env.meta.get(keep.r.id)!.person;
+        // Every removal of that person at the same time: they stay.
+        const theirs = taken.filter((t) => env.meta.get(t.r.id)!.person === person).map((t) => t.r.id);
+        for (const id of theirs) excluded.add(id);
+        disputes.push({ people: [person], ops: theirs.sort() });
         continue;
       }
     }
@@ -703,33 +871,40 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
     anc.set(e.id, past);
     ops.push(e);
   }
-  // Each operation, judged by the policy its own past makes (the same wherever it is judged).
+  const env: Env = { counted, order, at: new Map(order.map((e, i) => [e.id, i + 1])), anc, by: new Map(), meta: new Map(), before: new Map(), ctx };
+  // Each operation, judged by the policy its own past makes (the same wherever it is judged); operations with the same past, by one fold.
   const ok: PolicyEntry[] = [];
-  const by = new Map<string, string>();
-  const meta = new Map<string, Removal>();
+  const folds = new Map<string, State>();
   for (const e of ops) {
     const who = ctx.personOf(e.signer);
     if (!who) continue;
+    // A key its person revoked: only what its revoker had seen of what it signed (0072).
+    const cut = ctx.cutKey?.(e.signer);
+    if (cut && !cut.some((h) => h === e.id || anc.get(h)?.has(e.id))) continue;
     const past = anc.get(e.id)!;
-    const before = fold(ok.filter((x) => past.has(x.id)), counted, order, anc, meta, by).state;
+    const mine = ok.filter((x) => past.has(x.id));
+    const key = mine.map((x) => x.id).join();
+    let before = folds.get(key);
+    if (!before) folds.set(key, (before = fold(mine, env).state));
     if (!allowed(e, who, before, ctx)) continue;
-    by.set(e.id, who);
+    env.by.set(e.id, who);
+    env.before.set(e.id, before);
     const op = e.op;
-    if (op.t === 'revoke') meta.set(e.id, { person: op.who, group: op.group, kind: 'out', wasAdmin: before.groups.get(op.group)?.get(op.who) === 'admin' });
-    else if (op.t === 'grant' && op.role === 'member' && before.groups.get(op.group)?.get(op.who) === 'admin') meta.set(e.id, { person: op.who, group: op.group, kind: 'demote', wasAdmin: true });
+    if (op.t === 'revoke') env.meta.set(e.id, { person: op.who, group: op.group, kind: 'out', wasAdmin: before.groups.get(op.group)?.get(op.who) === 'admin' });
+    else if (op.t === 'grant' && op.role === 'member' && before.groups.get(op.group)?.get(op.who) === 'admin') env.meta.set(e.id, { person: op.who, group: op.group, kind: 'demote', wasAdmin: true });
     ok.push(e);
   }
-  const { state, disputes } = fold(ok, counted, order, anc, meta, by);
+  const { state, disputes } = fold(ok, env);
   const parents = new Set(order.flatMap((e) => e.parents));
   const heads = order.filter((e) => rooted.has(e.id) && !parents.has(e.id)).map((e) => e.id).sort();
   // Who is out of the workspace, and the content they had seen when taken out (their cutoff: gate.ts).
   const cutoffs = new Map<string, string[]>();
   for (const e of ok) {
-    const m = meta.get(e.id);
-    if (!m || m.group !== WORKSPACE || m.kind !== 'out' || state.groups.get(WORKSPACE)!.has(m.person) || e.op.t !== 'revoke') continue;
+    const m = env.meta.get(e.id);
+    if (!m || m.group !== WORKSPACE || m.kind !== 'out' || state.groups.get(WORKSPACE)!.has(m.person) || e.op.t !== 'revoke' || !state.applied.includes(e.id)) continue;
     cutoffs.set(m.person, [...new Set([...(cutoffs.get(m.person) ?? []), ...(e.op.cutoff ?? [])])].sort());
   }
-  const policy = new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.perms, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed, state.owner);
+  const policy = new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.perms, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed, state.owner, state.dropped, state.witnesses);
   policy.workspace = ctx.workspace;
   return { policy, seal: state.seal };
 }

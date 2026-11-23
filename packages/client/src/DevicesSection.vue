@@ -93,6 +93,11 @@ async function setRole(p: Someone, role: 'admin' | 'member') {
 /** Whether you may change this person's role, or take them out: admins are the owner's to make and unmake (0070); the owner is no one's. */
 const mayManagePerson = (i: Info, p: Someone) => admin.value && i.canInvite && !i.removed && !p.you && p.role !== 'owner' && (p.role === 'member' || !!i.people?.assignsAdmins);
 
+/** Name a person a witness, or not (0072): their devices' acknowledgements confirm removals. */
+async function setWitness(p: Someone, on: boolean) {
+  await act(() => props.api.setWitness(p.id, on));
+}
+
 async function makeOwner(p: Someone) {
   const ok = await askConfirm(S.people.makeOwnerAsk(nameOf(p)), S.people.makeOwner, true);
   if (ok) await act(() => props.api.makeOwner(p.id));
@@ -146,6 +151,8 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
         <div class="person-line">
           <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template><span v-if="p.emails?.length" class="muted"> · {{ p.emails.join(', ') }}</span></span>
           <span class="device-tag" :title="p.role === 'owner' ? S.people.ownerTitle : p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'owner' ? S.people.owner : p.role === 'admin' ? S.people.admin : S.people.member }}</span>
+          <span v-if="info.people?.witnesses?.includes(p.id)" class="device-tag" :title="S.people.witnessTitle" :data-testid="`witness:${nameOf(p)}`">{{ S.people.witness }}</span>
+          <button v-if="admin && info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`witness-toggle:${nameOf(p)}`" @click="setWitness(p, !info.people?.witnesses?.includes(p.id))">{{ info.people?.witnesses?.includes(p.id) ? S.people.unmakeWitness : S.people.makeWitness }}</button>
           <template v-if="mayManagePerson(info, p)">
             <button v-if="info.people?.assignsAdmins" type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
             <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.people.removeEllipsis }}</button>
@@ -198,6 +205,15 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
     </template>
 
     <p v-if="note" class="menu-facts" role="status" data-testid="device-note">{{ note }}</p>
+    <template v-if="info.people?.removals?.length">
+      <h4 class="menu-subhead" :title="S.people.removalsAbout">{{ S.people.removals }}</h4>
+      <ul class="menu-devices" data-testid="removals">
+        <li v-for="(r, i) in info.people.removals" :key="i" :data-testid="`removal:${i}`">
+          <span class="device-who">{{ S.people.removal(r.kind, r.who, r.by) }}</span>
+          <span :class="['device-state', { warn: !r.confirmedBy.length }]">{{ S.people.confirmed(r.confirmedBy, r.witnessed) }}</span>
+        </li>
+      </ul>
+    </template>
     <p v-for="(d, i) in info.people?.disputes ?? []" :key="i" class="menu-facts warn" :data-testid="`dispute:${i}`">{{ S.people.dispute(d) }}</p>
     <p v-if="!admin && !info.removed" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
     <!-- A removed device's invitations and removals are refused by the others: none offered. -->

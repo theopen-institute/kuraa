@@ -385,8 +385,20 @@ const historyRoutes: Route[] = [
       const pathThen = names.split('\n').map((n) => n.trim()).filter(Boolean).pop() ?? path;
       // Saves the host made on its own, merges it made, or commits made otherwise (named versions, outside).
       const kind = email === MERGE_AUTHOR.email ? 'merge' : /^Kuraa-Kind:\s*autosave\s*$/im.test(body) ? 'autosave' : 'commit';
-      return { hash, author, email, date, subject, coAuthors, path: pathThen, kind };
+      return { hash, author, email, date, subject, coAuthors, path: pathThen, kind } as { hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string | undefined; email: string | undefined }[]; path: string; kind: string };
     });
+    // Changes not kept (0072): made by someone who may not change the file; in its history, to read and take up.
+    const refused = await host.notKept(path);
+    if (refused.length) {
+      for (const { commit } of refused) {
+        const r = await host.git.run(['show', '-s', '--format=%an%x1f%ae%x1f%aI%x1f%s', commit], { allowFail: true });
+        if (r.code !== 0) continue;
+        const [author = '', email = '', date = '', subject = ''] = r.stdout.trim().split('\x1f');
+        // Put in by date, the history's own order otherwise as git gives it.
+        const at = commits.findIndex((c) => c.date <= date);
+        commits.splice(at < 0 ? commits.length : at, 0, { hash: commit, author, email, date, subject, coAuthors: [], path, kind: 'not-kept' });
+      }
+    }
     send(res, 200, { commits });
   }),
 
@@ -745,34 +757,24 @@ const peerRoutes: Route[] = [
     await allowed(() => peers.makeOwner(params[0]!));
     send(res, 200, await peers.people());
   }),
+  // A witness (0072): an admin names a person whose devices' acknowledgements confirm removals, or stops.
+  route('POST', /^\/api\/peers\/witness\/([0-9a-f]{64})$/, async ({ host, req, res, params }) => {
+    const peers = await host.peersForInvites();
+    const on = (await readBody(req)).on;
+    if (typeof on !== 'boolean') throw new HttpError(400, 'Say whether they are a witness: on, true or false');
+    await allowed(() => peers.setWitness(params[0]!, on));
+    send(res, 200, await peers.people());
+  }),
   route('DELETE', /^\/api\/peers\/people\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
     await allowed(() => peers.removePerson(params[0]!));
     send(res, 200, await peers.people());
   }),
 
-  // Who may change what (0066): a file's access and suggestions; suggesting; seeing to a suggestion; rules and groups.
+  // Who may change what (0066): a file's access; rules and groups.
   route('GET', '/api/access', async ({ host, res, q }) => {
     const path = str(q.get('path'), 'path');
-    send(res, 200, host.peers ? await host.peers.access(path) : { canWrite: true, rule: null, admin: false, suggestions: [], you: null, readers: null });
-  }),
-  route('POST', '/api/suggestions', async ({ host, req, res }) => {
-    const peers = host.peers;
-    if (!peers) throw new HttpError(400, 'Suggestions are for a workspace shared with other devices');
-    const b = await readBody(req);
-    const path = str(b.path, 'path');
-    if (typeof b.text !== 'string') throw new HttpError(400, 'A suggestion has a text');
-    const text = b.text;
-    send(res, 201, { commit: await allowed(() => peers.suggest(path, text)) });
-  }),
-  route('POST', '/api/suggestions/resolve', async ({ host, req, res }) => {
-    const peers = host.peers;
-    if (!peers) throw new HttpError(400, 'Suggestions are for a workspace shared with other devices');
-    const b = await readBody(req);
-    const commit = str(b.commit, 'commit');
-    const path = str(b.path, 'path');
-    await allowed(() => peers.resolveSuggestion(commit, path, b.accepted === true));
-    send(res, 200, { ok: true });
+    send(res, 200, host.peers ? await host.peers.access(path) : { canWrite: true, rule: null, admin: false, you: null, readers: null, notKept: [] });
   }),
   // A file's or folder's permissions (0069): who may change it, who reads it (a folder's: what is made in it).
   route('GET', '/api/permissions', async ({ host, res, q }) => {

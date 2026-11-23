@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
-import type { CommitInfo, FileAccess, HubWorkspace, NotRepository, SuggestionInfo, TreeFile, WorkspaceInfo } from './api.js';
+import type { CommitInfo, FileAccess, HubWorkspace, NotRepository, TreeFile, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { askConfirm, askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -26,7 +26,6 @@ import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
 import PastVersion from './PastVersion.vue';
 import AccessBar from './AccessBar.vue';
-import SuggestDialog from './SuggestDialog.vue';
 import PermissionsDialog from './PermissionsDialog.vue';
 import SettingsDialog from './SettingsDialog.vue';
 import AddWorkspaceDialog from './AddWorkspaceDialog.vue';
@@ -87,8 +86,8 @@ const historyKey = ref(0);
  * history, or the copy of an outside edit the host kept beside the file
  * (`outside`, its path), each comparable with now and restorable.
  */
-const viewing = shallowRef<{ commit: CommitInfo | null; outside?: string; text: string; compare?: boolean; suggestion?: SuggestionInfo } | null>(null);
-/** Who may change the open file, and its suggestions (0066); null until known, or where it does not apply. */
+const viewing = shallowRef<{ commit: CommitInfo | null; outside?: string; text: string; compare?: boolean } | null>(null);
+/** Who may change the open file (0066); null until known, or where it does not apply. A file this person may not change opens read only. */
 const access = shallowRef<FileAccess | null>(null);
 /** A file's permissions, open (0066, 0067): its path, and what it is called. */
 const permissionsFor = shallowRef<{ path: string; name: string } | null>(null);
@@ -98,8 +97,6 @@ function openPermissions(p: string) {
   permissionsFor.value = { path: p, name };
 }
 
-/** Suggesting a change to the open document: its text as it is now. */
-const suggesting = shallowRef<{ path: string; title: string; text: string } | null>(null);
 let viewAsked = 0;
 const syncing = ref(false);
 const historyOpen = ref(false);
@@ -178,7 +175,7 @@ async function openMatch(p: string, target: MatchTarget) {
   editor.value?.reveal(target);
 }
 
-/** Ask again who may change the open file, and its suggestions. The last asked wins, for the file still open. */
+/** Ask again who may change the open file. The last asked wins, for the file still open. */
 let accessAsked = 0;
 async function loadAccess() {
   const n = ++accessAsked;
@@ -195,67 +192,14 @@ async function loadAccess() {
   }
 }
 watch([path, historyKey, api], () => void loadAccess(), { immediate: true });
-// Rules and suggestions come from other devices too: asked again now and then.
+// Rules come from other devices too: asked again now and then.
 const accessTimer = setInterval(() => void loadAccess(), 10_000);
 onBeforeUnmount(() => clearInterval(accessTimer));
 
-/** Suggest a change to the open document (one this person may not change): its text, to edit and send. */
-function openSuggest() {
-  const p = path.value;
-  const text = editor.value?.text();
-  if (!p || text == null) return;
-  const f = files.value.find((x) => x.path === p);
-  suggesting.value = { path: p, title: (f && 'title' in f && f.title) || p, text };
-}
-
-/** Show a suggestion in place of the document: to read, compare with now, and accept or dismiss. */
-function viewSuggestion(s: SuggestionInfo) {
-  viewAsked++;
-  viewing.value = { commit: null, text: s.text ?? '', suggestion: s };
-}
-
-/** What may be done with the suggestion shown: accept (who may change the file), dismiss (they, or whoever suggested it). */
-const suggestionView = computed(() => {
-  const s = viewing.value?.suggestion;
-  if (!s) return null;
-  const canAccept = access.value?.canWrite ?? false;
-  return { name: s.name, date: s.date, canAccept, canDismiss: canAccept || (!!s.person && s.person === access.value?.you), removes: s.text === null };
-});
-
-async function dismissSuggestion() {
-  const s = viewing.value?.suggestion;
-  if (!s) return;
-  try {
-    await api.value.resolveSuggestion(s.commit, s.path, false);
-    void view(null);
-    notice.value = { kind: 'info', text: S.access.dismissed };
-  } catch (e) {
-    fail(e);
-  }
-  await loadAccess();
-}
-
-/** Make the document read as the version shown (a past one, an outside edit's copy, or a suggestion), as this person's edit. */
+/** Make the document read as the version shown (a past one, or an outside edit's copy), as this person's edit. */
 async function restoreVersion() {
   const v = viewing.value;
   if (!v) return;
-  if (v.suggestion) {
-    const s = v.suggestion;
-    if (!(await askConfirm(S.access.acceptAsk(s.name), S.access.accept.replace('…', ''))) || viewing.value !== v) return;
-    if (!editor.value?.replaceText(v.text)) {
-      notice.value = { kind: 'warn', text: S.versions.cannotRestore };
-      return;
-    }
-    try {
-      await api.value.resolveSuggestion(s.commit, s.path, true);
-    } catch (e) {
-      fail(e);
-    }
-    void view(null);
-    notice.value = { kind: 'info', text: S.access.accepted(s.name) };
-    await loadAccess();
-    return;
-  }
   const date = v.commit ? S.versions.date(v.commit.date) : null;
   const paused = editor.value?.savePaused();
   if (paused) {
@@ -591,6 +535,18 @@ async function view(commit: CommitInfo | null) {
   }
 }
 
+/** Show changes of this person's that were not kept (0072), as the history has them: to read, and compare with now. */
+async function showNotKept(commit: string) {
+  const p = path.value;
+  if (!p) return;
+  try {
+    const entry = (await api.value.history(p)).find((c) => c.hash === commit);
+    if (entry && p === path.value) await view(entry);
+  } catch (e) {
+    fail(e);
+  }
+}
+
 /** Show the copy of an outside edit the host kept beside the open file (decision 0037), to read or compare with now. */
 async function viewOutside(savedAs: string, compare: boolean) {
   const n = ++viewAsked;
@@ -790,7 +746,7 @@ function useSettings(s: Settings) {
             @click="openDocMenu"
           >⋯</button>
           <div :style="{ display: viewing ? 'none' : 'contents' }">
-            <AccessBar v-if="access" :access="access" @suggest="openSuggest" @view="viewSuggestion" />
+            <AccessBar v-if="access" :access="access" @show="showNotKept" />
             <Editor
               ref="editor"
               :key="`${api.baseUrl}|${path}|${type.id}`"
@@ -817,7 +773,7 @@ function useSettings(s: Settings) {
           </div>
           <PastVersion
             v-if="viewing"
-            :key="viewing.suggestion?.commit ?? viewing.outside ?? viewing.commit?.hash"
+            :key="viewing.outside ?? viewing.commit?.hash"
             :commit="viewing.commit"
             :outside="viewing.outside"
             :start-comparing="viewing.compare"
@@ -826,10 +782,9 @@ function useSettings(s: Settings) {
             :path="viewing.commit?.path || path"
             :format-editor="editorFor(type.id)"
             :now="() => editor?.text() ?? null"
-            :suggestion="suggestionView"
+            :can-restore="access?.canWrite !== false"
             @back="view(null)"
             @restore="restoreVersion"
-            @dismiss="dismissSuggestion"
           />
         </div>
       </main>
@@ -884,7 +839,6 @@ function useSettings(s: Settings) {
     />
     <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
     <PermissionsDialog v-if="permissionsFor" :api="api" :path="permissionsFor.path" :name="permissionsFor.name" @close="permissionsFor = null" @saved="(what) => { permissionsFor = null; notice = { kind: 'info', text: what }; void refreshTree(); void loadAccess(); }" />
-    <SuggestDialog v-if="suggesting" :api="api" :path="suggesting.path" :title="suggesting.title" :text="suggesting.text" @close="suggesting = null" @sent="suggesting = null; notice = { kind: 'info', text: S.access.sent }; void loadAccess()" />
     <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkSyncable()" />
     <AddWorkspaceDialog
       v-if="addingWorkspace"

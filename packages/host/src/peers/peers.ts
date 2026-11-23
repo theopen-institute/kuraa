@@ -12,9 +12,9 @@
 // kuraa), only the one with the lower key makes the merges, and the other
 // takes them.
 import { NotBrought, WaitingForPolicy, describeOutcome, type Host } from '../host.js';
-import { RESOLVED_TRAILER, gate, policyWaits, type GateResult } from './gate.js';
+import { gate, policyWaits, type GateResult } from './gate.js';
+import { commitSigner } from '../signing.js';
 import { digestOf } from './node.js';
-import { suggestions, type Suggestion } from './suggestions.js';
 import { emailOf } from './attest.js';
 import { MERGE_VERSION, isAncestor } from '../merging.js';
 import { randomBytes } from 'node:crypto';
@@ -133,11 +133,12 @@ export interface FileAccess {
   rule: { path: string; by: string[]; who: string[] } | null;
   /** Whether this person may make rules (an admin of the workspace). */
   admin: boolean;
-  suggestions: Suggestion[];
   /** This person (identity ID). */
   you: string | null;
   /** Who reads it: null for everyone in the workspace; else its space's audience, and that in words (0066). */
   readers: { audience: string[]; words: string } | null;
+  /** This person's changes to it that were not kept (0072: they could not change it), newest first: to tell them, once. */
+  notKept: { commit: string; date: string }[];
 }
 
 /** An audience in words: "Only you", "Ada and Bo", "editors", "admins". */
@@ -190,8 +191,15 @@ export interface PeopleInfo {
   people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean; emails: string[] }[];
   /** People invited by email who are not in yet (0066, step 6). */
   invited: { email: string; role: Role }[];
-  /** Admins who took each other out at the same time, which would have left none, so neither removal stood: their names. */
+  /** Admins taken out at the same time as the others, which would have left none, who stayed (0072): their names. */
   disputes: string[][];
+  /** People whose devices' acknowledgements confirm removals (0072): their IDs. */
+  witnesses: string[];
+  /**
+   * The latest removals (0072: people taken out, computers dropped), each with
+   * the names of those whose devices hold it so far, and whether a witness does.
+   */
+  removals: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -729,9 +737,13 @@ export class Peers {
   }
 
   /**
-   * Remove a device from the workspace, for good, on record, and tell the others
-   * (any member may). It keeps its copy. The workspace's secret is made anew, so
-   * the device, which knew the old one, can no longer find the others (0050).
+   * Remove a device from the workspace, for good, and tell the others: its own
+   * person (or an admin; the owner, for an admin's computer). It keeps its copy.
+   * Its signing key is revoked (one's own, where this computer keeps one's
+   * identity: in every workspace) or dropped here (0072), with the commits this
+   * device has; what it signs from now on counts for nothing. The workspace's
+   * secret is made anew, so the device, which knew the old one, can no longer
+   * find the others (0050).
    */
   async removeDevice(key: string): Promise<{ revoked: boolean }> {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
@@ -740,7 +752,8 @@ export class Peers {
     if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
     // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.
     const revoked = await this.revokeOwn(key);
-    await this.node.identity.removeMember(key);
+    const target = await this.node.identity.signingKeyOf(key);
+    if (!revoked && target) await this.node.identity.dropKey(target, await this.node.branchTips(), await this.node.signingKeyNow());
     await this.node.newSecret();
     // Told first, with the others (it stops syncing once it takes the record); then let go of, in any case.
     const link = this.node.links.get(key);
@@ -800,7 +813,14 @@ export class Peers {
       invited: policy.invited(),
       // Admins who took each other out at once, which would have left none: neither stood (step 4).
       disputes: policy.disputes.map((d) => d.people.map((id) => known.get(id)?.name ?? `${id.slice(0, 8)}…`)),
+      witnesses: [...policy.witnesses],
+      removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: known.get(r.who)?.name ?? `${r.who.slice(0, 8)}…`, by: r.by ? known.get(r.by)?.name ?? `${r.by.slice(0, 8)}…` : null, confirmedBy: r.confirmedBy.map((p) => known.get(p)?.name ?? `${p.slice(0, 8)}…`), witnessed: r.witnessed })),
     };
+  }
+
+  /** Name a person a witness, or not (0072: an admin's to do): their devices' acknowledgements confirm removals. */
+  async setWitness(person: string, on: boolean): Promise<void> {
+    await this.adminOp({ t: 'witness', who: person, on });
   }
 
   /** Give the owner's role to someone in the workspace (the owner's to do, 0070): they stay an admin. */
@@ -814,24 +834,21 @@ export class Peers {
   }
 
   /**
-   * Take a person out of the workspace (an admin's to do; or anyone, themselves),
-   * and remove their devices, as removing a device does (0050: a new secret).
+   * Take a person out of the workspace (an admin's to do; or anyone, themselves):
+   * their devices are out with them (0072), and the secret is made anew (0050).
    */
   async removePerson(person: string): Promise<void> {
     const devices = (await this.node.identity.people()).find((p) => p.key === person)?.devices ?? [];
     // With the commits this device has: what they made among them still counts, and nothing else (their cutoff).
     await this.adminOp({ t: 'revoke', group: WORKSPACE, who: person, cutoff: await this.node.branchTips() });
-    const members = new Set((await this.node.identity.members()).map((m) => m.key));
-    const theirs = devices.filter((d) => members.has(d) && d !== this.node.myKey);
-    for (const d of theirs) await this.node.identity.removeMember(d);
-    if (theirs.length) await this.node.newSecret();
+    if (devices.some((d) => d !== this.node.myKey)) await this.node.newSecret();
     await this.node.membersChanged();
   }
 
   /**
    * Who may change a file (0066), for the editor: whether this person may, the
-   * rule that says so (its path, and who it names, in words), and the file's
-   * open suggestions.
+   * rule that says so (its path, and who it names, in words). A file this
+   * person may not change opens read only.
    */
   async access(path: string): Promise<FileAccess> {
     const { policy, me } = await this.node.policy();
@@ -845,29 +862,25 @@ export class Peers {
       rule: rule && { path: rule.path, by: rule.by.map(words), who: rule.by },
       // Whether this person may say who changes it (make a rule): the workspace's admins (0066).
       admin: policy.founded && policy.isAdmin(me),
-      suggestions: await this.suggestions(path),
       you: me,
       // Who reads it: everyone in the workspace (null), or a space's audience (0066).
       readers: space ? { audience: policy.spaces.get(space)?.audience ?? [], words: audienceWords(policy.spaces.get(space)?.audience ?? [], me, names) } : null,
+      notKept: await this.notKeptOf(path, me),
     };
   }
 
-  /** The open suggestions on the current branch (of one file, if given). */
-  async suggestions(path?: string): Promise<Suggestion[]> {
-    const branch = await this.host.git.branch();
-    if (!branch) return [];
-    const { policy } = await this.node.policy();
-    const people = await this.node.identity.people();
-    const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
-    const names = new Map(people.map((p) => [p.key, p.name]));
-    const ctx = { personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? null, mayWrite: (p: string | null, f: string) => !policy.founded || policy.mayWrite(p, f) };
-    // The workspace's own history, and each space's (0066): a space's file's suggestions are in its space's.
-    const refs = path !== undefined
-      ? [this.host.refFor(path) === 'HEAD' ? branch : this.host.refFor(path)]
-      : [branch, ...this.host.spaces.ids().map((id) => this.host.spaces.refOf(id)!)];
-    const all: Suggestion[] = [];
-    for (const ref of refs) all.push(...(await suggestions(this.host.git, ref, ctx, path)));
-    return all.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  /** A person's changes to a file that were not kept (Host.notKept), the latest few: whose each is, by its signature. */
+  private async notKeptOf(path: string, me: string | null): Promise<{ commit: string; date: string }[]> {
+    if (!me) return [];
+    const out: { commit: string; date: string }[] = [];
+    for (const { commit } of (await this.host.notKept(path)).slice(0, 20)) {
+      const key = await commitSigner(this.host.git, commit);
+      if (!key || (await this.node.identity.personIdOf(key)) !== me) continue;
+      const date = (await this.host.git.run(['show', '-s', '--format=%aI', commit], { allowFail: true })).stdout.trim();
+      if (date) out.push({ commit, date });
+      if (out.length >= 5) break;
+    }
+    return out;
   }
 
   /**
@@ -907,33 +920,70 @@ export class Peers {
   }
 
   /**
-   * Who may read a file (0066): everyone in the workspace (`null`), or an
-   * audience (people's IDs, `group:<name>`, `admins`), which must include this
-   * person. Files with the same audience share a space: one is made for an
-   * audience no space has yet. The file moves there as it is now; its history
-   * stays where it was, with those who read it then.
+   * Who may read a file (0066, 0072): everyone in the workspace (`null`), or
+   * an audience (people's IDs, `group:<name>`, `admins`), which must include
+   * this person. The audience its folder has puts it in the folder's space.
+   * Any other is a space of the file's own: where it has one already (it alone
+   * is in it, and it is no folder's), that space's readers change, its history
+   * going to whoever is added; else one is made, and the file moves there as
+   * it is now, its history staying with those who read it then.
    */
   async setAudience(path: string, audience: string[] | null): Promise<void> {
     const { policy, me } = await this.node.policy();
     if (!policy.founded || !me) throw new NotAllowed('Who reads what is for a workspace shared with other people, once it has a policy');
     if (!(await this.access(path)).canWrite) throw new NotAllowed('Only someone who may change this file says who reads it');
-    const target = await this.spaceFor(audience);
+    const wanted = audience && this.cleanAudience(audience);
+    const current = this.host.spaceOf(path);
+    const folder = policy.readFor(path);
+    let target: string | null;
+    if (!wanted) target = null;
+    else if (folder && folder.audience.join() === wanted.join()) target = folder.space ?? (await this.spaceFor(wanted));
+    else if (current && this.ownSpace(policy, current, path)) {
+      await this.changeSpace(current, wanted);
+      if (!(await this.node.policy()).policy.mayRead(me, current)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
+      return;
+    } else target = await this.newSpace(wanted);
     if (target && !(await this.node.policy()).policy.mayRead(me, target)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
     await this.host.moveToSpace(path, target);
   }
 
-  /** The space for an audience (0066): one that has it, or one made for it now; null for everyone in the workspace. */
-  private async spaceFor(audience: string[] | null): Promise<string | null> {
-    if (!audience) return null;
+  /** An audience as the policy names one: sorted, each entry someone it can name. */
+  private cleanAudience(audience: string[]): string[] {
     const wanted = [...new Set(audience)].sort();
     if (!wanted.length || !wanted.every(isWriter)) throw new NotAllowed('An audience names people, groups, admins or email addresses');
-    const { policy } = await this.node.policy();
-    const same = [...policy.spaces].find(([, s]) => s.audience.join() === wanted.join());
-    if (same) return same[0];
+    return wanted;
+  }
+
+  /** Whether a space is a file's own (0072): it alone is in it, and it is no folder's. */
+  private ownSpace(policy: Policy, space: string, path: string): boolean {
+    return !policy.isFolderSpace(space) && this.host.spaces.entries().every(([p, s]) => s !== space || p === path);
+  }
+
+  /** A new space for an audience (0072: a folder's own, or a file's). */
+  private async newSpace(audience: string[]): Promise<string> {
     const id = randomBytes(16).toString('hex');
-    await this.node.identity.makeSpace(id, wanted, await this.node.signingKeyNow());
+    await this.node.identity.makeSpace(id, this.cleanAudience(audience), await this.node.signingKeyNow());
     await this.node.membersChanged();
     return id;
+  }
+
+  /** Who reads a space, changed (0072): no file moves; whoever is added is sent its history. */
+  private async changeSpace(space: string, audience: string[]): Promise<void> {
+    await this.node.identity.makeSpace(space, this.cleanAudience(audience), await this.node.signingKeyNow());
+    await this.node.membersChanged();
+  }
+
+  /**
+   * The space with an audience, for a folder's permission from before 0072,
+   * which names none: one that has it, or one made for it now; null for
+   * everyone in the workspace.
+   */
+  private async spaceFor(audience: string[] | null): Promise<string | null> {
+    if (!audience) return null;
+    const wanted = this.cleanAudience(audience);
+    const { policy } = await this.node.policy();
+    const same = [...policy.spaces].find(([, s]) => s.audience.join() === wanted.join());
+    return same ? same[0] : this.newSpace(wanted);
   }
 
   /** Who reads a file now: its space's audience; null for everyone in the workspace. */
@@ -1003,17 +1053,26 @@ export class Peers {
       // Named by its hash where it is private: in a space, under a folder fewer read, or a folder fewer read itself.
       const hidden = !!this.host.spaceOf(path) || !!nextRead || (parent !== null && !!policy.readFor(folder ? parent : path));
       const key = hidden && path !== '' ? hashedPath(policy.workspace, path) : path;
+      // A folder read by fewer has a space of its own (0072): who reads it is that space's audience.
+      const hadSpace = folder && own?.perm.space && policy.spaces.has(own.perm.space) ? own.perm.space : undefined;
+      const before = folder ? (own?.perm.read ? policy.readFor(path)?.audience ?? own.perm.read : (parent !== null ? policy.readFor(parent)?.audience : undefined) ?? null) : null;
+      let space = folder && nextRead ? hadSpace : undefined;
+      // Readers changed: the same space, its readers changed; no file moves, whoever is added is sent its history.
+      if (folder && read && hadSpace) await this.changeSpace(hadSpace, read);
+      // Read by fewer from now: a space of its own, which its files that read as it did move into.
+      if (folder && read && !hadSpace) space = await this.newSpace(read);
       if (own && own.key !== key) await this.adminOp({ t: 'perm', path: own.key });
-      await this.adminOp({ t: 'perm', path: key, ...(nextWrite ? { write: nextWrite } : {}), ...(nextRead ? { read: nextRead } : {}) });
-      if (folder && read !== undefined) {
+      await this.adminOp({ t: 'perm', path: key, ...(nextWrite ? { write: nextWrite } : {}), ...(nextRead ? { read: nextRead } : {}), ...(nextRead && space ? { space } : {}) });
+      if (folder && read !== undefined && !(read && hadSpace)) {
         // Its files that followed it (who read them was who read the folder) follow it still.
-        const before = own?.perm.read ?? (parent !== null ? policy.readFor(parent)?.audience : undefined) ?? null;
-        const after = nextRead ?? (parent !== null ? (await this.node.policy()).policy.readFor(parent)?.audience : undefined) ?? null;
-        if ((before ?? []).join() !== (after ?? []).join()) {
-          const target = await this.spaceFor(after);
-          const now = (await this.node.policy()).policy;
+        const now = (await this.node.policy()).policy;
+        const above = parent !== null ? now.readFor(parent) : null;
+        const target = read ? space! : above?.space ?? (await this.spaceFor(above?.audience ?? null));
+        const after = read ?? above?.audience ?? null;
+        if ((before ?? []).join() !== (after ?? []).join() || hadSpace) {
           for (const f of (await this.knownPaths()).files.filter((x) => x.startsWith(path))) {
-            if ((this.audienceOf(now, f) ?? []).join() !== (before ?? []).join() || !now.mayWrite(me, f)) continue;
+            const followed = hadSpace ? this.host.spaceOf(f) === hadSpace : (this.audienceOf(now, f) ?? []).join() === (before ?? []).join();
+            if (!followed || !now.mayWrite(me, f)) continue;
             await this.host.moveToSpace(f, target);
           }
         }
@@ -1029,9 +1088,9 @@ export class Peers {
    */
   async spaceForNew(path: string): Promise<string | null> {
     const { policy, me } = await this.node.policy();
-    const audience = policy.founded ? policy.readFor(path)?.audience ?? null : null;
-    if (!audience) return null;
-    const id = await this.spaceFor(audience);
+    const folder = policy.founded ? policy.readFor(path) : null;
+    if (!folder) return null;
+    const id = folder.space ?? (await this.spaceFor(folder.audience));
     return id && (await this.node.policy()).policy.mayRead(me, id) ? id : null;
   }
 
@@ -1076,29 +1135,8 @@ export class Peers {
     const has = this.audienceOf(now, to);
     // It followed its old folder: it follows its new one.
     if ((has ?? []).join() === (was ?? []).join() && (next ?? []).join() !== (has ?? []).join() && now.mayWrite((await this.node.policy()).me, to)) {
-      await this.host.moveToSpace(to, await this.spaceFor(next));
+      await this.host.moveToSpace(to, now.readFor(to)?.space ?? (await this.spaceFor(next)));
     }
-  }
-
-  /** Suggest a text for a file this person may not change (Host.suggest); one they may, they change. */
-  async suggest(path: string, text: string): Promise<string> {
-    if ((await this.access(path)).canWrite) throw new NotAllowed('You may change this document: edit it instead');
-    const commit = await this.host.suggest(path, text);
-    await this.node.membersChanged();
-    return commit;
-  }
-
-  /**
-   * A suggestion seen to (accepted, its text put in the document as an edit; or
-   * dismissed): on record, for every device. By someone who may change the file,
-   * or whoever suggested it.
-   */
-  async resolveSuggestion(commit: string, path: string, accepted: boolean): Promise<void> {
-    const s = (await this.suggestions(path)).find((x) => x.commit === commit);
-    if (!s) throw new Error('No such suggestion is open');
-    const { me } = await this.node.policy();
-    if (!(await this.access(path)).canWrite && s.person !== me) throw new NotAllowed('Only someone who may change this document, or who suggested it, sees to a suggestion');
-    await this.host.commitNote(`${accepted ? 'Took' : 'Left'} ${s.name ?? 'someone'}’s suggestion for ${path}`, [`${RESOLVED_TRAILER}: ${commit} ${path}`]);
   }
 
   /** Say who may change a path (an admin's to do): people's IDs, `group:<name>`, or `admins`; none takes the rule away (as setPermissions). */
@@ -1155,7 +1193,7 @@ export class Peers {
     return this.rules();
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' }>): Promise<void> {
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' | 'witness' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());
@@ -1168,7 +1206,7 @@ export class Peers {
   async status(): Promise<PeersStatus> {
     const id = this.node.identity;
     const devices: DeviceInfo[] = [];
-    for (const m of await id.members()) {
+    for (const m of await id.devicesToMeet()) {
       const link = this.node.links.get(m.key);
       devices.push({
         name: m.name,

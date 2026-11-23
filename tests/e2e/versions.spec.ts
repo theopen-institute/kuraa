@@ -30,7 +30,7 @@ test('a past version is compared with now, and restored as an edit everyone sees
   await expect.poll(async () => (await (await api(`/api/history?path=${encodeURIComponent(path)}`)).json() as { commits: unknown[] }).commits.length, { timeout: 15_000 }).toBe(2);
 
   await ada.getByTestId('document-menu-button').click();
-  await ada.getByTestId('document-menu').getByRole('button', { name: 'History' }).click();
+  await ada.getByTestId('document-menu').getByRole('menuitemcheckbox', { name: 'History' }).click();
   const entries = ada.getByTestId('history').locator('li');
   await expect(entries).toHaveCount(2);
   // People and times, not commit ids.

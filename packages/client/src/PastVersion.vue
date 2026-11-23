@@ -30,10 +30,10 @@ const props = defineProps<{
   formatEditor?: FormatEditor;
   /** The document's text as it is now, in the live editor (null if it is not open). */
   now?: () => string | null;
-  /** A suggestion shown instead of a past version (0066): whose, and what you may do with it. */
-  suggestion?: { name: string | null; date: string; canAccept: boolean; canDismiss: boolean; removes: boolean } | null;
+  /** Whether this person may make the document read as this version (false: they may not change it, 0066). */
+  canRestore?: boolean;
 }>();
-const emit = defineEmits<{ back: []; restore: []; dismiss: [] }>();
+const emit = defineEmits<{ back: []; restore: [] }>();
 
 const mode = ref<'read' | 'source' | 'compare'>('read');
 const comparison = ref<Comparison | null>(null);
@@ -49,9 +49,7 @@ function compare() {
     compareError.value = S.past.notOpen;
     return;
   }
-  // A suggestion reads as a change to the document: from now, to what it suggests.
-  const blocks = blocksFrom((t) => props.type.parse(t));
-  comparison.value = props.suggestion ? compareTexts(now, props.text, blocks) : compareTexts(props.text, now, blocks);
+  comparison.value = compareTexts(props.text, now, blocksFrom((t) => props.type.parse(t)));
   compareError.value = null;
   mode.value = 'compare';
 }
@@ -68,8 +66,7 @@ onMounted(() => {
   <div class="editor-pane past-version" data-testid="past-version">
     <div class="toolbar">
       <span class="past-label">
-        <template v-if="suggestion"><strong data-testid="suggestion-by">{{ S.access.by(suggestion.name) }}</strong> · {{ S.versions.date(suggestion.date) }}</template>
-        <template v-else-if="commit"><strong data-testid="past-date">{{ date }}</strong> · {{ people }}</template>
+        <template v-if="commit"><strong data-testid="past-date">{{ date }}</strong> · {{ people }}</template>
         <strong v-else data-testid="past-outside">{{ S.outside.title(outsideName) }}</strong>
         <span class="muted"> {{ mode === 'compare' ? S.past.comparedWithNow : S.past.readOnly }}</span>
       </span>
@@ -83,23 +80,18 @@ onMounted(() => {
       <div class="toolbar-spacer" />
       <button v-if="!type.editor?.layout && mode !== 'compare'" type="button" :class="{ active: mode === 'source' }" @click="mode = mode === 'source' ? 'read' : 'source'">{{ mode === 'source' ? S.past.rendered : S.past.source }}</button>
       <button type="button" :class="{ active: mode === 'compare' }" :aria-pressed="mode === 'compare'" data-testid="compare-now" @click="compare">{{ mode === 'compare' ? S.past.showVersion : S.past.compare }}</button>
-      <template v-if="suggestion">
-        <button v-if="suggestion.canAccept && !suggestion.removes" type="button" data-testid="accept-suggestion" :title="S.access.acceptTitle" @click="emit('restore')">{{ S.access.accept }}</button>
-        <button v-if="suggestion.canDismiss" type="button" data-testid="dismiss-suggestion" @click="emit('dismiss')">{{ S.access.dismiss }}</button>
-      </template>
-      <button v-else type="button" data-testid="restore-version" :title="S.past.restoreTitle" @click="emit('restore')">{{ commit ? S.past.restore : `${S.versions.useOutside}…` }}</button>
+      <button v-if="canRestore !== false" type="button" data-testid="restore-version" :title="S.past.restoreTitle" @click="emit('restore')">{{ commit ? S.past.restore : `${S.versions.useOutside}…` }}</button>
       <button type="button" class="primary" @click="emit('back')">{{ S.past.back }}</button>
     </div>
     <p v-if="compareError" class="banner warn">{{ compareError }}</p>
-    <p v-if="suggestion?.removes" class="banner info">{{ S.access.removes }}</p>
+    <p v-if="commit?.kind === 'not-kept'" class="banner info" data-testid="not-kept">{{ S.past.notKept }}</p>
     <div class="editor-scroll">
       <div v-if="mode === 'compare' && comparison" class="compare" data-testid="compare">
         <p class="compare-summary muted">
           <template v-if="!comparison.changes">{{ S.past.same }}</template>
           <template v-else>
             {{ S.past.differ(comparison.changes) }}
-            <span v-if="suggestion" class="compare-key"><del>{{ S.access.onlyNow }}</del> <ins>{{ S.access.onlySuggested }}</ins></span>
-            <span v-else class="compare-key"><del>{{ S.past.onlyThen }}</del> <ins>{{ S.past.onlyNow }}</ins></span>
+            <span class="compare-key"><del>{{ S.past.onlyThen }}</del> <ins>{{ S.past.onlyNow }}</ins></span>
           </template>
         </p>
         <template v-for="(b, i) in comparison.blocks" :key="i">

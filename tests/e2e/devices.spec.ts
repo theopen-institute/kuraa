@@ -13,6 +13,7 @@ import createTestnet from 'hyperdht/testnet.js';
 import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
+import { sign, signRecord, signsMessage, vouchMessage } from '../../packages/host/src/peers/records.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -73,8 +74,16 @@ test('people on two devices edit one document; a member made owner renames their
     await expect(ada.getByTestId('device:laptop')).toContainText('online');
     await expect(ada.getByTestId('devices')).not.toContainText(/[0-9a-f]{8}/);
     // A device Ada's cannot reach, which the laptop says it is connected to: online, through the laptop.
-    const phone = 'e'.repeat(64);
-    await a.host.peers!.node.identity.addMember(phone, 'phone');
+    // Bo's phone (0072: a device is in as its person is): its own key, which Bo's identity vouches for.
+    const phoneDevice = await keptKey(join(keys, 'phone', 'device.json'));
+    const phoneKey = await keptKey(join(keys, 'phone', 'signing.json'));
+    const phone = phoneDevice.publicKey.toString('hex');
+    const hexOf = (k: { publicKey: Buffer }) => k.publicKey.toString('hex');
+    const vouch = vouchMessage(hexOf(phoneKey), boPerson.id, 'Bo');
+    await a.host.peers!.node.identity.takeRecords([
+      signRecord({ kind: 'signs', workspace: git(dirA, 'config', 'kuraa.workspace'), subject: hexOf(phoneKey), proof: sign(signsMessage(phone), phoneKey), name: 'phone' }, phoneDevice),
+      signRecord({ kind: 'vouch', workspace: git(dirA, 'config', 'kuraa.workspace'), subject: hexOf(phoneKey), person: boPerson.id, personKey: hexOf(boPerson), name: 'Bo', proof: sign(vouch, boPerson), keyProof: sign(vouch, phoneKey) }, phoneDevice),
+    ]);
     b.host.peers!.node.links.get(a.host.peers!.node.myKey)!.send({ type: 'present', keys: [phone] });
     await expect(ada.getByTestId('through:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
     await expect(ada.getByTestId('devices')).toContainText('2 of 2 other devices online');
@@ -107,15 +116,17 @@ test('people on two devices edit one document; a member made owner renames their
     await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');
     await bo.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
     await expect(bo.getByTestId('this-device')).toContainText('You are on bo-s-laptop');
-    const adas = bo.getByTestId('devices').locator('li[data-testid^="device:"]');
+    const adas = bo.getByTestId('person:Ada').locator('li[data-testid^="device:"]');
     await expect(adas).toHaveCount(1);
     await adas.getByRole('button', { name: 'Lost or no longer used…' }).click();
     await expect(bo.getByTestId('ask')).toContainText('permanent');
     await expect(bo.getByTestId('ask')).toContainText('keeps their copy');
     await bo.getByTestId('ask').getByRole('button', { name: 'Remove' }).click();
-    await expect(bo.getByTestId('devices')).toContainText('No one else has joined yet', { timeout: 20_000 });
+    // Her computer is out (0072: its key dropped); she is still in the workspace, and the removal is listed.
+    await expect(adas).toHaveCount(0, { timeout: 20_000 });
+    await expect(bo.getByTestId('removals')).toContainText('A computer of Ada’s removed by Bo');
     // Ada's device learns it, and stops syncing; her files stay as they were.
-    await expect.poll(() => { try { return git(dirA, 'config', '--get-all', 'kuraa.removed'); } catch { return ''; } }, { timeout: 20_000 }).toBe(a.host.peers!.node.myKey);
+    await expect.poll(async () => (await a.host.peers!.status()).removed, { timeout: 20_000 }).toBe(true);
     // Her Devices section says so, and offers nothing the others would refuse.
     await ada.getByTestId('settings-button').click();
     await ada.getByTestId('settings-tab-workspace').click();

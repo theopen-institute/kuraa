@@ -22,9 +22,10 @@ const CONTROL = 'kuraa/control/1';
  * admins' devices invite and remove, which an older one would not hold to);
  * 4: 0071 (git served as protocol v0 only, records compared by what they say,
  * a want answered once, grants that sign their link's expiry and maker, and
- * branches said only to paired devices).
+ * branches said only to paired devices); 5: 0072 (devices are in as their people
+ * are: no pairing records; a policy ranked by who made it; keys dropped).
  */
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):
@@ -114,6 +115,13 @@ export type ControlMessage =
       tcp?: string[];
       /** Its DHT node, to start from (a server): `host:port`. */
       dht?: string;
+      /**
+       * To a device that may not know it is in (0072): the records that show it
+       * is, each signed in itself: its person's key events, the key it signs
+       * with, that key vouched for, and the policy operations that key signed
+       * (its join).
+       */
+      proof?: unknown[];
     }
   /** The answer to a joining device: what it needs to set itself up, and the records (the joining device checks who welcomed it by them). */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; branch: string; records: unknown[]; /** The workspace's secret: the link does not carry it (0050). */ secret?: string }

@@ -16,8 +16,9 @@ import { standardTypes } from '@kuraa/formats';
 import { mergeLines, type DocumentType } from '@kuraa/kernel';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { commitSigner } from '../src/signing.js';
+import { sign, signRecord, signsMessage, vouchMessage } from '../src/peers/records.js';
 import { createPerson, type Person } from '../src/peers/person.js';
-import { joinWorkspace, startHost, type RunningHost } from '../src/index.js';
+import { joinWorkspace as joinWorkspaceAs, startHost, type RunningHost } from '../src/index.js';
 import type { PeerOptions } from '../src/peers/peers.js';
 import type { RunOptions } from '../src/runner.js';
 import type { RunRecord } from '@kuraa/session/model';
@@ -77,13 +78,61 @@ function repo(): string {
 
 /** Each device's signing key: as if each were someone on a computer of their own (0035). */
 const signingKeys = new Map<string, { publicKey: Buffer; secretKey: Buffer }>();
+const signingKeyFor = (dir: string) => {
+  if (!signingKeys.has(dir)) signingKeys.set(dir, crypto.keyPair());
+  return signingKeys.get(dir)!;
+};
+
+/**
+ * Each device's person, made the first time it is asked for, as the app makes
+ * one for whoever runs it: a device is in a workspace only as someone (0072).
+ */
+const people = new Map<string, Person>();
+const NAMES = new Map([['bee', 'Bo'], ['cee', 'Cy'], ['dee', 'Dee']]);
+async function personFor(dir: string, name?: string): Promise<Person> {
+  let p = people.get(dir);
+  if (!p) {
+    const home = mkdtempSync(join(tmpdir(), 'kuraa-peer-person-'));
+    dirs.push(home);
+    p = await createPerson(name ?? 'Ada', join(home, 'person.json'));
+    people.set(dir, p);
+  }
+  return p;
+}
+
+/**
+ * A device of someone the owner puts in the workspace (0072), told to a host's
+ * device as its records: its own key (above or below the given key, if asked),
+ * the key it signs with, and its person's vouch for it. Its key.
+ */
+async function deviceOfSomeone(owner: RunningHost, name: string, o: { above?: string; below?: string } = {}): Promise<string> {
+  let device = crypto.keyPair();
+  const hexOf = (k: { publicKey: Buffer }) => k.publicKey.toString('hex');
+  while ((o.above && hexOf(device) <= o.above) || (o.below && hexOf(device) >= o.below)) device = crypto.keyPair();
+  const person = await personFor(`device:${hexOf(device)}`, name);
+  const key = crypto.keyPair();
+  const ws = (await owner.host.peers!.node.identity.workspace())!.id;
+  const m = vouchMessage(hexOf(key), person.id, name);
+  await owner.host.peers!.node.identity.takeRecords([
+    ...person.events.map((e) => signRecord({ kind: 'key-event', workspace: ws, subject: person.id, event: e }, device)),
+    signRecord({ kind: 'signs', workspace: ws, subject: hexOf(key), proof: sign(signsMessage(hexOf(device)), key), name }, device),
+    signRecord({ kind: 'vouch', workspace: ws, subject: hexOf(key), person: person.id, personKey: hexOf(person), name, proof: sign(m, person), keyProof: sign(m, key) }, device),
+  ]);
+  await owner.host.peers!.setRole(person.id, 'member');
+  return hexOf(device);
+}
+
+/** Join as the device's person, with its signing key (each made on first use). */
+async function joinWorkspace(o: Parameters<typeof joinWorkspaceAs>[0]) {
+  const person = o.person ?? (await personFor(o.dir, NAMES.get(o.name ?? '') ?? o.name));
+  return joinWorkspaceAs({ ...o, person, signing: o.signing ?? signingKeyFor(o.dir) });
+}
 
 type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort' | 'outputsPublishMs'>;
 
 async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net } = {}): Promise<RunningHost> {
   const { person, node, dialMs, lookupsMs, bootstrap, net, ...rest } = extra;
-  if (!signingKeys.has(dir)) signingKeys.set(dir, crypto.keyPair());
-  const h = await startHost({ ...rest, dir, timings: FAST, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeys.get(dir), person: person ?? null, node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
+  const h = await startHost({ ...rest, dir, timings: FAST, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
   hosts.push(h);
   return h;
 }
@@ -100,7 +149,6 @@ async function pair(first: Parameters<typeof start>[1] = {}): Promise<{ a: Runni
   dirs.push(parent);
   const dirB = join(parent, 'notes');
   await joinWorkspace({ dir: dirB, invitation, name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, log: process.env.PEER_LOG ? (m) => console.log(`[join] ${m}`) : undefined });
-  if (process.env.PEER_LOG) console.log('[join] config', git(dirB, 'config', '--list', '--local'));
   git(dirB, 'config', 'user.name', 'Bo');
   git(dirB, 'config', 'user.email', 'bo@example.org');
   const b = await start(dirB);
@@ -328,14 +376,6 @@ describe('joining, and staying connected', () => {
     return { a, b };
   }
 
-  /** A device key above (or below) this one's: which of two dials the other depends on it. */
-  function keyAbove(than: string, above = true): string {
-    for (;;) {
-      const k = crypto.keyPair().publicKey.toString('hex');
-      if (above ? k > than : k < than) return k;
-    }
-  }
-
   /** Watch a node's swarm: whom it dials, and lets be. */
   function watchSwarm(node: PeerNode) {
     const swarm = (node as unknown as { swarm: { joinPeer(key: Buffer): void; leavePeer(key: Buffer): void } }).swarm;
@@ -357,12 +397,10 @@ describe('joining, and staying connected', () => {
     const { a, b } = await joinedPair({ dialMs: 300 });
     const node = a.host.peers!.node;
     const bee = b.host.peers!.node.myKey;
-    // Two members Ada's device cannot reach: one with a key above its own, one below.
-    const above = keyAbove(node.myKey);
-    const below = keyAbove(node.myKey, false);
+    // Two devices of people in the workspace that Ada's device cannot reach: one with a key above its own, one below.
     // (Ada's host may be writing .git/config at the same moment: git.ts waits its turn.)
-    await node.identity.addMember(above, 'above');
-    await node.identity.addMember(below, 'below');
+    const above = await deviceOfSomeone(a, 'above', { above: node.myKey });
+    const below = await deviceOfSomeone(a, 'below', { below: node.myKey });
     const seen = watchSwarm(node);
     // Bee says it is connected to both.
     await new Promise((r) => setTimeout(r, 400));
@@ -450,7 +488,7 @@ describe('equal members, and forks', () => {
     await until(async () => (await b.host.peers!.status()).removed, 15_000, 'Bo’s device removed');
   });
 
-  it('keep what someone may not change as it was, with their change on record as a suggestion (0066)', async () => {
+  it('keep what someone may not change as it was (0066)', async () => {
     const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
     dirs.push(people);
     const ada = await createPerson('Ada', join(people, 'ada', 'person.json'));
@@ -480,30 +518,20 @@ describe('equal members, and forks', () => {
     expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'bo.md', content: '# Bo’s note\n' }) })).status).toBe(201);
     // His note comes in; his chapter does not: Ada's copy keeps chapters/ as it was, and the merge says why.
     await until(() => existsSync(join(dirA, 'bo.md')), 20_000, 'Bo’s note on Ada’s device');
-    await until(async () => (await a.host.peers!.suggestions()).some((x) => x.path === 'chapters/two.md'), 20_000, 'Bo’s chapter a suggestion');
+    await until(() => /Kept chapters\/two\.md as it was: not Bo to change/.test(git(dirA, 'log', '-1', '--merges', '--format=%B')), 20_000, 'Bo’s chapter kept out');
     expect(existsSync(join(dirA, 'chapters', 'two.md'))).toBe(false);
-    expect(git(dirA, 'log', '-1', '--merges', '--format=%B')).toMatch(/Kept chapters\/two\.md as it was: not Bo to change/);
-    const refused = (await a.host.peers!.suggestions()).find((x) => x.path === 'chapters/two.md')!;
-    expect(refused).toMatchObject({ person: bo.id, name: 'Bo', text: '# Two\n\nBo’s.\n' });
     // Ada's merge reaches Bo's device: his copy has the chapter no longer either.
     await until(() => !existsSync(join(dirB, 'chapters', 'two.md')), 20_000, 'Bo’s copy in step');
-
-    // Bo suggests a change to chapter one, as a suggestion: his copy stays as it was.
-    await b.host.peers!.suggest('chapters/one.md', '# One\n\nAda’s, with Bo’s line.\n');
-    expect(readFileSync(join(dirB, 'chapters', 'one.md'), 'utf8')).toBe('# One\n\nAda’s.\n');
-    expect((await b.host.peers!.suggestions('chapters/one.md'))).toHaveLength(1);
-    await until(async () => (await a.host.peers!.suggestions('chapters/one.md')).length === 1, 20_000, 'Bo’s suggestion on Ada’s device');
-    const s = (await a.host.peers!.suggestions('chapters/one.md'))[0]!;
-    expect(readFileSync(join(dirA, 'chapters', 'one.md'), 'utf8')).toBe('# One\n\nAda’s.\n');
-    // Ada takes it: its text, as her edit; then it is seen to, on both devices.
-    writeFileSync(join(dirA, 'chapters', 'one.md'), s.text!);
-    await a.host.peers!.resolveSuggestion(s.commit, 'chapters/one.md', true);
-    expect(await a.host.peers!.suggestions('chapters/one.md')).toEqual([]);
-    await until(async () => (await b.host.peers!.suggestions('chapters/one.md')).length === 0, 20_000, 'seen to on Bo’s device');
-    // Bo takes back his refused chapter (his own suggestion, his to dismiss): gone on Ada's device too.
-    await until(async () => (await b.host.peers!.suggestions('chapters/two.md')).length === 1, 20_000, 'Bo sees his refused chapter');
-    await b.host.peers!.resolveSuggestion(refused.commit, 'chapters/two.md', false);
-    await until(async () => (await a.host.peers!.suggestions('chapters/two.md')).length === 0, 20_000, 'dismissed on Ada’s device');
+    // Nothing is offered in its place: what he may not change, he reads (0072).
+    expect((await b.host.peers!.access('chapters/one.md'))).not.toHaveProperty('suggestions');
+    // But his chapter is not lost: in the file's history, as changes not kept, on both devices; and he is told.
+    const history = async (h: RunningHost) => ((await (await api(h, `/api/history?path=${encodeURIComponent('chapters/two.md')}`)).json()) as { commits: { hash: string; kind: string }[] }).commits;
+    const [notKept] = await history(a);
+    expect(notKept).toMatchObject({ kind: 'not-kept' });
+    expect(await (await api(a, `/api/history/${notKept!.hash}?path=${encodeURIComponent('chapters/two.md')}`)).text()).toBe('# Two\n\nBo’s.\n');
+    expect((await history(b)).map((c) => c.kind)).toContain('not-kept');
+    expect((await b.host.peers!.access('chapters/two.md')).notKept.map((n) => n.commit)).toEqual([notKept!.hash]);
+    expect((await a.host.peers!.access('chapters/two.md')).notKept).toEqual([]);
   });
 
   it('take live edits only from those who may change the document; theirs reach everyone (0066)', async () => {
@@ -677,7 +705,7 @@ describe('equal members, and forks', () => {
     expect(a.host.spaceOf('plans/budget.md')).toBe(a.host.spaceOf('plans/fiesta.md'));
   });
 
-  it('take any member’s work, and name it by the person whose it is', async () => {
+  it('take a member’s work, and name it by the person whose it is', async () => {
     const people = mkdtempSync(join(tmpdir(), 'kuraa-people-'));
     dirs.push(people);
     const bo = await createPerson('Bo', join(people, 'bo.json'));
@@ -686,9 +714,9 @@ describe('equal members, and forks', () => {
     const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
     dirs.push(parent);
     const dirB = join(parent, 'notes');
-    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000 });
+    await joinWorkspace({ dir: dirB, invitation: await inviteFrom(a), name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, person: bo });
     const b = await start(dirB, { person: bo });
-    // A member that joined last has the same say as the first: its work comes in, with no rule to pass.
+    // A member's work comes in, with no rule to pass.
     expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'chapters/bo.md', content: '# Bo’s\n' }) })).status).toBe(201);
     await until(() => existsSync(join(dirA, 'chapters', 'bo.md')), 15_000, 'Bo’s work on Ada’s device');
     // Signed with Bo's key on his computer, which his identity vouched for: Ada's device names him (by his identity's ID).
@@ -698,35 +726,36 @@ describe('equal members, and forks', () => {
     expect(await a.host.peers!.node.identity.personOf(signer!)).toEqual({ key: bo.id, name: 'Bo' });
   });
 
-  it('spread a new member through the others, and let any member remove another, the first among them', async () => {
+  it('spread a new member through the others; the owner removes a computer, a member no one else’s (0070, 0072)', async () => {
     const { a, b, dirA, dirB } = await pair();
-    // A third device joins by Bo's link (not the first device's); Ada's learns of it from Bo's.
+    // Ada, the owner, makes Bo an admin; a third device joins by Bo's link (not hers); Ada's learns of it from Bo's.
+    await a.host.peers!.setRole((await personFor(dirB)).id, 'admin');
+    await until(async () => (await b.host.peers!.people()).admin, 15_000, 'Bo an admin on his device');
     const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-c-'));
     dirs.push(parent);
     const dirC = join(parent, 'notes');
     await joinWorkspace({ dir: dirC, invitation: await inviteFrom(b), name: 'cee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000 });
     const c = await start(dirC, { invites: {} });
-    await until(() => git(dirA, 'remote').split('\n').includes('cee'), 15_000, 'Ada’s device pairs with cee through bee');
+    await until(() => git(dirA, 'remote').split('\n').includes('cee'), 15_000, 'Ada’s device knows cee through bee');
     await until(async () => (await c.host.peers!.status()).devices.filter((d) => d.online).length === 2, 15_000, 'cee meets both');
-    // The newest member renames itself and removes the first device, from the app: Bo's learns it, and Ada's is turned away.
+    // The newest member renames its device; it may not remove anyone else's.
     expect((await api(c, '/api/peers/name', { method: 'POST', body: JSON.stringify({ name: 'Cy’s laptop' }) })).status).toBe(200);
     expect((await c.host.peers!.status()).device.name).toBe('cy-s-laptop');
     const adaKey = (await a.host.peers!.status()).device.key;
-    expect((await api(c, `/api/peers/devices/${adaKey}`, { method: 'DELETE' })).status).toBe(200);
-    await until(() => !git(dirB, 'remote').split('\n').some((r) => git(dirB, 'remote', 'get-url', r) === `kuraa://${adaKey}`), 20_000, 'Bo’s device forgets Ada’s');
-    await until(async () => !(await a.host.peers!.status()).devices.some((d) => d.online), 20_000, 'Ada’s device is turned away');
-    expect(git(dirB, 'config', '--get-all', 'kuraa.removed')).toBe(adaKey);
-    // Ada's device knows it was removed, and says since when no device has been connected; the others were not removed.
-    const adas = await a.host.peers!.status();
-    expect(adas.removed).toBe(true);
-    expect(adas.noContactSince).toBeGreaterThan(0);
-    expect((await c.host.peers!.status()).removed).toBe(false);
-    expect((await c.host.peers!.status()).noContactSince).toBeNull();
-    // It keeps its copy.
-    expect(file(dirA)).toBe(NOTES);
+    expect((await api(c, `/api/peers/devices/${adaKey}`, { method: 'DELETE' })).status).toBe(403);
+    // Ada, the owner, removes Cy's computer: its key dropped here, and every device turns it away.
+    const cyKey = (await c.host.peers!.status()).device.key;
+    await a.host.peers!.removeDevice(cyKey);
+    await until(() => !git(dirB, 'remote').split('\n').some((r) => git(dirB, 'remote', 'get-url', r) === `kuraa://${cyKey}`), 20_000, 'Bo’s device forgets Cy’s');
+    await until(async () => (await c.host.peers!.status()).removed, 20_000, 'Cy’s device knows it is out');
+    await until(async () => !(await c.host.peers!.status()).devices.some((d) => d.online), 20_000, 'Cy’s device is turned away');
+    // Cy is still in the workspace: only that computer is out. The others were not removed; it keeps its copy.
+    expect((await a.host.peers!.people()).people.some((p) => p.name === 'Cy')).toBe(true);
+    expect((await b.host.peers!.status()).removed).toBe(false);
+    expect(file(dirC)).toBe(NOTES);
     // Removing a device that is not a member, or this one, is refused.
-    expect((await api(c, `/api/peers/devices/${'0'.repeat(64)}`, { method: 'DELETE' })).status).toBe(404);
-    expect((await api(c, `/api/peers/devices/${(await c.host.peers!.status()).device.key}`, { method: 'DELETE' })).status).toBe(404);
+    await expect(a.host.peers!.removeDevice('0'.repeat(64))).rejects.toThrow('No such device');
+    await expect(a.host.peers!.removeDevice(adaKey)).rejects.toThrow('This is this device');
   });
 
   it('let a fork and its origin fetch from each other, but never merge on their own', async () => {
@@ -812,7 +841,7 @@ describe('invite links', () => {
     const parent = mkdtempSync(join(tmpdir(), `kuraa-peer-${name}-`));
     dirs.push(parent);
     const dir = join(parent, 'notes');
-    await joinWorkspace({ dir, invitation: link, name, bootstrap: testnet.bootstrap as never, timeoutMs });
+    await joinWorkspace({ dir, invitation: link, name, bootstrap: testnet.bootstrap as never, timeoutMs, log: process.env.PEER_LOG ? (m) => console.log(`[join ${name}] ${m}`) : undefined });
     git(dir, 'config', 'user.name', name);
     git(dir, 'config', 'user.email', `${name}@example.org`);
     return dir;
@@ -858,7 +887,7 @@ describe('invite links', () => {
     execFileSync('git', ['clone', '-q', dirA, dirM]);
     const mallory = new Identity(new Git(dirM), join(dirM, '.git', 'kuraa'));
     await mallory.adopt({ id: l.workspace.id, secret: git(dirA, 'config', 'kuraa.secret'), forkedFrom: null });
-    await mallory.addMember(l.issuer.key, l.issuer.name);
+    await mallory.addRemote(l.issuer.key, l.issuer.name);
     await start(dirM);
     // The device joining hears from her, but does not join through her.
     await expect(joinBy(link, 'late', 6000)).rejects.toThrow('Could not reach');
@@ -878,7 +907,7 @@ describe('invite links', () => {
     await expect(joinBy(link, 'late', 20_000)).rejects.toThrow('Could not join: the link was used, or revoked');
   });
 
-  it('stop working once revoked (on every device) or expired, whichever member made them', async () => {
+  it('stop working once revoked (on every device) or expired, whichever admin made them', async () => {
     const dirA = repo();
     const a = await start(dirA);
     const link = await a.host.peers!.inviteLink({ hours: 24, once: false });
@@ -894,7 +923,9 @@ describe('invite links', () => {
     // Expired: refused before looking.
     const expired = await a.host.peers!.inviteLink({ hours: -1, once: false });
     await expect(joinBy(expired, 'later', 4000)).rejects.toThrow('This invite link has expired');
-    // A link the member that joined last made lets people in like any other.
+    // A link another admin made lets people in like any other.
+    await a.host.peers!.setRole((await personFor(dirB)).id, 'admin');
+    await until(async () => (await b.host.peers!.people()).admin, 15_000, 'Bo an admin on his device');
     const fromBo = await b.host.peers!.inviteLink({ hours: 24, once: false });
     expect(file(await joinBy(fromBo, 'welcome'))).toBe(NOTES);
   });
@@ -1064,6 +1095,8 @@ describe('reaching each other however the networks are (0053)', () => {
     const dirB = await joinInto(await inviteFrom(a), 'bee');
     const b = await start(dirB, { net: { computer: 'b' } });
     await until(async () => (await b.host.peers!.status()).devices.some((d) => d.online), 15_000, 'bee online');
+    await a.host.peers!.setRole((await personFor(dirB)).id, 'admin');
+    await until(async () => (await b.host.peers!.people()).admin, 15_000, 'Bo an admin on his device');
     const dirC = await joinInto(await b.host.peers!.inviteLink({ hours: 1, once: true }), 'cee');
     // Ada's and Cee's computers cannot reach each other (two hard networks, say): only Bee's reaches both.
     blocked.add(deviceKey(dirC));

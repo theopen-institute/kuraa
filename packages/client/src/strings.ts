@@ -159,11 +159,9 @@ export const S = {
   menu: {
     /** The button at the bottom of the sidebar: Settings, at what is in front of you (decision 0065). */
     button: (key: string) => `Settings (${key})`,
-    editSource: 'Edit the source',
-    showDocument: 'Show the document',
+    source: 'Source',
     documentSettings: 'Document settings…',
     history: 'History',
-    hideHistory: 'Hide history',
     saveVersion: 'Save version…',
     preview: 'Preview',
     previewTitle: (key: string) => `Render the document to HTML, Word or PDF (${key})`,
@@ -264,6 +262,7 @@ export const S = {
     onlyThen: 'Only in this version',
     onlyNow: 'Only now',
     folded: (n: number) => count(n, 'unchanged part', 'unchanged parts'),
+    notKept: 'Not kept: whoever made these changes could not change this document. They are kept here, in its history, to read, and for someone who can change it to take up.',
   },
 
   history: {
@@ -275,6 +274,7 @@ export const S = {
     latest: ' · latest',
     saves: (n: number, parts: string) => `${count(n, 'save', 'saves')}${parts ? `: ${parts}` : ''}`,
     more: (shown: string, n: number) => `${shown} and ${n} more`,
+    notKept: (who: string) => `Changes by ${who || 'someone'}, not kept`,
   },
 
   tree: {
@@ -429,25 +429,10 @@ export const S = {
   },
 
   access: {
-    readOnly: (by: string[]) => (by.length ? `Only ${list(by)} can change this document. You can read it, and suggest changes.` : 'You cannot change this document. You can read it, and suggest changes.'),
-    suggest: 'Suggest a change…',
-    suggestions: (n: number) => (n === 1 ? '1 suggestion:' : `${n.toLocaleString()} suggestions:`),
-    suggestionBy: (name: string | null, date: string) => `${name ?? 'Someone'}, ${date}`,
-    suggestTitle: (title: string) => `Suggest a change to ${title}`,
-    suggestAbout: 'Change the text below and send it. Those who can change this document see it as a suggestion, to take or leave; your copy stays as it is until they do.',
-    suggestLabel: 'The document’s text, as you suggest it',
-    send: 'Send suggestion',
-    sent: 'Suggestion sent. Those who can change this document see it when it reaches them.',
-    by: (name: string | null) => `Suggested by ${name ?? 'someone'}`,
-    accept: 'Accept…',
-    acceptTitle: 'Put this text in the document, as your edit (it can be undone), and mark the suggestion taken',
-    dismiss: 'Dismiss',
-    acceptAsk: (name: string | null) => `Accept ${name ?? 'this'}’s suggestion? Its text replaces the document’s, as your edit.`,
-    accepted: (name: string | null) => `Took ${name ?? 'the'}’s suggestion.`,
-    dismissed: 'Suggestion dismissed.',
-    removes: 'This suggestion takes the file away.',
-    onlyNow: 'Taken out',
-    onlySuggested: 'Put in',
+    readOnly: (by: string[]) => (by.length ? `Only ${list(by)} can change this document. You can read it.` : 'You cannot change this document. You can read it.'),
+    notKept: (date: string) => `Your changes of ${date} were not kept: you could not change this document by then. They are in its history.`,
+    show: 'Show them',
+    dismiss: 'OK',
   },
 
   more: {
@@ -504,7 +489,7 @@ export const S = {
     inherit: 'As its folder or the workspace says',
     anyone: 'anyone in the workspace',
     fromRule: (path: string, who: string[]) => `${list(who)}, by the rule for ${path === '' ? 'everything' : path}`,
-    writeAbout: 'Anyone else’s changes become suggestions, for those who can change it to take or leave. Folders have permissions too (right-click one); all of them are listed in Workspace settings.',
+    writeAbout: 'Anyone else sees it read only. Folders have permissions too (right-click one); all of them are listed in Workspace settings.',
     adminsSay: 'Only the workspace’s admins say who can change what.',
     admins: 'The workspace’s admins',
     you: ' (you)',
@@ -514,7 +499,7 @@ export const S = {
     writersTitle: (words: string) => `Who can change it: ${words}`,
     titleFolder: (name: string) => `Permissions for the folder ${name}`,
     titleEverything: 'Permissions for everything in the workspace',
-    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them, on their devices.',
+    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them, on their devices. Changing who reads it later moves nothing: whoever is added gets its files and their history; whoever is taken out keeps what they had, and gets nothing new.',
     asAbove: 'As the folder above says',
     readFromRule: (path: string, who: string[]) => `${list(who)}, as ${path} says`,
     anyoneChoice: 'Anyone in the workspace',
@@ -526,7 +511,7 @@ export const S = {
   readers: {
     title: (words: string) => `Who can read it: ${words}`,
     line: (words: string) => (words === 'Only you' ? 'Only you can read this document.' : `Only ${words.replace(/^You/, 'you')} can read this document.`),
-    about: 'Only the people chosen get this file, on their devices; no one else’s device is ever sent it. Its history so far stays with whoever could read it then.',
+    about: 'Only the people chosen get this file, on their devices; no one else’s device is ever sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
     everyone: 'Everyone in the workspace',
     onlyMe: 'Only you',
     chosen: 'These people and groups:',
@@ -537,7 +522,7 @@ export const S = {
 
   rules: {
     title: 'Permissions',
-    about: 'Who can read and who can change files and folders. Each says its own, or follows the folder it is in: set them from a file’s or folder’s Permissions… (right-click it), or here. Changes by anyone else become suggestions.',
+    about: 'Who can read and who can change files and folders. Each says its own, or follows the folder it is in: set them from a file’s or folder’s Permissions… (right-click it), or here. Anyone else sees what they cannot change read only.',
     change: 'Change…',
     private: 'A file or folder you cannot read',
     says: (read: string[] | null, write: string[] | null) => [read ? `read by ${list(read)}` : '', write ? `changed by ${list(write)}` : ''].filter(Boolean).join('; '),
@@ -581,8 +566,16 @@ export const S = {
     makeOwner: 'Make owner',
     makeOwnerAsk: (name: string) => `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins.`,
     invited: (email: string) => `${email} (invited, not in yet)`,
-    dispute: (names: string[]) => `${list(names)} took each other out of the workspace at the same time. That would have left it with no admin, so neither stands: talk it over, and take someone out again if need be.`,
+    dispute: (names: string[]) => `${list(names)} stays an admin: the workspace’s admins were taken out (or left) at the same time, which would have left it with none, so the longest-standing of them stays.`,
     removeAsk: (who: string) => `Take ${who} out of this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
+    witness: 'witness',
+    witnessTitle: 'Their devices confirm removals: once theirs hold one, it has reached them (a server that is always on, usually).',
+    makeWitness: 'Make witness',
+    unmakeWitness: 'Not a witness',
+    removals: 'Recent removals',
+    removalsAbout: 'A removal counts at once on each device that has it. Until the others have it too, a device that has not heard of it may still sync with whoever was removed.',
+    removal: (kind: 'person' | 'computer', who: string, by: string | null) => (kind === 'person' ? `${who} taken out` : `A computer of ${who}’s removed`) + (by ? ` by ${by}` : ''),
+    confirmed: (names: string[], witnessed: boolean) => (witnessed ? `confirmed by a witness${names.length > 1 ? `, and ${count(names.length - 1, 'other', 'others')}` : ''}` : names.length ? `confirmed by ${list(names)}` : 'not confirmed by anyone else yet'),
   },
 
   // A sync's own words (its name, what it does, an example address, how to get one) come from its component.

@@ -264,9 +264,9 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
 
   // A question (ask.ts) is a dialog on the same stack: Escape closes it.
   await page.getByTestId('document-menu-button').click();
-  const theMenu = page.getByRole('dialog', { name: 'Document' });
+  const theMenu = page.getByRole('menu', { name: /^Document/ });
   await expect(theMenu).toBeVisible();
-  await theMenu.getByRole('button', { name: 'Save version…' }).click();
+  await theMenu.getByRole('menuitem', { name: 'Save version…' }).click();
   const ask = page.getByRole('dialog', { name: 'Name this version' });
   await expect(ask).toBeVisible();
   await page.keyboard.press('Escape');

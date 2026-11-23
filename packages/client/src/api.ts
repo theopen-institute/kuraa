@@ -87,25 +87,15 @@ export type PeersInfo =
       people?: PeopleInfo;
     };
 
-/** A change someone suggested to a file they may not change (0066). */
-export interface SuggestionInfo {
-  commit: string;
-  path: string;
-  person: string | null;
-  name: string | null;
-  date: string;
-  /** The text proposed; null to take the file away. */
-  text: string | null;
-}
-
-/** Who may change a file (0066): whether you may, the rule that says so, and its open suggestions. */
+/** Who may change a file (0066): whether you may, and the rule that says so. */
 export interface FileAccess {
   canWrite: boolean;
   rule: { path: string; by: string[]; who: string[] } | null;
   /** Whether you may make rules (an admin of the workspace). */
   admin?: boolean;
-  suggestions: SuggestionInfo[];
   you: string | null;
+  /** Your changes to it that were not kept (0072: you could not change it), newest first. */
+  notKept?: { commit: string; date: string }[];
   /** Who reads it: null for everyone in the workspace; else its audience, and that in words (0066). */
   readers?: { audience: string[]; words: string } | null;
 }
@@ -145,8 +135,12 @@ export interface PeopleInfo {
   people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean; emails?: string[] }[];
   /** People invited by email, not in yet (step 6). */
   invited?: { email: string; role: 'admin' | 'member' }[];
-  /** Admins who took each other out at the same time, which would have left none, so neither removal stood. */
+  /** Admins taken out at the same time as the others, which would have left none, who stayed (0072). */
   disputes?: string[][];
+  /** People whose devices' acknowledgements confirm removals (0072). */
+  witnesses?: string[];
+  /** The latest removals (0072): people taken out, computers dropped; who has confirmed each so far. */
+  removals?: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[];
 }
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
@@ -188,8 +182,12 @@ export interface CommitInfo {
   hash: string; author: string; email: string; date: string; subject: string; coAuthors: { name: string; email: string }[];
   /** The file's path in this commit; differs from the current path before a rename. */
   path: string;
-  /** A save the host made on its own, a merge it made, or any other commit (a named version, one made outside). */
-  kind: 'autosave' | 'merge' | 'commit';
+  /**
+   * A save the host made on its own, a merge it made, any other commit (a named
+   * version, one made outside), or changes not kept (0072: made by someone who
+   * may not change the file; in its history only).
+   */
+  kind: 'autosave' | 'merge' | 'commit' | 'not-kept';
 }
 
 export type RenderFormat = 'html' | 'docx' | 'pdf';
@@ -297,12 +295,8 @@ export class HostApi {
   peers() { return this.json<PeersInfo>('/api/peers'); }
   peerLinks() { return this.json<{ links: InviteLinkInfo[] }>('/api/peers/links').then((r) => r.links); }
   /** An invite link: for one person (`once`) or anyone, lasting `hours` (null: no expiry). Turns syncing on if it is not. */
-  /** Who may change a file, and its open suggestions (0066). */
+  /** Who may change a file (0066). */
   access(path: string) { return this.json<FileAccess>(`/api/access?path=${encodeURIComponent(path)}`); }
-  /** Suggest a text for a file you may not change. */
-  suggest(path: string, text: string) { return this.json<{ commit: string }>('/api/suggestions', { method: 'POST', body: JSON.stringify({ path, text }) }); }
-  /** See to a suggestion: accepted (its text put in the document first) or dismissed. */
-  resolveSuggestion(commit: string, path: string, accepted: boolean) { return this.json('/api/suggestions/resolve', { method: 'POST', body: JSON.stringify({ commit, path, accepted }) }); }
   rules() { return this.json<RulesInfo>('/api/rules'); }
   /** Count a verifier's checks in this workspace (an admin's to do), by its address; or stop (0066, step 6). */
   addVerifier(url: string) { return this.json<RulesInfo>('/api/verifiers', { method: 'POST', body: JSON.stringify({ url }) }); }
@@ -330,6 +324,8 @@ export class HostApi {
   setRole(id: string, role: 'admin' | 'member') { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'POST', body: JSON.stringify({ role }) }); }
   /** Give the owner's role to someone in the workspace (the owner's to do, 0070). */
   makeOwner(id: string) { return this.json<PeopleInfo>(`/api/peers/owner/${id}`, { method: 'POST' }); }
+  /** Name a person a witness, or not (0072: an admin's to do). */
+  setWitness(id: string, on: boolean) { return this.json<PeopleInfo>(`/api/peers/witness/${id}`, { method: 'POST', body: JSON.stringify({ on }) }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
   removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
   createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member'; email?: string }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }

@@ -93,7 +93,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   if (l.grant?.genesis) await node.identity.setPin(l.grant.genesis);
   if (o.name) await node.identity.setDeviceName(o.name);
   // The device that made the link is the first to look for.
-  await node.identity.addMember(l.issuer.key, l.issuer.name);
+  await node.identity.addRemote(l.issuer.key, l.issuer.name);
   const welcomed = new Promise<{ branch: string; remote: string; from: string }>((resolveWelcome, reject) => {
     const timer = setTimeout(() => reject(new Error('Could not reach a device of the workspace: is one running, with syncing on?')), o.timeoutMs ?? 120_000);
     let done = false;
@@ -116,7 +116,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
       clearTimeout(timer);
       clearTimeout(refusal);
       void (async () => {
-        for (const member of m.members) await node.identity.addMember(member.key, member.name);
+        for (const member of m.members) await node.identity.addRemote(member.key, member.name);
         await node.refresh();
         resolveWelcome({ branch: m.branch, remote: from.remote!, from: m.name });
       })().catch(reject);

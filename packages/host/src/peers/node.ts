@@ -2,13 +2,13 @@
 // workspace's topic), checking who they are, pairing new ones by invite link,
 // sharing who the members are, and letting paired devices fetch from it.
 //
-// Who is let in: a paired device that has not been removed, and a device not
-// yet paired that presents an invite link a member made (any member checks it).
-// A device joining pairs with one the link's maker vouches for: the maker, or
-// one its pairing records trace back to it (records.ts, traced). Records go
-// only to paired devices. Membership spreads: a device paired with one member
-// is paired by the others once that member vouches for it; every member has the
-// same say (see docs/decisions/0028-peers.md and 0038).
+// Who is let in: a device in the workspace (0072: one whose person the policy
+// has in it, its key vouched for by them and neither dropped nor revoked), and,
+// for as long as it is connected, a device that presents an invite link a
+// member made (any member checks it). It is in for good once its person's join,
+// with an admin's grant, is in the policy. A device joining is let in only by
+// the link's maker, or by a device the records it is sent show to be in, under
+// the genesis the link names. See docs/decisions/0028-peers.md and 0072.
 import { createHash } from 'node:crypto';
 import { devNull } from 'node:os';
 import { join } from 'node:path';
@@ -25,14 +25,14 @@ import { gitEnv, gitPath, spawnGit, type Git } from '../git.js';
 import { GitBridge } from './bridge.js';
 import { useDht } from './dht.js';
 import { isRelayKey, useRelay, type Relay } from './relay.js';
-import { Identity, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, topicsFor, type Member, type WorkspaceIdentity } from './identity.js';
+import { Identity, MAX_PROOF, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, topicsFor, type Member, type WorkspaceIdentity } from './identity.js';
 import { joinLan } from './lan.js';
 import NoiseSecretStream from '@hyperswarm/secret-stream';
 import type { Socket } from 'node:net';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { dialTcp, listenTcp, parseAddress } from './tcp.js';
-import { recordKey, revokeKeyMessage, shortKey, traced, type MemberRecord } from './records.js';
+import { recordKey, revokeKeyMessage, shortKey, type MemberRecord } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
 import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
@@ -120,6 +120,9 @@ const DIAL_MS = 60_000;
  * members only over TCP, nor for one whose members' topics changed meanwhile.
  */
 const LOOKUPS_MS = [15_000, 60_000, 120_000, 240_000, 480_000];
+
+/** How long a device let in by an invite link is let in again, connecting anew, before its join comes (0072). */
+const LET_IN_MS = 10 * 60_000;
 
 /** How long a device that connected may take to be let in (its hello, an invite link) before its link is closed (0071). */
 const HELLO_MS = 60_000;
@@ -381,7 +384,8 @@ export class PeerNode {
     this.swarm.on('connection', (conn) => this.connected(conn));
     // Just started: this device dials the others, found by the topic and directly (the others do not
     // know it is back). Hyperswarm looks the topic up again when the network changes; so does this, on its schedule.
-    for (const m of await this.identity.members()) this.dial(m.key);
+    // The members, and, for a fork, the devices of the workspace it came from (0072).
+    for (const m of await this.identity.devicesToMeet()) this.dial(m.key);
     for (const k of joinAs?.dial ?? []) this.dial(k);
     await this.retopic();
     if (this.o.lan !== false || this.o.peerPort) await this.startTcp();
@@ -1110,6 +1114,14 @@ export class PeerNode {
 
   private admitting: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Devices let in by an invite link here, and until when (0072): a device
+   * joining may connect again (a second connection, by the workspace's topic,
+   * once it has the secret) before its join reaches this device; it is let in
+   * again meanwhile, not checked against a link it has used up.
+   */
+  private readonly letIn = new Map<string, { name: string; until: number }>();
+
   /** Run `fn` after any other run so has finished. */
   private oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.admitting.then(fn, fn);
@@ -1117,11 +1129,16 @@ export class PeerNode {
     return run;
   }
 
-  /** Pair with a device this one lets in (by an invite link), on record so the others pair with it too. */
+  /**
+   * Let in a device by an invite link (0072): for as long as it is connected,
+   * with a remote to fetch from. It is in for good, on every device, once its
+   * person's join (the link's grant) is in the policy.
+   */
   private async admit(key: string, name: string): Promise<string | null> {
     if ((await this.identity.removed()).includes(key)) return null;
-    await this.identity.decide('add', key, { name });
-    return (await this.identity.members()).find((m) => m.key === key)?.name ?? null;
+    const remote = await this.identity.addRemote(key, name);
+    if (remote) this.letIn.set(key, { name: remote, until: Date.now() + LET_IN_MS });
+    return remote;
   }
 
   /**
@@ -1197,6 +1214,8 @@ export class PeerNode {
       // A device joining shows its link to whomever it reaches; one that came in by a link, only to members
       // that may not know it yet (0071): a device not paired must not get a link that may still let people in.
       ...(shown && (this.o.ticket || paired) ? { link: shown } : {}),
+      // To a device that may not know this one is in (0072): what shows it is.
+      ...(!paired && !this.o.joining ? { proof: await this.identity.proof() } : {}),
     };
   }
 
@@ -1242,6 +1261,13 @@ export class PeerNode {
     await link.said;
     if (m.type === 'hello') return this.hello(link, m);
     if (m.type === 'welcome') return this.welcomed(link, m);
+    // Turned away, whether this device took the other in or not: a device joining has not yet (0072).
+    if (m.type === 'bye') {
+      this.o.log(`peers: ${link.remote ?? link.hello?.name ?? link.key.slice(0, 8)} left: ${m.reason}`);
+      this.events.refused?.(link, String(m.reason));
+      link.close();
+      return;
+    }
     if (!link.accepted) return;
     if (m.type === 'refs') {
       link.heads = readHeads(m.heads);
@@ -1265,11 +1291,6 @@ export class PeerNode {
     else if (m.type === 'present') {
       link.present = new Set((Array.isArray(m.keys) ? m.keys : []).filter((k): k is string => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k)));
       await this.reach();
-    }
-    else if (m.type === 'bye') {
-      this.o.log(`peers: ${link.remote ?? link.key.slice(0, 8)} left: ${m.reason}`);
-      this.events.refused?.(link, String(m.reason));
-      link.close();
     }
   }
 
@@ -1315,6 +1336,10 @@ export class PeerNode {
     const related = (h.forkedFrom ?? '').startsWith(`${this.ws.id}@`) || (this.ws.forkedFrom ?? '').startsWith(`${h.workspace}@`);
     if (!same && !related) return bye('another workspace');
     let member: Member | undefined = (await this.identity.members()).find((x) => x.key === link.key);
+    // A fork meeting a device of the workspace it was forked from: in that one, as the records of it here say (0072).
+    if (!member && !same && (this.ws.forkedFrom ?? '').startsWith(`${h.workspace}@`) && (await this.identity.devicesOf(h.workspace)).has(link.key)) {
+      member = (await this.identity.remotes()).find((x) => x.key === link.key) ?? { key: link.key, name: (await this.identity.addRemote(link.key, h.name)) ?? h.name };
+    }
     if (!member && this.o.joining) {
       // Joining: a device of the workspace may let this one in; it is paired with
       // once its welcome shows the link's maker vouches for it (welcomed).
@@ -1324,8 +1349,16 @@ export class PeerNode {
       }
       return bye('not paired with this device');
     }
+    // A device this one does not know to be in, showing it is (0072): its records taken, and it is judged again.
+    if (!member && same && Array.isArray(h.proof) && h.proof.length) {
+      await this.takeRecords(link, h.proof.slice(0, MAX_PROOF));
+      member = (await this.identity.members()).find((x) => x.key === link.key);
+    }
+    // Let in by a link here a moment ago, connecting again before its join came (0072).
+    const recently = this.letIn.get(link.key);
+    if (!member && same && recently && recently.until > Date.now()) member = { key: link.key, name: recently.name };
     if (!member) {
-      if (!same || typeof h.link !== 'string') return bye('not paired with this device');
+      if (!same || typeof h.link !== 'string') return bye('not in this workspace');
       const code = h.link;
       // One device let in by a link at a time here (0071): two at once by a link for one person would both
       // pass the check before either used it up.
@@ -1382,13 +1415,15 @@ export class PeerNode {
       const t = this.o.ticket;
       if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
       const l = decodeLink(t);
-      const known = traced([l.issuer.key, ...l.through], records, this.ws.id);
+      // In the workspace, as the policy the link's genesis roots says (0072): someone who only knows its secret is not.
+      const known = await this.identity.devicesIn(records, this.ws.id);
+      known.add(l.issuer.key);
       if (!known.has(link.key)) {
-        this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the link's maker does not vouch for it; not joining through it`);
+        this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
         link.close();
         return;
       }
-      const name = await this.identity.addMember(link.key, link.hello.name);
+      const name = await this.identity.addRemote(link.key, link.hello.name);
       if (!name) return;
       link.accepted = true;
       link.remote = name;
@@ -1406,6 +1441,9 @@ export class PeerNode {
       await this.identity.adopt({ id: this.ws.id, secret, forkedFrom: this.ws.forkedFrom });
       this.ws = { ...this.ws, secret };
       void this.retopic();
+      // Who this device is, said now that it is in a workspace (0072): nothing could be before it had the secret.
+      this.saidFor = '';
+      await this.syncPerson();
     }
     await this.takeRecords(link, records);
     // Let in by a link that puts this person in a group: said in the policy (0066).
@@ -1445,26 +1483,31 @@ export class PeerNode {
 
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */
   private async takeRecords(link: PeerLink, records: unknown[]): Promise<void> {
+    const before = new Set((await this.identity.members()).map((m) => m.key));
     const taken = await this.identity.takeRecords(records);
     if (!taken.length) return;
-    if (taken.some((r) => r.kind === 'remove' && r.subject === this.myKey)) {
-      this.o.log('peers: this device was removed from the workspace; not syncing');
+    // Out (0072): dropped, its key revoked, or its person taken out.
+    const removed = new Set(await this.identity.removed());
+    if (removed.has(this.myKey)) {
+      this.o.log('peers: this device is out of the workspace (removed, or its person taken out); not syncing');
       await this.close();
       return;
     }
+    for (const m of await this.identity.members()) {
+      if (before.has(m.key)) continue;
+      this.o.log(`peers: ${m.name} (${m.key.slice(0, 8)}…) is in the workspace`);
+      this.dial(m.key);
+    }
+    for (const k of before) {
+      if (!removed.has(k)) continue;
+      this.links.get(k)?.close();
+      this.o.log(`peers: ${k.slice(0, 8)}… is out of the workspace`);
+    }
     for (const r of taken) {
       const who = (await this.identity.members()).find((m) => m.key === r.by)?.name ?? (r.by === this.myKey ? 'this device' : `${r.by.slice(0, 8)}…`);
-      if (r.kind === 'add') {
-        if (r.subject === this.myKey) continue;
-        this.o.log(`peers: ${who} paired ${r.name ?? 'a device'} (${r.subject.slice(0, 8)}…)`);
-        this.dial(r.subject);
-      } else if (r.kind === 'remove') {
-        this.links.get(r.subject)?.close();
-        this.o.log(`peers: ${who} removed ${r.subject.slice(0, 8)}…`);
-      } else if (r.kind === 'revoke-link') this.o.log(`peers: ${who} ${r.name === 'used' ? 'let someone in by' : 'revoked'} invite link ${r.subject}`);
+      if (r.kind === 'revoke-link') this.o.log(`peers: ${who} ${r.name === 'used' ? 'let someone in by' : 'revoked'} invite link ${r.subject}`);
       else if (r.kind === 'link') this.o.log(`peers: ${who} made invite link ${r.subject}`);
       else if (r.kind === 'secret') this.o.log(`peers: ${who} made the workspace's secret anew`);
-      else this.o.log(`peers: ${who} acts for ${r.name ?? 'someone'}`);
     }
     if (taken.some((r) => r.kind === 'secret')) await this.secretChanged();
     await this.membersChanged(link);
@@ -1478,6 +1521,8 @@ export class PeerNode {
    */
   async membersChanged(except?: PeerLink): Promise<void> {
     await this.refresh();
+    // How much of the policy this device holds, if that changed (0072): its person confirms the removals in it.
+    await this.identity.acknowledge().catch((e: Error) => this.o.log(`peers: could not acknowledge the policy: ${e.message}`));
     // Links made, revoked or used: announced, or no longer.
     await this.retopic();
     const all = await this.identity.records();

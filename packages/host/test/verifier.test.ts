@@ -110,7 +110,7 @@ describe('a verifier', () => {
     await ask('/verify/email/start', { id: bo.id, email: 'bo@uni.edu', log: bo.events, proof: crypto.sign(askMessage('email', bo.id, 'email:bo@uni.edu'), bo.secretKey).toString('hex') });
     const attestation = readAttestation((await ask('/verify/email/finish', { id: bo.id, email: 'bo@uni.edu', code: code() })).body.attestation)!;
     const device = crypto.keyPair();
-    await id.addMember(device.publicKey.toString('hex'), 'bo');
+    await id.addRemote(device.publicKey.toString('hex'), 'bo');
     await id.takeRecords([signRecord({ kind: 'attest', workspace: (await id.workspace())!.id, subject: bo.id, attestation }, device)]);
     // Not counted: this workspace names no verifier yet.
     expect((await id.policy()).role(bo.id)).toBeNull();

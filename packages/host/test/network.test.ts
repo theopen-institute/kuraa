@@ -150,21 +150,21 @@ describe('invites and pairing, under a policy', () => {
     expect(await id.refuseGrant(old)).toMatch(/older kuraa/);
   });
 
-  it('a device paired by a member who is not an admin counts once its person came in by an admin’s grant', async () => {
+  it('a device is in once its person came in by an admin’s grant; a member’s pairing record says nothing (0072)', async () => {
     const { id, ws, adaKey } = await workspace();
     // Bo: a member, not an admin.
     const boId = identity();
     const bo = deviceOf(ws.id, boId, 'Bo');
-    await id.addMember(hex(bo.device), 'bo');
+    await id.addRemote(hex(bo.device), 'bo');
     await id.takeRecords(bo.records);
     await id.adminOp({ t: 'grant', group: 'workspace', who: boId.id, role: 'member' }, adaKey);
     expect((await id.policy()).role(boId.id)).toBe('member');
-    // Bo's device pairs a device of someone the admins never let in: it is not paired here.
+    // Bo's device pairs a device of someone the admins never let in (a record from before 0072): it is not in.
     const mallory = deviceOf(ws.id, identity(), 'Mallory');
     const pairs = (d: typeof mallory) => signRecord({ kind: 'add', workspace: ws.id, subject: hex(d.device), name: 'new' }, bo.device);
-    expect(await id.takeRecords([pairs(mallory), ...mallory.records])).toEqual([]);
+    await id.takeRecords([pairs(mallory), ...mallory.records]);
     expect((await id.members()).map((m) => m.key)).not.toContain(hex(mallory.device));
-    // Dee came in by Ada's link (her join, with its grant, signed with her key): Bo's device pairing hers counts.
+    // Dee came in by Ada's link (her join, with its grant, signed with her key): her device is in.
     const deeId = identity();
     const dee = deviceOf(ws.id, deeId, 'Dee');
     const l = decodeLink(await id.createLink(1, true, { relays: [], tcp: [] }, { key: adaKey }));

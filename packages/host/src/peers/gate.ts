@@ -4,8 +4,8 @@
 // who signed it (the person their signing key is) against the workspace's write
 // rules (policy.ts). A file whose last change among them is by someone who may
 // not change it keeps this side's version in the merge; the change is refused,
-// and kept on record in the merge (`Kuraa-Refused`), where those who may change
-// the file see it as a suggestion. A later change by someone who may takes it up.
+// and kept on record in the merge (`Kuraa-Refused`). A later change by someone who
+// may takes the file up.
 // Every device holding the same policy judges the same commits alike.
 //
 // Signed commits say which policy they were made under (`Kuraa-Policy`): a
@@ -32,12 +32,6 @@ import type { Policy } from './policy.js';
 export const POLICY_TRAILER = 'Kuraa-Policy';
 /** A merge's record of a change it refused: `<commit> <path>`. */
 export const REFUSED_TRAILER = 'Kuraa-Refused';
-/** A suggestion made as such (Suggest): the commit proposes this path's text. */
-export const SUGGESTION_TRAILER = 'Kuraa-Suggestion';
-/** The commit that takes a suggestion back off the suggester's own copy: names the suggestion. */
-export const SUGGESTED_TRAILER = 'Kuraa-Suggested';
-/** A suggestion seen to: accepted or dismissed, `<commit> <path>`. */
-export const RESOLVED_TRAILER = 'Kuraa-Resolved';
 
 export interface GateResult {
   /** Files that keep this side's version: path → its blob here (null: not here). */
@@ -124,13 +118,9 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
     const changed = parents.length >= 2
       ? await mergeChanges(git, c, parents, message, ctx)
       : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);
-    // Taking one's own suggestion back off one's copy proposes nothing: the suggestion before it does.
-    const takesBack = trailers(message, SUGGESTED_TRAILER).length > 0;
     for (const path of changed) {
       // By someone who may: taken, and whatever was refused before it with it.
       if (!cut && ctx.policy.mayWrite(by, path)) tainted.set(path, null);
-      // A taking back: still not theirs to change; the suggestion before it, if any, is what is proposed.
-      else if (takesBack) tainted.set(path, tainted.get(path) ?? { commit: '', by });
       else tainted.set(path, { commit: c, by });
     }
   }
@@ -140,7 +130,7 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
     if (!t) continue;
     const here = ours ? (await git.run(['ls-tree', '-z', ours, '--', path])).stdout.split('\0').filter(Boolean)[0] : undefined;
     keeps.set(path, here ? here.split(/\s+/)[2]! : null);
-    if (t.commit) refused.push({ commit: t.commit, path, by: t.by ? ctx.nameOf(t.by) ?? null : null });
+    refused.push({ commit: t.commit, path, by: t.by ? ctx.nameOf(t.by) ?? null : null });
   }
   return { keeps, refused, waitFor: [] };
 }

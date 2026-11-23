@@ -147,11 +147,13 @@ heading and is typed there (↑ at the top of the text goes up to it, Enter come
 to fill in, with Pandoc's standard fields (and R Markdown's `output` and `params`) offered by name,
 or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/0021-document-header.md)).
 
-The open document's **⋯** (its top-right corner) is what to do with it: its **Source** (the
-markdown, which you can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md)),
-**History**, **Save version**, **Preview** (below), **Find and replace…**, **Outline**, **Insert
-table**, when it was last saved and kept in the history, its code session, **Document settings…** and
-**Markdown and shortcuts**. **Search** (⇧⌘F: every text file, and open documents as they are being
+The open document's **⋯** (its top-right corner) is a menu of what to do with it
+([0074](docs/decisions/0074-the-document-menu-is-a-menu.md)): **Source** (the markdown, which you
+can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md))
+and **History**, ticked when shown; **Preview** (below); **Find and replace…**, **Outline**, **Insert
+table**; **Save version…**; its code session (**Run all**, **Restart**, **Packages…**); and
+**Permissions…**, **Document settings…** and **Markdown and shortcuts**, each with its keys; below
+them, when it was last saved and kept in the history. **Search** (⇧⌘F: every text file, and open documents as they are being
 typed; a result opens the file at the match, [0042](docs/decisions/0042-search.md)) and **Sync**
 (once there is an online copy or another device; it says "Up to date" or how many changes it brought
 in) are beside **+** at the top of the sidebar ([decision 0065](docs/decisions/0065-no-menu.md)).
@@ -290,16 +292,22 @@ admin.
 everyone reads everything; only admins invite people, remove devices, make others admins or
 members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, a
 file's or folder's **Permissions…**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists
-them, `group` manages groups). Where nothing is said, anyone may change it. A change by anyone else is kept out
-where it comes in: every device's merge keeps its own version of the file and keeps the change on
-record, and those who may change the file see it above the document as a suggestion, to compare
-and **Accept** (as their edit) or **Dismiss**. A document you may not change opens read only, saying
-who may, with **Suggest a change…**. Changes to the policy made at the same time on different
-devices settle the same way everywhere: someone taken out is not put back in at the same time,
-nothing they did meanwhile counts, and two admins taking each other out are both out, unless that
-would leave no admin (then neither is, and Workspace settings say so). What someone taken out, or
-a revoked or lost key, signs after that counts for nothing anywhere; merges are made again by
-every device that brings them in, so none can slip a change past the rules.
+them, `group` manages groups). Where nothing is said, anyone may change it. A document you may not
+change opens read only, saying who may. A change by anyone else (made outside the app) is kept out
+where it comes in: every device's merge keeps its own version of the file, and the change stays in
+the file's history, listed as *not kept*, to read and for someone who may change it to restore; its
+maker is told ([0072](docs/decisions/0072-ranks-devices-and-changes-not-kept.md)). Changes to the
+policy made at the same time on different devices settle the same way everywhere, by rank: the
+owner, then admins by how long they have been, then members; nothing someone taken out did meanwhile
+counts. What someone taken out, or a dropped, revoked or lost key, signs after that counts for
+nothing anywhere; merges are made again by every device that brings them in, so none can slip a
+change past the rules. How every device works the policy out is in [docs/policy.md](docs/policy.md).
+
+**Devices are in as their people are** (0072): a computer is in the workspace where its key is
+vouched for by someone the workspace has in it; taking someone out takes their computers out, and
+**Lost or no longer used…** drops one computer's key (its own person, or an admin). Workspace
+settings list recent removals and who has confirmed each so far; admins may name *witnesses*
+(usually an always-on server) whose devices confirm them.
 
 **Permissions** are on files and folders ([0069](docs/decisions/0069-permissions-on-files-and-folders.md)):
 a file's or folder's **Permissions…** (its right-click menu, or a document's ⋯ menu) say who can
@@ -315,8 +323,10 @@ by a hash, so members who cannot see it do not learn its path.
 history of its own in the repository (`refs/spaces/…`), which devices send only to the devices
 of the people who may read it, so no one else's device ever has it, nor its history. On your
 device its files lie in the folder with the rest, marked with a lock in the file list, and kept
-out of plain git's way (`.git/info/exclude`). Code run for a document cannot see files fewer
-people read than the document, and nothing of a space goes to the online copy.
+out of plain git's way (`.git/info/exclude`). A folder read by fewer holds a space of its own:
+changing who reads it moves nothing, sends its history to whoever is added, and sends nothing new to
+whoever is taken out (0072). Code run for a document cannot see files fewer people read than the
+document, and nothing of a space goes to the online copy.
 
 **Email, trustees and getting your identity back** (Settings › You). A kuraa server can check
 people's email addresses: `pnpm host --verify-emails "sendmail -t" --verifier-name "Lab server"`

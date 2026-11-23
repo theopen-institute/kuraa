@@ -23,31 +23,29 @@ const standing = (over: Partial<Standing> = {}): Standing => ({
   workspace: WS, self: hex(ada), members: new Set([hex(bo), hex(cy)]), removed: new Set(), managers: null, ...over,
 });
 
-describe('signed membership records', () => {
-  it('are taken only as signed, for this workspace, from a member', () => {
-    const r = signRecord({ kind: 'remove', workspace: WS, subject: hex(cy) }, bo);
+describe('signed records', () => {
+  it('are taken only as signed, for this workspace; those not signed in themselves, only from a device in it', () => {
+    const r = signRecord({ kind: 'secret', workspace: WS, subject: 'ee'.repeat(32) }, bo);
     expect(readRecord(JSON.parse(JSON.stringify(r)))).toEqual(r);
     // Changed after signing: not a record.
-    expect(readRecord({ ...r, subject: hex(ada) })).toBeNull();
+    expect(readRecord({ ...r, subject: 'ff'.repeat(32) })).toBeNull();
     expect(judge(r, standing())).toBe('take');
-    // Another workspace's, or from a removed device: refused. From a device not paired yet: later.
-    expect(judge(signRecord({ kind: 'remove', workspace: 'cd'.repeat(16), subject: hex(cy) }, bo), standing())).toBe('refuse');
+    // Another workspace's, or from a device out: refused. From a device not known to be in yet: later.
+    expect(judge(signRecord({ kind: 'secret', workspace: 'cd'.repeat(16), subject: 'ee'.repeat(32) }, bo), standing())).toBe('refuse');
     expect(judge(r, standing({ removed: new Set([hex(bo)]) }))).toBe('refuse');
     expect(judge(r, standing({ members: new Set() }))).toBe('wait');
+    // Signed in itself (0072): a device's key, a person's word, the policy; taken from a device not known yet, which is how it comes to be known.
+    const signs = signRecord({ kind: 'signs', workspace: WS, subject: hex(cy), proof: sign(signsMessage(hex(bo)), cy) }, bo);
+    expect(judge(signs, standing({ members: new Set() }))).toBe('take');
   });
 
-  it('that remove a device are taken only from an admin’s device, or one of the same person’s, once a policy says who (0066, 0068)', () => {
+  it('that removed a device before (0072: none made now) are taken only from an admin’s device, or one of the same person’s (0066, 0068)', () => {
     const remove = signRecord({ kind: 'remove', workspace: WS, subject: hex(cy) }, bo);
     const secret = signRecord({ kind: 'secret', workspace: WS, subject: 'ee'.repeat(32) }, bo);
-    const add = signRecord({ kind: 'add', workspace: WS, subject: hex(crypto.keyPair()), name: 'new' }, bo);
     // No policy yet: every member's word counts (0038).
     expect(judge(remove, standing())).toBe('take');
     // Bo's device is not an admin's: waiting (the policy that makes him one may come); Cy's is.
     expect(judge(remove, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
-    // Pairing a device (0071): an admin's word, or a member's once the device's person is in the workspace.
-    expect(judge(add, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
-    expect(judge(add, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
-    expect(judge(add, standing({ managers: new Set([hex(cy)]), inWorkspace: (d) => d === add.subject }))).toBe('take');
     expect(judge(remove, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
     // A person removes their own computer, admin or not (0068): Bo's device removes Cy's only if both are the same person's.
     expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p1']]) }))).toBe('take');
@@ -58,20 +56,13 @@ describe('signed membership records', () => {
     // The new secret that goes with a removal is any member's to make.
     expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
   });
-
-  it('are taken from every member alike, the newest as the first', () => {
-    // Cy removes Bo, and Bo removes Cy: each is a member, so each record is taken.
-    expect(judge(signRecord({ kind: 'remove', workspace: WS, subject: hex(bo) }, cy), standing())).toBe('take');
-    expect(judge(signRecord({ kind: 'remove', workspace: WS, subject: hex(cy) }, bo), standing())).toBe('take');
-    expect(judge(signRecord({ kind: 'add', workspace: WS, subject: hex(crypto.keyPair()), name: 'new' }, cy), standing())).toBe('take');
-  });
 });
 
 describe('records a device makes about itself', () => {
   it('signing keys: a device says which it signs with, with that key’s word; a person vouches for theirs, and revokes them', async () => {
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const boKey = crypto.keyPair(); // the key Bo signs with on Bo's device
     const boIdentity = identity();
     const mallory = crypto.keyPair();
@@ -109,7 +100,7 @@ describe('records a device makes about itself', () => {
   it('a key whose holder vouched for it in two names is no one’s', async () => {
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const key = crypto.keyPair();
     const one = identity();
     const two = identity();
@@ -122,7 +113,7 @@ describe('records a device makes about itself', () => {
   it('an identity recovered: its old key’s word counts only for the keys the recovery kept, on every device alike', async () => {
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const bo1 = identity();
     const laptop = crypto.keyPair();
     const desk = crypto.keyPair();
@@ -183,7 +174,7 @@ describe('a workspace’s policy, on a device (0066)', () => {
   it('a workspace from before: written down with everyone it knows of an admin; the first admin change seals it', async () => {
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const me = identity();
     const boId = identity();
     const myKey = crypto.keyPair();
@@ -217,7 +208,7 @@ describe('cutoffs for keys no longer a person’s (0066, step 4)', () => {
   it('a key dropped when its identity was recovered is found, and once revoked with the commits seen, is cut there', async () => {
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const bo1 = identity();
     const laptop = crypto.keyPair();
     const stolen = crypto.keyPair();
@@ -264,13 +255,13 @@ describe('trustees (0066, step 6)', () => {
     // A workspace that knows Ada's and Cy's logs counts it; one that knew of other keys for them would not.
     const { id } = repo();
     const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    await id.addRemote(hex(bo), 'bo');
     const events = (p: { id: string; events: KeyEvent[] }) => p.events.map((e) => signRecord({ kind: 'key-event', workspace: ws.id, subject: p.id, event: e }, bo));
     await id.takeRecords([...events(adaP), ...events(cyP), ...events(back)]);
     expect((await id.identityState(boP.id))!.current).toBe(back.publicKey.toString('hex'));
     const { id: other } = repo();
     const ws2 = await other.found();
-    await other.addMember(hex(bo), 'bo');
+    await other.addRemote(hex(bo), 'bo');
     await other.takeRecords(back.events.map((e) => signRecord({ kind: 'key-event', workspace: ws2.id, subject: boP.id, event: e }, bo)));
     // Without the trustees' logs, the trustee rotation waits: Bo's key there is the one he named trustees with.
     expect((await other.identityState(boP.id))!.current).toBe(named.publicKey.toString('hex'));
@@ -369,58 +360,164 @@ function repo(): { dir: string; git: Git; id: Identity } {
   return { dir, git, id: new Identity(git, join(dir, '.git', 'kuraa')) };
 }
 
+/** A workspace this device made, with a policy: Ada (this device's person) its owner. */
+async function founded(id: Identity) {
+  const ws = await id.found();
+  const me = identity();
+  const myKey = crypto.keyPair();
+  await id.signsWith(myKey);
+  await id.vouch({ name: 'Ada', ...me.key, id: me.id, events: me.events }, myKey);
+  await id.ensureGenesis(me.id, myKey, true);
+  return { ws, me, myKey };
+}
+
+/** What makes a device in (0072): it signs with a key its person vouched for, and the person is in the policy. All signed in themselves, passed on by `device`. */
+function inRecords(ws: string, device: typeof bo, name: string) {
+  const p = identity();
+  const key = crypto.keyPair();
+  const m = vouchMessage(hex(key), p.id, name);
+  return {
+    person: p,
+    key,
+    records: [
+      ...p.events.map((e) => signRecord({ kind: 'key-event', workspace: ws, subject: p.id, event: e }, device)),
+      signRecord({ kind: 'signs', workspace: ws, subject: hex(key), proof: sign(signsMessage(hex(device)), key), name: name.toLowerCase() }, device),
+      signRecord({ kind: 'vouch', workspace: ws, subject: hex(key), person: p.id, personKey: hex(p.key), name, proof: sign(m, p.key), keyProof: sign(m, key) }, device),
+    ],
+  };
+}
+
 describe('a device and its records', () => {
-  it('puts its changes on record, to pass on', async () => {
+  it('has in it the devices whose people the policy has in it; a device dropped is out (0072)', async () => {
     const { id } = repo();
-    await id.found();
-    const me = hex(await id.deviceKey());
-    await id.addMember(hex(bo), 'bo');
-    await id.addMember(hex(cy), 'cy');
-    await id.removeMember(hex(bo));
-    expect((await id.records()).map((r) => [r.kind, r.subject, r.by])).toEqual([['remove', hex(bo), me]]);
+    const { ws, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    await id.takeRecords(b.records);
+    // Bo's device says who it is, but Bo is not in the workspace yet: neither in nor out.
+    expect(await id.members()).toEqual([]);
+    expect(await id.removed()).toEqual([]);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'member' }, myKey);
+    expect((await id.members()).map((m) => [m.name, m.key])).toEqual([['bo', hex(bo)]]);
+    // Bo's computer dropped (an admin's to do): out, and its remote gone.
+    await id.dropKey(hex(b.key), [], myKey);
+    expect(await id.members()).toEqual([]);
     expect(await id.removed()).toEqual([hex(bo)]);
+    expect((await id.remotes()).map((m) => m.key)).toEqual([]);
+    // Bo is still in the workspace: a computer of his that his identity vouches for is in.
+    const desk = crypto.keyPair();
+    const deskKey = crypto.keyPair();
+    const m = vouchMessage(hex(deskKey), b.person.id, 'Bo');
+    await id.takeRecords([
+      signRecord({ kind: 'signs', workspace: ws.id, subject: hex(deskKey), proof: sign(signsMessage(hex(desk)), deskKey), name: 'desk' }, desk),
+      signRecord({ kind: 'vouch', workspace: ws.id, subject: hex(deskKey), person: b.person.id, personKey: hex(b.person.key), name: 'Bo', proof: sign(m, b.person.key), keyProof: sign(m, deskKey) }, desk),
+    ]);
+    expect((await id.members()).map((x) => x.name)).toEqual(['desk']);
   });
 
-  it('takes records from any member, in any order', async () => {
+  it('takes records in any order: one from a device, and those that show it to be in', async () => {
     const { id } = repo();
-    const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
-    // Cy's device is vouched for by Bo's, whose record arrives after Cy's own: both taken.
-    const vouch = signRecord({ kind: 'add', workspace: ws.id, subject: hex(cy), name: 'cy' }, bo);
+    const { ws, myKey } = await founded(id);
+    const c = inRecords(ws.id, cy, 'Cy');
+    await id.takeRecords(c.records);
+    // Cy's link revoked, by Cy's device, arriving before Cy is in: waits, then taken once Cy is.
     const fromCy = signRecord({ kind: 'revoke-link', workspace: ws.id, subject: 'ab'.repeat(8) }, cy);
-    expect((await id.takeRecords([fromCy, vouch])).map((r) => r.kind).sort()).toEqual(['add', 'revoke-link']);
-    expect((await id.members()).map((m) => m.name).sort()).toEqual(['bo', 'cy']);
-    // Cy, the newest, removes Bo, who paired Cy: taken like any member's.
-    expect((await id.takeRecords([signRecord({ kind: 'remove', workspace: ws.id, subject: hex(bo) }, cy)])).map((r) => r.kind)).toEqual(['remove']);
-    expect((await id.members()).map((m) => m.name)).toEqual(['cy']);
+    expect(await id.takeRecords([fromCy])).toEqual([]);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: c.person.id, role: 'member' }, myKey);
+    expect((await id.takeRecords([fromCy])).map((r) => r.kind)).toEqual(['revoke-link']);
+    // Taken out of the workspace: Cy's devices are out with him, and nothing more is taken from them.
+    await id.adminOp({ t: 'revoke', group: 'workspace', who: c.person.id }, myKey);
+    expect(await id.removed()).toEqual([hex(cy)]);
+    expect(await id.takeRecords([signRecord({ kind: 'secret', workspace: ws.id, subject: 'cd'.repeat(32) }, cy)])).toEqual([]);
   });
 
-  it('applies a record it kept but could not apply (git config held by another writer), before its next change', async () => {
+  it('makes the remotes what the records say, if git config was held by another writer, before its next change', async () => {
     const { dir, id } = repo();
-    const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
-    // Another writer holds .git/config for longer than git.ts waits: Bo's pairing of Cy is kept, not applied.
+    const { ws, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    await id.takeRecords(b.records);
+    // Another writer holds .git/config for longer than git.ts waits: Bo is in, but has no remote yet.
     writeFileSync(join(dir, '.git', 'config.lock'), '');
-    const add = signRecord({ kind: 'add', workspace: ws.id, subject: hex(cy), name: 'cy' }, bo);
-    expect((await id.takeRecords([add])).map((r) => r.kind)).toEqual(['add']);
-    expect((await id.members()).map((m) => m.name)).toEqual(['bo']);
-    // Let go of: the next change applies it first, though the record is not new to this device.
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'member' }, myKey);
+    expect(await id.members()).toEqual([]);
+    // Let go of: the next change makes it first, though nothing in it is new.
     rmSync(join(dir, '.git', 'config.lock'));
-    expect(await id.takeRecords([add])).toEqual([]);
-    expect((await id.members()).map((m) => m.name).sort()).toEqual(['bo', 'cy']);
-    // A removal on record but not in the config (stopped in between) is applied when the device starts (reconcile).
-    const remove = signRecord({ kind: 'remove', workspace: ws.id, subject: hex(bo) }, cy);
+    expect(await id.takeRecords(b.records)).toEqual([]);
+    expect((await id.members()).map((m) => m.name)).toEqual(['bo']);
+    // A removal from before, on record but not in the config (stopped in between), is applied when the device starts (reconcile).
+    const remove = signRecord({ kind: 'remove', workspace: ws.id, subject: hex(bo) }, await id.deviceKey());
     const file = join(dir, '.git', 'kuraa', 'records.json');
     writeFileSync(file, JSON.stringify([...JSON.parse(readFileSync(file, 'utf8')), remove]));
     await id.reconcile();
     expect(await id.removed()).toEqual([hex(bo)]);
-    expect((await id.members()).map((m) => m.name)).toEqual(['cy']);
+    expect(await id.members()).toEqual([]);
   }, 30_000);
+
+  it('keeps what a key revoked signed of the policy before, and nothing after (0072)', async () => {
+    const { id } = repo();
+    const { ws, me, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    await id.takeRecords(b.records);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'admin' }, myKey);
+    // Ada's laptop (myKey) is lost: she revokes its key, with the policy as she has it.
+    await id.revokeKey(me.id, hex(me.key), hex(myKey), sign(revokeKeyMessage(hex(myKey)), me.key));
+    const policy = await id.policy();
+    // What it signed before still counts: Bo is still an admin, Ada still the owner.
+    expect(policy.role(b.person.id)).toBe('admin');
+    expect(policy.owner).toBe(me.id);
+    // Whoever has the laptop signs more: it counts for nothing.
+    const thief = await id.makePolicy({ t: 'grant', group: 'workspace', who: identity().id, role: 'member' }, myKey);
+    expect((await id.policy()).applied).not.toContain(thief);
+  });
+
+  it('tells a device joining which devices are in, from the records it is sent, under the genesis it holds (0072)', async () => {
+    const { id } = repo();
+    const { ws, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    await id.takeRecords(b.records);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'member' }, myKey);
+    const records = await id.records();
+    // A device joining holds the genesis its link names, and nothing else.
+    const joiner = repo().id;
+    await joiner.setPin((await id.pin())!);
+    const self = hex(await id.deviceKey());
+    expect([...(await joiner.devicesIn(records, ws.id))].sort()).toEqual([hex(bo), self].sort());
+    // Another genesis (another history of the workspace): no one.
+    await joiner.setPin('ef'.repeat(32));
+    expect([...(await joiner.devicesIn(records, ws.id))]).toEqual([]);
+  });
+
+  it('confirms a removal by the people whose devices acknowledge holding it; a witness among them (0072)', async () => {
+    const { id } = repo();
+    const { ws, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    const c = inRecords(ws.id, cy, 'Cy');
+    await id.takeRecords([...b.records, ...c.records]);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'member' }, myKey);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: c.person.id, role: 'member' }, myKey);
+    // This device says how much of the policy it holds, once for each change.
+    expect(await id.acknowledge()).toBe(true);
+    expect(await id.acknowledge()).toBe(false);
+    // Ada takes Bo out: no one but Ada holds it yet.
+    await id.adminOp({ t: 'revoke', group: 'workspace', who: b.person.id }, myKey);
+    expect(await id.confirmations()).toEqual([expect.objectContaining({ kind: 'person', who: b.person.id, confirmedBy: [], witnessed: false })]);
+    // Cy's device acknowledges a policy that holds it: Cy confirms it.
+    const ack = (heads: string[]) => signRecord({ kind: 'ack', workspace: ws.id, subject: 'ab'.repeat(32), policyHeads: heads }, cy);
+    expect(readRecord(JSON.parse(JSON.stringify(ack((await id.policy()).heads))))).not.toBeNull();
+    await id.takeRecords([ack((await id.policy()).heads)]);
+    expect((await id.confirmations())[0]).toMatchObject({ confirmedBy: [c.person.id], witnessed: false });
+    // Cy named a witness: the removal has reached a witness.
+    await id.adminOp({ t: 'witness', who: c.person.id, on: true }, myKey);
+    expect((await id.confirmations())[0]).toMatchObject({ confirmedBy: [c.person.id], witnessed: true });
+    // An acknowledgement from a device not in the workspace (Bo's, out now) is not taken.
+    expect(await id.takeRecords([signRecord({ kind: 'ack', workspace: ws.id, subject: 'cd'.repeat(32), policyHeads: (await id.policy()).heads }, bo)])).toEqual([]);
+  });
 
   it('makes its secret anew on record, the latest counting, and keeps its records from other users of the computer', async () => {
     const { dir, git, id } = repo();
-    const ws = await id.found();
-    await id.addMember(hex(bo), 'bo');
+    const { ws, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    await id.takeRecords(b.records);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'member' }, myKey);
     const mine = await id.newSecret();
     expect((await id.workspace())!.secret).toBe(mine);
     expect(mine).not.toBe(ws.secret);

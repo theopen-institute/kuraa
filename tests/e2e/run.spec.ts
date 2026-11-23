@@ -147,7 +147,7 @@ test('the Packages panel installs and removes packages for the workspace', async
   const page = await open(browser, 'Pat', path);
 
   await page.getByTestId('document-menu-button').click();
-  await page.getByTestId('document-menu').getByRole('button', { name: 'Packages…' }).click();
+  await page.getByTestId('document-menu').getByRole('menuitem', { name: 'Packages…' }).click();
   const dialog = page.getByTestId('packages');
   await expect(dialog.getByRole('heading')).toHaveText('R packages');
   await dialog.getByLabel('Packages to install').fill('hellno');
@@ -167,7 +167,7 @@ test('the Packages panel installs and removes packages for the workspace', async
 
   // A URL is not a package name: refused before anything is fetched.
   await page.getByTestId('document-menu-button').click();
-  await page.getByTestId('document-menu').getByRole('button', { name: 'Packages…' }).click();
+  await page.getByTestId('document-menu').getByRole('menuitem', { name: 'Packages…' }).click();
   await dialog.getByLabel('Packages to install').fill('https://example.org/evil.tar.gz');
   await dialog.getByRole('button', { name: 'Install' }).click();
   await expect(dialog.locator('.packages-result.warn')).toContainText('Not a package name this host installs');

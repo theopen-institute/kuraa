@@ -227,7 +227,7 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const by: string[] = [];
       for (const w of more) by.push(w === 'admins' || w.startsWith('group:') ? w : await personNamed(id, w));
       await id.adminOp({ t: 'rule', path: arg, by: [...new Set(by)].sort() }, key);
-      return say(by.length ? `Only ${more.join(', ')} can change ${arg || 'anything'} now; others' changes become suggestions.` : `No rule for ${arg || 'everything'} now.`);
+      return say(by.length ? `Only ${more.join(', ')} can change ${arg || 'anything'} now; others' changes are kept out.` : `No rule for ${arg || 'everything'} now.`);
     }
     case 'group': {
       // kuraa-host group <name> add|admin|remove <person>
@@ -255,18 +255,22 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       const devices = (await id.people()).find((p) => p.key === who)?.devices ?? [];
       const tips = (await git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads', 'refs/spaces/'], { allowFail: true })).stdout.split('\n').filter((l) => /^[0-9a-f]{40,64}$/.test(l.trim())).map((l) => l.trim());
       await id.adminOp({ t: 'revoke', group: WORKSPACE, who, cutoff: [...new Set(tips)].sort() }, key);
-      const members = new Set((await id.members()).map((m) => m.key));
-      for (const d of devices.filter((x) => members.has(x))) await id.removeMember(d);
-      if (devices.some((d) => members.has(d))) await id.newSecret();
+      // Their devices are out with them (0072); they knew the workspace's secret: a new one.
+      if (devices.length) await id.newSecret();
       return say(`Took ${arg} out of this workspace, with their devices. Other devices learn of it when they next meet this one.`);
     }
     case 'remove-device': {
-      const { id } = await identityAt(values.dir!);
+      const { git, id } = await identityAt(values.dir!);
       const m = (await id.members()).find((x) => x.name === arg || x.key === arg);
       if (!m) throw new Error(`No paired device called ${arg}`);
       // An admin, or whoever it is: one's own lost or retired computer (0068).
       if (!(await id.mayRemove((await id.deviceKey()).publicKey.toString('hex'), m.key))) throw new Error('Only an admin of this workspace, or whoever it is, can remove a computer');
-      await id.removeMember(m.key);
+      // Its signing key dropped here (0072), with the commits this device has: what it signed among them still counts.
+      const { key } = await asPerson(git, id, false);
+      const target = await id.signingKeyOf(m.key);
+      if (!target) throw new Error(`${m.name} has said no key it signs with`);
+      const tips = (await git.run(['for-each-ref', '--format=%(objectname)', 'refs/heads', 'refs/spaces/'], { allowFail: true })).stdout.split('\n').map((l) => l.trim()).filter((l) => /^[0-9a-f]{40,64}$/.test(l));
+      await id.dropKey(target, tips, key);
       // It knew the workspace's secret: a new one, so it can no longer find the others (0050).
       await id.newSecret();
       return say(`Removed ${m.name}, for good: it keeps its copy, but no longer syncs with this workspace, and can no longer find its devices. Other devices learn of it when they next meet this one.`);

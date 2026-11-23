@@ -21,7 +21,7 @@ import { createRequestHandler, sameToken } from './http.js';
 import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
-import { POLICY_TRAILER, SUGGESTED_TRAILER, SUGGESTION_TRAILER, type GateResult } from './peers/gate.js';
+import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './peers/gate.js';
 import { Spaces, spaceRef } from './spaces.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
@@ -978,6 +978,40 @@ export class Host {
   }
 
   /**
+   * Changes to a file that were not kept (0072): made by someone who may not
+   * change it, kept out by a merge, which says so (`Kuraa-Refused: <commit>
+   * <path>`). Each the commit proposing its text, and the merge; newest first.
+   * Never the file's text: they stay in its history, to read and take up.
+   */
+  async notKept(path: string): Promise<{ commit: string; merge: string }[]> {
+    const ref = this.refFor(path);
+    const tip = (await this.git.run(['rev-parse', '-q', '--verify', `${ref}^{commit}`], { allowFail: true })).stdout.trim();
+    if (!tip) return [];
+    const key = `${tip}\0${path}`;
+    const had = this.notKeptMemo.get(key);
+    if (had) return had;
+    const log = await this.git.run(['log', tip, '--merges', '-n', '500', '--format=%H%x1f%B%x1e', `--grep=^${REFUSED_TRAILER}: `], { allowFail: true });
+    const out: { commit: string; merge: string }[] = [];
+    const seen = new Set<string>();
+    for (const entry of log.stdout.split('\x1e')) {
+      const [merge, body] = entry.trim().split('\x1f');
+      if (!merge || body === undefined) continue;
+      for (const v of trailers(body, REFUSED_TRAILER)) {
+        const m = /^([0-9a-f]{40,64}) (.+)$/.exec(v);
+        if (m && m[2] === path && !seen.has(m[1]!)) {
+          seen.add(m[1]!);
+          out.push({ commit: m[1]!, merge });
+        }
+      }
+    }
+    if (this.notKeptMemo.size > 200) this.notKeptMemo.clear();
+    this.notKeptMemo.set(key, out);
+    return out;
+  }
+
+  private notKeptMemo = new Map<string, { commit: string; merge: string }[]>();
+
+  /**
    * The files code run for a document must not see (0066): those of spaces
    * whose readers are not everyone who reads the document. Data flows from
    * wider to narrower audiences, never back.
@@ -1074,56 +1108,6 @@ export class Host {
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
     return head;
-  }
-
-  /**
-   * Suggest a text for a file this person may not change (0066: peers/gate.ts):
-   * committed as theirs on the current branch (`Kuraa-Suggestion`), then taken
-   * back off this copy at once (`Kuraa-Suggested`), so the file here stays as it
-   * is. Every device bringing the two in keeps its own version and has the
-   * suggestion on record for those who may change the file. Neither the working
-   * tree nor the index changes: the branch's tree ends as it began.
-   */
-  async suggest(path: string, text: string): Promise<string> {
-    if (!this.peers) throw new Error('Suggestions are for a workspace shared with other devices');
-    return this.serial(async () => {
-      await this.requireWritable();
-      const branch = await this.git.branch();
-      if (!branch) throw new Error('No branch is checked out');
-      const before = await this.git.run(['show', `${this.refFor(path)}:${path}`], { allowFail: true });
-      if (before.code !== 0) throw new Error(`${path} is not in this workspace's history yet`);
-      if (before.stdout === text) throw new Error('That is the text it has already');
-      const policy = await this.policyTrailer();
-      const name = this.typeFor(path)?.title?.read(before.stdout) || path;
-      const proposed = await this.commitToBranch(branch, path, text, withTrailers(`Suggest a change to ${name}`, [], [`${SUGGESTION_TRAILER}: ${path}`, ...policy]));
-      if (!proposed) throw new Error('That is the text it has already');
-      await this.commitToBranch(branch, path, before.stdout, withTrailers(`Keep ${name} as it was here, until someone who may change it takes the suggestion`, [], [`${SUGGESTED_TRAILER}: ${proposed}`, ...policy]));
-      return proposed;
-    });
-  }
-
-  /**
-   * A commit that changes no file, signed, saying something to every device
-   * through history: here, that a suggestion was seen to (`Kuraa-Resolved`).
-   */
-  async commitNote(message: string, extra: string[], path?: string): Promise<string> {
-    if (!this.peers) throw new Error('Not a workspace shared with other devices');
-    return this.serial(async () => {
-      await this.requireWritable();
-      // About a space's file: in that space's history, where its suggestions are (0066).
-      const space = path ? this.spaces.spaceOf(path) : null;
-      const ref = space ? this.spaces.refOf(space)! : 'HEAD';
-      const head = space ? (await this.git.out(['rev-parse', `${ref}^{commit}`])) : await this.git.head();
-      if (!head) throw new Error('Nothing is committed yet');
-      const tree = await this.git.out(['rev-parse', `${head}^{tree}`]);
-      const unsigned = await this.git.out(['commit-tree', tree, '-p', head, '-F', '-'], { input: `${withTrailers(message, [], [...extra, ...(await this.policyTrailer())]).trimEnd()}\n` });
-      const raw = (await this.git.run(['cat-file', 'commit', unsigned])).bytes;
-      const commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers!.node.signingKey()) });
-      await this.git.run(['update-ref', '-m', `commit: ${message}`, ref, commit, head]);
-      this.log(`committed ${commit.slice(0, 7)} ${message}`);
-      this.refsChanged();
-      return commit;
-    });
   }
 
   /**

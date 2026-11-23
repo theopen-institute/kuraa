@@ -4,15 +4,17 @@
 //
 // - The workspace's id and secret, and this device's name: git config (`kuraa.*`).
 // - This device's key pair: .git/kuraa/device.json, readable only by its owner.
-// - Paired devices: git remotes whose URL is `kuraa://<device key>`, so
-//   `git fetch laptop` works and their branches are `laptop/main`.
-// - Devices removed from the workspace: `kuraa.removed`, never accepted again.
+// - The devices in the workspace (0072): those that sign with a key a person
+//   vouched for, whose person the policy has in it, the key neither dropped nor
+//   revoked. Each is a git remote whose URL is `kuraa://<device key>`, so
+//   `git fetch laptop` works and their branches are `laptop/main`; the remotes
+//   follow the records (syncRemotes).
+// - Devices removed before (0072: no longer made): `kuraa.removed`, never accepted again.
 // - Invite links this device made: .git/kuraa/links.json; revoked or used ones,
 //   `kuraa.revokedlinks` (shared with the other devices, as removals are). The
 //   link this device joined by: .git/kuraa/joined-link.
-// - Every change to the members, signed by the device that made it:
-//   .git/kuraa/records.json (records.ts). The config above is what the records
-//   this device took say, applied. Every member's are taken (0038).
+// - Every record, signed by the device that made it: .git/kuraa/records.json
+//   (records.ts). The config above is what the records this device took say, applied.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -45,6 +47,9 @@ export interface WorkspaceIdentity {
 }
 
 export const KURAA_SCHEME = 'kuraa://';
+
+/** At most this many records prove a device to be in (Identity.proof). */
+export const MAX_PROOF = 200;
 
 /** The ID of the identity whose log this is (its inception's hash). */
 const person0 = (events: KeyEvent[]) => resolve(events)!.id;
@@ -85,13 +90,44 @@ export class Identity {
   constructor(private readonly git: Git, private readonly stateDir: string) {}
 
   private async get(key: string): Promise<string | null> {
-    const r = await this.git.run(['config', '--get', key], { allowFail: true });
-    return r.code === 0 ? r.stdout.trim() : null;
+    return (await this.config()).get(key.toLowerCase())?.at(-1) ?? null;
   }
 
   private async getAll(key: string): Promise<string[]> {
-    const r = await this.git.run(['config', '--get-all', key], { allowFail: true });
-    return r.code === 0 ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : [];
+    return [...((await this.config()).get(key.toLowerCase()) ?? [])];
+  }
+
+  /**
+   * The repository's own git config (`kuraa.*`, its remotes), read again only
+   * when the file has changed (0072): asked for at every turn, as records are,
+   * and each read a git process.
+   */
+  private async config(): Promise<Map<string, string[]>> {
+    const file = join(this.stateDir, '..', 'config');
+    const stamp = await this.stamp(file);
+    if (stamp && this.configCache?.stamp === stamp) return this.configCache.values;
+    const r = await this.git.run(['config', '--local', '--list', '-z'], { allowFail: true });
+    const values = new Map<string, string[]>();
+    for (const entry of r.code === 0 ? r.stdout.split('\0') : []) {
+      if (!entry) continue;
+      const at = entry.indexOf('\n');
+      const key = (at < 0 ? entry : entry.slice(0, at)).toLowerCase();
+      const value = at < 0 ? '' : entry.slice(at + 1).trim();
+      values.set(key, [...(values.get(key) ?? []), value]);
+    }
+    this.configCache = stamp ? { stamp, values } : null;
+    return values;
+  }
+
+  private configCache: { stamp: string; values: Map<string, string[]> } | null = null;
+
+  /** A git command that writes the config (a setting, a remote): what is cached of it is read again after. */
+  private async write(args: string[], o?: { allowFail?: boolean }): Promise<unknown> {
+    try {
+      return await this.git.run(args, o);
+    } finally {
+      this.configCache = null;
+    }
   }
 
   /** The workspace's identity, or null if this repository is not yet a peer workspace. */
@@ -119,7 +155,7 @@ export class Identity {
     if (!old) throw new Error('This repository is not a workspace shared between devices, so there is nothing to fork from');
     const ws = { id: randomBytes(16).toString('hex'), secret: randomBytes(32).toString('hex'), forkedFrom: `${old.id}@${commit}` };
     await this.adopt(ws);
-    await this.git.run(['config', 'kuraa.originsecret', old.secret]);
+    await this.write(['config', 'kuraa.originsecret', old.secret]);
     return ws;
   }
 
@@ -131,10 +167,10 @@ export class Identity {
   /** Take on a workspace's identity (a device joining it). */
   async adopt(ws: WorkspaceIdentity): Promise<void> {
     if (!hex.test(ws.id) || !hex.test(ws.secret)) throw new Error('Not a workspace identity');
-    await this.git.run(['config', 'kuraa.workspace', ws.id]);
-    await this.git.run(['config', 'kuraa.secret', ws.secret]);
-    if (ws.forkedFrom) await this.git.run(['config', 'kuraa.forkedfrom', ws.forkedFrom]);
-    else await this.git.run(['config', '--unset', 'kuraa.forkedfrom'], { allowFail: true });
+    await this.write(['config', 'kuraa.workspace', ws.id]);
+    await this.write(['config', 'kuraa.secret', ws.secret]);
+    if (ws.forkedFrom) await this.write(['config', 'kuraa.forkedfrom', ws.forkedFrom]);
+    else await this.write(['config', '--unset', 'kuraa.forkedfrom'], { allowFail: true });
   }
 
   /**
@@ -147,7 +183,7 @@ export class Identity {
   }
 
   async setDeviceName(name: string): Promise<void> {
-    await this.git.run(['config', 'kuraa.devicename', remoteName(name)]);
+    await this.write(['config', 'kuraa.devicename', remoteName(name)]);
   }
 
   /** This device's key pair, made the first time it is asked for (keys.ts). */
@@ -155,54 +191,176 @@ export class Identity {
     return keptKey(join(this.stateDir, 'device.json'));
   }
 
-  /** The devices this one is paired with: its kuraa:// remotes. */
+  /** The devices in the workspace, this one aside (0072): as the records say, each by its remote's name. */
   async members(): Promise<Member[]> {
-    const r = await this.git.run(['config', '--get-regexp', '^remote\\..*\\.url$'], { allowFail: true });
+    const { in: inside } = await this.devices();
+    return (await this.remotes()).filter((m) => inside.has(m.key));
+  }
+
+  /**
+   * The devices this one syncs or fetches with: those in the workspace, and, for
+   * a fork, those of the workspace it came from (0072: as the records of that
+   * one here say), each by its remote's name.
+   */
+  async devicesToMeet(): Promise<Member[]> {
+    const members = await this.members();
+    const ws = await this.workspace();
+    const origin = ws?.forkedFrom?.split('@')[0];
+    if (!origin) return members;
+    const theirs = await this.devicesOf(origin);
+    return [...members, ...(await this.remotes()).filter((r) => theirs.has(r.key) && !members.some((m) => m.key === r.key))];
+  }
+
+  /** The kuraa:// remotes: the devices git fetches from. */
+  async remotes(): Promise<Member[]> {
     const out: Member[] = [];
-    for (const line of r.stdout.split('\n')) {
-      const m = /^remote\.(.+)\.url (.*)$/.exec(line.trim());
-      if (m && m[2]!.startsWith(KURAA_SCHEME)) {
-        const key = m[2]!.slice(KURAA_SCHEME.length).replace(/\/$/, '');
+    for (const [k, values] of await this.config()) {
+      const m = /^remote\.(.+)\.url$/.exec(k);
+      const url = values.at(-1) ?? '';
+      if (m && url.startsWith(KURAA_SCHEME)) {
+        const key = url.slice(KURAA_SCHEME.length).replace(/\/$/, '');
         if (hex.test(key) && key.length === 64) out.push({ name: m[1]!, key });
       }
     }
     return out;
   }
 
-  /** Pair with a device: add it as a remote (under a free name), unless it was removed. Returns its remote name. */
-  addMember(key: string, name: string): Promise<string | null> {
-    return this.serial(() => this.addMemberNow(key, name));
+  /**
+   * A remote for a device to fetch from (under a free name), unless it is out;
+   * its name. Says nothing of whether it is in: a device joining fetches from the
+   * device that lets it in before it holds the records that say so.
+   */
+  addRemote(key: string, name: string): Promise<string | null> {
+    return this.serial(() => this.addRemoteNow(key, name));
   }
 
-  private async addMemberNow(key: string, name: string): Promise<string | null> {
+  private async addRemoteNow(key: string, name: string): Promise<string | null> {
     if (!hex.test(key) || key.length !== 64) throw new Error('Not a device key');
     if ((await this.removed()).includes(key)) return null;
-    const members = await this.members();
-    const known = members.find((m) => m.key === key);
+    const remotes = await this.remotes();
+    const known = remotes.find((m) => m.key === key);
     if (known) return known.name;
-    const remotes = (await this.git.out(['remote'])).split('\n').filter(Boolean);
+    const names = (await this.git.out(['remote'])).split('\n').filter(Boolean);
     const base = remoteName(name);
     let pick = base;
-    for (let i = 2; remotes.includes(pick); i++) pick = `${base}-${i}`;
-    await this.git.run(['remote', 'add', pick, `${KURAA_SCHEME}${key}`]);
+    for (let i = 2; names.includes(pick); i++) pick = `${base}-${i}`;
+    await this.write(['remote', 'add', pick, `${KURAA_SCHEME}${key}`]);
     return pick;
   }
 
-  /** Remove a device from the workspace, on record (passed on to the others): forget it, and never accept it again. */
-  async removeMember(key: string): Promise<void> {
-    await this.decide('remove', key);
-  }
-
+  /** A removal from before (0072: none made now), applied: never accepted again. */
   private async removeMemberNow(key: string): Promise<void> {
     // Recorded as removed before it is forgotten: stopped in between, the device is still never
     // accepted again, and whoever sees its remote gone can rely on the record being there.
-    if (!(await this.removed()).includes(key)) await this.git.run(['config', '--add', 'kuraa.removed', key]);
-    const m = (await this.members()).find((x) => x.key === key);
-    if (m) await this.git.run(['remote', 'remove', m.name]);
+    if (!(await this.getAll('kuraa.removed')).includes(key)) await this.write(['config', '--add', 'kuraa.removed', key]);
+    const m = (await this.remotes()).find((x) => x.key === key);
+    if (m) await this.write(['remote', 'remove', m.name]);
   }
 
+  /**
+   * Which devices are in the workspace, and which out, as records (`list`, or
+   * those this device holds) say (0072). In: signs with a key a person vouched
+   * for, whose person the policy has in the workspace (where there is no policy
+   * yet: any person), the key neither dropped nor revoked. Out: its key dropped
+   * or revoked, or its person taken out (or left); or removed before. A device
+   * whose person is not known yet, or not in yet, is neither.
+   */
+  async devices(list?: MemberRecord[]): Promise<{ in: Map<string, { person: string; name: string }>; out: Set<string> }> {
+    const records = list ?? (await this.records());
+    const ws = await this.workspace();
+    const before = await this.getAll('kuraa.removed');
+    // Worked out once for the same records: asked for at every hello.
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${(await this.pin()) ?? ''}\0${Math.floor(Date.now() / 60_000)}\0${before.join(',')}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    if (this.devicesMemo?.key === key) return this.devicesMemo.value;
+    const value = this.devicesBy(records, await this.policy(records), ws?.id ?? '', new Set(before));
+    this.devicesMemo = { key, value };
+    return value;
+  }
+
+  private devicesMemo: { key: string; value: { in: Map<string, { person: string; name: string }>; out: Set<string> } } | null = null;
+
+  private devicesBy(records: MemberRecord[], policy: Policy, workspace: string, removedBefore: Set<string>): { in: Map<string, { person: string; name: string }>; out: Set<string> } {
+    const w = this.who(records.filter((r) => r.workspace === workspace));
+    const inside = new Map<string, { person: string; name: string }>();
+    const out = new Set(removedBefore);
+    for (const [device, key] of w.signsWith) {
+      if (out.has(device)) continue;
+      if (w.cut.has(key) || policy.dropped.has(key)) {
+        out.add(device);
+        continue;
+      }
+      const p = w.personOf.get(key);
+      if (!p) continue;
+      if (!policy.founded || policy.role(p.key)) inside.set(device, { person: p.key, name: w.names.get(device) ?? '' });
+      else if (policy.cutoffs.has(p.key)) out.add(device);
+    }
+    return { in: inside, out };
+  }
+
+  /**
+   * The devices records sent by another device say are in a workspace (0072): for
+   * a device joining, which holds none yet, to tell whether the device letting
+   * it in is one, under the genesis its link names.
+   */
+  async devicesIn(list: unknown[], workspace: string): Promise<Set<string>> {
+    const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
+    if (!policy.founded) return new Set();
+    return new Set(this.devicesBy(records, policy, workspace, new Set()).in.keys());
+  }
+
+  /**
+   * The records that show this device to be in (0072), for a device that may not
+   * know yet: its person's key events, the key it signs with, that key vouched
+   * for, and the policy operations that key signed.
+   */
+  async proof(): Promise<MemberRecord[]> {
+    const list = await this.records();
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const signs = this.latest('signs', self, list);
+    if (!signs) return [];
+    const key = signs.subject;
+    const vouches = list.filter((r) => r.kind === 'vouch' && r.subject === key);
+    const persons = new Set(vouches.map((r) => r.person));
+    const events = list.filter((r) => r.kind === 'key-event' && persons.has(r.subject));
+    const ops = list.filter((r) => r.kind === 'policy' && r.signer === key);
+    return [signs, ...vouches, ...events, ...ops].slice(0, MAX_PROOF);
+  }
+
+  /**
+   * The devices in another workspace, as the records this device holds of it
+   * say (0072): for a fork, those of the workspace it was forked from, which it
+   * may fetch from.
+   */
+  async devicesOf(workspace: string): Promise<Set<string>> {
+    const records = (await this.records()).filter((r) => r.workspace === workspace);
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
+    return new Set(this.devicesBy(records, policy, workspace, new Set(await this.getAll('kuraa.removed'))).in.keys());
+  }
+
+  /** Make the remotes what the records say (0072): one for each device in, none for a device out. */
+  private async syncRemotesNow(): Promise<void> {
+    if (!(await this.workspace())) return;
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const { in: inside, out } = await this.devices();
+    const remotes = await this.remotes();
+    for (const r of remotes) if (out.has(r.key)) await this.write(['remote', 'remove', r.name]);
+    const have = new Set(remotes.map((r) => r.key));
+    for (const [key, d] of inside) if (key !== self && !have.has(key)) await this.addRemoteNow(key, d.name || 'device');
+  }
+
+  /** The remotes made what the records say; if they cannot be now (git config held by another writer), before the next change (reconcile). */
+  private async syncRemotesOrLater(): Promise<void> {
+    try {
+      await this.syncRemotesNow();
+    } catch {
+      this.unapplied = true;
+    }
+  }
+
+  /** Devices out of the workspace (0072): never accepted, never sent the secret. */
   async removed(): Promise<string[]> {
-    return this.getAll('kuraa.removed');
+    return [...(await this.devices()).out];
   }
 
   // Signed records (records.ts) --------------------------------------------
@@ -283,8 +441,18 @@ export class Identity {
     return true;
   }
 
-  /** Each identity's log, as the events on record show it (kel.ts), by ID. */
+  /** Each identity's log, as the events on record show it (kel.ts), by ID: worked out once for the same records. */
   private identities(list: MemberRecord[]): Map<string, IdentityState> {
+    const key = list.map((r) => r.sig).join();
+    if (this.identitiesMemo?.key === key) return this.identitiesMemo.value;
+    const value = this.identitiesOf(list);
+    this.identitiesMemo = { key, value };
+    return value;
+  }
+
+  private identitiesMemo: { key: string; value: Map<string, IdentityState> } | null = null;
+
+  private identitiesOf(list: MemberRecord[]): Map<string, IdentityState> {
     const events = list.filter((r) => r.kind === 'key-event').map((r) => r.event!);
     const ids = new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject));
     // First each log by its own keys; then again, a trustee rotation judged by its trustees' keys as those say (step 6).
@@ -317,26 +485,76 @@ export class Identity {
    * own signature too. A key more than one identity vouched for (only whoever
    * holds it could make that so) is no one's, as is one its person revoked.
    */
-  private who(list: MemberRecord[]): { signsWith: Map<string, string>; personOf: Map<string, { key: string; name: string }> } {
+  private who(list: MemberRecord[]): ReturnType<Identity['whoOf']> {
+    // Worked out once for the same records (0072): asked for at every turn, and each identity's log is checked by its signatures.
+    const key = list.map((r) => r.sig).join();
+    if (this.whoMemo?.key === key) return this.whoMemo.value;
+    const value = this.whoOf(list);
+    this.whoMemo = { key, value };
+    return value;
+  }
+
+  private whoMemo: { key: string; value: ReturnType<Identity['whoOf']> } | null = null;
+
+  private whoOf(list: MemberRecord[]): {
+    signsWith: Map<string, string>;
+    /** Each device's name, as it said with the key it signs with. */
+    names: Map<string, string>;
+    personOf: Map<string, { key: string; name: string }>;
+    /** Keys once a person's that no longer are (revoked, or left behind when their identity was recovered): whose, for their past word (0072). */
+    formerly: Map<string, { key: string; name: string }>;
+    /** Keys revoked or left behind, and the policy operations their revokers had (null: none said, a revocation from before or none yet). */
+    cut: Map<string, string[] | null>;
+  } {
     const signsWith = new Map<string, string>();
-    for (const by of new Set(list.filter((r) => r.kind === 'signs').map((r) => r.by))) signsWith.set(by, this.latest('signs', by, list)!.subject);
+    const names = new Map<string, string>();
+    for (const by of new Set(list.filter((r) => r.kind === 'signs').map((r) => r.by))) {
+      const latest = this.latest('signs', by, list)!;
+      signsWith.set(by, latest.subject);
+      if (latest.name) names.set(by, latest.name);
+    }
     const ids = this.identities(list);
     const counts = (r: MemberRecord, test: typeof vouchCounts) => {
       const state = ids.get(r.person!);
       return !!state && test(state, r.personKey!, r.subject);
     };
-    const revoked = new Set(list.filter((r) => r.kind === 'revoke-key' && counts(r, revocationCounts)).map((r) => `${r.person}\0${r.subject}`));
+    const revocations = list.filter((r) => r.kind === 'revoke-key' && counts(r, revocationCounts));
+    const revoked = new Set(revocations.map((r) => `${r.person}\0${r.subject}`));
+    // Vouched for by a key that was ever the identity's: the person's once, if not now.
+    const ever = (r: MemberRecord) => {
+      const state = ids.get(r.person!);
+      return !!state && !state.disputed && state.events.some((e) => e.key === r.personKey);
+    };
     const vouches = new Map<string, MemberRecord[]>();
-    for (const r of list) if (r.kind === 'vouch' && counts(r, vouchCounts)) vouches.set(r.subject, [...(vouches.get(r.subject) ?? []), r]);
+    const once = new Map<string, MemberRecord[]>();
+    for (const r of list) {
+      if (r.kind !== 'vouch') continue;
+      if (counts(r, vouchCounts)) vouches.set(r.subject, [...(vouches.get(r.subject) ?? []), r]);
+      if (ever(r)) once.set(r.subject, [...(once.get(r.subject) ?? []), r]);
+    }
+    // Their latest name: said with the identity's latest key, then the latest said.
+    const latestOf = (vs: MemberRecord[]) => {
+      const place = (v: MemberRecord) => ids.get(v.person!)!.events.findIndex((e) => e.key === v.personKey);
+      return vs.reduce((a, b) => (place(b) > place(a) || (place(b) === place(a) && (b.at > a.at || (b.at === a.at && b.sig > a.sig))) ? b : a));
+    };
     const personOf = new Map<string, { key: string; name: string }>();
     for (const [key, vs] of vouches) {
       if (new Set(vs.map((v) => v.person)).size !== 1) continue;
-      // Their latest name: said with the identity's latest key, then the latest said.
-      const place = (v: MemberRecord) => ids.get(v.person!)!.events.findIndex((e) => e.key === v.personKey);
-      const v = vs.reduce((a, b) => (place(b) > place(a) || (place(b) === place(a) && (b.at > a.at || (b.at === a.at && b.sig > a.sig))) ? b : a));
+      const v = latestOf(vs);
       if (!revoked.has(`${v.person}\0${key}`)) personOf.set(key, { key: v.person!, name: v.name ?? '' });
     }
-    return { signsWith, personOf };
+    const formerly = new Map<string, { key: string; name: string }>();
+    const cut = new Map<string, string[] | null>();
+    for (const [key, vs] of once) {
+      if (personOf.has(key) || new Set(vs.map((v) => v.person)).size !== 1) continue;
+      const v = latestOf(vs);
+      formerly.set(key, { key: v.person!, name: v.name ?? '' });
+      // What its revokers had seen of the policy, together; none said: null.
+      let heads: string[] | null = null;
+      for (const r of revocations) if (r.subject === key && r.person === v.person && r.policyHeads) heads = [...new Set([...(heads ?? []), ...r.policyHeads])].sort();
+      cut.set(key, heads);
+    }
+    return { signsWith, names, personOf, formerly, cut };
   }
 
   /** The signing key a device's commits are signed with, as it says (with that key's signature); null if it has not said. */
@@ -371,8 +589,11 @@ export class Identity {
     if (!(await this.workspace())) return;
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const hex = key.publicKey.toString('hex');
-    if (this.latest('signs', self, await this.records())?.subject === hex) return;
-    await this.decide('signs', hex, { proof: sign(signsMessage(self), key) });
+    const name = await this.deviceName();
+    const latest = this.latest('signs', self, await this.records());
+    if (latest?.subject === hex && latest.name === name) return;
+    // With this device's name (0072): what the others call it.
+    await this.decide('signs', hex, { proof: sign(signsMessage(self), key), name });
   }
 
   /** Put an identity's events on record in this workspace (those not yet), so every device can follow its keys. */
@@ -405,7 +626,8 @@ export class Identity {
   async revokeKey(person: string, personKey: string, key: string, proof: string, heads: string[] = []): Promise<void> {
     if (!(await this.workspace())) return;
     if ((await this.records()).some((r) => r.kind === 'revoke-key' && r.person === person && r.subject === key && r.personKey === personKey)) return;
-    await this.decide('revoke-key', key, { person, personKey, proof, heads: [...new Set(heads)].sort() });
+    // With the policy as this device has it: what the key signed of it still counts, and nothing after (0072).
+    await this.decide('revoke-key', key, { person, personKey, proof, heads: [...new Set(heads)].sort(), policyHeads: (await this.policy()).heads });
   }
 
   /**
@@ -417,8 +639,14 @@ export class Identity {
   async cutKeys(): Promise<Map<string, { person: string; heads: string[] }>> {
     const list = await this.records();
     const ids = this.identities(list);
-    const now = this.who(list).personOf;
+    const w = this.who(list);
+    const now = w.personOf;
     const out = new Map<string, { person: string; heads: string[] }>();
+    // Dropped here (0072): its cutoff the commits the dropper had.
+    for (const [key, heads] of (await this.policy(list)).dropped) {
+      const p = now.get(key) ?? w.formerly.get(key);
+      if (p) out.set(key, { person: p.key, heads: [...heads].sort() });
+    }
     for (const r of list) {
       if (r.kind !== 'revoke-key') continue;
       const state = ids.get(r.person!);
@@ -446,7 +674,7 @@ export class Identity {
 
   async setPin(genesis: string): Promise<void> {
     if (!/^[0-9a-f]{64}$/.test(genesis)) throw new Error('Not a genesis');
-    await this.git.run(['config', 'kuraa.genesis', genesis]);
+    await this.write(['config', 'kuraa.genesis', genesis]);
   }
 
   /** The workspace's policy, as the operations on record make it. */
@@ -471,7 +699,13 @@ export class Identity {
   private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null): Promise<Policy> {
     const w = this.who(records);
     const entries = records.filter((r) => r.kind === 'policy' && r.workspace === workspace).map(policyEntry);
-    const ctx = { workspace, pin, personOf: (key: string) => w.personOf.get(key)?.key ?? null };
+    // A key its person revoked (or left behind recovering) is still theirs for what it signed before (0072).
+    const ctx = {
+      workspace,
+      pin,
+      personOf: (key: string) => (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null,
+      cutKey: (key: string) => (w.personOf.has(key) ? undefined : w.cut.get(key)),
+    };
     const base = evaluate(entries, ctx);
     if (!base.verifiers.size) return base;
     // Then again, with the emails attested by the verifiers it counts (step 6).
@@ -566,7 +800,7 @@ export class Identity {
    * In a workspace from before, the first seals its legacy geneses, so none
    * made later counts.
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' | 'witness' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
@@ -581,8 +815,8 @@ export class Identity {
     }
     if (op.t === 'owner') {
       // Checked above.
-    } else if (op.t === 'rule' || op.t === 'verifier' || op.t === 'perm') {
-      if (!policy.isAdmin(me)) throw new Error(op.t === 'rule' ? 'Only an admin of this workspace can say who may change what' : 'Only an admin of this workspace can say whose checks count here');
+    } else if (op.t === 'rule' || op.t === 'verifier' || op.t === 'perm' || op.t === 'witness') {
+      if (!policy.isAdmin(me)) throw new Error(op.t === 'rule' ? 'Only an admin of this workspace can say who may change what' : op.t === 'witness' ? 'Only an admin of this workspace names its witnesses' : 'Only an admin of this workspace can say whose checks count here');
     } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
       throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
     }
@@ -591,6 +825,63 @@ export class Identity {
     if (!(await this.policy()).applied.includes(id)) {
       throw new Error(op.t === 'revoke' && op.group === WORKSPACE ? 'The workspace needs an admin: make someone else one first' : 'That change is not allowed');
     }
+  }
+
+  /**
+   * Say how much of the policy this device holds (0072), if that changed since
+   * it last said: an acknowledgement, by which its person confirms the removals
+   * in it. Whether it said anything.
+   */
+  async acknowledge(): Promise<boolean> {
+    if (!(await this.workspace())) return false;
+    const records = await this.records();
+    const policy = await this.policy(records);
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    if (!policy.founded || !policy.heads.length || !(await this.devices(records)).in.has(self)) return false;
+    if ((this.latest('ack', self, records)?.policyHeads ?? []).join() === policy.heads.join()) return false;
+    await this.decide('ack', createHash('sha256').update(`kuraa-ack\0${policy.heads.join(',')}`).digest('hex'), { policyHeads: policy.heads });
+    return true;
+  }
+
+  /**
+   * The removals that count (0072: people taken out of the workspace, computers
+   * dropped), the latest first, with who confirmed each: the people, but
+   * whoever made it and whoever it took out, whose devices' acknowledgements
+   * say they hold it; and whether a witness is among them.
+   */
+  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[]> {
+    const records = await this.records();
+    const policy = await this.policy(records);
+    const w = this.who(records);
+    const entries = new Map(records.filter((r) => r.kind === 'policy').map((r) => [r.subject, policyEntry(r)]));
+    const personOfKey = (k: string) => (w.personOf.get(k) ?? w.formerly.get(k))?.key ?? null;
+    // What each person's devices hold of the policy: all their acknowledged heads descend from.
+    const held = new Map<string, Set<string>>();
+    for (const device of new Set(records.filter((r) => r.kind === 'ack').map((r) => r.by))) {
+      const ack = this.latest('ack', device, records)!;
+      const person = personOfKey(w.signsWith.get(device) ?? '');
+      if (!person) continue;
+      const seen = held.get(person) ?? new Set<string>();
+      for (const todo = [...(ack.policyHeads ?? [])]; todo.length;) {
+        const id = todo.pop()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        todo.push(...(entries.get(id)?.parents ?? []));
+      }
+      held.set(person, seen);
+    }
+    const out: { op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[] = [];
+    for (const id of [...policy.applied].reverse()) {
+      const e = entries.get(id);
+      if (!e) continue;
+      const who = e.op.t === 'revoke' && e.op.group === WORKSPACE ? e.op.who : e.op.t === 'drop' ? personOfKey(e.op.key) : null;
+      if (!who) continue;
+      const by = personOfKey(e.signer);
+      const confirmedBy = [...held].filter(([p, ops]) => p !== by && p !== who && ops.has(id)).map(([p]) => p).sort();
+      out.push({ op: id, kind: e.op.t === 'drop' ? 'computer' : 'person', who, by, confirmedBy, witnessed: confirmedBy.some((p) => policy.witnesses.has(p)) });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   /** Make a space, or change who reads it (0066): checked after, as the policy judges it. */
@@ -635,6 +926,17 @@ export class Identity {
   }
 
   /**
+   * Drop one of a person's signing keys here (0072): the computer that signs
+   * with it stops syncing, and what it signs from now on counts for nothing; what
+   * it signed among `cutoff` (the commits this device has) still counts. Its own
+   * person's to do, or an admin's (the owner's, for an admin's computer).
+   */
+  async dropKey(target: string, cutoff: string[], key: KeyPair): Promise<void> {
+    const made = await this.makePolicy({ t: 'drop', key: target, cutoff: [...new Set(cutoff)].sort() }, key);
+    if (!(await this.policy()).applied.includes(made)) throw new Error('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
+  }
+
+  /**
    * Make the config say what the records say (the records are what counts; the
    * config is them applied): a device removed on record is removed here, one
    * paired on record is a remote here, a link revoked on record is revoked here.
@@ -653,22 +955,18 @@ export class Identity {
     const list = await this.records();
     const ws = await this.workspace();
     if (!ws) return;
-    const self = (await this.deviceKey()).publicKey.toString('hex');
     const mine = list.filter((r) => r.workspace === ws.id);
-    const removed = new Set(await this.removed());
-    const members = new Set((await this.members()).map((m) => m.key));
-    for (const r of mine) if (r.kind === 'remove' && (!removed.has(r.subject) || members.has(r.subject))) {
+    // Removals from before (0072: none made now).
+    const removed = new Set(await this.getAll('kuraa.removed'));
+    const remotes = new Set((await this.remotes()).map((m) => m.key));
+    for (const r of mine) if (r.kind === 'remove' && (!removed.has(r.subject) || remotes.has(r.subject))) {
       await this.removeMemberNow(r.subject);
       removed.add(r.subject);
-      members.delete(r.subject);
     }
-    for (const r of mine) if (r.kind === 'add' && r.subject !== self && !removed.has(r.subject) && !members.has(r.subject)) {
-      await this.addMemberNow(r.subject, r.name ?? 'device');
-      members.add(r.subject);
-    }
+    await this.syncRemotesNow();
     const revoked = new Set(await this.revokedLinks());
     for (const r of mine) if (r.kind === 'revoke-link' && !revoked.has(r.subject)) {
-      await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
+      await this.write(['config', '--add', 'kuraa.revokedlinks', r.subject]);
       revoked.add(r.subject);
     }
     await this.applySecret();
@@ -681,7 +979,7 @@ export class Identity {
     if (!ws) return;
     let latest: MemberRecord | undefined;
     for (const r of await this.records()) if (r.kind === 'secret' && r.workspace === ws.id && (!latest || r.at > latest.at || (r.at === latest.at && r.sig > latest.sig))) latest = r;
-    if (latest && latest.subject !== ws.secret) await this.git.run(['config', 'kuraa.secret', latest.subject]);
+    if (latest && latest.subject !== ws.secret) await this.write(['config', 'kuraa.secret', latest.subject]);
   }
 
   /**
@@ -729,12 +1027,9 @@ export class Identity {
 
   /** Apply a record taken. */
   private async apply(r: MemberRecord): Promise<void> {
-    const self = (await this.deviceKey()).publicKey.toString('hex');
-    // This device's own pairing, as another made it: nothing to pair with here.
-    if (r.kind === 'add' && r.subject === self) return;
-    if (r.kind === 'add') await this.addMemberNow(r.subject, r.name ?? 'device');
-    else if (r.kind === 'remove') await this.removeMemberNow(r.subject);
-    else if (r.kind === 'revoke-link' && !(await this.revokedLinks()).includes(r.subject)) await this.git.run(['config', '--add', 'kuraa.revokedlinks', r.subject]);
+    // Pairings from before say nothing now (0072); removals from before still count.
+    if (r.kind === 'remove') await this.removeMemberNow(r.subject);
+    else if (r.kind === 'revoke-link' && !(await this.revokedLinks()).includes(r.subject)) await this.write(['config', '--add', 'kuraa.revokedlinks', r.subject]);
     else if (r.kind === 'secret') await this.applySecret();
     // signs, vouch, revoke-key, link, key-event: kept as they are, and read from the records.
   }
@@ -743,7 +1038,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; attestation?: Attestation; topic?: string; expires?: number; at?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; policyHeads?: string[]; attestation?: Attestation; topic?: string; expires?: number; at?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
@@ -751,13 +1046,14 @@ export class Identity {
       const r = signRecord({ kind, workspace: ws.id, subject, ...extra }, await this.deviceKey());
       await this.keepRecord(r);
       await this.applyOrLater(r, { rethrow: true });
+      await this.syncRemotesOrLater();
       return r;
     });
   }
 
   /**
-   * Records from another device: each taken if its signer is a member (records.ts,
-   * judge), until no more can be (an add may make another's signer known).
+   * Records from another device: each taken as records.ts (judge) says, until
+   * no more can be (one taken may make another's maker known to be in).
    * Returns those taken.
    */
   takeRecords(list: unknown[]): Promise<MemberRecord[]> {
@@ -769,19 +1065,6 @@ export class Identity {
       if (!waiting.length) return taken;
       // What this device knows, read once and kept up to date as records are taken.
       const standing = await this.standing();
-      // A device paired by a member who is not an admin: in once its person is (records.ts, judge), as the records
-      // taken and these say together. What decides it is signed by the people themselves (their keys, an admin's
-      // grant in the policy), whoever passed it on, so these may count for it before they are taken.
-      // Set up whenever there are pairings to judge: a device joining has no policy yet when it starts, and has one after the first round.
-      if (waiting.some((r) => r.kind === 'add' && !standing.managers?.has(r.by))) {
-        const all = [...(await this.records()), ...waiting];
-        const policy = await this.policy(all);
-        const w = this.who(all);
-        standing.inWorkspace = (device) => {
-          const id = w.personOf.get(w.signsWith.get(device) ?? '')?.key;
-          return !!id && [...policy.groups.values()].some((g) => g.has(id));
-        };
-      }
       for (let progress = true; progress && waiting.length;) {
         progress = false;
         const next: MemberRecord[] = [];
@@ -794,22 +1077,18 @@ export class Identity {
             // One that says what a newer record says already is passed over: nothing changes.
             if (!(await this.keepRecord(r))) continue;
             await this.applyOrLater(r, { rethrow: false });
-            if (r.kind === 'add' && r.subject !== standing.self && !standing.removed.has(r.subject)) standing.members.add(r.subject);
-            else if (r.kind === 'remove') {
-              standing.members.delete(r.subject);
-              standing.removed.add(r.subject);
-            }
-            // Who is an admin may have changed: a record waiting for that is judged again.
-            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) stale = true;
+            // Who is in, and who is an admin, may have changed: a record waiting for that is judged again.
+            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'remove'].includes(r.kind)) stale = true;
             taken.push(r);
             progress = true;
           } else if (verdict === 'wait') next.push(r);
         }
-        if (stale) Object.assign(standing, await this.managers());
+        if (stale) Object.assign(standing, await this.standing());
         waiting = next;
       }
       // One could not be applied: try again now, and if that fails too, before the next change.
       if (this.unapplied) await this.reconcileNow().catch(() => undefined);
+      if (taken.length) await this.syncRemotesOrLater();
       return taken;
     });
   }

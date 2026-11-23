@@ -508,6 +508,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .history-saves { list-style: none; margin: 0 0 4px 14px; padding: 0; border-left: 1px solid var(--border); }
 .history-saves .history-subject { font-weight: 400; font-size: 13px; }
 .history-merge .history-subject { font-weight: 500; color: var(--muted); }
+.history-not-kept .history-subject { font-style: italic; color: var(--muted); }
 /* Devices: who is in the workspace, and whether each is connected. */
 .menu-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .menu-devices li { display: flex; align-items: center; gap: 6px; }
@@ -583,8 +584,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .rule-new-group input { flex: 1 1 12em; min-width: 0; }
 .access-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
 .access-bar button { margin-left: 0; }
-.access-suggestions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.suggest textarea { width: 100%; min-height: 240px; font: 13px var(--mono, ui-monospace, monospace); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; box-sizing: border-box; resize: vertical; }
 .person-recovery { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--accent-soft); }
 .person-recovery .menu-facts { margin: 0; }
 
@@ -773,8 +772,17 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .document-menu-button { position: absolute; top: 8px; right: 12px; z-index: 15; border: 1px solid transparent; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 8px 6px; border-radius: 6px; }
 .document-menu-button:hover, .document-menu-button[aria-expanded='true'] { color: var(--text); background: var(--selected); border-color: var(--border); }
 .popover-backdrop { position: fixed; inset: 0; z-index: 10; }
-.document-menu { position: fixed; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 80px); overflow: auto; padding: 4px 18px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.18); font-size: 14px; }
-.document-menu .menu-section:last-child { border-bottom: 0; }
+/* The document's ⋯ menu (0072): a menu like any other, its items in groups with a line between. */
+.document-menu { position: fixed; display: flex; flex-direction: column; min-width: 240px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 80px); overflow: auto; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.18); font-size: 13px; }
+.document-menu .menu-item { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: left; padding: 5px 10px 5px 6px; font-size: 13px; }
+.document-menu .menu-item:hover:not(:disabled), .document-menu .menu-item:focus-visible { background: var(--selected); outline: none; }
+.document-menu .menu-item:disabled { color: var(--muted); }
+.document-menu .menu-check { flex: 0 0 1em; text-align: center; }
+.document-menu .menu-label { flex: 1; }
+.document-menu .menu-keys { margin-left: 16px; color: var(--muted); font-size: 12px; }
+.document-menu .menu-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+.document-menu .menu-note { margin: 2px 0; padding: 2px 10px 2px calc(1em + 12px); color: var(--muted); font-size: 12px; }
+.document-menu .menu-footer { margin: 4px 0 0; padding: 6px 10px 2px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .pane-header-actions button.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .pane-header-actions button.spinning { animation: none; opacity: 0.5; } }

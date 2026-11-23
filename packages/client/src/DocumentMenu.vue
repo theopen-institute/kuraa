@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // The document's ⋯ menu (decision 0065), from the top-right corner of the open
-// document: what to do with it. Its views and versions (Source, History, Save
-// version, Preview), writing in it (Find and replace, Outline, Insert table,
-// Next conflict), when it was last saved, its code session (CodeSection), and
-// the way to its settings (Settings › Document) and to the Markdown and
-// shortcuts sheet. It holds no settings: those are in the Settings window
-// (0064). It takes focus as a dialog does; Escape or a click outside closes it.
+// document: what to do with it, as a menu like any other (0072). Its views
+// (Source, History, Preview), writing in it (Find and replace, Outline, Insert
+// table, Next conflict), Save version, its code session (CodeSection), and the
+// way to its permissions, its settings (Settings › Document) and the Markdown
+// and shortcuts sheet; below them, when it was last saved. Each item says its
+// keys, if it has any. Arrow keys, Home and End move between the items; Escape,
+// a click outside, or choosing one closes it.
 import { computed, useTemplateRef } from 'vue';
 import type { DocumentType } from '@kuraa/kernel';
 import type { ChunkRunner } from './runs.js';
@@ -27,7 +28,7 @@ const props = defineProps<{
   conflicts?: number;
   /** Where it opens: under the ⋯ button, its right edge with the button's (px from the window's top and right). */
   at: { top: number; right: number };
-  /** The workspace is shared with other people's devices: Who can read… is offered (0066). */
+  /** The workspace is shared with other people's devices: Permissions… is offered (0066). */
   shared?: boolean;
 }>();
 const emit = defineEmits<{
@@ -57,59 +58,94 @@ function then(fn: () => void) {
   fn();
 }
 
+interface Item {
+  label: string;
+  run: () => void;
+  testid?: string;
+  /** Its keys (keys.ts), shown at its right. */
+  keys?: string;
+  /** A view that is on or off: shown with a tick when on. */
+  checked?: boolean;
+  title?: string;
+}
+
 const layout = computed(() => !!props.type.editor?.layout);
 const runner = computed(() => props.status?.runner ?? null);
+
+/** The items, in groups with a line between them. The code session's come after these, then the document's own (below). */
+const groups = computed<Item[][]>(() => {
+  const view: Item[] = [];
+  if (!layout.value) view.push({ label: S.menu.source, checked: props.showSource, testid: 'toggle-source', run: () => then(() => emit('toggleSource')) });
+  view.push({ label: S.menu.history, checked: props.historyOpen, testid: 'menu-history', run: () => then(() => emit('toggleHistory')) });
+  if (!layout.value) view.push({ label: S.menu.preview, keys: APP_KEYS.preview, title: S.menu.previewTitle(keyLabel(APP_KEYS.preview)), testid: 'menu-preview', run: () => then(() => emit('preview')) });
+  const writing: Item[] = [];
+  if (!layout.value && !props.showSource) {
+    writing.push(
+      { label: S.menu.find, keys: APP_KEYS.find, testid: 'menu-find', run: () => then(() => emit('find')) },
+      { label: S.menu.outline, keys: APP_KEYS.outline, testid: 'menu-outline', run: () => then(() => emit('outline')) },
+      { label: S.menu.insertTable, testid: 'menu-insert-table', run: () => then(() => emit('insertTable')) },
+    );
+    if (props.conflicts) writing.push({ label: S.menu.nextConflict, keys: 'Mod-Alt-n', testid: 'menu-next-conflict', run: () => then(() => emit('nextConflict')) });
+  }
+  const versions: Item[] = [{ label: S.menu.saveVersion, testid: 'menu-save-version', run: () => then(() => emit('saveVersion')) }];
+  return [view, writing, versions].filter((g) => g.length);
+});
+
+const own = computed<Item[]>(() => [
+  ...(props.shared ? [{ label: S.permissions.menu, testid: 'menu-permissions', run: () => then(() => emit('permissions')) }] : []),
+  { label: S.menu.documentSettings, testid: 'menu-document', run: () => then(() => emit('settings')) },
+  { label: S.menu.help, keys: APP_KEYS.help, title: S.menu.helpTitle(keyLabel(APP_KEYS.help)), testid: 'menu-help', run: () => then(() => emit('help')) },
+]);
+
+/** Arrow keys, Home and End: from item to item (those not disabled), round and round. */
+function onKey(e: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const items = [...(root.value?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
+  if (!items.length) return;
+  e.preventDefault();
+  const at = items.indexOf(document.activeElement as HTMLButtonElement);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+  items[next]?.focus();
+}
 </script>
 
 <template>
   <div class="popover-backdrop" @mousedown.self="emit('close')">
-    <div ref="root" class="document-menu" role="dialog" :aria-label="S.docMenu.label" :style="{ top: `${at.top}px`, right: `${at.right}px` }" data-testid="document-menu">
-      <section class="menu-section">
-        <h3>{{ name }}</h3>
-        <div class="menu-actions">
-          <button
-            v-if="!layout"
-            type="button"
-            :class="{ active: showSource }"
-            :aria-pressed="showSource"
-            data-testid="toggle-source"
-            @click="then(() => emit('toggleSource'))"
-          >
-            {{ showSource ? S.menu.showDocument : S.menu.editSource }}
-          </button>
-          <button type="button" :class="{ active: historyOpen }" :aria-pressed="historyOpen" @click="then(() => emit('toggleHistory'))">
-            {{ historyOpen ? S.menu.hideHistory : S.menu.history }}
-          </button>
-          <button type="button" @click="then(() => emit('saveVersion'))">{{ S.menu.saveVersion }}</button>
-          <button v-if="!layout" type="button" :title="S.menu.previewTitle(keyLabel(APP_KEYS.preview))" data-testid="menu-preview" @click="then(() => emit('preview'))">{{ S.menu.preview }}</button>
-        </div>
-        <div v-if="!layout && !showSource" class="menu-actions" data-testid="menu-writing">
-          <button type="button" :title="keyLabel(APP_KEYS.find)" data-testid="menu-find" @click="then(() => emit('find'))">{{ S.menu.find }}</button>
-          <button type="button" :title="keyLabel(APP_KEYS.outline)" data-testid="menu-outline" @click="then(() => emit('outline'))">{{ S.menu.outline }}</button>
-          <button type="button" data-testid="menu-insert-table" @click="then(() => emit('insertTable'))">{{ S.menu.insertTable }}</button>
-          <button v-if="conflicts" type="button" :title="keyLabel('Mod-Alt-n')" data-testid="menu-next-conflict" @click="then(() => emit('nextConflict'))">{{ S.menu.nextConflict }}</button>
-        </div>
-        <p v-if="status" class="menu-facts">
-          <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
-          ·
-          <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
-          <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
-        </p>
-        <details v-if="status?.lastCommit" class="menu-details">
-          <summary>{{ S.common.details }}</summary>
-          <span class="menu-facts" data-testid="last-commit-id">{{ S.menu.versionDetails(status.lastCommit.slice(0, 7)) }}</span>
-        </details>
-      </section>
+    <div ref="root" class="document-menu" role="menu" :aria-label="name ? `${S.docMenu.label}: ${name}` : S.docMenu.label" :style="{ top: `${at.top}px`, right: `${at.right}px` }" data-testid="document-menu" @keydown="onKey">
+      <template v-for="(group, g) in groups" :key="g">
+        <div v-if="g" class="menu-divider" role="separator" />
+        <button
+          v-for="item in group"
+          :key="item.label"
+          type="button"
+          :role="item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'"
+          :aria-checked="item.checked === undefined ? undefined : item.checked"
+          class="menu-item"
+          :title="item.title"
+          :data-testid="item.testid"
+          @click="item.run()"
+        >
+          <span class="menu-check" aria-hidden="true">{{ item.checked ? '✓' : '' }}</span>
+          <span class="menu-label">{{ item.label }}</span>
+          <span v-if="item.keys" class="menu-keys" aria-hidden="true">{{ keyLabel(item.keys) }}</span>
+        </button>
+      </template>
 
-      <CodeSection v-if="runner" :runner="runner" @packages="(engine) => then(() => emit('packages', runner!, engine))" />
+      <CodeSection v-if="runner" :runner="runner" @done="emit('close')" @packages="(engine) => then(() => emit('packages', runner!, engine))" />
 
-      <section class="menu-section menu-links">
-        <div class="menu-actions">
-          <button v-if="shared" type="button" data-testid="menu-permissions" @click="then(() => emit('permissions'))">{{ S.permissions.menu }}</button>
-          <button type="button" data-testid="menu-document" @click="then(() => emit('settings'))">{{ S.menu.documentSettings }}</button>
-          <button type="button" :title="S.menu.helpTitle(keyLabel(APP_KEYS.help))" data-testid="menu-help" @click="then(() => emit('help'))">{{ S.menu.help }}</button>
-        </div>
-      </section>
+      <div class="menu-divider" role="separator" />
+      <button v-for="item in own" :key="item.label" type="button" role="menuitem" class="menu-item" :title="item.title" :data-testid="item.testid" @click="item.run()">
+        <span class="menu-check" aria-hidden="true" />
+        <span class="menu-label">{{ item.label }}</span>
+        <span v-if="item.keys" class="menu-keys" aria-hidden="true">{{ keyLabel(item.keys) }}</span>
+      </button>
+
+      <p v-if="status" class="menu-footer" role="none" :title="status.lastCommit ? S.menu.versionDetails(status.lastCommit.slice(0, 7)) : undefined">
+        <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
+        ·
+        <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
+        <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
+      </p>
     </div>
   </div>
 </template>

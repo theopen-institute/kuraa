@@ -1,10 +1,9 @@
 // Who can change what (0066): an admin says who may change a document, in
 // Workspace settings; on another person's device it opens read only, saying
-// who may, and they suggest a change instead; the admin sees the suggestion,
-// compares it with the document, and accepts it, as her edit. On a local DHT.
+// who may, with nothing to edit it by; the admin's edits reach it. On a local DHT.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +15,7 @@ import { keptKey } from '../../packages/host/src/keys.js';
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
 
-test('an admin says who can change a document; someone else suggests a change, and she accepts it', async ({ browser }) => {
+test('an admin says who can change a document; to someone else it is read only, and her edits reach them', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -72,28 +71,17 @@ test('an admin says who can change a document; someone else suggests a change, a
     // On Bo's device: read only, saying who may change it.
     await expect(bo.getByTestId('read-only')).toContainText('Only Ada can change this document', { timeout: 20_000 });
     await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'false');
-    // He suggests a change instead.
-    await bo.getByTestId('suggest').click();
-    const dialog = bo.getByTestId('suggest-dialog');
-    const text = await dialog.getByTestId('suggest-text').inputValue();
-    await dialog.getByTestId('suggest-text').fill(text.replace('The tide was out.', 'The tide was out. Bo saw a heron.'));
-    await dialog.getByTestId('suggest-send').click();
-    await expect(dialog).toBeHidden();
-    await expect(bo.getByTestId('editor')).not.toContainText('heron');
-    expect(readFileSync(join(dirB, 'notes.md'), 'utf8')).not.toContain('heron');
+    // Nothing to edit it by (0072).
+    await expect(bo.getByTestId('suggest')).toHaveCount(0);
 
-    // Ada sees it, compares it with the document, and accepts it.
-    await expect(ada.getByTestId('suggestions')).toContainText('1 suggestion', { timeout: 30_000 });
-    await ada.getByTestId('suggestion:0').click();
-    await expect(ada.getByTestId('suggestion-by')).toContainText('Suggested by Bo');
-    await ada.getByTestId('compare-now').click();
-    await expect(ada.getByTestId('compare-changed')).toContainText('heron');
-    await ada.getByTestId('accept-suggestion').click();
-    await ada.getByTestId('ask').getByRole('button', { name: 'Accept' }).click();
+    // Ada edits it.
+    await ada.getByTestId('editor').getByText('The tide was out.').click();
+    await ada.keyboard.press('End');
+    await ada.keyboard.type(' Bo saw a heron.');
     await expect(ada.getByTestId('editor')).toContainText('Bo saw a heron.');
-    await expect(ada.getByTestId('suggestions')).toHaveCount(0, { timeout: 15_000 });
-    // It reaches Bo's device, as Ada's edit.
+    // It reaches Bo's device, still read only there.
     await expect(bo.getByTestId('editor')).toContainText('Bo saw a heron.', { timeout: 20_000 });
+    await expect(bo.getByTestId('editor')).toHaveAttribute('contenteditable', 'false');
   } finally {
     await b.close();
     await a.close();

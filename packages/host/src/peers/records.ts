@@ -1,12 +1,17 @@
-// Membership as signed records (docs/decisions/0031-signed-membership.md,
-// 0038-equal-peers.md).
+// Signed records (docs/decisions/0031-signed-membership.md, 0072).
 //
-// Each change to who is in a workspace is a statement signed by the device that
-// made it: this device is in (add), this one is out (remove), this link no longer
-// lets anyone in (revoke-link). Devices keep the records they take and pass them
-// all on, so a change reaches every device through any other, and each can tell
-// which device made it, whoever passed it on. Every member's records are taken:
-// all members have the same say (0038).
+// What devices tell each other about the workspace, each signed by the device
+// that made it, kept, and passed on, so it reaches every device through any
+// other. Which devices are in is not said by any record of its own (0072): a
+// device is in where it signs with a key (signs) a person vouched for (vouch),
+// and the policy has that person in the workspace, the key not dropped or
+// revoked. Records signed in themselves by people's and keys' own signatures
+// (key-event, vouch, revoke-key, signs, policy, attest) are taken whoever made or
+// passed them on; the rest (link, revoke-link, secret) only from a device in.
+// Pairing records from before (add) are kept but say nothing; removals from
+// before (remove) still count, and none is made. An acknowledgement (ack) says
+// how much of the policy a device holds: removals it holds are confirmed, in
+// the app's words, by its person; it decides nothing.
 //
 // For attribution only, who wrote what: the signing key the commits made on a
 // device are signed with (signs, carrying that key's own signature, so no
@@ -32,7 +37,7 @@ import { eventHash, eventIdentity, readEvent, type KeyEvent } from './kel.js';
 import { entrySigned, readOp, type PolicyEntry, type PolicyOp } from './policy.js';
 import { readAttestation, type Attestation } from './attest.js';
 
-export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event' | 'policy' | 'attest';
+export type RecordKind = 'add' | 'remove' | 'revoke-link' | 'signs' | 'vouch' | 'revoke-key' | 'link' | 'secret' | 'key-event' | 'policy' | 'attest' | 'ack';
 
 export interface MemberRecord {
   v: 1;
@@ -53,6 +58,8 @@ export interface MemberRecord {
   attestation?: Attestation;
   /** revoke-key: the commits (branch tips) its maker's device had when it said so: what the key signed among them still counts (its cutoff, 0066). */
   heads?: string[];
+  /** revoke-key: the policy operations its maker's device had: those the key signed among them still count (0072). ack: the policy operations its maker's device holds (all they descend from too). */
+  policyHeads?: string[];
   /** policy: the operation (policy.ts), the operations its maker had seen, and the signing key that signed it (`proof`). */
   op?: PolicyOp;
   parents?: string[];
@@ -84,8 +91,9 @@ function message(r: Omit<MemberRecord, 'sig'>): Buffer {
   // A policy operation is signed in itself, and named by its hash (the subject), which covers it.
   const policy = r.signer !== undefined ? ['signer', r.signer] : [];
   const heads = r.heads !== undefined ? ['heads', r.heads.join(',')] : [];
+  const policyHeads = r.policyHeads !== undefined ? ['policyHeads', r.policyHeads.join(',')] : [];
   const attestation = r.attestation !== undefined ? ['attestation', r.attestation.sig] : [];
-  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy, ...heads, ...attestation].join('\0'));
+  return Buffer.from(['kuraa-record', r.v, r.kind, r.workspace, r.subject, r.name ?? '', r.by, r.at, r.proof ?? '', r.person ?? '', r.keyProof ?? '', ...link, ...person, ...event, ...policy, ...heads, ...attestation, ...policyHeads].join('\0'));
 }
 
 /** What a signing key signs to say a device signs with it. */
@@ -97,8 +105,8 @@ export const revokeKeyMessage = (key: string) => Buffer.from(`kuraa-revoke-key\0
 
 export const sign = (message: Buffer, key: { secretKey: Buffer }) => crypto.sign(message, key.secretKey).toString('hex');
 
-/** Whether a record is one a device makes about itself (signs): the latest of each device counts. */
-export const aboutItself = (k: RecordKind) => k === 'signs';
+/** Whether a record is one a device makes about itself (signs; ack, 0072): the latest of each device counts. */
+export const aboutItself = (k: RecordKind) => k === 'signs' || k === 'ack';
 
 /** Whether a record is one a person makes, with their identity's signature (vouch, revoke-key): any member may pass it on. */
 export const byPerson = (k: RecordKind) => k === 'vouch' || k === 'revoke-key';
@@ -140,7 +148,7 @@ export const FUTURE_MS = 10 * 60_000;
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event', 'policy', 'attest'];
+  const kinds: RecordKind[] = ['add', 'remove', 'revoke-link', 'signs', 'vouch', 'revoke-key', 'link', 'secret', 'key-event', 'policy', 'attest', 'ack'];
   if (r.v !== 1 || !kinds.includes(r.kind as RecordKind) || typeof r.workspace !== 'string' || typeof r.subject !== 'string'
     || typeof r.by !== 'string' || !hexKey.test(r.by) || typeof r.at !== 'number' || typeof r.sig !== 'string' || !/^[0-9a-f]{128}$/.test(r.sig)) return null;
   if (r.name !== undefined && typeof r.name !== 'string') return null;
@@ -162,6 +170,8 @@ export function readRecord(v: unknown): MemberRecord | null {
   if ((kind === 'attest') !== (attestation !== null) || (r.attestation !== undefined && !attestation)) return null;
   if (attestation && attestation.id !== r.subject) return null;
   if (r.heads !== undefined && (kind !== 'revoke-key' || !Array.isArray(r.heads) || r.heads.length > 1000 || !r.heads.every((h) => typeof h === 'string' && /^[0-9a-f]{40,64}$/.test(h)))) return null;
+  if (kind === 'ack' && r.policyHeads === undefined) return null;
+  if (r.policyHeads !== undefined && ((kind !== 'revoke-key' && kind !== 'ack') || !Array.isArray(r.policyHeads) || r.policyHeads.length > 1000 || !r.policyHeads.every((h) => typeof h === 'string' && hexKey.test(h)))) return null;
   const aboutLink = kind === 'revoke-link' || kind === 'link';
   if (!aboutLink && !hexKey.test(r.subject)) return null;
   if (aboutLink && !/^[0-9a-f]{16}$/.test(r.subject)) return null;
@@ -180,6 +190,7 @@ export function readRecord(v: unknown): MemberRecord | null {
     ...(event ? { event } : {}),
     ...(op ? { op, parents: r.parents as string[], signer: r.signer as string } : {}),
     ...(r.heads !== undefined ? { heads: r.heads as string[] } : {}),
+    ...(r.policyHeads !== undefined ? { policyHeads: r.policyHeads as string[] } : {}),
     ...(attestation ? { attestation } : {}),
     ...(r.keyProof !== undefined ? { keyProof: r.keyProof as string } : {}),
     ...(r.topic !== undefined ? { topic: r.topic as string, expires: (r.expires as number | undefined) ?? 0 } : {}),
@@ -204,8 +215,9 @@ export interface Standing {
   workspace: string;
   /** This device's key. */
   self: string;
-  /** Devices it is paired with. */
+  /** Devices in the workspace (0072: as people, their keys and the policy say). */
   members: Set<string>;
+  /** Devices out: dropped, their key revoked, their person taken out; or removed before (0072). */
   removed: Set<string>;
   /** Devices whose person is an admin of the workspace (policy.ts); null: no policy yet, every member's word counts (0038). */
   managers: Set<string> | null;
@@ -214,67 +226,38 @@ export interface Standing {
   /** Devices whose person is an admin; and those whose person makes and unmakes admins (the owner): only they remove an admin's computer (0070). */
   adminDevices?: Set<string>;
   assigners?: Set<string>;
-  /**
-   * Whether a device is a person's that the policy has in the workspace (or in
-   * a group of it), as the records taken and those being taken say (0071): a
-   * device paired by a member who is not an admin counts once its person is in.
-   */
-  inWorkspace?: (device: string) => boolean;
   /** Now, as this device's clock says (ms). */
   now?: number;
 }
 
-/** Records only an admin's device may make (0066), or, for a device, one of the same person's (0068): removing a device. */
+/** Records from before that only an admin's device may have made (0066), or, for a device, one of the same person's (0068): removing a device. */
 export const forAdmins = (k: RecordKind) => k === 'remove';
 
+/** Records whose word is in their own signatures, by people and keys, not in the device that made them (0072): taken from whoever passes them on. */
+export const selfProven = (k: RecordKind) => k === 'key-event' || k === 'vouch' || k === 'revoke-key' || k === 'signs' || k === 'policy' || k === 'attest';
+
 /**
- * Whether to take a record now: 'take' (any member's), 'wait' (its signer is
- * not paired here yet; it comes again with the next hello), or 'refuse' (another
- * workspace's, or a removed device's).
+ * Whether to take a record now: 'take', 'wait' (its maker is not known to be in
+ * yet, or what lets it make it has not come; it comes again with the next
+ * hello), or 'refuse' (another workspace's, or an out device's).
  */
 export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' {
   if (r.workspace !== s.workspace) return 'refuse';
   if (r.by === s.self) return 'take';
   if (s.removed.has(r.by)) return 'refuse';
-  if (!s.members.has(r.by)) return 'wait';
   if (r.at > (s.now ?? Date.now()) + FUTURE_MS) return 'wait';
-  // A device paired (0071): by an admin's device; by anyone else's, once the person it is has come in by an
-  // admin's grant (an invite link's, said in the policy), so no member pairs devices the admins did not let in.
-  if (r.kind === 'add' && s.managers && !s.managers.has(r.by) && !s.inWorkspace?.(r.subject)) return 'wait';
   // A revocation's cutoff (the commits that still count) is said by a device of the person revoking (0071): no
   // one else may wrap their signature with commits of their own choosing.
-  if (r.kind === 'revoke-key' && s.persons?.get(r.by) !== r.person) return 'wait';
-  // Not (yet) an admin's, nor the same person's as the device it removes: it may be, once the policy or vouch that says so is taken.
+  if (r.kind === 'revoke-key') return s.persons?.get(r.by) === r.person ? 'take' : 'wait';
+  if (selfProven(r.kind)) return 'take';
+  if (!s.members.has(r.by)) return 'wait';
+  // A removal from before: an admin's, or the same person's as the device it removes; for an admin's, the owner's.
   if (forAdmins(r.kind) && s.managers) {
     const whose = s.persons?.get(r.by);
     const own = !!whose && whose === s.persons?.get(r.subject);
-    // An admin's (or the owner's) computer: only the owner removes it, or its own person (0070).
     const ofAdmin = !!s.adminDevices?.has(r.subject);
     const may = own || (s.managers.has(r.by) && (!ofAdmin || !!s.assigners?.has(r.by)));
     if (!may) return 'wait';
   }
   return 'take';
-}
-
-/**
- * The devices that records show to be in a workspace, as far as `from` (devices
- * already trusted: a link's maker, and those it came in through) vouch for them:
- * those they paired (add), those those paired, and so on, each record signed by
- * a device already counted; less those a counted device removed. A record a
- * device signs about how it came in counts for nothing: anyone may sign one.
- */
-export function traced(from: string[], list: unknown[], workspace: string): Set<string> {
-  const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
-  const known = new Set(from);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const r of records) {
-      if (r.kind === 'add' && known.has(r.by) && !known.has(r.subject)) {
-        known.add(r.subject);
-        grew = true;
-      }
-    }
-  }
-  for (const r of records) if (r.kind === 'remove' && known.has(r.by)) known.delete(r.subject);
-  return known;
 }

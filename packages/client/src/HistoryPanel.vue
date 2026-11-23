@@ -42,6 +42,7 @@ const people = (c: CommitInfo) => peopleOf([c]);
  */
 const title = (c: CommitInfo) => {
   if (c.kind === 'merge') return S.history.merged;
+  if (c.kind === 'not-kept') return S.history.notKept(c.author);
   if (c.kind === 'autosave') {
     const parts = partsOf([c]);
     return parts.length ? S.history.savedParts(parts.join(', ')) : S.history.saved;

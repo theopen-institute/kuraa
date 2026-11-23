@@ -544,7 +544,6 @@ export class Peers {
         }
         this.outputs?.timing(`fetched branches from ${remote} in ${Date.now() - asked} ms`);
         if (l.hello?.workspace !== this.node.ws.id) return; // a fork: fetched, never merged on its own
-        await this.rooms.settle(l);
         if (this.closed) return;
         if (await this.bringIn(l)) this.retryLater(remote);
         else this.retryMs.delete(remote);
@@ -602,13 +601,15 @@ export class Peers {
   }
 
   /**
-   * Bring a device's branches in. Two devices that merge differently would each
-   * make their own merge of the same work, and their histories would part: the
-   * one with the lower key makes the merges, and the other only fast-forwards.
+   * Bring a device's branches in. Of two devices, the one with the lower key
+   * makes the merges, and the other only fast-forwards (0077): two devices that
+   * merge differently would each make their own merge of the same work, and
+   * their histories would part; and devices that each merged the others' merges
+   * at once would each make a new one, and could go on so for ever.
    */
   private async bringIn(link: PeerLink): Promise<boolean> {
     const remote = link.remote!;
-    const forwardOnly = this.node.mergesDiffer(link.key) && link.key < this.node.myKey;
+    const forwardOnly = link.key < this.node.myKey;
     let retry = false;
     // Each on its own (0071): one that fails (a file in the way, the policy not here yet) holds up none of the others.
     for (const { branch, oid } of await this.branchesOf(remote)) {
@@ -668,7 +669,7 @@ export class Peers {
       if (await this.holds(mine, oid)) return false;
       // Merging differently (0071): as for branches, only the other makes the merges.
       if (forwardOnly && mine && !(await isAncestor(this.host.git, mine, oid))) {
-        if (!this.waiting.has(key)) this.host.log(`peers: ${link.remote} merges differently from this device (another version of kuraa?); its work in a space comes in once it has merged this device's`);
+        if (!this.waiting.has(key) && this.node.mergesDiffer(link.key)) this.host.log(`peers: ${link.remote} merges differently from this device (another version of kuraa?); its work in a space comes in once it has merged this device's`);
         this.waiting.add(key);
         return false;
       }
@@ -676,9 +677,8 @@ export class Peers {
       const waits = await this.policyWaits(mine || null, oid, link.key);
       try {
         if (waits.length) throw new WaitingForPolicy(waits);
-        const current = (await this.host.git.branch()) === branch;
         this.bringing = link.key;
-        const outcome = await this.host.bringSpace(id, branch, oid, current ? this.rooms.override(link, branch, id) : undefined).finally(() => void (this.bringing = null));
+        const outcome = await this.host.bringSpace(id, branch, oid).finally(() => void (this.bringing = null));
         this.waitingForPolicy.delete(key);
         this.notBrought.delete(key);
         if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${link.remote}${describeOutcome(outcome)}`);
@@ -710,7 +710,7 @@ export class Peers {
       if (await this.holds(mine, oid)) return false;
       const from = link.remote ?? branch;
       if (forwardOnly && mine && !(await isAncestor(this.host.git, mine, oid))) {
-        if (!this.waiting.has(`${from}/${branch}`)) this.host.log(`peers: ${from} merges differently from this device (another version of kuraa?); its work on ${branch} comes in once it has merged this device's`);
+        if (!this.waiting.has(`${from}/${branch}`) && this.node.mergesDiffer(link.key)) this.host.log(`peers: ${from} merges differently from this device (another version of kuraa?); its work on ${branch} comes in once it has merged this device's`);
         this.waiting.add(`${from}/${branch}`);
         return false;
       }
@@ -721,7 +721,7 @@ export class Peers {
         const waits = await this.policyWaits(mine || null, oid, link.key);
         if (waits.length) throw new WaitingForPolicy(waits);
         this.bringing = link.key;
-        outcome = await this.host.bringBranch(branch, oid, branch === current ? this.rooms.override(link, branch, null) : undefined).finally(() => void (this.bringing = null));
+        outcome = await this.host.bringBranch(branch, oid).finally(() => void (this.bringing = null));
       } catch (e) {
         if (!(e instanceof WaitingForPolicy)) throw e;
         this.askFor(link, e.heads);

@@ -1,5 +1,7 @@
 # 0057 · Opening a file does not wait behind the host's other work
 
+*Since [0077](0077-one-leader-per-room.md): a room kept warm stays in its session (it hears everything), and is no longer kept after it closes; a new session starts from the file as read, its first state made afresh.*
+
 Opening a file showed "Opening…", sometimes for seconds. Nothing on the way waited for the network
 or another device: the room was opened in the host's one queue (`Host.serial`), behind whatever
 was in it (the last file's save and commit, which ran git even with nothing changed; bringing in

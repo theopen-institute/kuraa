@@ -29,8 +29,8 @@
 //
 // Merge commits are made again (step 4): what one holds beyond the merge of its
 // parents as this device makes it is its own change, by whoever signed it (a
-// merge carrying a live room's text is signed by the device that made it; an
-// ordinary merge is no one's), judged as any change is. A file it kept as one
+// merge is no one's: since 0077 none carries a live room's text), judged as any
+// change is. A file it kept as one
 // side had it, saying so, is no change of its own. A merge made by another
 // version of merging is checked only for what it holds that neither parent did.
 import type { Git } from '../git.js';

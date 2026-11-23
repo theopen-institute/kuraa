@@ -1,5 +1,7 @@
 # 0027 · Rooms start from the file's git blob, the same way everywhere
 
+*Since [0077](0077-one-leader-per-room.md): rooms no longer combine by their seeds. A room is one session: started by one device from its file, joined by others from the state of one in it, never used again once it ends; two sessions never combine, and meet in git.*
+
 A room's Yjs history begins with its seed: the document as the file held it when the room was
 made. Yjs can only merge two copies that share their history, so two devices that seeded the same
 file on their own, each with a random client id, would see each other's whole text as an

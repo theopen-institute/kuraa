@@ -133,49 +133,55 @@ describe('host', () => {
     // The odd spacing in the untouched paragraph survives byte for byte.
     expect(file()).toBe(expected);
 
-    // Unflushed edits survive a host restart through the room cache.
+    // Edits not yet written when the host stops are written as it stops; the next session starts from the file (0077).
     const { generation } = await roomFor('notes.md');
     a.write(insertAt(a.read(), 'The tide', 'Late: '));
+    await until(() => (running.host as unknown as { records: Map<string, { dirty: boolean }> }).records.get('main:notes.md')!.dirty, 5000, 'the edit at the host');
     a.destroy();
     clients.splice(0);
     await running.close();
     running = await startHost({ dir, timings: FAST, token: running.token, run: ONLINE });
     const after = await roomFor('notes.md');
-    expect(after.generation).toBe(generation);
+    expect(after.generation).not.toBe(generation);
     const b = await connect('notes.md', BOB);
     expect(b.read().textContent).toContain('Late: The tide');
     expect(b.read().textContent).toContain('Heavy then Light rain');
+    expect(b.read().textContent.match(/Late: /g)).toHaveLength(1);
   });
 
-  it('starts a room nobody is in afresh from a file changed outside it, warm or from its cache: the same seed, the same history (0027)', async () => {
+  it('keeps a room no one is in open in its session a while, then starts a new session from the file as it is (0077)', async () => {
     await running.close();
     running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
-    const blob = () => git(dir, 'hash-object', 'notes.md');
     const a = await connect('notes.md');
     a.write(insertAt(a.read(), 'Light rain', 'Heavy then '));
     await until(() => file().includes('Heavy then') && git(dir, 'status', '--porcelain') === '', 15_000, 'committed');
+    const { room } = await roomFor('notes.md');
     a.destroy();
     clients.splice(0);
-    await until(() => !running.host.liveRooms().length, 5000, 'nobody in the room');
-    // Kept warm: a change made outside is not patched into it (by this host alone), it starts again from the file.
+    // Kept warm: the same session, still open here; a change made outside comes into it, once, by this device (which leads it).
+    await new Promise((r) => setTimeout(r, 200));
+    expect(running.host.liveRooms()).toHaveLength(1);
     writeFileSync(join(dir, 'notes.md'), file().replace('The tide', 'Outside: The tide'));
-    await until(async () => (await roomFor('notes.md')).generation === blob(), 15_000, 'the room started from the changed file');
+    await until(() => (running.host.roomText(room) ?? '').includes('Outside: The tide'), 15_000, 'the outside change in the warm room');
+    expect((await roomFor('notes.md')).room).toBe(room);
     const b = await connect('notes.md', BOB);
+    expect(b.read().textContent.match(/Outside: /g)).toHaveLength(1);
     expect(b.read().eq(pandocMarkdown.parse(file()).doc)).toBe(true);
     b.destroy();
     clients.splice(0);
-    await until(() => !running.host.liveRooms().length, 5000, 'nobody in the room');
-    // From its cache: resumed only while the file is as the cache knew it.
-    await running.close();
-    running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
-    expect((await roomFor('notes.md')).generation).toBe(blob());
+    // Dropped (here, at once): the session is over, and the next starts afresh from the file, changed meanwhile.
     await running.close();
     writeFileSync(join(dir, 'notes.md'), file().replace('Light rain', 'Light rain, again'));
-    running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
-    expect((await roomFor('notes.md')).generation).toBe(blob());
+    running = await startHost({ dir, timings: { ...FAST, dropMs: 300 }, token: running.token, run: ONLINE });
     const c = await connect('notes.md', BOB);
+    const second = (await roomFor('notes.md')).room;
+    expect(second).not.toBe(room);
     expect(c.read().textContent.match(/again/g)).toHaveLength(1);
     expect(c.read().eq(pandocMarkdown.parse(file()).doc)).toBe(true);
+    c.destroy();
+    clients.splice(0);
+    await until(() => !running.host.liveRooms().length, 5000, 'the session left');
+    await until(async () => (await roomFor('notes.md')).room !== second, 5000, 'a new session next time');
   });
 
   it('takes an outside change whatever its short hash: two texts with the same FNV hash and length are told apart', async () => {

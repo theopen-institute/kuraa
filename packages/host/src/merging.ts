@@ -54,11 +54,6 @@ export interface MergeOptions {
   signature?: string;
   /** The type that opens a file, to merge it as a document. */
   typeFor(path: string, head: string): DocumentType | undefined;
-  /**
-   * The text a file is to have in the merge, instead of merging it: a document
-   * whose live room both sides share already holds both sides' edits.
-   */
-  override?(path: string): string | undefined;
   /** Somewhere to put a temporary index. */
   tmpDir: string;
   /**
@@ -79,8 +74,6 @@ export interface MergeOutcome {
   conflicts: { path: string; count: number }[];
   /** Copies saved beside files that could not be merged as text. */
   copies: string[];
-  /** Files that took a live room's text (override), which another device cannot make again: the merge is then its maker's to sign (0066). */
-  overridden?: string[];
 }
 
 export async function isAncestor(git: Git, a: string, b: string): Promise<boolean> {
@@ -145,7 +138,6 @@ export async function mergeCommits(repo: Git, x: string, y: string, opts: MergeO
   const blob = async (s?: Stage) => (s ? (await git.run(['cat-file', 'blob', s.oid])).bytes : null);
 
   const entries: string[] = [];
-  const overridden: string[] = [];
   const conflicts: { path: string; count: number }[] = [];
   const copies: string[] = [];
   const write = (content: Buffer | string) => git.out(['hash-object', '-w', '--stdin'], { input: content });
@@ -157,13 +149,6 @@ export async function mergeCommits(repo: Git, x: string, y: string, opts: MergeO
     const s3 = stages.get(3);
     const mode = (s2 ?? s3)?.mode ?? '100644';
     if (!s2 && !s3) continue;
-    const override = opts.override?.(path);
-    if (override !== undefined) {
-      const oid = await write(override);
-      entries.push(`${mode} ${oid} 0\t${path}`);
-      overridden.push(path);
-      continue;
-    }
     // Changed on one side, deleted on the other: keep it, changed.
     if (!s2 || !s3) {
       entries.push(`${mode} ${(s2 ?? s3)!.oid} 0\t${path}`);
@@ -231,7 +216,7 @@ export async function mergeCommits(repo: Git, x: string, y: string, opts: MergeO
       GIT_COMMITTER_NAME: MERGE_AUTHOR.name, GIT_COMMITTER_EMAIL: MERGE_AUTHOR.email, GIT_COMMITTER_DATE: at,
     },
   });
-  return { commit, kind: 'merge', conflicts, copies, ...(overridden.length ? { overridden } : {}) };
+  return { commit, kind: 'merge', conflicts, copies };
 }
 
 /** How many conflicts a file's text keeps, as its type counts them. */

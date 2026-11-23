@@ -902,11 +902,6 @@ export class Identity {
     return (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null;
   }
 
-  /** No email is checked since 0078: none, for whoever asks (rooms.ts names co-authors by their name alone). */
-  async emailsOf(_id: string): Promise<string[]> {
-    return [];
-  }
-
   /**
    * The devices whose person is an admin of the workspace (null if there is no
    * policy yet), and the person each device is, where known: who may remove a

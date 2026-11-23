@@ -19,7 +19,9 @@ What remains of the machinery is about convergence, not trust:
   the one with the lower key makes the merges, and the other takes them, so their histories never
   part.
 - **Shared rooms** are committed by the device with the lowest key among those that have the room
-  open. Every device sees the same devices in the room, so they agree without a setting.
+  open. Every device sees the same devices in the room, so they agree without a setting. (Since
+  [0077](0077-one-leader-per-room.md) that device leads the room's session: it alone writes it,
+  commits it and brings git's changes into it.)
 
 ## What any member can do
 

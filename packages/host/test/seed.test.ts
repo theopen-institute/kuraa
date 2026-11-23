@@ -1,38 +1,33 @@
-// Rooms seeded from a file's blob: the same state on every device, so two
-// devices' rooms combine without the text appearing twice.
+// Why two sessions of one file never combine (0077): each starts its own Yjs
+// history of the text, and two histories of one text, combined, hold it twice.
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
-import { rmarkdown } from '@kuraa/format-rmarkdown';
-import { combineStates, decodeDoc, patchState } from '@kuraa/session/server';
-import { blobId, seedState } from '../src/host.js';
+import { combineStates, decodeDoc, encodeDoc, patchState } from '@kuraa/session/server';
+import { blobId } from '../src/host.js';
 
 const NOTES = '---\ntitle: Field notes\n---\n\n# Day one\n\nThe tide was out.\n\n- quadrats\n- cores\n';
 
-describe('seeding rooms', () => {
-  it('names a room by the git blob of its text', () => {
+describe('sessions', () => {
+  it('know a file changed on the disk by its git blob', () => {
     expect(blobId(NOTES)).toBe(execFileSync('git', ['hash-object', '--stdin'], { input: NOTES, encoding: 'utf8' }).trim());
   });
 
-  it('gives the same state for the same text and type version, and another for another type', () => {
-    expect(Buffer.from(seedState(pandocMarkdown, NOTES))).toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
-    expect(Buffer.from(seedState(rmarkdown, NOTES))).not.toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
+  it('start each with a history of its own, even from the same text', () => {
+    const doc = pandocMarkdown.parse(NOTES).doc;
+    expect(Buffer.from(encodeDoc(doc))).not.toEqual(Buffer.from(encodeDoc(doc)));
   });
 
-  it('gives the same state from a text already parsed, and parses again a parse of another text', () => {
-    const parsed = pandocMarkdown.parse(NOTES);
-    expect(Buffer.from(seedState(pandocMarkdown, NOTES, parsed))).toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
-    const other = pandocMarkdown.parse(NOTES.replace('The tide was out.', 'Not this text.'));
-    expect(Buffer.from(seedState(pandocMarkdown, NOTES, other))).toEqual(Buffer.from(seedState(pandocMarkdown, NOTES)));
+  it('would hold the text twice if two started apart were combined: so they meet in git instead', () => {
+    const edit = (find: string, replace: string) => patchState(encodeDoc(pandocMarkdown.parse(NOTES).doc), pandocMarkdown.parse(NOTES.replace(find, replace)).doc);
+    const text = pandocMarkdown.serialize(decodeDoc(combineStates(edit('The tide was out.', 'The tide was far out.'), edit('- cores', '- cores at 25 m')), pandocMarkdown.schema));
+    expect(text.match(/Day one/g)!.length).toBeGreaterThan(1);
   });
 
-  it('lets two rooms seeded apart, each edited, combine with both edits and no duplicate text', () => {
-    const edit = (find: string, replace: string) => {
-      const doc = pandocMarkdown.parse(NOTES.replace(find, replace)).doc;
-      return patchState(seedState(pandocMarkdown, NOTES), doc);
-    };
-    const a = edit('The tide was out.', 'The tide was far out.');
-    const b = edit('- cores', '- cores at 25 m');
+  it('combine with any copy of themselves, whatever each copy was given since', () => {
+    const start = encodeDoc(pandocMarkdown.parse(NOTES).doc);
+    const a = patchState(start, pandocMarkdown.parse(NOTES.replace('The tide was out.', 'The tide was far out.')).doc);
+    const b = patchState(start, pandocMarkdown.parse(NOTES.replace('- cores', '- cores at 25 m')).doc);
     const text = pandocMarkdown.serialize(decodeDoc(combineStates(a, b), pandocMarkdown.schema));
     expect(text).toBe(NOTES.replace('The tide was out.', 'The tide was far out.').replace('- cores', '- cores at 25 m'));
   });

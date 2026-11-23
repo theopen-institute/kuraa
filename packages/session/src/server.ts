@@ -12,7 +12,7 @@ import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
 export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, RunSessionInfo, RunSessionState } from './model.js';
 
-/** Either a ProseMirror document to seed a new generation, or a saved state to resume one. */
+/** What a room starts from: a ProseMirror document, or a state (a session's, from another device). */
 export type RoomSeed = { doc: PMNode } | { state: Uint8Array };
 
 export interface RelayHooks {
@@ -24,10 +24,12 @@ export interface RelayHooks {
   changed(room: string, user: PresenceUser | null, local: boolean): void;
   /** A client opened the room: it is loaded, and the relay holds it (read, state and the rest work). */
   loaded?(room: string): void;
-  /** Encoded room state, for the host's cache. */
-  store(room: string, state: Uint8Array): void | Promise<void>;
   /** The last client left the room. */
   empty(room: string): void;
+  /** Whether to keep a room no client is in open (the host says when to let it go: release). Default: no. */
+  keep?(room: string): boolean;
+  /** The room is let go of, no client being in it: its state as it ends. */
+  unloaded?(room: string, state: Uint8Array): void;
   /** HTTP requests that are not WebSocket upgrades. Return true when handled. */
   request(req: IncomingMessage, res: ServerResponse): boolean | Promise<boolean>;
   /** Whether a WebSocket may be opened (its Host and Origin headers, say). False closes it. Default: any. */
@@ -124,8 +126,10 @@ export class Relay {
         const peer = isPeerOrigin(transactionOrigin) ? transactionOrigin.peer : null;
         for (const fn of this.awarenessListeners) fn(documentName, update, peer);
       },
-      onStoreDocument: async ({ documentName, document }) => {
-        await this.hooks.store(documentName, Y.encodeStateAsUpdate(document));
+      beforeUnloadDocument: async ({ documentName, document }) => {
+        // Kept open with no one in it (thrown without a message, Hocuspocus keeps it quietly), until the host releases it.
+        if (this.hooks.keep?.(documentName)) throw null;
+        this.hooks.unloaded?.(documentName, Y.encodeStateAsUpdate(document));
       },
       onDisconnect: async ({ documentName, clientsCount }) => {
         if (clientsCount === 0) this.hooks.empty(documentName);
@@ -139,7 +143,10 @@ export class Relay {
   }
 
   async close(): Promise<void> {
-    await this.server.destroy();
+    const done = this.server.destroy();
+    // Rooms kept open with no one in them (keep) are let go of too: the server waits for every room to be.
+    for (const d of [...this.server.hocuspocus.documents.values()]) if (!d.getConnectionsCount()) void this.server.hocuspocus.unloadDocument(d);
+    await done;
   }
 
   private doc(room: string): Document | undefined {
@@ -241,23 +248,32 @@ export class Relay {
   closeRoom(room: string): void {
     this.server.hocuspocus.closeConnections(room);
   }
+
+  /** Let a room no client is in go (one kept: RelayHooks.keep); `unloaded` says when it has. */
+  release(room: string): void {
+    const d = this.doc(room);
+    if (d && !d.getConnectionsCount()) void this.server.hocuspocus.unloadDocument(d);
+  }
+}
+
+/** How far a room's edits go in a state: its state vector. */
+export function vectorOf(state: Uint8Array): Uint8Array {
+  return Y.encodeStateVectorFromUpdate(state);
+}
+
+/** Whether a room at state vector `at` holds everything of one at `vector`: every client's edits, as far. */
+export function covers(at: Uint8Array, vector: Uint8Array): boolean {
+  const mine = Y.decodeStateVector(at);
+  for (const [client, clock] of Y.decodeStateVector(vector)) if ((mine.get(client) ?? 0) < clock) return false;
+  return true;
 }
 
 /**
- * A room's starting state, the same wherever it is made: the document written
- * into the room by one fixed client id. Two devices seeding from the same file
- * (the same git blob) with the same id get identical states, which Yjs takes as
- * one; so their rooms combine without either's text appearing twice. Edits that
- * follow use each client's own random id.
+ * Encode a ProseMirror document as a room state without a running relay: a
+ * session's first state (0077), written by a client id of its own, as any new
+ * Y.Doc has. Two states made apart from one text are two histories: combined,
+ * the text would be there twice. So a session is never combined with another.
  */
-export function encodeSeed(doc: PMNode, clientID: number): Uint8Array {
-  const ydoc = new Y.Doc();
-  ydoc.clientID = clientID;
-  ydoc.transact(() => prosemirrorToYXmlFragment(doc, ydoc.getXmlFragment(FRAGMENT)));
-  return Y.encodeStateAsUpdate(ydoc);
-}
-
-/** Encode a ProseMirror document as a room state without a running relay (for caches and tests). */
 export function encodeDoc(doc: PMNode): Uint8Array {
   const ydoc = new Y.Doc();
   ydoc.transact(() => prosemirrorToYXmlFragment(doc, ydoc.getXmlFragment(FRAGMENT)));

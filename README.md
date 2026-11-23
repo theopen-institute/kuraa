@@ -274,8 +274,9 @@ between ([decision 0028](docs/decisions/0028-peers.md)). A workspace syncs once 
 inviting someone to it, or joining it from an invite link, makes it so, for good. One on this
 computer alone has nothing to sync with, so there is no setting for it
 ([0048](docs/decisions/0048-shared-workspaces-always-sync.md)). When people on two devices
-have the same document open, they edit it together live; what is done apart reaches the other
-devices through git as soon as they meet. Merges read documents and never stop: a passage both
+have the same document open, they edit it together live, in one session of it; what is done apart
+reaches the other devices through git as soon as they meet, and their sessions become one
+([0077](docs/decisions/0077-one-leader-per-room.md)). Merges read documents and never stop: a passage both
 sides changed differently stays in the document with both versions, to choose between there
 ([0025](docs/decisions/0025-merging.md)).
 
@@ -376,9 +377,12 @@ devices` and `people` list them; `remove-device`, `role <person> admin|member`, 
 `name` and `fork` manage them. Paired devices
 are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.
 
-Merges are the same on every device, so work done apart comes together into one history. A
-document open on several devices is one live room there, saved by one of them (the one with the
-lowest key). Commits are signed, for attribution only: each person has a signing key on each
+Merges are the same on every device, so work done apart comes together into one history (of two
+devices, the one with the lower key makes the merges). A document open on several devices is one
+live session there, led by one of them (the one with the lowest key): it alone writes the file,
+commits it and brings changes from git into it; the others' copy of the file follows git, and an
+edit made outside the app on one of them is committed there and reaches the session through the
+leader ([0077](docs/decisions/0077-one-leader-per-room.md)). Commits are signed, for attribution only: each person has a signing key on each
 computer, which their identity vouches for, so `git log --show-signature` and the app can say who
 wrote what ([0035](docs/decisions/0035-identities-and-signing-keys.md)). Your identity is made for
 you, from your name, the first time the app knows it; Settings › **You** says "You on this
@@ -679,6 +683,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | — | `packages/client/test/polish.test.ts`, `packages/format-pandoc/test/editor-help.test.ts`, `tests/e2e/polish.spec.ts`: the shortcuts sheet lists what is bound, errors in plain words, the offline banner, the keyboard file tree, dialogs keeping focus |
 | — | `packages/host/test/runner.test.ts`, `tests/e2e/run.spec.ts`: R chunks run on the host, outputs reach every client, interrupt and restart work, files stay untouched, and code cannot see this computer (skipped without Podman) |
 | — | `packages/host/test/outputs.test.ts`, `peers.test.ts` (run outputs between devices): outputs published on a signed ref of each device's own, taken by the others (passed on only if signed by the device they came from, the newest kept), shown with where they ran, and cleared everywhere from any device; sent as they happen to devices with the document open, before any publish, believed only from the device that ran them, kept until its commit holds them, and cleared there at once; `link.test.ts`: never sent to a device whose kuraa does not open their channel |
+| — | `packages/host/test/sessions.test.ts`: one session per room and one leader (0077): a device leaving and coming back (its room warm, or closed) on either key, a commit or an outside edit arriving at a device that does not lead, the leader leaving while others type, a network split and its healing, the last device leaving; and three devices at random (`KURAA_SESSION_SEED`), each ending in one session, every room and file the same, every edit once; `seed.test.ts`: two sessions started apart would show the text twice |
 | M8 | `tests/e2e/desktop.spec.ts`: the Electron app opens a folder, edits and commits while other programs edit the folder and `git pull` into it; survives a reload; joins a shared host; the launcher initialises a plain folder and joins a host |
 | — | `tests/e2e/dev.spec.ts`: `pnpm dev` serves a working client with nothing to configure, and Ctrl+C commits pending edits |
 | — | `packages/host/test/settings.test.ts`, `tests/e2e/preferences.spec.ts`: one settings model in the hub (read leniently, saved strictly, flags winning), applied by reopening every workspace at the same address; the owner's features only on loopback; Settings and Open a folder… in the browser, through the folder picker |
@@ -714,8 +719,13 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 - The Windows and Linux packages have not yet been run on Windows or Linux; only the macOS one has
   been tested. On Windows the desktop app cannot serve its workspaces' git over HTTP (`git clone` from
   a host's `/git`): the git it ships has no `git-http-backend`.
-- Edits made while disconnected are kept and sent on reconnect. If the host reseeded the file in
-  the meantime (for example after its room cache was cleared), the client only warns.
+- Edits made while disconnected are kept and sent on reconnect; if the room's session ended
+  meanwhile, they are carried into the new one, but only while the page stays open: edits not sent
+  before the page was closed are not carried across a reload.
+- Edits not yet committed when the network parts are in both sides' rooms; where both sides then
+  edit the same paragraph beside them, the merge keeps a conflict block
+  ([0077](docs/decisions/0077-one-leader-per-room.md)). A device that does not lead a room renders
+  the file as last committed.
 - The corpus does not yet include real working files from the project's first users.
 - Symbolic links in a workspace are listed but never opened or followed, and files not saved as
   UTF-8 (a Latin-1 `.bib`) are not opened for editing ([decision 0037](docs/decisions/0037-host-safety.md)).

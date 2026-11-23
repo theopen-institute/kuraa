@@ -7,7 +7,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown as md } from '../../format-pandoc/src/index.js';
 import { carryOver } from '../../client/src/carry.js';
 import { applyDocument, trackAcknowledged } from '../src/acked.js';
-import { decodeDoc, encodeSeed, patchState } from '../src/server.js';
+import { decodeDoc, encodeDoc, patchState } from '../src/server.js';
 
 const NOTES = '# Day one\n\nThe tide was out.\n\nWe counted crabs.\n\n# Day two\n\nIt rained.\n';
 const SIDES: [{ by: string }, { by: string }] = [{ by: 'Bo' }, { by: 'Another device' }];
@@ -27,7 +27,7 @@ describe('edits the host had not acknowledged when their room was replaced', () 
   it('are known from the room as the host last had all of them, and carried into the new room once', () => {
     // Bo's client, in the old room: one edit the host has, one it has not.
     const old = new Y.Doc();
-    Y.applyUpdate(old, encodeSeed(md.parse(NOTES).doc, 1));
+    Y.applyUpdate(old, encodeDoc(md.parse(NOTES).doc));
     let unsynced = 0;
     const acked = trackAcknowledged(old, () => unsynced);
     expect(acked.unsent(md.schema)).toBeNull();
@@ -41,10 +41,10 @@ describe('edits the host had not acknowledged when their room was replaced', () 
     expect(md.serialize(carry.base)).not.toContain('Bo2');
     expect(md.serialize(carry.ours)).toContain('Bo2: We counted');
 
-    // The new room: another device's, from another seed, which the host merged Bo1 into, with an edit of its own.
+    // The new room: another session's, which the host merged Bo1 into, with an edit of its own.
     const next = new Y.Doc();
     const theirs = NOTES.replace('The tide', 'Bo1: The tide').replace('It rained', 'Ada: It rained');
-    Y.applyUpdate(next, patchState(encodeSeed(md.parse(NOTES.replace('It rained', 'Ada: It rained')).doc, 2), md.parse(theirs).doc));
+    Y.applyUpdate(next, patchState(encodeDoc(md.parse(NOTES.replace('It rained', 'Ada: It rained')).doc), md.parse(theirs).doc));
     const doc = carryOver(md, carry.base, carry.ours, read(next), SIDES);
     expect(doc).not.toBeNull();
     applyDocument(next, doc!);

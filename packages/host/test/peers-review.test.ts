@@ -338,7 +338,7 @@ describe('edits passed on in a room', () => {
       myKey: ME,
       mayWrite: (k: string) => k !== BARRED,
       mayReadSpace: () => true,
-      identity: { personOf: async (k: string) => ({ key: k, name: `person of ${k.slice(0, 1)}` }), emailsOf: async () => [] },
+      identity: { personOf: async (k: string) => ({ key: k, name: `person of ${k.slice(0, 1)}` }) },
     };
     const r = new Rooms(host as never, node as never);
     const forwarder = link(FORWARDER);

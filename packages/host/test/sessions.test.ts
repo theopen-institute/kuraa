@@ -44,8 +44,11 @@ afterEach(async () => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+/** How much longer to wait on a slow computer (KURAA_TEST_SLOW=2: twice as long). */
+const SLOW = Number(process.env.KURAA_TEST_SLOW ?? 1) || 1;
+
 async function until(cond: () => boolean | Promise<boolean>, ms = 20_000, what = 'condition'): Promise<void> {
-  const end = Date.now() + ms;
+  const end = Date.now() + ms * SLOW;
   while (Date.now() < end) {
     if (await cond()) return;
     await new Promise((r) => setTimeout(r, 50));
@@ -452,5 +455,5 @@ describe('one leader per session, at random (0077)', () => {
     for (const t of typed) expect(count(text, t), t).toBe(1);
     expect(count(text, 'Day one')).toBe(1);
     for (const o of outside) expect(count(text, o)).toBe(1);
-  }, 120_000);
+  }, 120_000 * SLOW);
 });

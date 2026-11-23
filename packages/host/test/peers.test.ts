@@ -56,8 +56,11 @@ afterEach(async () => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+/** How much longer to wait on a slow computer (KURAA_TEST_SLOW=2: twice as long). */
+const SLOW = Number(process.env.KURAA_TEST_SLOW ?? 1) || 1;
+
 async function until(cond: () => boolean | Promise<boolean>, ms = 15_000, what = 'condition'): Promise<void> {
-  const end = Date.now() + ms;
+  const end = Date.now() + ms * SLOW;
   while (Date.now() < end) {
     if (await cond()) return;
     await new Promise((r) => setTimeout(r, 50));
@@ -166,6 +169,13 @@ async function connect(h: RunningHost, user = ADA): Promise<HeadlessClient> {
   clients.push(c);
   await c.ready;
   return c;
+}
+
+/** A room replaced by another device's session of it (0077): followed, as the app does (Editor.vue, on reseeded). */
+async function follow(c: HeadlessClient, h: RunningHost, user: typeof ADA): Promise<HeadlessClient> {
+  if (!c.messages.some((m) => m.type === 'reseeded')) return c;
+  c.destroy();
+  return connect(h, user);
 }
 
 function insertAt(doc: PMNode, anchor: string, text: string): PMNode {
@@ -735,9 +745,11 @@ describe('equal members, and forks', () => {
     const b = await start(dirB, { person: bo });
     // A member's work comes in, with no rule to pass.
     expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'chapters/bo.md', content: '# Bo’s\n' }) })).status).toBe(201);
-    await until(() => existsSync(join(dirA, 'chapters', 'bo.md')), 15_000, 'Bo’s work on Ada’s device');
+    // In Ada's history, not only on her disk (a slow computer may show the file a moment before the branch moves).
+    const brought = () => git(dirA, 'log', '-1', '--format=%H', '--', 'chapters/bo.md');
+    await until(() => existsSync(join(dirA, 'chapters', 'bo.md')) && brought() !== '', 15_000, 'Bo’s work on Ada’s device');
     // Signed with Bo's key on his computer, which his identity vouched for: Ada's device names him (by his identity's ID).
-    const signer = await commitSigner(a.host.git, git(dirA, 'log', '-1', '--format=%H', '--', 'chapters/bo.md'));
+    const signer = await commitSigner(a.host.git, brought());
     expect(signer).toBe(signingKeys.get(dirB)!.publicKey.toString('hex'));
     await until(async () => (await a.host.peers!.status()).devices[0]?.person === 'Bo', 15_000, 'Bo named on Ada’s device');
     expect(await a.host.peers!.node.identity.personOf(signer!)).toEqual({ key: bo.id, name: 'Bo' });
@@ -806,11 +818,6 @@ describe('equal members, and forks', () => {
     const b2 = await start(dirB);
     const want = (t: string) => t.includes('The tide was far out.') && t.includes('It poured.') && t.includes('Live: We counted');
     // Either room may be replaced by the other's: follow it, as the app does.
-    const follow = async (c: HeadlessClient, h: RunningHost, user: typeof ADA) => {
-      if (!c.messages.some((m) => m.type === 'reseeded')) return c;
-      c.destroy();
-      return connect(h, user);
-    };
     let one = ada;
     let two = await connect(b2, BO);
     await until(async () => {
@@ -839,13 +846,21 @@ describe('a shared room and a third device', () => {
     // Cee edits apart (its host not running); Ada and Bo have the document open together.
     writeFileSync(join(dirC, 'notes.md'), NOTES.replace('We counted crabs.', 'We counted many crabs.'));
     git(dirC, 'commit', '-q', '-am', 'Cy, apart');
-    const ada = await connect(a, ADA);
-    const bo = await connect(b, BO);
+    let ada = await connect(a, ADA);
+    let bo = await connect(b, BO);
     ada.write(insertAt(ada.read(), 'It rained', 'Ada: '));
-    await until(() => bo.read().textContent.includes('Ada: '), 15_000, 'the shared room');
+    // Opened at once on both, the two may start a session each; one gives way to the other (0077): followed.
+    await until(async () => {
+      bo = await follow(bo, b, BO);
+      return bo.read().textContent.includes('Ada: ');
+    }, 15_000, 'the shared room');
     await start(dirC);
     const want = (t: string) => t.includes('We counted many crabs.') && t.includes('Ada: It rained');
-    await until(() => want(ada.read().textContent) && want(bo.read().textContent), 25_000, 'Cy’s edit in the room');
+    await until(async () => {
+      ada = await follow(ada, a, ADA);
+      bo = await follow(bo, b, BO);
+      return want(ada.read().textContent) && want(bo.read().textContent);
+    }, 25_000, 'Cy’s edit in the room');
     expect(ada.read().textContent.match(/many/g)).toHaveLength(1);
     expect(ada.read().eq(bo.read())).toBe(true);
     await until(() => want(file(dirA)) && file(dirA) === file(dirB) && file(dirB) === file(dirC) && head(dirA) === head(dirB) && head(dirB) === head(dirC), 25_000, 'all three the same');

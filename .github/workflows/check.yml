@@ -26,4 +26,7 @@ jobs:
       - run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
       - run: pnpm lint
       - run: pnpm typecheck
+      # The tests across devices wait twice as long here: a runner shared with others is slower than a laptop.
       - run: pnpm test
+        env:
+          KURAA_TEST_SLOW: '2'

@@ -1,5 +1,7 @@
 # 0075 · What a review of security, the network and the data found, and what changed
 
+*Since [0078](0078-restrictive-wins.md):* legacy geneses and seals count for nothing: a workspace from before is worked out the one last time and founded again by its owner. There are no attestations to expire.
+
 > Changes how the policy counts geneses, seals and joins ([docs/policy.md](../policy.md),
 > [0066](0066-permissions-without-a-centre.md), [0072](0072-ranks-devices-and-changes-not-kept.md)),
 > how rooms start again from a changed file ([0027](0027-room-seeds.md), [0057](0057-opening-files-quickly.md)),

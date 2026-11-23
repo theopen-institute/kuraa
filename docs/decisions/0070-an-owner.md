@@ -1,5 +1,7 @@
 # 0070 · An owner, above the admins
 
+*Since [0078](0078-restrictive-wins.md):* a workspace from before has as its owner whoever founds it again (its legacy owner, the sealer; with none, an admin); no seal counts. Trustees are gone: losing the owner's identity is what its recovery key is for.
+
 > Changes who makes admins in [0066](0066-permissions-without-a-centre.md) (step 2: every admin had
 > full control) and who removes an admin's computers ([0068](0068-people-and-their-computers.md)).
 > Everything else admins do is as before.

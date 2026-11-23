@@ -15,10 +15,10 @@
 //   link this device joined by: .git/kuraa/joined-link.
 // - Every record, signed by the device that made it: .git/kuraa/records.json
 //   (records.ts). The config above is what the records this device took say, applied.
-// - A workspace from before policies: the legacy geneses this device holds as its
-//   own, and the seal it keeps to (policy.ts): .git/kuraa/legacy.json.
+// - A workspace from before policies, until it is founded again (legacy.ts,
+//   0078): the last working out of its legacy policy here, .git/kuraa/legacy-last.json.
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -26,8 +26,8 @@ import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
-import type { Attestation } from './attest.js';
-import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
+import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyEntry, type PolicyOp, type Role } from './policy.js';
+import { evaluateLegacy, frozenPolicy, mayRefound, type LegacySnapshot } from './legacy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
@@ -85,11 +85,11 @@ export function remoteName(name: string): string {
   return !clean ? 'device' : reservedName(clean) ? `${clean}-device` : clean;
 }
 
-/** A workspace from before policies (policy.ts): the legacy geneses a device holds as its own, and the seal it keeps to. */
-interface LegacyState { geneses: string[]; seal: string | null }
-
-/** The legacy geneses among records. */
+/** The legacy geneses among records (a workspace from before policies: legacy.ts). */
 const legacyGeneses = (list: MemberRecord[]) => list.filter((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.op.legacy).map((r) => r.subject);
+
+/** Said where a workspace from before 0066 is asked to change its policy before it is founded again (0078). */
+export const REFOUND_FIRST = 'This workspace is from before policies were pinned to a genesis: its owner (or, where it has none, an admin) must found it again first';
 
 export class Identity {
   /** Changes to the members, one at a time (a device may be paired by two routes at once). */
@@ -278,7 +278,7 @@ export class Identity {
     const ws = await this.workspace();
     const before = await this.getAll('kuraa.removed');
     // Worked out once for the same records: asked for at every hello.
-    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${(await this.pin()) ?? ''}\0${JSON.stringify(await this.legacy())}\0${before.join(',')}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${(await this.pin()) ?? ''}\0${await this.stamp(this.legacyFile)}\0${before.join(',')}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
     if (this.devicesMemo?.key === key) return this.devicesMemo.value;
     const value = this.devicesBy(records, await this.policy(records), ws?.id ?? '', new Set(before));
     this.devicesMemo = { key, value };
@@ -310,21 +310,17 @@ export class Identity {
    * a device joining, which holds none yet, to tell whether the device letting
    * it in is one, under the genesis its link names.
    */
-  async devicesIn(list: unknown[], workspace: string, issuer?: string): Promise<Set<string>> {
+  async devicesIn(list: unknown[], workspace: string): Promise<Set<string>> {
     const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
-    // A workspace from before: the legacy geneses its link's maker's person signed are where the joining device
-    // starts from (with those their admins signed); where it signed none, all of them, as before.
-    const w = this.who(records);
-    const by = issuer ? w.personOf.get(w.signsWith.get(issuer) ?? '')?.key : undefined;
-    const legacy = records.filter((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.op.legacy && !!by && w.personOf.get(r.signer!)?.key === by).map((r) => r.subject);
-    const policy = await this.evaluatePolicy(records, workspace, await this.pin(), legacy.length ? { geneses: legacy, seal: null } : null);
+    // Under the genesis the link names (a workspace from before has none: it is founded again first, 0078).
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
     if (!policy.founded) return new Set();
     return new Set(this.devicesBy(records, policy, workspace, new Set()).in.keys());
   }
 
   /**
    * The records about one device (0072): the key it signs with, that key
-   * vouched for, its person's key events and attestations, and the policy
+   * vouched for, its person's key events, and the policy
    * operations that key signed. What a device not known to be in shows, and all
    * that is taken of it.
    */
@@ -335,9 +331,8 @@ export class Identity {
     const vouches = list.filter((r) => r.kind === 'vouch' && r.subject === key);
     const persons = new Set(vouches.map((r) => r.person));
     const events = list.filter((r) => r.kind === 'key-event' && persons.has(r.subject));
-    const attestations = list.filter((r) => r.kind === 'attest' && persons.has(r.subject));
     const ops = list.filter((r) => r.kind === 'policy' && r.signer === key);
-    return [signs, ...vouches, ...events, ...attestations, ...ops];
+    return [signs, ...vouches, ...events, ...ops];
   }
 
   /** The records that show this device to be in (0072), for a device that may not know yet. */
@@ -360,7 +355,7 @@ export class Identity {
     const mine = this.about(device, [...have, ...sent]).filter((r) => !known.has(r.sig));
     if (!mine.length) return [];
     const all = [...have, ...mine];
-    const policy = await this.evaluatePolicy(all, ws.id, await this.pin(), await this.legacy());
+    const policy = await this.evaluatePolicy(all, ws.id, await this.pin());
     if (!this.devicesBy(all, policy, ws.id, new Set(await this.getAll('kuraa.removed'))).in.has(device)) return [];
     const counted = new Set(policy.applied);
     return mine.filter((r) => r.kind !== 'policy' || counted.has(r.subject));
@@ -373,7 +368,7 @@ export class Identity {
    */
   async devicesOf(workspace: string): Promise<Set<string>> {
     const records = (await this.records()).filter((r) => r.workspace === workspace);
-    const policy = await this.evaluatePolicy(records, workspace, await this.pin(), null);
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
     return new Set(this.devicesBy(records, policy, workspace, new Set(await this.getAll('kuraa.removed'))).in.keys());
   }
 
@@ -495,7 +490,6 @@ export class Identity {
     // An event of a person's identity, or a policy operation, once, whoever passed it on.
     if (r.kind === 'key-event' && list.some((x) => x.kind === r.kind && x.event && eventHash(x.event) === eventHash(r.event!))) return false;
     if (r.kind === 'policy' && list.some((x) => x.kind === r.kind && x.subject === r.subject)) return false;
-    if (r.kind === 'attest' && list.some((x) => x.kind === r.kind && x.attestation?.sig === r.attestation?.sig)) return false;
     // What a person says about a key, once, whoever passed it on (a vouch: the latest): once for
     // each of their identity's keys, so what a key no longer theirs signs never pushes out what theirs did.
     if (byPerson(r.kind)) {
@@ -528,20 +522,9 @@ export class Identity {
 
   private identitiesOf(list: MemberRecord[]): Map<string, IdentityState> {
     const events = list.filter((r) => r.kind === 'key-event').map((r) => r.event!);
-    const ids = new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject));
-    // First each log by its own keys; then again, a trustee rotation judged by its trustees' keys as those say (step 6).
-    const plain = new Map<string, IdentityState>();
-    for (const id of ids) {
-      const state = resolve(events, id);
-      if (state) plain.set(id, state);
-    }
-    const trusteeKey = (id: string) => {
-      const t = plain.get(id);
-      return t && !t.disputed ? t.current : null;
-    };
     const out = new Map<string, IdentityState>();
-    for (const id of ids) {
-      const state = resolve(events, id, { trusteeKey });
+    for (const id of new Set(list.filter((r) => r.kind === 'key-event').map((r) => r.subject))) {
+      const state = resolve(events, id);
       if (state) out.set(id, state);
     }
     return out;
@@ -751,61 +734,120 @@ export class Identity {
     await this.write(['config', 'kuraa.genesis', genesis]);
   }
 
+  /** Where a workspace from before 0066 keeps the last working out of its legacy policy (legacy.ts). */
   private get legacyFile(): string {
-    return join(this.stateDir, 'legacy.json');
+    return join(this.stateDir, 'legacy-last.json');
   }
 
-  private legacyCache: { stamp: string; value: LegacyState } | null = null;
+  private legacyCache: { stamp: string; value: LegacySnapshot } | null = null;
 
   /**
-   * A workspace from before (no pin): the legacy geneses this device holds as
-   * its own, and the seal it keeps to (policy.ts, docs/policy.md). The first
-   * time it is asked, those it holds then (its own, and those its devices had
-   * passed on to each other, before any stranger could bring one). Null for a
-   * workspace pinned to its genesis.
+   * A workspace from before 0066 (no pin), until it is founded again (0078):
+   * the last working out of its legacy policy on this device. Made once, the
+   * first time it is asked, from the records held then and the legacy geneses
+   * and seal this device kept to (legacy.json, then removed), and kept. Null
+   * for a workspace pinned to its genesis.
    */
-  private async legacy(): Promise<LegacyState | null> {
+  async legacySnapshot(): Promise<LegacySnapshot | null> {
     if (await this.pin()) return null;
     const ws = await this.workspace();
     if (!ws) return null;
     const stamp = await this.stamp(this.legacyFile);
     if (stamp && this.legacyCache?.stamp === stamp) return this.legacyCache.value;
     try {
-      const v = JSON.parse(await readFile(this.legacyFile, 'utf8')) as { geneses?: unknown; seal?: unknown };
-      const hex = (x: unknown): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
-      const value: LegacyState = { geneses: Array.isArray(v.geneses) ? v.geneses.filter(hex) : [], seal: hex(v.seal) ? v.seal : null };
-      this.legacyCache = { stamp, value };
-      return value;
-    } catch {
-      const records = this.pending?.list ?? (await this.records());
-      return this.writeLegacy({ geneses: legacyGeneses(records.filter((r) => r.workspace === ws.id)), seal: null });
-    }
-  }
-
-  private async writeLegacy(value: LegacyState): Promise<LegacyState> {
+      const value = JSON.parse(await readFile(this.legacyFile, 'utf8')) as LegacySnapshot;
+      if (value && typeof value === 'object' && Array.isArray(value.geneses) && value.groups && typeof value.groups === 'object') {
+        this.legacyCache = { stamp, value };
+        return value;
+      }
+    } catch { /* not made yet */ }
+    const records = (this.pending?.list ?? (await this.records())).filter((r) => r.workspace === ws.id);
+    const isHex = (x: unknown): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+    let held = null as { geneses?: unknown; seal?: unknown } | null;
+    try {
+      held = JSON.parse(await readFile(join(this.stateDir, 'legacy.json'), 'utf8')) as typeof held;
+    } catch { /* never worked out so: those it holds now are its own, as they were then */ }
+    const w = this.who(records);
+    const value = evaluateLegacy(records.filter((r) => r.kind === 'policy').map(policyEntry), {
+      workspace: ws.id,
+      legacy: Array.isArray(held?.geneses) ? held.geneses.filter(isHex) : legacyGeneses(records),
+      seal: isHex(held?.seal) ? held.seal : null,
+      personOf: (key: string) => (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null,
+      cutKey: (key: string) => (w.personOf.has(key) ? undefined : w.cut.get(key)),
+    });
     await mkdir(this.stateDir, { recursive: true });
     await writeWhole(this.legacyFile, JSON.stringify(value));
+    await rm(join(this.stateDir, 'legacy.json'), { force: true });
     this.legacyCache = { stamp: await this.stamp(this.legacyFile), value };
     return value;
   }
 
+  /** Whether a person may found this workspace again (0078): one from before, as this device's last legacy policy has it (legacy.ts, mayRefound). */
+  async mayRefound(person: string | null): Promise<boolean> {
+    const snap = await this.legacySnapshot();
+    return !!snap && mayRefound(snap, person);
+  }
+
   /**
-   * A workspace from before, once records came or were made: a device welcomed
-   * holding no legacy genesis of its own takes those it was welcomed with as its
-   * own; a legacy genesis this device made is its own; and once a seal counts, the
-   * device keeps to it (no seal made after, by anyone, counts here).
+   * Found a workspace from before 0066 again (0078), as its owner (or, where it
+   * has none, one of its admins; with no policy at all, anyone in it): a new
+   * genesis naming this person, its owner, pinned here; then everyone as this
+   * device's last legacy policy had them (admins, members, groups), its
+   * permissions and spaces, its computers dropped and people taken out (with
+   * their cutoffs), each an operation of this person's. The others take the
+   * genesis as they hold it, if their own last legacy policy lets this person.
    */
-  private async settleLegacy(o: { welcomed?: MemberRecord[]; made?: string } = {}): Promise<void> {
-    let state = await this.legacy();
-    if (!state) return;
-    const before = JSON.stringify(state);
-    if (!state.geneses.length && o.welcomed?.length) state = { ...state, geneses: legacyGeneses(o.welcomed) };
-    if (o.made && !state.geneses.includes(o.made)) state = { ...state, geneses: [...state.geneses, o.made] };
-    if (JSON.stringify(state) !== before) await this.writeLegacy(state);
-    if (!state.seal) {
-      const sealed = (await this.policy()).sealId;
-      if (sealed) await this.writeLegacy({ ...state, seal: sealed });
+  async refound(person: string, key: KeyPair): Promise<string> {
+    const ws = await this.workspace();
+    if (!ws) throw new Error('This repository is not a workspace shared between devices');
+    if (await this.pin()) throw new Error('This workspace is founded already');
+    const snap = await this.legacySnapshot();
+    if (!snap || !mayRefound(snap, person)) throw new Error(snap?.owner ? 'Only the workspace’s owner can found it again' : 'Only an admin of this workspace can found it again');
+    // Who this signing key is must be said here first.
+    if (this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key !== person) throw new Error('This computer’s key is not yet said to be yours here');
+    const genesis = await this.makePolicy({ t: 'genesis', admins: [person], legacy: false }, key);
+    await this.setPin(genesis);
+    const make = (op: PolicyOp) => this.makePolicy(op, key);
+    const groups = Object.entries(snap.groups);
+    for (const [g, entries] of [...groups.filter(([name]) => name === WORKSPACE), ...groups.filter(([name]) => name !== WORKSPACE)]) {
+      for (const [who, role] of Object.entries(entries).sort()) if (who !== person || g !== WORKSPACE) await make({ t: 'grant', group: g, who, role });
     }
+    for (const [path, perm] of Object.entries(snap.perms).sort()) await make({ t: 'perm', path, ...perm });
+    for (const [id, s] of Object.entries(snap.spaces).sort()) {
+      // A space is made by someone it holds: made for this person first where it does not, then given its audience.
+      if (!s.audience.includes(person) && !s.audience.includes('admins')) await make({ t: 'space', id, audience: [person] });
+      await make({ t: 'space', id, audience: s.audience });
+    }
+    for (const [dropped, cutoff] of Object.entries(snap.dropped).sort()) await make({ t: 'drop', key: dropped, cutoff: [...cutoff].sort() });
+    // People taken out stay out, with what they had made that still counts.
+    for (const [who, cutoff] of Object.entries(snap.cutoffs).sort()) {
+      if (who === person) continue;
+      await make({ t: 'grant', group: WORKSPACE, who, role: 'member' });
+      await make({ t: 'revoke', group: WORKSPACE, who, cutoff: [...cutoff].sort() });
+    }
+    return genesis;
+  }
+
+  /**
+   * A workspace from before 0066 (no pin): pinned to a genesis that founds it
+   * again, once one is here signed by whom this device's last legacy policy
+   * lets (its owner; with none, an admin), naming that person; the lowest, if
+   * more than one. Whether it was.
+   */
+  private async adoptRefounding(): Promise<boolean> {
+    const snap = await this.legacySnapshot();
+    const ws = await this.workspace();
+    if (!snap || !ws) return false;
+    const records = await this.records();
+    const w = this.who(records);
+    const found = records.filter((r) => {
+      if (r.kind !== 'policy' || r.workspace !== ws.id || r.op?.t !== 'genesis' || r.op.legacy) return false;
+      const by = w.personOf.get(r.signer!)?.key ?? null;
+      return r.op.admins.length === 1 && r.op.admins[0] === by && mayRefound(snap, by);
+    }).map((r) => r.subject).sort();
+    if (!found.length) return false;
+    await this.setPin(found[0]!);
+    return true;
   }
 
   /** The workspace's policy, as the operations on record make it. */
@@ -813,12 +855,11 @@ export class Identity {
     const records = list ?? (await this.records());
     const ws = await this.workspace();
     const pin = await this.pin();
-    const legacy = await this.legacy();
     // Worked out once for the same records (0071): it is asked for often, and costs more the more there are.
-    // Nothing in it depends on this computer's clock (attestations expire by their verifier's: claims).
-    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${JSON.stringify(legacy)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    // Nothing in it depends on this computer's clock.
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${pin ? '' : await this.stamp(this.legacyFile)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
     if (this.policyMemo?.key === key) return this.policyMemo.policy;
-    const policy = this.evaluatePolicy(records, ws?.id ?? '', pin, legacy);
+    const policy = this.evaluatePolicy(records, ws?.id ?? '', pin);
     this.policyMemo = { key, policy };
     policy.catch(() => {
       if (this.policyMemo?.policy === policy) this.policyMemo = null;
@@ -828,55 +869,42 @@ export class Identity {
 
   private policyMemo: { key: string; policy: Promise<Policy> } | null = null;
 
-  private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null, legacy: LegacyState | null): Promise<Policy> {
+  /**
+   * The policy records make under a genesis. A workspace from before 0066 (none
+   * pinned): the policy its last legacy working out here made, as it was,
+   * nothing new counting, until it is founded again (legacy.ts).
+   */
+  private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null): Promise<Policy> {
+    if (!pin) {
+      const snap = workspace && workspace === (await this.workspace())?.id ? await this.legacySnapshot() : null;
+      return snap ? frozenPolicy(snap, workspace) : evaluate([], { workspace, pin: null, personOf: () => null });
+    }
     const w = this.who(records);
     const entries = records.filter((r) => r.kind === 'policy' && r.workspace === workspace).map(policyEntry);
     // A key its person revoked (or left behind recovering) is still theirs for what it signed before (0072).
-    const ctx = {
+    return evaluate(entries, {
       workspace,
       pin,
-      ...(legacy ? { legacy: legacy.geneses, seal: legacy.seal } : {}),
       personOf: (key: string) => (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null,
       cutKey: (key: string) => (w.personOf.has(key) ? undefined : w.cut.get(key)),
-    };
-    const base = evaluate(entries, ctx);
-    if (!base.verifiers.size) return base;
-    // Then again, with the emails attested by the verifiers it counts (step 6).
-    const claims = this.claims(records, base.verifiers);
-    return evaluate(entries, { ...ctx, claimsOf: (id) => [...(claims.get(id) ?? [])], claimed: new Set([...claims.values()].flatMap((c) => [...c])) });
+    });
   }
 
-  /**
-   * The emails attested of each person, by the verifiers given, unexpired. Not
-   * by this computer's clock, which devices would read differently, but by the
-   * verifier's: an attestation has expired once one the same verifier made
-   * after it ran out is on record. Every device holding the same records
-   * counts the same ones.
-   */
-  private claims(records: MemberRecord[], verifiers: Map<string, string>): Map<string, Set<string>> {
-    const latest = new Map<string, number>();
-    for (const r of records) if (r.kind === 'attest' && r.attestation) latest.set(r.attestation.verifier, Math.max(latest.get(r.attestation.verifier) ?? 0, r.attestation.at));
-    const out = new Map<string, Set<string>>();
-    for (const r of records) {
-      const a = r.attestation;
-      if (r.kind !== 'attest' || !a || !verifiers.has(a.verifier) || a.expires <= latest.get(a.verifier)!) continue;
-      out.set(a.id, (out.get(a.id) ?? new Set()).add(a.claim.slice(6)));
-    }
-    return out;
+  /** The policy operations on record in this workspace, by ID. */
+  async policyEntries(): Promise<Map<string, PolicyEntry>> {
+    const ws = await this.workspace();
+    return new Map((await this.records()).filter((r) => r.kind === 'policy' && r.workspace === ws?.id).map((r) => [r.subject, policyEntry(r)]));
   }
 
-  /** The emails attested of a person that count in this workspace (by its verifiers). */
-  async emailsOf(id: string): Promise<string[]> {
-    const records = await this.records();
-    const policy = await this.policy(records);
-    return [...(this.claims(records, policy.verifiers).get(id) ?? [])].sort();
+  /** The person a signing key is or was (a key revoked, for its past word), as the records say; null if no one's. */
+  async personOfKey(key: string): Promise<string | null> {
+    const w = this.who(await this.records());
+    return (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null;
   }
 
-  /** Put an attestation of this person on record here, if it is not (step 6). */
-  async publishAttestation(a: Attestation): Promise<void> {
-    if (!(await this.workspace())) return;
-    if ((await this.records()).some((r) => r.kind === 'attest' && r.attestation?.sig === a.sig)) return;
-    await this.decide('attest', a.id, { attestation: a });
+  /** No email is checked since 0078: none, for whoever asks (rooms.ts names co-authors by their name alone). */
+  async emailsOf(_id: string): Promise<string[]> {
+    return [];
   }
 
   /**
@@ -938,13 +966,13 @@ export class Identity {
   /**
    * A change to the policy that only an admin may make (`group`'s, or the
    * workspace's): refused here first if this person may not, and checked after.
-   * In a workspace from before, the first seals its legacy geneses, so none
-   * made later counts.
+   * A workspace from before 0066 is founded again first (0078).
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' | 'witness' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' | 'witness' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
+    if (!(await this.pin())) throw new Error(REFOUND_FIRST);
     // The owner's (0070): giving the role; making, unmaking or taking out admins; the owner is never made a member or taken out.
     if (op.t === 'owner' && !policy.isOwner(me)) throw new Error('Only the owner gives the owner’s role');
     if ((op.t === 'grant' || op.t === 'revoke') && op.group === WORKSPACE) {
@@ -956,16 +984,38 @@ export class Identity {
     }
     if (op.t === 'owner') {
       // Checked above.
-    } else if (op.t === 'rule' || op.t === 'verifier' || op.t === 'perm' || op.t === 'witness') {
-      if (!policy.isAdmin(me)) throw new Error(op.t === 'rule' ? 'Only an admin of this workspace can say who may change what' : op.t === 'witness' ? 'Only an admin of this workspace names its witnesses' : 'Only an admin of this workspace can say whose checks count here');
+    } else if (op.t === 'rule' || op.t === 'perm' || op.t === 'witness') {
+      if (!policy.isAdmin(me)) throw new Error(op.t === 'witness' ? 'Only an admin of this workspace names its witnesses' : 'Only an admin of this workspace can say who may change what');
     } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
       throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
     }
-    if (!(await this.pin()) && !policy.sealed) await this.makePolicy({ t: 'seal', geneses: policy.geneses }, key);
     const id = await this.makePolicy(op, key);
-    if (!(await this.policy()).applied.includes(id)) {
-      throw new Error(op.t === 'revoke' && op.group === WORKSPACE ? 'The workspace needs an admin: make someone else one first' : 'That change is not allowed');
-    }
+    if (!(await this.policy()).applied.includes(id)) throw new Error('That change is not allowed');
+  }
+
+  /**
+   * Make again, on purpose, an operation that lost a clash (0078): the same
+   * change, as this person's, after everything this device holds (so after
+   * both), with the commits this device has (`tips`) as a removal's cutoff. A
+   * join, which only its maker makes, is made again as a grant of the same place.
+   * Refused if this person may not make it now; checked after.
+   */
+  async redo(op: string, key: KeyPair, tips: string[]): Promise<void> {
+    if (!(await this.pin())) throw new Error(REFOUND_FIRST);
+    const records = await this.records();
+    const r = records.find((x) => x.kind === 'policy' && x.subject === op);
+    const was = r?.op;
+    if (!r || !was) throw new Error('No such change');
+    const by = this.who(records).personOf.get(r.signer!)?.key ?? null;
+    const cutoff = [...new Set(tips)].sort();
+    const again: PolicyOp = was.t === 'join' ? { t: 'grant', group: was.group, who: by ?? '', role: was.role }
+      : was.t === 'revoke' ? { ...was, cutoff }
+        : was.t === 'drop' ? { ...was, cutoff }
+          : was;
+    if (again.t === 'grant' && !again.who) throw new Error('Whose that change was is not known here');
+    if (['genesis', 'seal', 'verifier', 'admit'].includes(again.t)) throw new Error('That change is not one to make again');
+    const made = await this.makePolicy(again, key);
+    if (!(await this.policy()).counted.has(made)) throw new Error('You may not make that change');
   }
 
   /**
@@ -1027,32 +1077,20 @@ export class Identity {
 
   /** Make a space, or change who reads it (0066): checked after, as the policy judges it. */
   async makeSpace(id: string, audience: string[], key: KeyPair): Promise<void> {
+    if (!(await this.pin())) throw new Error(REFOUND_FIRST);
     const op: PolicyOp = { t: 'space', id, audience: [...new Set(audience)].sort() };
     const made = await this.makePolicy(op, key);
     if (!(await this.policy()).applied.includes(made)) throw new Error('That audience is not one you may make');
   }
 
   /**
-   * Write the policy down if there is none: for a workspace just made (`fresh`),
-   * its genesis, naming this person its admin, pinned; for one from before, a
-   * legacy genesis naming everyone this device knows of as admins (everyone has
-   * the same say there, as before: 0038), which counts with the others' until an
-   * admin seals them. A person whose key is not yet vouched for here writes none.
+   * Write the policy down for a workspace just made (`fresh`): its genesis,
+   * naming this person its owner, pinned. One from before 0066 is founded again
+   * by whoever may (refound), never on its own: each device would found its own.
    */
   async ensureGenesis(person: string, key: KeyPair, fresh: boolean): Promise<void> {
-    if (!(await this.workspace())) return;
-    if (await this.pin()) return;
-    if (fresh) {
-      await this.setPin(await this.makePolicy({ t: 'genesis', admins: [person], legacy: false }, key));
-      return;
-    }
-    const records = await this.records();
-    const policy = await this.policy(records);
-    const self = (await this.deviceKey()).publicKey.toString('hex');
-    if (policy.founded || records.some((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.by === self)) return;
-    const people = new Set([person, ...(await this.people()).map((p) => p.key)]);
-    // This device's own: it counts here, and with the others' wherever they hold its maker an admin (policy.ts).
-    await this.settleLegacy({ made: await this.makePolicy({ t: 'genesis', admins: [...people].sort(), legacy: true }, key) });
+    if (!fresh || !(await this.workspace()) || (await this.pin())) return;
+    await this.setPin(await this.makePolicy({ t: 'genesis', admins: [person], legacy: false }, key));
   }
 
   /** What this device knows, to judge a record by. */
@@ -1074,6 +1112,7 @@ export class Identity {
    * person's to do, or an admin's (the owner's, for an admin's computer).
    */
   async dropKey(target: string, cutoff: string[], key: KeyPair): Promise<void> {
+    if (!(await this.pin())) throw new Error(REFOUND_FIRST);
     const made = await this.makePolicy({ t: 'drop', key: target, cutoff: [...new Set(cutoff)].sort() }, key);
     if (!(await this.policy()).applied.includes(made)) throw new Error('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
   }
@@ -1180,7 +1219,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; policyHeads?: string[]; attestation?: Attestation; topic?: string; expires?: number; at?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; policyHeads?: string[]; topic?: string; expires?: number; at?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
@@ -1189,7 +1228,6 @@ export class Identity {
       await this.keepRecord(r);
       await this.applyOrLater(r, { rethrow: true });
       await this.syncRemotesOrLater();
-      if (kind === 'policy') await this.settleLegacy();
       return r;
     });
   }
@@ -1199,12 +1237,12 @@ export class Identity {
    * no more can be (one taken may make another's maker known to be in).
    * Returns those taken.
    */
-  takeRecords(list: unknown[], o: { welcomed?: boolean } = {}): Promise<MemberRecord[]> {
+  takeRecords(list: unknown[]): Promise<MemberRecord[]> {
     return this.serial(async () => {
       // Kept all at once, written down once (not the whole file again for each).
       const taken = await this.batch(() => this.takeNow(list));
-      // A workspace from before: the legacy geneses of the device that welcomed this one; the seal it keeps to (settleLegacy).
-      if (taken.some((r) => r.kind === 'policy')) await this.settleLegacy(o.welcomed ? { welcomed: taken } : {});
+      // A workspace from before 0066: pinned to the genesis that founds it again, once that is here (0078).
+      if (taken.some((r) => r.kind === 'policy' && r.op?.t === 'genesis') && !(await this.pin()) && (await this.adoptRefounding())) await this.syncRemotesOrLater();
       return taken;
     });
   }
@@ -1278,6 +1316,7 @@ export class Identity {
     const issuer = key.publicKey.toString('hex');
     let granted: LinkGrant | undefined;
     if (policy.founded) {
+      if (!(await this.pin())) throw new Error(REFOUND_FIRST);
       if (!grant) throw new Error('Only a person can invite to this workspace: this computer has no identity');
       const group = grant.group ?? WORKSPACE;
       const role = grant.role ?? 'member';
@@ -1312,6 +1351,7 @@ export class Identity {
   async refuseGrant(l: InviteLink): Promise<string | null> {
     const policy = await this.policy();
     if (!policy.founded) return null;
+    if (!(await this.pin())) return 'the workspace must be founded again first (it is from before policies were pinned)';
     const g = l.grant;
     if (!g) return 'the link was made by an older kuraa: ask for a new one';
     if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
@@ -1376,7 +1416,7 @@ export class Identity {
   /** Unlink a link in the policy (policy.ts), if this person may (an admin of its group) and it is not already. */
   private async unlink(id: string, key: KeyPair): Promise<void> {
     const policy = await this.policy();
-    if (!policy.founded || policy.unlinked.has(id)) return;
+    if (!policy.founded || !(await this.pin()) || policy.unlinked.has(id)) return;
     const records = await this.records();
     const me = this.who(records).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     // Its group: as this device made it, or as the joins by it say; else the workspace.
@@ -1394,7 +1434,7 @@ export class Identity {
    * grants then let no one in, whoever holds them.
    */
   async unlinkStale(key: KeyPair, now = Date.now()): Promise<void> {
-    if (!(await this.workspace()) || !(await this.policy()).founded) return;
+    if (!(await this.workspace()) || !(await this.pin()) || !(await this.policy()).founded) return;
     const records = await this.records();
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const used = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject));
@@ -1409,7 +1449,7 @@ export class Identity {
    * `signer`: the key their join is signed with.
    */
   async admit(link: string, signer: string, key: KeyPair): Promise<void> {
-    if (!/^[0-9a-f]{64}$/.test(signer) || !(await this.policy()).founded) return;
+    if (!/^[0-9a-f]{64}$/.test(signer) || !(await this.pin()) || !(await this.policy()).founded) return;
     await this.makePolicy({ t: 'admit', link, key: signer }, key);
   }
 

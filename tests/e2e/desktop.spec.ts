@@ -477,10 +477,10 @@ test('you on this computer: made from your name, said in each workspace that syn
     expect(JSON.parse(readFileSync(elsewhere, 'utf8')).publicKey).toBe(JSON.parse(readFileSync(person, 'utf8')).publicKey);
     await page.getByTestId('subpanel-back').click();
     await expect(key.getByTestId('you-here')).toContainText('You on this computer: Desk Top');
-    // Account recovery: the recovery key, and trustees.
+    // Account recovery: the recovery key alone (0078: no trustees, escrow or email checks).
     await page.getByTestId('open-recovery').click();
     await expect(page.getByTestId('subpanel-title')).toHaveText('Account recovery');
-    await expect(page.getByTestId('trustees')).toBeVisible();
+    await expect(page.getByTestId('trustees')).toHaveCount(0);
     // The first computer is stolen: recovered here with the recovery key, the identity keeps its ID, with a new key.
     const before = JSON.parse(readFileSync(elsewhere, 'utf8')) as { id: string; publicKey: string };
     await key.getByTestId('recover-line').fill(recovery);

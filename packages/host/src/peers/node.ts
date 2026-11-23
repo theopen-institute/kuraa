@@ -16,7 +16,7 @@ import { writeAllowedSigners } from '../signing.js';
 import type { Policy } from './policy.js';
 import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
-import { attestations, attestationsFile, createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
+import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
 import { stat } from 'node:fs/promises';
 import { pipeline, type Duplex } from 'node:stream';
@@ -1041,12 +1041,7 @@ export class PeerNode {
       const st = await stat(revokedFile());
       revokedStamp = `${st.mtimeMs}:${st.size}`;
     } catch { /* none */ }
-    let attestStamp = '';
-    try {
-      const st = await stat(attestationsFile());
-      attestStamp = `${st.mtimeMs}:${st.size}`;
-    } catch { /* none */ }
-    const said = `${key.publicKey.toString('hex')}:${person ? `${person.publicKey.toString('hex')}:${person.name}` : ''}:${revokedStamp}:${attestStamp}`;
+    const said = `${key.publicKey.toString('hex')}:${person ? `${person.publicKey.toString('hex')}:${person.name}` : ''}:${revokedStamp}`;
     if (said === this.saidFor) return false;
     await this.identity.signsWith(key);
     // An identity recovered on another computer since it was copied here (0066): its key here no
@@ -1060,8 +1055,6 @@ export class PeerNode {
       const heads = await this.branchTips();
       // Revocations kept before identities had logs were signed by the identity's first key.
       for (const r of await revokedKeys()) await this.identity.revokeKey(person.id, r.by ?? person.events[0]!.key, r.key, r.proof, heads);
-      // What verifiers attested of them (their emails, step 6): each workspace counts those of its verifiers.
-      if (this.o.person === undefined) for (const a of await attestations()) if (a.id === person.id) await this.identity.publishAttestation(a);
       // Keys no longer theirs since their identity was recovered: revoked here too, for their cutoff.
       for (const k of await this.identity.droppedKeys(person.id)) {
         await this.identity.revokeKey(person.id, person.publicKey.toString('hex'), k, crypto.sign(revokeKeyMessage(k), person.secretKey).toString('hex'), heads);
@@ -1465,7 +1458,7 @@ export class PeerNode {
       if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
       const l = decodeLink(t);
       // In the workspace, as the policy the link's genesis roots says (0072): someone who only knows its secret is not.
-      const known = await this.identity.devicesIn(records, this.ws.id, l.issuer.key);
+      const known = await this.identity.devicesIn(records, this.ws.id);
       known.add(l.issuer.key);
       if (!known.has(link.key)) {
         this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
@@ -1494,7 +1487,7 @@ export class PeerNode {
       this.saidFor = '';
       await this.syncPerson();
     }
-    await this.takeRecords(link, records, { welcomed: true });
+    await this.takeRecords(link, records);
     // Let in by a link that puts this person in a group: said in the policy (0066).
     const person = await this.person();
     if (person && this.o.ticket) {
@@ -1544,9 +1537,9 @@ export class PeerNode {
   }
 
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */
-  private async takeRecords(link: PeerLink, records: unknown[], o: { welcomed?: boolean } = {}): Promise<void> {
+  private async takeRecords(link: PeerLink, records: unknown[]): Promise<void> {
     const before = new Set((await this.identity.members()).map((m) => m.key));
-    const taken = await this.identity.takeRecords(records, o);
+    const taken = await this.identity.takeRecords(records);
     if (!taken.length) return;
     // Out (0072): dropped, its key revoked, or its person taken out.
     const removed = new Set(await this.identity.removed());

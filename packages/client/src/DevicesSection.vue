@@ -149,7 +149,7 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
     <ul v-if="info.people?.founded" class="menu-people" data-testid="people">
       <li v-for="p in info.people.people" :key="p.id" class="person-block" :data-testid="`person:${nameOf(p)}`">
         <div class="person-line">
-          <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template><span v-if="p.emails?.length" class="muted"> · {{ p.emails.join(', ') }}</span></span>
+          <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template></span>
           <span class="device-tag" :title="p.role === 'owner' ? S.people.ownerTitle : p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'owner' ? S.people.owner : p.role === 'admin' ? S.people.admin : S.people.member }}</span>
           <span v-if="info.people?.witnesses?.includes(p.id)" class="device-tag" :title="S.people.witnessTitle" :data-testid="`witness:${nameOf(p)}`">{{ S.people.witness }}</span>
           <button v-if="admin && info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`witness-toggle:${nameOf(p)}`" @click="setWitness(p, !info.people?.witnesses?.includes(p.id))">{{ info.people?.witnesses?.includes(p.id) ? S.people.unmakeWitness : S.people.makeWitness }}</button>
@@ -177,12 +177,6 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
             <button v-if="mayRemove(info, d)" type="button" :disabled="busy" :data-testid="`remove:${d.name}`" @click="remove(d)">{{ S.devices.lost }}</button>
           </li>
         </ul>
-      </li>
-      <li v-for="i in info.people.invited ?? []" :key="i.email" class="person-block" :data-testid="`invited:${i.email}`">
-        <div class="person-line">
-          <span class="device-who muted">{{ S.people.invited(i.email) }}</span>
-          <span class="device-tag">{{ i.role === 'admin' ? S.people.admin : S.people.member }}</span>
-        </div>
       </li>
     </ul>
 
@@ -214,7 +208,6 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
         </li>
       </ul>
     </template>
-    <p v-for="(d, i) in info.people?.disputes ?? []" :key="i" class="menu-facts warn" :data-testid="`dispute:${i}`">{{ S.people.dispute(d) }}</p>
     <p v-if="!admin && !info.removed" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
     <!-- A removed device's invitations and removals are refused by the others: none offered. -->
     <div v-if="info.canInvite && !info.removed" class="menu-actions">

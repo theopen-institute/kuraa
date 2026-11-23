@@ -2,7 +2,8 @@
 // Settings › You (decision 0064): what is yours alone, kept in this browser.
 // Your name, email and colour, saved as each is changed (others see your name
 // and colour beside what you type); you on this computer (your key), with two
-// subpanels of its own, Sign in from another device and Account recovery; how
+// subpanels of its own, Sign in from another device and Account recovery (the
+// recovery key alone since 0078: no trustees, escrow or email checks); how
 // each kind of document is edited for you (its editor module, on or off); and,
 // where the shell does not run the server, the server and its access code, used
 // as the window closes (pending): half an address would connect nowhere. The rest
@@ -15,7 +16,6 @@ import type { Settings } from './settings.js';
 import type { PersonShell, Shell } from './shell.js';
 import { S } from './strings.js';
 import PersonKey from './PersonKey.vue';
-import PersonMore from './PersonMore.vue';
 import SettingsForm from './SettingsForm.vue';
 import SubpanelLink from './SubpanelLink.vue';
 
@@ -66,7 +66,6 @@ defineExpose({ pending });
         <SubpanelLink :title="S.person.signInTitle" :about="S.person.signInAbout" testid="open-sign-in" @open="sub = 'devices'" />
         <SubpanelLink :title="S.person.recoveryTitle" :about="S.person.recoveryAbout" testid="open-recovery" @open="sub = 'recovery'" />
       </template>
-      <PersonMore v-if="sub !== 'devices'" :api="api" :view="sub === 'recovery' ? 'recovery' : 'email'" />
     </section>
     <section v-if="modules.length" v-show="!sub" class="settings-part" data-testid="components-editing">
       <fieldset class="pref-group">

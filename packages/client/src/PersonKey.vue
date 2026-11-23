@@ -10,7 +10,7 @@
 // - devices (Sign in from another device): copying your identity to another
 //   computer, or taking one copied there; your computers, and revoking a lost
 //   one's key; the keys themselves, under Keys;
-// - recovery (Account recovery, with PersonMore's trustees): your recovery key,
+// - recovery (Account recovery): your recovery key,
 //   and getting your identity back with it.
 import { onMounted, ref, shallowRef, watch } from 'vue';
 import type { PersonInfo, PersonShell } from './shell.js';

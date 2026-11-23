@@ -1,5 +1,7 @@
 # 0071 · What a review of the network found, and what changed
 
+*Since [0078](0078-restrictive-wins.md):* attestations are no longer records.
+
 > Changes how devices serve git, compare records, pair devices and stay connected
 > ([0028](0028-peers.md), [0038](0038-equal-peers.md), [0050](0050-networking-review.md),
 > [0053](0053-reaching-each-other.md), [0066](0066-permissions-without-a-centre.md)). `PROTOCOL` is

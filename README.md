@@ -301,9 +301,11 @@ change opens read only, saying who may. A change by anyone else (made outside th
 where it comes in: every device's merge keeps its own version of the file, and the change stays in
 the file's history, listed as *not kept*, to read and for someone who may change it to restore; its
 maker is told ([0072](docs/decisions/0072-ranks-devices-and-changes-not-kept.md)). Changes to the
-policy made at the same time on different devices settle the same way everywhere, by rank: the
-owner, then admins by how long they have been, then members; nothing someone taken out did meanwhile
-counts. What someone taken out, or a dropped, revoked or lost key, signs after that counts for
+policy made at the same time on different devices settle the same way everywhere: the one that
+gives less counts, whoever made it (out beats member beats admin; a removal beats what the one taken
+out did meanwhile; of two rules, the narrower), and each such clash is listed in Workspace settings,
+where whoever may can **Make it again** after both
+([0078](docs/decisions/0078-restrictive-wins.md)). What someone taken out, or a dropped, revoked or lost key, signs after that counts for
 nothing anywhere; merges are made again by every device that brings them in, so none can slip a
 change past the rules. How every device works the policy out is in [docs/policy.md](docs/policy.md).
 
@@ -332,18 +334,11 @@ changing who reads it moves nothing, sends its history to whoever is added, and 
 whoever is taken out (0072). Code run for a document cannot see files fewer people read than the
 document, and nothing of a space goes to the online copy.
 
-**Email, trustees and getting your identity back** (Settings › You). A kuraa server can check
-people's email addresses: `pnpm host --verify-emails "sendmail -t" --verifier-name "Lab server"`
-sends a code to the address and signs, once it is typed in, that it is theirs; add `--escrow` to
-keep recovery keys locked with a passphrase it never sees, given back for a code sent to the
-address. A workspace counts the checks of the servers its admins name (Workspace settings › Permissions
-› Email checked by); then people are known by their address, and **Invite
-people…** can keep a place for one (`email:` entries name people in groups, rules and audiences
-too). Your **trustees**, named with your recovery key, can together give you your identity back
-if both its keys are lost: you send each a line, each vouches in their own app, and their answers
-complete it. This is a signed policy every device holds alike, so no device takes
-a removal from someone who is not an admin. Whoever makes a workspace is its first admin; in a
-workspace from before, everyone who was in it is one, as before. An invite link puts whoever joins
+**Who is in** is a signed policy every device holds alike, so no device takes
+a removal from someone who is not an admin. Whoever makes a workspace is its first admin, and its
+owner. A workspace from before 0066 keeps its people and permissions as they were, unchanging, until
+its owner (or, where it has none, an admin) founds it again (Workspace settings, or `pnpm host
+refound`): every device then takes that ([0078](docs/decisions/0078-restrictive-wins.md)). An invite link puts whoever joins
 by it in as a member, or as an admin (`--admin`, or the checkbox in the app); it is for one person
 (the first device it lets in uses it up) or for anyone who has it, and lasts a day, a week
 (`--hours`) or forever (`--forever`), unless revoked (`pnpm host revoke-invite <id>`; `pnpm host
@@ -391,7 +386,7 @@ computer". Its **Sign in from another device** copies your identity to a second 
 the one made there) or takes one copied on another, lists your computers to revoke a lost one's key,
 and shows the keys themselves. Your identity is a stable ID whose key can change: Settings shows its
 **recovery key** until you say it is saved somewhere safe (then it is removed from the computer), and
-with it **Account recovery** (where your trustees are too) recovers your identity on any computer if its key is lost or stolen; what the old key signs from then on is no one's
+with it **Account recovery** recovers your identity on any computer if its key is lost or stolen; what the old key signs from then on is no one's
 ([0066](docs/decisions/0066-permissions-without-a-centre.md)). From the command line, `pnpm host
 person [create | export | import | recovery [saved] | recover <recovery key> | revoke <key>]`;
 `pnpm host signing-key` prints this computer's signing key, to add to GitHub as a signing key.

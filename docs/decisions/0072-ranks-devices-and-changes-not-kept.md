@@ -1,5 +1,7 @@
 # 0072 · Ranks, devices that follow their people, folders that hold their space, removals confirmed, and changes not kept
 
+*Since [0078](0078-restrictive-wins.md):* changes made at the same time are no longer settled by rank: the one that gives less counts, whoever made it, and each clash is shown; with an owner always an admin, the rule keeping an admin (and its disputes) is gone.
+
 > Changes [0066](0066-permissions-without-a-centre.md) (how changes made at the same time are
 > settled; suggestions; which devices are in; spaces), [0068](0068-people-and-their-computers.md)
 > (removing a computer) and [0071](0071-network-review.md) (pairing). `PROTOCOL` is now 5.

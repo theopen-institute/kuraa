@@ -105,8 +105,6 @@ export interface HostOptions {
   personChanged?: () => Promise<void>;
   /** The signing keys the workspaces know to be this identity's (a hub: all of its workspaces'); else this workspace's. */
   knownKeys?: (id: string) => Promise<string[]>;
-  /** An identity's log and name, as any of the workspaces knows it (a hub: all of its workspaces'); else this workspace's (trustees, 0066). */
-  identityLog?: (id: string) => Promise<{ events: import('./peers/kel.js').KeyEvent[]; name: string } | null>;
   timings?: Partial<HostTimings>;
   log?: (msg: string) => void;
 }

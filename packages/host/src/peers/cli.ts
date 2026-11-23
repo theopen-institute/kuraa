@@ -14,6 +14,8 @@
 //   kuraa-host online [add <address|remote> | remove <name>] [--dir .]
 //                                                     the online copy: a git server synced with (backup)
 //   kuraa-host fork     [--dir .]                     make this copy a workspace of its own
+//   kuraa-host refound  [--dir .]                     found a workspace from before 0066 again (0078): its
+//                                                     owner's (with none, an admin's) to do; they become its owner
 //   kuraa-host signing-key                            the key commits made on this computer are signed with, for GitHub
 //   kuraa-host relay [--bootstrap host:port]          run a relay (relay.ts) on this computer, and print its key, for
 //                                                     others to name (--relay, or Preferences): for computers that cannot
@@ -41,7 +43,7 @@ import { createPerson, exportPerson, importPerson, personFile, readPerson, readR
 /** Commands, and other names they go by. */
 const ALIASES: Record<string, string> = { link: 'invite', links: 'invites', 'revoke-link': 'revoke-invite', backup: 'online' };
 
-export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'owner', 'remove-person', 'rules', 'rule', 'group', 'online', 'fork', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
+export const PEER_COMMANDS = ['invite', 'invites', 'revoke-invite', 'join', 'devices', 'name', 'remove-device', 'people', 'role', 'owner', 'remove-person', 'rules', 'rule', 'group', 'online', 'fork', 'refound', 'signing-key', 'person', 'relay', ...Object.keys(ALIASES)];
 
 /** The ways into a workspace besides the DHT this device knows (node.ts keeps them in hints.json), for an invite link. */
 async function storedHints(dir: string, id: Identity, relays: string[]): Promise<LinkHints> {
@@ -218,7 +220,17 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       if (!policy.rules.size) say('No rules: anyone in the workspace can change everything.');
       for (const [path, by] of [...policy.rules].sort()) say(`  ${path || '(everything)'}  ${by.map(words).join(', ')}`);
       for (const [g, entries] of policy.groups) if (g !== WORKSPACE) say(`group ${g}: ${[...entries].map(([w, r]) => `${words(w)} (${r})`).join(', ')}`);
+      // Changes made at the same time of which the one giving less counted (0078).
+      if (policy.clashes.length) say(`${policy.clashes.length} change${policy.clashes.length === 1 ? '' : 's'} made at the same time as another did not count (or counted narrowed): Settings › Workspace says which, and can make each again.`);
+      if (await id.legacySnapshot()) say('This workspace is from before policies were pinned: nothing about its people or permissions changes until it is founded again (kuraa-host refound, by its owner).');
       return;
+    }
+    case 'refound': {
+      // A workspace from before 0066, founded again by its owner (with none, an admin): everyone as this device had them (0078).
+      const { git, id } = await identityAt(values.dir!);
+      const { person, key } = await asPerson(git, id, false);
+      const genesis = await id.refound(person.id, key);
+      return say(`Founded again (${genesis.slice(0, 12)}…): you are its owner, and everyone and every permission is as this device had them. The other devices take it when they next meet this one.`);
     }
     case 'rule': {
       // kuraa-host rule <path> [<who>…]: who may change it (people, group:<name>, admins); none takes the rule away.

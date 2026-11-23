@@ -15,7 +15,7 @@ import { NotBrought, WaitingForPolicy, describeOutcome, type Host } from '../hos
 import { gate, policyWaits, type GateResult } from './gate.js';
 import { commitSigner } from '../signing.js';
 import { digestOf } from './node.js';
-import { emailOf } from './attest.js';
+import { clashWords } from './clashes.js';
 import { isAncestor, mergeTrailerValue } from '../merging.js';
 import { randomBytes } from 'node:crypto';
 import { PEER_SPACES } from './node.js';
@@ -26,6 +26,7 @@ import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
 import { WORKSPACE, hashedPath, isGroupName, isRulePath, isWriter, pathsAbove, type Perm, type Policy, type PolicyOp, type Role } from './policy.js';
+import type { ClashInfo } from './clashes.js';
 import { NotAllowed } from '../errors.js';
 import type { KeyPair } from '../keys.js';
 
@@ -146,7 +147,7 @@ export function audienceWords(audience: string[], me: string | null, names: Map<
   if (audience.length === 1 && audience[0] === me) return 'Only you';
   // You first: "You and Bo".
   const ordered = [...audience].sort((x, y) => Number(y === me) - Number(x === me));
-  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') || w.startsWith('email:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
+  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
   return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
 }
 
@@ -156,10 +157,16 @@ export interface RulesInfo {
   admin: boolean;
   rules: { path: string; by: string[] }[];
   groups: { name: string; entries: { who: string; role: Role; name: string | null }[] }[];
-  /** Verifiers whose attestations count here (0066, step 6). */
-  verifiers: { key: string; url: string }[];
   /** Every file's and folder's permission (0069): its path (null: private, not one this device knows), who may change it, who reads what is made there. */
   permissions: { path: string | null; private: boolean; write: string[] | null; read: string[] | null }[];
+  /**
+   * Clashes settled (0078), the latest first: changes made at the same time of
+   * which the one giving less counted; each in words, and whether this person
+   * may make the one that lost again (an admin, as the change needs).
+   */
+  clashes: ClashInfo[];
+  /** A workspace from before 0066, to be founded again (0078): its owner's name (null: none, any admin may), and whether this person may. Null: founded. */
+  refound: { owner: string | null; may: boolean } | null;
 }
 
 /** A file's or folder's permissions (0069), for its Permissions… dialog. */
@@ -184,15 +191,11 @@ export interface PeopleInfo {
   founded: boolean;
   /** Whether this person may invite people, remove devices and change who is in it. */
   admin: boolean;
-  /** The workspace's owner (0070); null: one from before that has none yet. */
+  /** The workspace's owner (0070); null: one from before that has none. */
   owner: string | null;
-  /** Whether this person makes, unmakes and takes out admins: the owner (any admin, where there is none yet). */
+  /** Whether this person makes, unmakes and takes out admins: the owner. */
   assignsAdmins: boolean;
-  people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean; emails: string[] }[];
-  /** People invited by email who are not in yet (0066, step 6). */
-  invited: { email: string; role: Role }[];
-  /** Admins taken out at the same time as the others, which would have left none, who stayed (0072): their names. */
-  disputes: string[][];
+  people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean }[];
   /** People whose devices' acknowledgements confirm removals (0072): their IDs. */
   witnesses: string[];
   /**
@@ -738,13 +741,7 @@ export class Peers {
    * first device it lets in uses it up) or anyone with it, until it expires
    * (`hours`; null: never) or is revoked.
    */
-  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string; email?: string }): Promise<string> {
-    // For someone by their email (0066, step 6): their place in the group waits for an attestation of that address.
-    if (o.email) {
-      const email = emailOf(o.email);
-      if (!email) throw new NotAllowed('Not an email address');
-      await this.adminOp({ t: 'grant', group: o.group ?? WORKSPACE, who: `email:${email}`, role: o.role ?? 'member' });
-    }
+  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string }): Promise<string> {
     // With the ways in besides the DHT this device knows: relays named, servers that take TCP (0053).
     // Putting its holder in a group, signed by this person (0066): the workspace, as a member, unless it says otherwise.
     const person = await this.node.person();
@@ -844,14 +841,10 @@ export class Peers {
     return {
       founded: policy.founded,
       admin: policy.founded ? policy.isAdmin(me) : true,
-      // The owner (0070), and whether this person makes and unmakes admins (the owner; any admin, where there is none yet).
+      // The owner (0070), and whether this person makes and unmakes admins (the owner).
       owner: policy.owner,
       assignsAdmins: policy.founded ? policy.mayAssignAdmins(me) : true,
-      people: await Promise.all(policy.people().map(async (p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me, emails: await id.emailsOf(p.id) }))),
-      // Invited by email, and not in yet (no one attested to have that address): step 6.
-      invited: policy.invited(),
-      // Admins who took each other out at once, which would have left none: neither stood (step 4).
-      disputes: policy.disputes.map((d) => d.people.map((id) => known.get(id)?.name ?? `${id.slice(0, 8)}…`)),
+      people: policy.people().map((p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
       witnesses: [...policy.witnesses],
       removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: known.get(r.who)?.name ?? `${r.who.slice(0, 8)}…`, by: r.by ? known.get(r.by)?.name ?? `${r.by.slice(0, 8)}…` : null, confirmedBy: r.confirmedBy.map((p) => known.get(p)?.name ?? `${p.slice(0, 8)}…`), witnessed: r.witnessed })),
     };
@@ -894,7 +887,7 @@ export class Peers {
     const space = this.host.spaceOf(path);
     const rule = policy.founded ? policy.ruleFor(path) : null;
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
-    const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : w.startsWith('email:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
+    const words = (w: string) => (w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`);
     return {
       canWrite: !policy.founded || policy.mayWrite(me, path),
       // In words, and as the policy says it (for the document's Permissions… to show and change: 0067).
@@ -989,7 +982,7 @@ export class Peers {
   /** An audience as the policy names one: sorted, each entry someone it can name. */
   private cleanAudience(audience: string[]): string[] {
     const wanted = [...new Set(audience)].sort();
-    if (!wanted.length || !wanted.every(isWriter)) throw new NotAllowed('An audience names people, groups, admins or email addresses');
+    if (!wanted.length || !wanted.every(isWriter)) throw new NotAllowed('An audience names people, groups or admins');
     return wanted;
   }
 
@@ -1082,7 +1075,7 @@ export class Peers {
     const clean = (list: string[] | null | undefined) => (list === undefined ? undefined : list && list.length ? [...new Set(list)].sort() : null);
     const write = clean(change.write);
     const read = clean(change.read);
-    for (const l of [write, read]) if (l && !l.every(isWriter)) throw new NotAllowed('Name people, groups, admins or email addresses');
+    for (const l of [write, read]) if (l && !l.every(isWriter)) throw new NotAllowed('Name people, groups or admins');
     if (write !== undefined || (folder && read !== undefined)) {
       if (!policy.isAdmin(me)) throw new NotAllowed('Only an admin of this workspace says who can change what, and who reads a folder');
       const own = policy.permAt(path);
@@ -1190,10 +1183,11 @@ export class Peers {
     await this.adminOp(role ? { t: 'grant', group, who, role } : { t: 'revoke', group, who });
   }
 
-  /** The workspace's groups and rules, as its policy says, for those who manage them. */
+  /** The workspace's groups and rules, as its policy says, for those who manage them; with its clashes, and whether it is to be founded again. */
   async rules(): Promise<RulesInfo> {
     const { policy, me } = await this.node.policy();
-    const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
+    const id = this.node.identity;
+    const names = new Map((await id.people()).map((p) => [p.key, p.name]));
     // Private paths by their hash: shown as the path where this device knows it, else as private.
     const known = await this.knownPaths();
     const byHash = new Map(['', ...known.files, ...known.folders].map((p) => [hashedPath(policy.workspace, p), p]));
@@ -1203,36 +1197,47 @@ export class Peers {
       rules: [...policy.rules].map(([key, by]) => ({ path: shown(key) ?? key, by })).filter((r) => !r.path.startsWith('h:')).sort((a, b) => (a.path < b.path ? -1 : 1)),
       permissions: [...policy.perms].map(([key, p]) => ({ path: shown(key), private: key.startsWith('h:'), write: p.write ?? null, read: p.read ?? null }))
         .sort((a, b) => ((a.path ?? '\uffff') < (b.path ?? '\uffff') ? -1 : 1)),
-      verifiers: [...policy.verifiers].map(([key, url]) => ({ key, url })),
       groups: [...policy.groups].filter(([g]) => g !== WORKSPACE).map(([name, entries]) => ({
         name,
         entries: [...entries].map(([who, role]) => ({ who, role, name: who.startsWith('group:') ? who.slice(6) : names.get(who) ?? null })),
       })),
+      // Everyone sees them (every device holds the operations anyway); admins may make the one that lost again (0078).
+      clashes: await clashWords(policy, await id.policyEntries(), (key) => id.personOfKey(key), names, me, shown),
+      refound: await this.refoundInfo(me, names),
     };
   }
 
-  /** Count a verifier's attestations here (an admin's to do): its key, asked of it at its address (verifier.ts). */
-  async addVerifier(url: string): Promise<RulesInfo> {
-    const clean = url.trim().replace(/\/+$/, '');
-    if (!/^https?:\/\/\S+$/.test(clean)) throw new NotAllowed('A verifier is a server’s address (https://…)');
-    let key: unknown;
+  /** A workspace from before 0066 (0078): who may found it again, as this device's last legacy policy says; null once it is founded. */
+  private async refoundInfo(me: string | null, names: Map<string, string>): Promise<RulesInfo['refound']> {
+    const snap = await this.node.identity.legacySnapshot();
+    if (!snap) return null;
+    return { owner: snap.owner ? names.get(snap.owner) ?? `${snap.owner.slice(0, 8)}…` : null, may: await this.node.identity.mayRefound(me) };
+  }
+
+  /** Make a clash's losing change again, on purpose, after both (0078): as this person's, if they may. */
+  async redo(op: string): Promise<void> {
+    if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
-      key = ((await (await fetch(`${clean}/verify`)).json()) as { key?: unknown }).key;
+      await this.node.identity.redo(op, await this.node.signingKeyNow(), await this.node.branchTips());
     } catch (e) {
-      throw new NotAllowed(`Could not ask ${clean}: ${(e as Error).message}`);
+      throw new NotAllowed((e as Error).message);
     }
-    if (typeof key !== 'string' || !/^[0-9a-f]{64}$/.test(key)) throw new NotAllowed(`${clean} is not a verifier`);
-    await this.adminOp({ t: 'verifier', key, url: clean });
-    return this.rules();
+    await this.node.membersChanged();
   }
 
-  /** Stop counting a verifier's attestations here. */
-  async removeVerifier(key: string): Promise<RulesInfo> {
-    await this.adminOp({ t: 'verifier', key, url: '' });
-    return this.rules();
+  /** Found a workspace from before 0066 again (0078): this person its owner, everyone as they were here. */
+  async refound(): Promise<void> {
+    const person = await this.node.person();
+    if (!person) throw new NotAllowed('This computer has no identity');
+    try {
+      await this.node.identity.refound(person.id, await this.node.signingKeyNow());
+    } catch (e) {
+      throw new NotAllowed((e as Error).message);
+    }
+    await this.node.membersChanged();
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'verifier' | 'perm' | 'owner' | 'witness' }>): Promise<void> {
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' | 'witness' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());

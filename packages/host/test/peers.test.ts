@@ -276,8 +276,8 @@ describe('devices of one workspace', () => {
     const body = git(dirA, 'log', '-1', '--format=%B');
     expect(['Ada', 'Bo']).toContain(authors);
     expect(body).toMatch(/^Edit Field notes: Day one, Day two \((Ada, Bo|Bo, Ada)\)/);
-    // Whoever edited on the other device is credited as the records say who that device is (by name, and by an
-    // address only where a verifier checked it), not as its messages say: here, by name.
+    // Whoever edited on the other device is credited as the records say who that device is (by name: no address
+    // is checked since 0078), not as its messages say.
     const committer = git(dirA, 'log', '-1', '--format=%an');
     const other = committer === 'Ada' ? 'Bo' : 'Ada';
     expect(body).toContain(`Co-authored-by: ${committer} <${committer.toLowerCase()}@example.org>`);
@@ -475,7 +475,7 @@ describe('equal members, and forks', () => {
     const dirA = repo();
     const a = await start(dirA, { person: ada });
     // A workspace made now: its genesis names Ada its admin, and is pinned.
-    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'owner', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true, emails: [] }]);
+    expect((await a.host.peers!.people()).people).toEqual([{ id: ada.id, role: 'owner', name: 'Ada', devices: [a.host.peers!.node.myKey], you: true }]);
     const parent = mkdtempSync(join(tmpdir(), 'kuraa-peer-b-'));
     dirs.push(parent);
     const dirB = join(parent, 'notes');

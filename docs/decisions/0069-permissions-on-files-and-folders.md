@@ -1,5 +1,7 @@
 # 0069 · Permissions on files and folders, one model for reading and changing
 
+*Since [0078](0078-restrictive-wins.md):* no email checks; permissions made at the same time on one path count narrowed (what both name).
+
 > Changes how 0066's write rules and audiences are set and kept ([0066](0066-permissions-without-a-centre.md),
 > [0067](0067-permissions-from-the-document.md)). Who may set what, how devices hold to it, spaces as
 > how reading is kept: as before.

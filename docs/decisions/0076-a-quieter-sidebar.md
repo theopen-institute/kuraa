@@ -1,5 +1,7 @@
 # 0076 · A quieter sidebar, and Settings in subpanels
 
+*Since [0078](0078-restrictive-wins.md):* Account recovery holds the recovery key alone: trustees, escrow and checked email addresses are gone.
+
 > Changes [0065](0065-no-menu.md) (⚙ at the foot of the sidebar; Search and Sync beside **+**),
 > [0064](0064-four-kinds-of-settings.md) (what each section of Settings holds) and
 > [0059](0059-online-copy-is-a-component.md) (where the online copy is set up).

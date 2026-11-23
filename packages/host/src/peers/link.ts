@@ -26,9 +26,11 @@ const CONTROL = 'kuraa/control/1';
  * are: no pairing records; a policy ranked by who made it; keys dropped); 6: the
  * network review's fixes (links unlinked, and those let in by them admitted, in
  * the policy; a workspace from before kept to its own geneses and seal; room
- * edits saying whose they are; policy operations asked for by commits).
+ * edits saying whose they are; policy operations asked for by commits); 7:
+ * 0078 (clashes settled by what gives less, not by rank; workspaces from before
+ * founded again; attestations and trustee rotations no longer taken).
  */
-export const PROTOCOL = 6;
+export const PROTOCOL = 7;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

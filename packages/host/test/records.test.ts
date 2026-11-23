@@ -9,8 +9,9 @@ import crypto from 'hypercore-crypto';
 import { Git } from '../src/git.js';
 import { Identity, decodeLink } from '../src/peers/identity.js';
 import { judge, readRecord, revokeKeyMessage, sign, signRecord, signsMessage, vouchMessage, type Standing } from '../src/peers/records.js';
-import { askTrustees, completeTrustees, createPerson, exportPerson, importPerson, nameTrustees, readPerson, readRecoveryLine, readTrusteeAsk, recoverPerson, recoveryLine, recoverySaved, recoveryState, trusteesOf, vouchForAsk } from '../src/peers/person.js';
-import { identityId, incept, rotate, type KeyEvent } from '../src/peers/kel.js';
+import { createPerson, exportPerson, importPerson, readPerson, readRecoveryLine, recoverPerson, recoveryLine, recoverySaved, recoveryState } from '../src/peers/person.js';
+import { eventHash, identityId, incept, nextDigest, readEvent, resolve, rotate, type KeyEvent } from '../src/peers/kel.js';
+import { makeOp, type PolicyOp } from '../src/peers/policy.js';
 import { commitSigned, commitSigner, sshPublicKey, writeAllowedSigners } from '../src/signing.js';
 
 const WS = 'ab'.repeat(16);
@@ -171,36 +172,155 @@ describe('records a device makes about itself', () => {
 });
 
 describe('a workspace’s policy, on a device (0066)', () => {
-  it('a workspace from before: written down with everyone it knows of an admin; the first admin change seals it', async () => {
+  /**
+   * A workspace from before 0066 on two devices, as a kuraa from before left it (0078): Ada's legacy
+   * genesis naming Ada and Bo, sealed by Ada (so its owner), a rule, and Cy a member. Each device then
+   * works it out the one last time (legacy-last.json).
+   */
+  async function legacyPair(sealed = true) {
+    const a = repo();
+    const ws = await a.id.found();
+    const b = repo();
+    await b.id.adopt(ws);
+    const [adaP, boP, cyP] = [identity(), identity(), identity()];
+    const [adaKey, boKey] = [crypto.keyPair(), crypto.keyPair()];
+    const people = [...eventRecords(ws.id, adaP), ...eventRecords(ws.id, boP), ...eventRecords(ws.id, cyP), signsWith(ws.id, boKey), vouchFor(ws.id, boKey, boP, 'Bo')];
+    await a.id.signsWith(adaKey);
+    await a.id.vouch({ name: 'Ada', ...adaP.key, id: adaP.id, events: adaP.events }, adaKey);
+    await a.id.addRemote(hex(bo), 'bo');
+    await a.id.takeRecords(people);
+    const ops: PolicyOp[] = [];
+    const g = makeOp(ws.id, { t: 'genesis', admins: [adaP.id, boP.id].sort(), legacy: true }, [], adaKey);
+    let last = g.id;
+    const write = async (op: PolicyOp) => {
+      const e = op.t === 'genesis' ? g : makeOp(ws.id, op, [last], adaKey);
+      last = e.id;
+      ops.push(op);
+      await a.id.decide('policy', e.id, { op: e.op, parents: e.parents, signer: e.signer, proof: e.proof });
+    };
+    await write(g.op);
+    if (sealed) await write({ t: 'seal', geneses: [g.id] });
+    await write({ t: 'grant', group: 'workspace', who: cyP.id, role: 'member' });
+    await write({ t: 'rule', path: 'secret/', by: ['admins'] });
+    // Both devices hold the same records, and work the legacy policy out the one last time, as they start.
+    await b.id.addRemote(hex(ada), 'ada');
+    await b.id.takeRecords(await a.id.records());
+    for (const d of [a, b]) rmSync(join(d.dir, '.git', 'kuraa', 'legacy-last.json'), { force: true });
+    writeFileSync(join(a.dir, '.git', 'kuraa', 'legacy.json'), JSON.stringify({ geneses: [g.id], seal: null }));
+    return { a, b, ws, adaP, boP, cyP, adaKey, boKey };
+  }
+
+  it('a workspace from before 0066 keeps to its last legacy policy, and changes nothing, until its owner founds it again; every device then pins to that (0078)', async () => {
+    const { a, b, adaP, boP, cyP, adaKey, boKey } = await legacyPair();
+    for (const d of [a, b]) {
+      const p = await d.id.policy();
+      expect(p.founded).toBe(true);
+      expect(p.owner).toBe(adaP.id);
+      expect(p.role(boP.id)).toBe('admin');
+      expect(p.role(cyP.id)).toBe('member');
+      expect(p.mayWrite(cyP.id, 'secret/x.md')).toBe(false);
+      expect(await d.id.mayRefound(adaP.id)).toBe(true);
+      expect(await d.id.mayRefound(boP.id)).toBe(false);
+    }
+    // The last working out kept; legacy.json gone.
+    expect(existsAt(a.dir, 'legacy-last.json')).toBe(true);
+    expect(existsAt(a.dir, 'legacy.json')).toBe(false);
+    // Nothing about who is in or what they may do changes meanwhile.
+    await expect(a.id.adminOp({ t: 'grant', group: 'workspace', who: cyP.id, role: 'admin' }, adaKey)).rejects.toThrow('found it again');
+    await expect(a.id.createLink(1, true, { relays: [], tcp: [] }, { key: adaKey })).rejects.toThrow('found it again');
+    // Bo, an admin but not the owner, may not found it again; one he makes anyway is taken by no device.
+    await expect(b.id.refound(boP.id, boKey)).rejects.toThrow('owner');
+    const rogue = makeOp((await a.id.workspace())!.id, { t: 'genesis', admins: [boP.id], legacy: false }, [], boKey);
+    await a.id.takeRecords([signRecord({ kind: 'policy', workspace: (await a.id.workspace())!.id, subject: rogue.id, op: rogue.op, parents: [], signer: rogue.signer, proof: rogue.proof }, bo)]);
+    expect(await a.id.pin()).toBeNull();
+    // Ada founds it again: a pinned genesis naming her, everyone and every rule put back.
+    const genesis = await a.id.refound(adaP.id, adaKey);
+    expect(await a.id.pin()).toBe(genesis);
+    await b.id.takeRecords(await a.id.records());
+    expect(await b.id.pin()).toBe(genesis);
+    for (const d of [a, b]) {
+      const p = await d.id.policy();
+      expect(p.geneses).toEqual([genesis]);
+      expect(p.owner).toBe(adaP.id);
+      expect(p.role(boP.id)).toBe('admin');
+      expect(p.role(cyP.id)).toBe('member');
+      expect(p.ruleFor('secret/x.md')?.by).toEqual(['admins']);
+      expect(await d.id.legacySnapshot()).toBeNull();
+    }
+    // And now it changes as any workspace does.
+    await a.id.adminOp({ t: 'grant', group: 'workspace', who: cyP.id, role: 'admin' }, adaKey);
+    expect((await a.id.policy()).role(cyP.id)).toBe('admin');
+  });
+
+  it('a workspace from before with no owner (never sealed): any of its admins may found it again, and becomes its owner', async () => {
+    const { a, b, boP, cyP, boKey } = await legacyPair(false);
+    expect((await b.id.policy()).owner).toBeNull();
+    expect(await b.id.mayRefound(boP.id)).toBe(true);
+    expect(await b.id.mayRefound(cyP.id)).toBe(false);
+    // Bo's device says who it is, then founds it again.
+    await b.id.signsWith(boKey);
+    await b.id.vouch({ name: 'Bo', ...boP.key, id: boP.id, events: boP.events }, boKey);
+    const genesis = await b.id.refound(boP.id, boKey);
+    await a.id.takeRecords(await b.id.records());
+    expect(await a.id.pin()).toBe(genesis);
+    expect((await a.id.policy()).owner).toBe(boP.id);
+    expect((await a.id.policy()).role(cyP.id)).toBe('member');
+  });
+});
+
+describe('clashes, on a device (0078)', () => {
+  it('are said in words, and the one that lost is made again on purpose, after both', async () => {
     const { id } = repo();
-    const ws = await id.found();
-    await id.addRemote(hex(bo), 'bo');
-    const me = identity();
-    const boId = identity();
-    const myKey = crypto.keyPair();
-    const boKey = crypto.keyPair();
-    // Bo's device signs with his key, which his identity vouched for; this device with Ada's.
-    await id.takeRecords([...eventRecords(ws.id, boId), signRecord({ kind: 'signs', workspace: ws.id, subject: hex(boKey), proof: sign(signsMessage(hex(bo)), boKey) }, bo), vouchFor(ws.id, boKey, boId, 'Bo')]);
-    const ada = { name: 'Ada', ...me.key, id: me.id, events: me.events };
-    await id.signsWith(myKey);
-    await id.vouch(ada, myKey);
-    expect((await id.policy()).founded).toBe(false);
-    await id.ensureGenesis(me.id, myKey, false);
-    await id.ensureGenesis(me.id, myKey, false);
+    const { ws, me, myKey } = await founded(id);
+    const b = inRecords(ws.id, bo, 'Bo');
+    const c = inRecords(ws.id, cy, 'Cy');
+    await id.takeRecords([...b.records, ...c.records]);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: b.person.id, role: 'admin' }, myKey);
+    await id.adminOp({ t: 'grant', group: 'workspace', who: c.person.id, role: 'member' }, myKey);
+    const base = (await id.policy()).heads;
+    // Bo takes Cy out as Ada, on another computer of hers that had not heard of it, makes Cy an admin.
+    const out = makeOp(ws.id, { t: 'revoke', group: 'workspace', who: c.person.id }, base, b.key);
+    const up = makeOp(ws.id, { t: 'grant', group: 'workspace', who: c.person.id, role: 'admin' }, base, myKey);
+    const record = (e: typeof out) => signRecord({ kind: 'policy', workspace: ws.id, subject: e.id, op: e.op, parents: e.parents, signer: e.signer, proof: e.proof }, bo);
+    await id.takeRecords([record(out), record(up)]);
     const policy = await id.policy();
-    expect(await id.pin()).toBeNull();
-    expect(policy.people().map((p) => p.role)).toEqual(['admin', 'admin']);
-    expect(policy.isAdmin(boId.id)).toBe(true);
-    expect(await id.mayManage(hex(bo))).toBe(true);
-    // Ada makes Bo a member: the legacy geneses are sealed first, then Bo's role changes.
-    await id.adminOp({ t: 'grant', group: 'workspace', who: boId.id, role: 'member' }, myKey);
-    const after = await id.policy();
-    expect(after.sealed).toBe(true);
-    expect(after.role(boId.id)).toBe('member');
-    expect(await id.mayManage(hex(bo))).toBe(false);
-    // Bo's device's removals now wait for an admin's word.
-    const removal = signRecord({ kind: 'remove', workspace: ws.id, subject: hex(cy) }, bo);
-    expect(await id.takeRecords([removal])).toEqual([]);
+    expect(policy.role(c.person.id)).toBeNull();
+    expect(policy.clashes).toEqual([{ lost: up.id, won: out.id, why: 'less' }]);
+    const { clashWords } = await import('../src/peers/clashes.js');
+    const names = new Map([[me.id, 'Ada'], [b.person.id, 'Bo'], [c.person.id, 'Cy']]);
+    const [said] = await clashWords(policy, await id.policyEntries(), (k) => id.personOfKey(k), names, me.id, (k) => k);
+    expect(said).toMatchObject({ lost: up.id, redo: true, words: 'You made Cy an admin while Bo took Cy out: Cy is out' });
+    // Bo, an admin but not the owner, may not make Cy an admin again.
+    expect((await clashWords(policy, await id.policyEntries(), (k) => id.personOfKey(k), names, b.person.id, (k) => k))[0]!.redo).toBe(false);
+    await id.redo(up.id, myKey, []);
+    expect((await id.policy()).role(c.person.id)).toBe('admin');
+    await expect(id.redo('ab'.repeat(32), myKey, [])).rejects.toThrow('No such change');
+  });
+});
+
+describe('records of kinds no longer made (0078)', () => {
+  it('are refused cleanly: an attestation, a trustee rotation; a rotation from before naming trustees is read as it was signed', () => {
+    // An attestation, as an older device would pass one on.
+    const attestation = { v: 1, id: 'aa'.repeat(32), claim: 'email:bo@uni.edu', verifier: hex(cy), at: 1, expires: 2, sig: 'ab'.repeat(64) };
+    const attest = signRecord({ kind: 'attest' as never, workspace: WS, subject: 'aa'.repeat(32), ...({ attestation } as object) }, bo);
+    expect(readRecord(JSON.parse(JSON.stringify(attest)))).toBeNull();
+    expect(judge(signRecord({ kind: 'secret', workspace: WS, subject: 'ee'.repeat(32) }, bo), standing())).toBe('take');
+    // A trustee rotation: not an event.
+    const p = identity();
+    const next = crypto.keyPair();
+    const trot = { ...rotate(p.events, p.recovery, next, []), t: 'trot', vouches: [] };
+    expect(readEvent(trot)).toBeNull();
+    // A rotation that named trustees (with the recovery key, before 0078): its signature covers them; read, and they say nothing.
+    const r = rotate(p.events, p.recovery, next, []);
+    const trustees = { threshold: 1, ids: ['bb'.repeat(32)] };
+    const body = ['kuraa-identity', 1, 'rot', r.id, r.seq, r.prior, r.key, r.next, '', 'trustees', 1, trustees.ids.join(','), r.at].join('\0');
+    const named = { ...r, trustees, sig: crypto.sign(Buffer.from(body), p.recovery.secretKey).toString('hex') };
+    const read = readEvent(named);
+    expect(read).not.toBeNull();
+    const state = resolve([...p.events, read!]);
+    expect(state?.current).toBe(hex(p.recovery));
+    expect(state?.events.map(eventHash)).toEqual([...p.events, named].map((e) => eventHash(e as KeyEvent)));
+    expect(nextDigest(hex(next))).toBe(state?.events[1]!.next);
   });
 });
 
@@ -226,45 +346,6 @@ describe('cutoffs for keys no longer a person’s (0066, step 4)', () => {
     // A cutoff's heads are signed with the record: changed after, not a record.
     const r = (await id.records()).find((x) => x.kind === 'revoke-key')!;
     expect(readRecord({ ...r, heads: ['ef'.repeat(20)] })).toBeNull();
-  });
-});
-
-describe('trustees (0066, step 6)', () => {
-  const file = () => join(mkdtempSync(join(tmpdir(), 'kuraa-person-')), 'person.json');
-
-  it('replace a lost identity’s key together, as many as it takes; a workspace counts it by their keys', async () => {
-    const [boFile, adaFile, cyFile, deeFile, newFile] = [file(), file(), file(), file(), file()];
-    const boP = await createPerson('Bo', boFile);
-    const adaP = await createPerson('Ada', adaFile);
-    const cyP = await createPerson('Cy', cyFile);
-    await createPerson('Dee', deeFile);
-    // Bo names Ada and Cy, any two of them (with his recovery key, as a recovery does).
-    const named = await nameTrustees((await recoveryLine(boFile))!, { threshold: 2, ids: [adaP.id, cyP.id] }, [], boFile);
-    expect(trusteesOf(named)).toEqual({ threshold: 2, ids: [adaP.id, cyP.id].sort() });
-    // Both his keys are lost. On a new computer, he asks them.
-    const { line, trustees } = await askTrustees(named.events, 'Bo', [], newFile);
-    expect(trustees.threshold).toBe(2);
-    expect(readTrusteeAsk(line)).toMatchObject({ name: 'Bo', id: boP.id });
-    const fromAda = await vouchForAsk(line, adaFile);
-    await expect(vouchForAsk(line, deeFile)).rejects.toThrow('not one of Bo’s trustees');
-    await expect(completeTrustees([fromAda], newFile)).rejects.toThrow('It takes 2');
-    const fromCy = await vouchForAsk(line, cyFile);
-    const back = await completeTrustees([fromAda, fromCy], newFile);
-    expect(back.id).toBe(boP.id);
-    expect(await recoveryState(newFile)).toBe('here');
-    // A workspace that knows Ada's and Cy's logs counts it; one that knew of other keys for them would not.
-    const { id } = repo();
-    const ws = await id.found();
-    await id.addRemote(hex(bo), 'bo');
-    const events = (p: { id: string; events: KeyEvent[] }) => p.events.map((e) => signRecord({ kind: 'key-event', workspace: ws.id, subject: p.id, event: e }, bo));
-    await id.takeRecords([...events(adaP), ...events(cyP), ...events(back)]);
-    expect((await id.identityState(boP.id))!.current).toBe(back.publicKey.toString('hex'));
-    const { id: other } = repo();
-    const ws2 = await other.found();
-    await other.addRemote(hex(bo), 'bo');
-    await other.takeRecords(back.events.map((e) => signRecord({ kind: 'key-event', workspace: ws2.id, subject: boP.id, event: e }, bo)));
-    // Without the trustees' logs, the trustee rotation waits: Bo's key there is the one he named trustees with.
-    expect((await other.identityState(boP.id))!.current).toBe(named.publicKey.toString('hex'));
   });
 });
 
@@ -352,6 +433,15 @@ const signsWith = (ws: string, key: { publicKey: Buffer; secretKey: Buffer }) =>
 
 const revokeFor = (ws: string, key: { publicKey: Buffer }, p: TestIdentity) =>
   signRecord({ kind: 'revoke-key', workspace: ws, subject: hex(key), person: p.id, personKey: hex(p.key), proof: sign(revokeKeyMessage(hex(key)), p.key) }, bo);
+
+const existsAt = (dir: string, file: string) => {
+  try {
+    statSync(join(dir, '.git', 'kuraa', file));
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 function repo(): { dir: string; git: Git; id: Identity } {
   const dir = mkdtempSync(join(tmpdir(), 'kuraa-records-'));

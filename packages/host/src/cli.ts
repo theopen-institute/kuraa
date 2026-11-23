@@ -39,7 +39,6 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
-import { mailCommand } from './verifier.js';
 import { runsAsService } from './selfupdate.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
@@ -95,10 +94,6 @@ const { values } = parseArgs({
     relay: { type: 'string', multiple: true },
     'peer-port': { type: 'string' },
     'public-address': { type: 'string' },
-    // A verifier (0066, step 6): checks people's email addresses with a code sent by this command, and keeps locked recovery keys with --escrow.
-    'verify-emails': { type: 'string' },
-    'verifier-name': { type: 'string' },
-    escrow: { type: 'boolean' },
     'dht-port': { type: 'string' },
     'serve-dht': { type: 'boolean' },
     'flush-ms': { type: 'string' },
@@ -177,10 +172,6 @@ const hub = await startHub({
     dhtPort: numberFlag('dht-port', values['dht-port'], { min: 1, whole: true }),
     serveDht: values['serve-dht'],
   }).filter(([, v]) => v !== undefined)),
-  // A verifier, if asked for: its key and the locked keys kept beside the settings.
-  ...(values['verify-emails'] ? {
-    verifier: { dir: join(dirname(settingsFile), 'verifier'), label: values['verifier-name'], mail: mailCommand(values['verify-emails']), escrow: values.escrow },
-  } : {}),
   log: (m) => console.log(`[kuraa] ${m}`),
 });
 const close = () => hub.close();

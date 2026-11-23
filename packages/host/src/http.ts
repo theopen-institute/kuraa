@@ -14,8 +14,6 @@ import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
 import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError, NotAllowed } from './errors.js';
-import crypto from 'hypercore-crypto';
-import { askMessage, emailOf, readAttestation } from './peers/attest.js';
 import { renameOver, unportablePath } from './files.js';
 import { renderRoutes, searchRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
@@ -461,26 +459,6 @@ const keysDo = async (fn: () => Promise<unknown>) => {
   }
 };
 
-/** A verifier's address, as the app gives it: http(s), no trailing slash. */
-function verifierUrl(v: unknown): string {
-  const url = typeof v === 'string' ? v.trim().replace(/\/+$/, '') : '';
-  if (!/^https?:\/\/\S+$/.test(url)) throw new HttpError(400, 'A verifier is a server’s address (https://…)');
-  return url;
-}
-
-/** Ask a verifier something (verifier.ts): its answer, or its refusal as an error. */
-async function askVerifier(url: string, path: string, body: unknown): Promise<unknown> {
-  let r: Response;
-  try {
-    r = await fetch(`${url}${path}`, body === null ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  } catch (e) {
-    throw new HttpError(502, `Could not reach ${url}: ${(e as Error).message}`);
-  }
-  const answer = await r.json().catch(() => ({})) as { error?: string };
-  if (!r.ok) throw new HttpError(r.status === 404 ? 404 : 400, answer.error ?? `${url} answered ${r.status}`);
-  return answer;
-}
-
 const personRoutes: Route[] = [
   route('GET', '/api/person', async ({ host, res }) => send(res, 200, { person: await hostPerson(host) })),
   route('POST', '/api/person', async ({ host, req, res }) => {
@@ -536,123 +514,6 @@ const personRoutes: Route[] = [
     });
     await personChanged(host);
     send(res, 200, { person: await hostPerson(host) });
-  }),
-  // Trustees (0066, step 6): name them (with the recovery key); ask them, with both keys lost; vouch, as one; complete.
-  route('POST', '/api/person/trustees', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const keys = await personKeys();
-    const line = str(b.line, 'line');
-    const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === 'string') : [];
-    const drop = new Set(Array.isArray(b.drop) ? b.drop.filter((k): k is string => typeof k === 'string') : []);
-    await keysDo(async () => {
-      const known = await knownKeys(host, keys.readRecoveryLine(line).id);
-      await keys.nameTrustees(line, { threshold: Number(b.threshold), ids }, known.filter((k) => !drop.has(k)));
-    });
-    await personChanged(host);
-    send(res, 200, { person: await hostPerson(host) });
-  }),
-  route('POST', '/api/person/trustees/ask', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const id = str((await readBody(req)).id, 'id');
-    const log = host.options.identityLog ? await host.options.identityLog(id) : host.peers ? await (async () => {
-      const state = await host.peers!.node.identity.identityState(id);
-      return state ? { events: state.events, name: (await host.peers!.node.identity.people()).find((p) => p.key === id)?.name ?? '' } : null;
-    })() : null;
-    if (!log) throw new HttpError(404, 'None of the workspaces here knows that identity');
-    let out: { line: string; trustees: { threshold: number; ids: string[] } } | undefined;
-    await keysDo(async () => { out = await (await personKeys()).askTrustees(log.events, log.name, await knownKeys(host, id)); });
-    send(res, 200, out);
-  }),
-  route('POST', '/api/person/trustees/preview', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const line = str((await readBody(req)).line, 'line');
-    let ask: { name: string; id: string } | undefined;
-    await keysDo(async () => { ask = (await personKeys()).readTrusteeAsk(line); });
-    send(res, 200, { name: ask!.name, id: ask!.id });
-  }),
-  route('POST', '/api/person/trustees/vouch', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const line = str((await readBody(req)).line, 'line');
-    let answer = '';
-    await keysDo(async () => { answer = await (await personKeys()).vouchForAsk(line); });
-    send(res, 200, { line: answer });
-  }),
-  route('POST', '/api/person/trustees/complete', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const lines = Array.isArray(b.lines) ? b.lines.filter((x): x is string => typeof x === 'string') : [];
-    await keysDo(async () => { await (await personKeys()).completeTrustees(lines); });
-    await personChanged(host);
-    send(res, 200, { person: await hostPerson(host) });
-  }),
-  // Your email, checked by a verifier (0066, step 6): a code sent there, then an attestation, kept here and said in each workspace.
-  route('POST', '/api/person/email/start', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const url = verifierUrl(b.url);
-    const keys = await personKeys();
-    const p = await keys.readPerson();
-    if (!p) throw new HttpError(400, 'Your identity is not on this computer');
-    const email = emailOf(str(b.email, 'email'));
-    if (!email) throw new HttpError(400, 'Not an email address');
-    await askVerifier(url, '/verify/email/start', { id: p.id, email, log: p.events, proof: crypto.sign(askMessage('email', p.id, `email:${email}`), p.secretKey).toString('hex') });
-    send(res, 200, { sent: true });
-  }),
-  route('POST', '/api/person/email/finish', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const keys = await personKeys();
-    const p = await keys.readPerson();
-    if (!p) throw new HttpError(400, 'Your identity is not on this computer');
-    const r = await askVerifier(verifierUrl(b.url), '/verify/email/finish', { id: p.id, email: str(b.email, 'email'), code: str(b.code, 'code') }) as { attestation?: unknown };
-    const a = readAttestation(r.attestation);
-    if (!a || a.id !== p.id) throw new HttpError(502, 'The verifier answered with something that is not an attestation of you');
-    await keys.keepAttestation(a);
-    await personChanged(host);
-    send(res, 200, { person: await hostPerson(host) });
-  }),
-  // Your recovery key, locked with a passphrase, kept by a verifier that checked your address; and had back with a code (step 6).
-  route('POST', '/api/person/escrow/put', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const url = verifierUrl(b.url);
-    const keys = await personKeys();
-    const p = await keys.readPerson();
-    const line = await keys.recoveryLine();
-    if (!p || !line) throw new HttpError(400, 'Your recovery key is not on this computer: it can be locked and kept only while it is');
-    const verifier = await askVerifier(url, '/verify', null) as { key?: string; escrow?: boolean };
-    if (!verifier.escrow) throw new HttpError(400, 'That server does not keep recovery keys');
-    const a = (await keys.attestations()).find((x) => x.id === p.id && x.verifier === verifier.key && x.expires > Date.now());
-    if (!a) throw new HttpError(400, 'Have your email address checked by that server first');
-    let blob: string;
-    try {
-      blob = keys.sealRecovery(line, str(b.passphrase, 'passphrase'));
-    } catch (e) {
-      throw new HttpError(400, (e as Error).message);
-    }
-    await askVerifier(url, '/verify/escrow/put', { attestation: a, blob, id: p.id, log: p.events, proof: crypto.sign(askMessage('escrow', p.id, createHash('sha256').update(blob).digest('hex')), p.secretKey).toString('hex') });
-    // Kept there: no longer on this computer (whoever takes it, takes no key with it).
-    await keys.recoverySaved();
-    send(res, 200, { person: await hostPerson(host), email: a.claim.slice(6) });
-  }),
-  route('POST', '/api/person/escrow/start', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    await askVerifier(verifierUrl(b.url), '/verify/escrow/start', { email: str(b.email, 'email') });
-    send(res, 200, { sent: true });
-  }),
-  route('POST', '/api/person/escrow/get', async ({ host, req, res }) => {
-    await hostPerson(host);
-    const b = await readBody(req);
-    const r = await askVerifier(verifierUrl(b.url), '/verify/escrow/get', { email: str(b.email, 'email'), code: str(b.code, 'code') }) as { kept?: { blob?: unknown }[] };
-    const keys = await personKeys();
-    const passphrase = str(b.passphrase, 'passphrase');
-    for (const k of r.kept ?? []) {
-      const line = typeof k.blob === 'string' ? keys.openRecovery(k.blob, passphrase) : null;
-      if (line) return send(res, 200, { line, ...keys.readRecoveryLine(line) });
-    }
-    throw new HttpError(400, (r.kept ?? []).length ? 'That passphrase opens none of the recovery keys kept for that address' : 'No recovery key is kept for that address');
   }),
   route('GET', '/api/person/export', async ({ host, res }) => {
     await hostPerson(host);
@@ -733,9 +594,7 @@ const peerRoutes: Route[] = [
     await host.ensureName();
     // As a member, unless it says admin (0066).
     const role = body.role === 'admin' ? 'admin' : 'member';
-    // For someone by their email, if given: their place waits for an attestation of it (0066, step 6).
-    const email = typeof body.email === 'string' && body.email.trim() ? body.email : undefined;
-    const link = await allowed(() => peers.inviteLink({ hours, once: body.once === true, role, email }));
+    const link = await allowed(() => peers.inviteLink({ hours, once: body.once === true, role }));
     send(res, 201, { link, ...(await peers.links()).at(-1)! });
   }),
 
@@ -822,17 +681,19 @@ const peerRoutes: Route[] = [
     send(res, 200, await peers.access(path));
   }),
   route('GET', '/api/rules', async ({ host, res }) => {
-    send(res, 200, host.peers ? await host.peers.rules() : { admin: false, rules: [], groups: [], verifiers: [] });
+    send(res, 200, host.peers ? await host.peers.rules() : { admin: false, rules: [], groups: [], permissions: [], clashes: [], refound: null });
   }),
-  // Verifiers whose checks count here (0066, step 6): an admin adds one by its address, or takes one away.
-  route('POST', '/api/verifiers', async ({ host, req, res }) => {
+  // A clash's losing change made again, on purpose, after both (0078): an admin's (as the change needs).
+  route('POST', /^\/api\/clashes\/([0-9a-f]{64})\/redo$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
-    const url = str((await readBody(req)).url, 'url');
-    send(res, 200, await allowed(() => peers.addVerifier(url)));
+    await allowed(() => peers.redo(params[0]!));
+    send(res, 200, await peers.rules());
   }),
-  route('DELETE', /^\/api\/verifiers\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+  // A workspace from before 0066 founded again (0078), by its owner (or, with none, an admin).
+  route('POST', '/api/peers/refound', async ({ host, res }) => {
     const peers = await host.peersForInvites();
-    send(res, 200, await allowed(() => peers.removeVerifier(params[0]!)));
+    await allowed(() => peers.refound());
+    send(res, 200, await peers.rules());
   }),
   route('POST', '/api/rules', async ({ host, req, res }) => {
     const peers = await host.peersForInvites();

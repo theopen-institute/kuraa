@@ -1,5 +1,7 @@
 # 0066 · Who may read and change what, without a centre
 
+*Since [0078](0078-restrictive-wins.md):* trustees, server escrow, verifiers with their attestations (email checks), and inviting by email are gone, removed entirely; an identity is recovered with its recovery key alone. Changes made at the same time are settled by what gives less (not by rank, 0072), and each such clash is shown. A workspace from before is founded again.
+
 **Status: built, in the order below, but for step 6's server-held identities, passkeys and sequencer, which wait on a design for a server many people sign in to (see *Built so far* at the end).**
 This is the redesign [0038](0038-equal-peers.md) left for later.
 When built, it replaces 0038's model (every member has total control), extends

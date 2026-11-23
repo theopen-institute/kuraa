@@ -35,7 +35,6 @@ import { DEFAULT_POLICY } from '@kuraa/run-kit';
 import { DEFAULT_TIMINGS, type HostOptions } from './host.js';
 import { HttpError } from './errors.js';
 import { Git } from './git.js';
-import { Verifier, type VerifierOptions } from './verifier.js';
 import { renameOver, reservedName } from './files.js';
 import { serialQueue } from './serial.js';
 import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from './http.js';
@@ -81,14 +80,12 @@ export interface HubOptions {
   /** Pages at other origins that may use the hub (--allow-origin; origins.ts). */
   allowOrigins?: string[];
   /** For every workspace's host: formats, running code, timings, identity, logging. */
-  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'knownKeys' | 'identityLog' | 'run' | 'requests'> & {
+  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'knownKeys' | 'run' | 'requests'> & {
     /** Running code. With settings, only what flags set: engines here (--engine) win over the setting. */
     run?: Partial<RunOptions>;
   };
   /** Syncing with other devices, for the workspaces that are shared: joined from an invite link, or that invited someone. */
   peers?: PeerOptions;
-  /** Act as a verifier too (0066, step 6): check people's email addresses, and keep locked recovery keys (verifier.ts). Its routes, under /verify/, are public. */
-  verifier?: VerifierOptions;
   log?: (m: string) => void;
 }
 
@@ -232,15 +229,7 @@ export class Hub {
     this.o.log?.(m);
   }
 
-  /** This server as a verifier, if it is one. */
-  verifier: Verifier | null = null;
-
   async start(): Promise<AddressInfo> {
-    if (this.o.verifier) {
-      this.verifier = new Verifier(this.o.verifier);
-      await this.verifier.start();
-      this.log(`verifying email addresses${this.o.verifier.escrow ? ', and keeping locked recovery keys' : ''}, as ${this.verifier.publicKey.slice(0, 12)}… (at /verify/)`);
-    }
     // The environments loaded, so that a setting naming one no longer there is passed over.
     if (this.o.settings) await this.loadComponents();
     if (this.o.folder) {
@@ -347,16 +336,6 @@ export class Hub {
     await Promise.all([...this.hosts.values()].map((h) => h.host.peers?.node.signingKey().catch(() => undefined)));
   }
 
-  /** An identity's log and name, from the first of this hub's workspaces that knows it. */
-  private async identityLog(id: string): Promise<{ events: import('./peers/kel.js').KeyEvent[]; name: string } | null> {
-    for (const h of this.hosts.values()) {
-      const node = h.host.peers?.node;
-      const state = await node?.identity.identityState(id).catch(() => null);
-      if (node && state) return { events: state.events, name: (await node.identity.people()).find((p) => p.key === id)?.name ?? '' };
-    }
-    return null;
-  }
-
   /** The signing keys any of this hub's workspaces knows to be this identity's. */
   private async knownKeys(id: string): Promise<string[]> {
     const all = await Promise.all([...this.hosts.values()].map(async (h) =>
@@ -385,7 +364,6 @@ export class Hub {
         manageOnline: this.owner,
         personChanged: () => this.personChanged(),
         knownKeys: (id) => this.knownKeys(id),
-        identityLog: (id) => this.identityLog(id),
       });
       this.hosts.set(e.id, h);
       this.errors.delete(e.id);
@@ -652,8 +630,6 @@ export class Hub {
     const w = /^\/w\/([a-z0-9-]+)(\/.*)?$/.exec(url.pathname);
     if (!hostAllowed(req, this.gate)) return refuseHost(res);
     try {
-      // A verifier's routes (/verify, /verify/…): public, each guarded by what it asks for (verifier.ts).
-      if (this.verifier && (await this.verifier.handle(req, res, url))) return;
       if (w) return this.proxy(req, res, w[1]!, `${w[2] ?? '/'}${url.search}`);
       if (url.pathname.startsWith('/hub/api/')) {
         corsHeaders(req, res, this.gate);

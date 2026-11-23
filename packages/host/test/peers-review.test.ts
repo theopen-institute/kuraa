@@ -1,8 +1,8 @@
 // What a second review of the network found, and how it is held to now: a
-// workspace from before policies kept to its own geneses and seal; invite links
-// unlinked, and joins counted only where a device in let their holder in; only
-// what shows a device to be in kept of what it sends before it is; attestations
-// expiring by their verifier's clock; edits passed on judged by whose they are;
+// workspace from before policies worked out, the one last time (legacy.ts,
+// 0078), kept to its own geneses and seal; invite links unlinked, and joins
+// counted only where a device in let their holder in; only what shows a device
+// to be in kept of what it sends before it is; edits passed on judged by whose they are;
 // a stream's window held to; links and look-alike paths refused at the gate;
 // what a device says on the local network tied to where it says it from.
 import { afterEach, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ import { Identity, decodeLink } from '../src/peers/identity.js';
 import { admittedGrantMessage, evaluate, linkGrantMessage, makeOp, type PolicyContext, type PolicyEntry, type PolicyOp } from '../src/peers/policy.js';
 import { sign, signRecord, signsMessage, vouchMessage } from '../src/peers/records.js';
 import { identityId, incept, type KeyEvent } from '../src/peers/kel.js';
-import { attest } from '../src/peers/attest.js';
+import { evaluateLegacy, type LegacyContext, type LegacySnapshot } from '../src/peers/legacy.js';
 import { PeerLink } from '../src/peers/link.js';
 import { Rooms, readAwareness, writeAwareness } from '../src/peers/rooms.js';
 import { gate, type GateContext } from '../src/peers/gate.js';
@@ -57,7 +57,10 @@ function people() {
   return { person, another, personOf: (k: string) => keys.get(k) ?? null };
 }
 
-describe('a workspace from before policies (its legacy geneses)', () => {
+/** A person's place in a legacy snapshot's workspace. */
+const roleIn = (s: LegacySnapshot, id: string) => s.groups.workspace?.[id] ?? null;
+
+describe('a workspace from before policies, worked out the one last time (its legacy geneses: legacy.ts)', () => {
   /** Ada's device wrote a legacy genesis naming Ada and Bo; Ada sealed it, then made a rule. As legacy.ts in the review. */
   function sealed() {
     const p = people();
@@ -77,21 +80,21 @@ describe('a workspace from before policies (its legacy geneses)', () => {
   it('takes no legacy genesis a stranger brings, nor a seal of it, however its hash falls (the takeover the review showed)', () => {
     const w = sealed();
     // Ada's device: its own genesis, the seal it keeps to.
-    const kept: PolicyContext = { workspace: WS, pin: null, personOf: w.personOf, legacy: [w.g.id], seal: w.seal.id };
+    const kept: LegacyContext = { workspace: WS, personOf: w.personOf, legacy: [w.g.id], seal: w.seal.id };
     // One that has not kept to the seal yet (it has its own geneses only).
-    const unsealed: PolicyContext = { ...kept, seal: null };
+    const unsealed: LegacyContext = { ...kept, seal: null };
     // Eve, never in: a legacy genesis naming her and a seal naming it alone, signed by many keys (some hashing below Ada's seal).
     for (let i = 0; i < 24; i++) {
       const key = w.another(w.eve);
       const g = makeOp(WS, { t: 'genesis', admins: [w.eve.id], legacy: true }, [], key);
       const s = makeOp(WS, { t: 'seal', geneses: [g.id] }, [g.id], key);
       for (const ctx of [kept, unsealed]) {
-        const p = evaluate([...w.entries, g, s], ctx);
+        const p = evaluateLegacy([...w.entries, g, s], ctx);
         expect(p.owner).toBe(w.ada.id);
-        expect(p.role(w.eve.id)).toBeNull();
-        expect(p.role(w.ada.id)).toBe('admin');
-        expect(p.role(w.bo.id)).toBe('admin');
-        expect(p.ruleFor('secret/x')?.by).toEqual(['admins']);
+        expect(roleIn(p, w.eve.id)).toBeNull();
+        expect(roleIn(p, w.ada.id)).toBe('admin');
+        expect(roleIn(p, w.bo.id)).toBe('admin');
+        expect(p.perms['secret/']?.write).toEqual(['admins']);
       }
     }
   });
@@ -100,9 +103,8 @@ describe('a workspace from before policies (its legacy geneses)', () => {
     const w = sealed();
     // Bo, an admin there, seals the same geneses again, as if he had not seen Ada's seal (to be the owner).
     const late = makeOp(WS, { t: 'seal', geneses: [w.g.id] }, [w.g.id], w.bo.key);
-    const p = evaluate([...w.entries, late], { workspace: WS, pin: null, personOf: w.personOf, legacy: [w.g.id], seal: w.seal.id });
+    const p = evaluateLegacy([...w.entries, late], { workspace: WS, personOf: w.personOf, legacy: [w.g.id], seal: w.seal.id });
     expect(p.owner).toBe(w.ada.id);
-    expect(p.sealId).toBe(w.seal.id);
   });
 
   it('of seals made at the same time, counts the one taking the fewest out, wherever it is worked out', () => {
@@ -113,12 +115,11 @@ describe('a workspace from before policies (its legacy geneses)', () => {
     // Bo seals his own alone (Ada out); Ada, at the same time, both.
     const narrow = makeOp(WS, { t: 'seal', geneses: [g2.id] }, [g1.id, g2.id], bo.key);
     const wide = makeOp(WS, { t: 'seal', geneses: [g1.id, g2.id].sort() }, [g1.id, g2.id], ada.key);
-    const ctx: PolicyContext = { workspace: WS, pin: null, personOf: p.personOf, legacy: [g1.id, g2.id] };
+    const ctx: LegacyContext = { workspace: WS, personOf: p.personOf, legacy: [g1.id, g2.id] };
     for (const order of [[g1, g2, narrow, wide], [wide, narrow, g2, g1]]) {
-      const policy = evaluate(order, ctx);
-      expect(policy.sealId).toBe(wide.id);
+      const policy = evaluateLegacy(order, ctx);
       expect(policy.owner).toBe(ada.id);
-      expect(policy.role(ada.id)).toBe('admin');
+      expect(roleIn(policy, ada.id)).toBe('admin');
     }
   });
 
@@ -131,12 +132,12 @@ describe('a workspace from before policies (its legacy geneses)', () => {
     const ge = makeOp(WS, { t: 'genesis', admins: [eve.id], legacy: true }, [], eve.key);
     const all = [g1, g3, ge];
     // Ada's device (g1 its own) and Cy's (g3) come to the same: Eve, whom no one there names, is not in.
-    const onAda = evaluate(all, { workspace: WS, pin: null, personOf: p.personOf, legacy: [g1.id] });
-    const onCy = evaluate(all, { workspace: WS, pin: null, personOf: p.personOf, legacy: [g3.id, g1.id] });
+    const onAda = evaluateLegacy(all, { workspace: WS, personOf: p.personOf, legacy: [g1.id] });
+    const onCy = evaluateLegacy(all, { workspace: WS, personOf: p.personOf, legacy: [g3.id, g1.id] });
     for (const policy of [onAda, onCy]) {
       expect(policy.geneses.sort()).toEqual([g1.id, g3.id].sort());
-      expect(policy.role(dee.id)).toBe('admin');
-      expect(policy.role(eve.id)).toBeNull();
+      expect(roleIn(policy, dee.id)).toBe('admin');
+      expect(roleIn(policy, eve.id)).toBeNull();
     }
   });
 });
@@ -233,7 +234,7 @@ function deviceOf(ws: string, person: TestIdentity, name: string) {
 
 const policyRecord = (ws: string, e: PolicyEntry, by: Key) => signRecord({ kind: 'policy', workspace: ws, subject: e.id, op: e.op, parents: e.parents, signer: e.signer, proof: e.proof }, by);
 
-/** A workspace on a device of Ada's: pinned (made now), or one from before (her legacy genesis, naming her). */
+/** A workspace on a device of Ada's: pinned (made now), or one from before (her legacy genesis, naming her, written as it was then). */
 async function workspace(fresh = true) {
   const dir = tmp('review');
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
@@ -243,7 +244,13 @@ async function workspace(fresh = true) {
   const adaKey = crypto.keyPair();
   await id.signsWith(adaKey);
   await id.vouch({ name: 'Ada', ...ada.key, id: ada.id, events: ada.events }, adaKey);
-  await id.ensureGenesis(ada.id, adaKey, fresh);
+  if (fresh) await id.ensureGenesis(ada.id, adaKey, true);
+  else {
+    const g = makeOp(ws.id, { t: 'genesis', admins: [ada.id], legacy: true }, [], adaKey);
+    await id.decide('policy', g.id, { op: g.op, parents: g.parents, signer: g.signer, proof: g.proof });
+    // As if written by a kuraa from before: this one works the legacy policy out first now, from what it holds.
+    rmSync(join(dir, '.git', 'kuraa', 'legacy-last.json'), { force: true });
+  }
   return { id, ws, ada, adaKey, dir };
 }
 
@@ -294,28 +301,6 @@ describe('what a device not known to be in sends', () => {
     await id.revokeLink(l.id, adaKey);
     expect((await id.policy()).unlinked.has(l.id)).toBe(true);
     expect(await id.refuseGrant(l)).toBe('the link was revoked');
-  });
-});
-
-describe('attestations, by their verifier’s clock', () => {
-  it('count, though past their expiry by this computer’s clock, until one their verifier made after it is on record', async () => {
-    const { id, ws, adaKey } = await workspace();
-    const verifier = crypto.keyPair();
-    const bo = identity();
-    const device = crypto.keyPair();
-    await id.addRemote(hex(device), 'bo');
-    await id.adminOp({ t: 'verifier', key: hex(verifier), url: 'https://verify.example.org' }, adaKey);
-    await id.adminOp({ t: 'grant', group: 'workspace', who: 'email:bo@uni.edu', role: 'member' }, adaKey);
-    // Made two years ago, for a year.
-    const at = Date.now() - 2 * 365 * 86_400_000;
-    const a = attest(verifier, bo.id, 'email:bo@uni.edu', 365 * 86_400_000, at);
-    await id.takeRecords([signRecord({ kind: 'attest', workspace: ws.id, subject: bo.id, attestation: a }, device)]);
-    expect((await id.policy()).role(bo.id)).toBe('member');
-    // The verifier attests something of someone else, after Bo's ran out: every device holding that has his expired.
-    const cy = identity();
-    const later = attest(verifier, cy.id, 'email:cy@uni.edu', 365 * 86_400_000, at + 400 * 86_400_000);
-    await id.takeRecords([signRecord({ kind: 'attest', workspace: ws.id, subject: cy.id, attestation: later }, device)]);
-    expect((await id.policy()).role(bo.id)).toBeNull();
   });
 });
 

@@ -116,10 +116,12 @@ export interface RulesInfo {
   admin: boolean;
   rules: { path: string; by: string[] }[];
   groups: { name: string; entries: { who: string; role: 'admin' | 'member'; name: string | null }[] }[];
-  /** Verifiers whose checks count here (0066, step 6). */
-  verifiers?: { key: string; url: string }[];
   /** Every file's and folder's permission (0069): its path (null: private, not one you know). */
   permissions?: { path: string | null; private: boolean; write: string[] | null; read: string[] | null }[];
+  /** Changes made at the same time of which the one giving less counted (0078), the latest first: in words, and whether you may make the one that lost again. */
+  clashes?: { lost: string; won: string | null; why: string; words: string; redo: boolean }[];
+  /** A workspace from before 0066, to be founded again (0078): its owner's name (null: any admin may), and whether you may. Null: founded. */
+  refound?: { owner: string | null; may: boolean } | null;
 }
 
 /** The workspace's people, by its policy (0066). */
@@ -128,15 +130,11 @@ export interface PeopleInfo {
   founded: boolean;
   /** Whether you may invite people, remove devices and change who is in it. */
   admin: boolean;
-  /** The workspace's owner (0070); null: one from before with none yet. */
+  /** The workspace's owner (0070); null: one from before with none. */
   owner?: string | null;
-  /** Whether you make, unmake and take out admins: the owner (any admin, where there is none yet). */
+  /** Whether you make, unmake and take out admins: the owner. */
   assignsAdmins?: boolean;
-  people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean; emails?: string[] }[];
-  /** People invited by email, not in yet (step 6). */
-  invited?: { email: string; role: 'admin' | 'member' }[];
-  /** Admins taken out at the same time as the others, which would have left none, who stayed (0072). */
-  disputes?: string[][];
+  people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean }[];
   /** People whose devices' acknowledgements confirm removals (0072). */
   witnesses?: string[];
   /** The latest removals (0072): people taken out, computers dropped; who has confirmed each so far. */
@@ -298,22 +296,10 @@ export class HostApi {
   /** Who may change a file (0066). */
   access(path: string) { return this.json<FileAccess>(`/api/access?path=${encodeURIComponent(path)}`); }
   rules() { return this.json<RulesInfo>('/api/rules'); }
-  /** Count a verifier's checks in this workspace (an admin's to do), by its address; or stop (0066, step 6). */
-  addVerifier(url: string) { return this.json<RulesInfo>('/api/verifiers', { method: 'POST', body: JSON.stringify({ url }) }); }
-  removeVerifier(key: string) { return this.json<RulesInfo>(`/api/verifiers/${key}`, { method: 'DELETE' }); }
-  /** Your email, checked by a verifier: a code sent there, then the code (step 6). */
-  emailStart(url: string, email: string) { return this.json('/api/person/email/start', { method: 'POST', body: JSON.stringify({ url, email }) }); }
-  emailFinish(url: string, email: string, code: string) { return this.json('/api/person/email/finish', { method: 'POST', body: JSON.stringify({ url, email, code }) }); }
-  /** Your recovery key, locked with a passphrase, kept by a verifier; and had back with a code and the passphrase (step 6). */
-  escrowPut(url: string, passphrase: string) { return this.json<{ email: string }>('/api/person/escrow/put', { method: 'POST', body: JSON.stringify({ url, passphrase }) }); }
-  escrowStart(url: string, email: string) { return this.json('/api/person/escrow/start', { method: 'POST', body: JSON.stringify({ url, email }) }); }
-  escrowGet(url: string, email: string, code: string, passphrase: string) { return this.json<{ line: string; name: string }>('/api/person/escrow/get', { method: 'POST', body: JSON.stringify({ url, email, code, passphrase }) }); }
-  /** Trustees (step 6): name them, with the recovery key; ask them; read a request; vouch; complete. */
-  trusteesName(line: string, threshold: number, ids: string[]) { return this.json('/api/person/trustees', { method: 'POST', body: JSON.stringify({ line, threshold, ids }) }); }
-  trusteesAsk(id: string) { return this.json<{ line: string; trustees: { threshold: number; ids: string[] } }>('/api/person/trustees/ask', { method: 'POST', body: JSON.stringify({ id }) }); }
-  trusteesPreview(line: string) { return this.json<{ name: string; id: string }>('/api/person/trustees/preview', { method: 'POST', body: JSON.stringify({ line }) }); }
-  trusteesVouch(line: string) { return this.json<{ line: string }>('/api/person/trustees/vouch', { method: 'POST', body: JSON.stringify({ line }) }); }
-  trusteesComplete(lines: string[]) { return this.json('/api/person/trustees/complete', { method: 'POST', body: JSON.stringify({ lines }) }); }
+  /** Make a clash's losing change again, on purpose, after both (0078). */
+  redoClash(op: string) { return this.json<RulesInfo>(`/api/clashes/${op}/redo`, { method: 'POST' }); }
+  /** Found a workspace from before 0066 again, as its owner (0078). */
+  refound() { return this.json<RulesInfo>('/api/peers/refound', { method: 'POST' }); }
   /** Who reads a file: everyone in the workspace (null), or an audience (people's IDs, `group:<name>`, `admins`) (0066). */
   setAudience(path: string, audience: string[] | null) { return this.json<FileAccess>('/api/audience', { method: 'POST', body: JSON.stringify({ path, audience }) }); }
   /** Say who may change a path (people's IDs, `group:<name>`, `admins`); none takes the rule away. */
@@ -328,7 +314,7 @@ export class HostApi {
   setWitness(id: string, on: boolean) { return this.json<PeopleInfo>(`/api/peers/witness/${id}`, { method: 'POST', body: JSON.stringify({ on }) }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
   removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
-  createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member'; email?: string }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
+  createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member' }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   /** Remove a device from the workspace, for good (it keeps its copy). */
   removeDevice(key: string) { return this.json<{ ok: boolean; revoked?: boolean }>(`/api/peers/devices/${key}`, { method: 'DELETE' }); }

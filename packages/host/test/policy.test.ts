@@ -123,20 +123,26 @@ describe('a workspace’s policy', () => {
     expect(evaluate(h.entries.filter((_, i) => i !== 1), h.ctx()).role(cy.id)).toBeNull();
   });
 
-  it('in a workspace from before: everyone its devices wrote down an admin, until an admin seals the list', () => {
-    const h = history(false);
-    h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
-    h.add({ t: 'genesis', admins: [bo.id, cy.id], legacy: true }, bo);
-    expect(h.now().people().map((p) => p.role)).toEqual(['admin', 'admin', 'admin']);
-    // A genesis of a workspace made since does not count here.
-    h.add({ t: 'genesis', admins: [dee.id], legacy: false }, dee);
-    expect(h.now().role(dee.id)).toBeNull();
-    // Ada seals it: a legacy genesis made later does not count.
-    h.add({ t: 'seal', geneses: h.now().geneses }, ada);
-    h.add({ t: 'genesis', admins: [dee.id], legacy: true }, dee);
-    expect(h.now().role(dee.id)).toBeNull();
-    expect(h.now().sealed).toBe(true);
-    expect(h.now().role(cy.id)).toBe('admin');
+  it('counts no legacy genesis, seal, verifier or email entry (0078): a workspace from before is founded again first', () => {
+    // Unpinned: nothing counts.
+    const old = history(false);
+    old.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
+    expect(old.now().founded).toBe(false);
+    expect(old.now().role(ada.id)).toBeNull();
+    // Pinned: operations of kinds retired with 0078 keep the history whole, and count for nothing.
+    const h = history();
+    h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+    h.add({ t: 'seal', geneses: [h.entries[0]!.id] }, ada);
+    h.add({ t: 'verifier', key: 'ab'.repeat(32), url: 'https://verify.example.org' }, ada);
+    h.add({ t: 'grant', group: 'workspace', who: 'email:bo@uni.edu', role: 'member' }, ada);
+    h.add({ t: 'rule', path: '', by: ['email:bo@uni.edu'] }, ada);
+    // What comes after them still counts.
+    h.add(grant(cy, 'member'), ada);
+    const p = h.now();
+    expect(p.applied).toHaveLength(2);
+    expect(p.role(cy.id)).toBe('member');
+    expect(p.groups.get('workspace')!.has('email:bo@uni.edu')).toBe(false);
+    expect(p.rules.size).toBe(0);
   });
 
   it('says who may change what: the most specific rule for a file, people, groups or admins; anyone where none', () => {
@@ -199,8 +205,8 @@ describe('a workspace’s policy', () => {
       expect(p.role(cy.id)).toBe('member');
     });
 
-    // Settled by rank (0072): the owner, then admins by how long they have been, then members.
-    it('of two taking each other out at once, the higher-ranked stays', () => {
+    // Settled by what gives less (0078), never by rank.
+    it('of two taking each other out at once, both are out (a ring of removals all count)', () => {
       const { h } = start();
       // Bo (an admin) and Cy (a member) are both admins of the team.
       h.add(grant(bo, 'admin', 'team'), ada);
@@ -209,29 +215,72 @@ describe('a workspace’s policy', () => {
       h.add({ t: 'revoke', group: 'team', who: cy.id }, bo, base);
       h.add({ t: 'revoke', group: 'team', who: bo.id }, cy, base);
       const p = h.now();
-      expect(p.role(bo.id, 'team')).toBe('admin');
+      expect(p.role(bo.id, 'team')).toBeNull();
       expect(p.role(cy.id, 'team')).toBeNull();
       expect(evaluate([...h.entries].reverse(), h.ctx()).groups).toEqual(p.groups);
     });
 
-    it('between equal admins (a workspace from before), the longer an admin stays', () => {
-      const h = history(false);
-      h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
-      h.add(grant(dee, 'admin'), bo);
+    it('a removal stands over what the one taken out did at the same time, however it hashes (no rank, no tie by ID)', () => {
+      const { h } = start();
+      h.add(grant(bo, 'admin', 'team'), ada);
+      h.add(grant(cy, 'admin', 'team'), ada);
+      h.add(grant(dee, 'member'), ada);
+      h.add(grant(dee, 'member', 'team'), ada);
       const base = h.now().heads;
-      h.add({ t: 'revoke', group: 'workspace', who: dee.id }, ada, base);
-      h.add({ t: 'revoke', group: 'workspace', who: ada.id }, dee, base);
+      // Bo takes Cy out of the team; Cy, at the same time, takes Dee out: Cy's does not count.
+      const r = h.add({ t: 'revoke', group: 'team', who: cy.id }, bo, base);
+      const late = h.add({ t: 'revoke', group: 'team', who: dee.id }, cy, base);
       const p = h.now();
-      expect(p.role(ada.id)).toBe('admin');
-      expect(p.role(dee.id)).toBeNull();
-      expect(p.disputes).toEqual([]);
+      expect(p.role(dee.id, 'team')).toBe('member');
+      expect(p.clashes).toContainEqual({ lost: late.id, won: r.id, why: 'removed' });
     });
 
-    it('the higher-ranked’s word counts on where someone is: the owner making someone an admin as an admin takes them out', () => {
+    it('what gives less counts on where someone is, whoever made it: an admin taking someone out as the owner makes them an admin', () => {
       const { h, base } = start();
-      h.add({ t: 'revoke', group: 'workspace', who: cy.id }, bo, base);
-      h.add(grant(cy, 'admin'), ada, base);
+      const out = h.add({ t: 'revoke', group: 'workspace', who: cy.id }, bo, base);
+      const up = h.add(grant(cy, 'admin'), ada, base);
+      const p = h.now();
+      expect(p.role(cy.id)).toBeNull();
+      // On record, the one that lost and why.
+      expect(p.clashes).toEqual([{ lost: up.id, won: out.id, why: 'less' }]);
+      // Made again on purpose, after both: it counts.
+      h.add(grant(cy, 'admin'), ada);
       expect(h.now().role(cy.id)).toBe('admin');
+    });
+
+    it('of two handovers of the owner’s role at once (two of the owner’s computers), the one with the lower ID: one owner', () => {
+      const { h, base } = start();
+      h.add(grant(dee, 'member'), ada, base);
+      const after = h.now().heads;
+      const a = h.add({ t: 'owner', who: bo.id }, ada, after);
+      const b = h.add({ t: 'owner', who: dee.id }, ada, after);
+      const [won, lost] = a.id < b.id ? [a, b] : [b, a];
+      const p = h.now();
+      expect(p.owner).toBe(won.op.t === 'owner' ? won.op.who : null);
+      expect(p.clashes).toContainEqual({ lost: lost.id, won: won.id, why: 'owner' });
+      expect(p.role(ada.id)).toBe('admin');
+    });
+
+    it('rules made at the same time: the narrower counts; neither narrower, what both name; none in common, the admins', () => {
+      const { h, base } = start();
+      const wide = h.add({ t: 'rule', path: 'notes/', by: [bo.id, cy.id].sort() }, ada, base);
+      const narrow = h.add({ t: 'rule', path: 'notes/', by: [cy.id] }, bo, base);
+      let p = h.now();
+      expect(p.ruleFor('notes/a.md')?.by).toEqual([cy.id]);
+      expect(p.clashes).toEqual([{ lost: wide.id, won: narrow.id, why: 'narrower' }]);
+      // Who reads a folder, likewise; and two that share no one: the admins.
+      const now = h.now().heads;
+      const x = h.add({ t: 'perm', path: 'secret/', read: [bo.id] }, ada, now);
+      const y = h.add({ t: 'perm', path: 'secret/', read: [cy.id] }, bo, now);
+      p = h.now();
+      expect(p.readFor('secret/x.md')?.audience).toEqual(['admins']);
+      expect(p.clashes.filter((c) => c.why === 'narrower' && (c.lost === x.id || c.lost === y.id))).toHaveLength(2);
+      // A rule taken away at the same time as one is made: the one made counts (no rule is everyone).
+      const then = h.now().heads;
+      h.add({ t: 'rule', path: 'notes/', by: [] }, ada, then);
+      h.add({ t: 'rule', path: 'notes/', by: [bo.id] }, bo, then);
+      expect(h.now().ruleFor('notes/a.md')?.by).toEqual([bo.id]);
+      expect(evaluate([...h.entries].reverse(), h.ctx()).perms).toEqual(h.now().perms);
     });
 
     it('leaving oneself always counts, over anything said of one at the same time', () => {
@@ -258,20 +307,13 @@ describe('a workspace’s policy', () => {
       expect(h.now().role(cy.id, 'team')).toBe('member');
     });
 
-    it('if all the admins leave at once (no owner), the highest-ranked stays, on record', () => {
-      const h = history(false);
-      h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
-      h.add(grant(cy, 'member'), ada);
-      const base = h.now().heads;
-      h.add({ t: 'revoke', group: 'workspace', who: ada.id }, ada, base);
+    it('with an owner there is always an admin: every other admin leaving at once leaves the owner', () => {
+      const { h, base } = start();
       h.add({ t: 'revoke', group: 'workspace', who: bo.id }, bo, base);
+      h.add({ t: 'revoke', group: 'workspace', who: ada.id }, ada, base);
       const p = h.now();
-      const stays = [ada.id, bo.id].sort()[0]!;
-      expect(p.people().filter((x) => x.role === 'admin').map((x) => x.id)).toEqual([stays]);
-      expect(p.disputes).toHaveLength(1);
-      expect(p.disputes[0]!.people).toEqual([stays]);
-      // The same, whichever device puts them in which order.
-      expect(evaluate([...h.entries].reverse(), h.ctx()).disputes).toEqual(p.disputes);
+      expect(p.people().filter((x) => x.role === 'admin').map((x) => x.id)).toEqual([ada.id]);
+      expect(p.owner).toBe(ada.id);
     });
 
     // Found over histories made at random (0072): what counts must be allowed by what counts of its past.
@@ -287,14 +329,16 @@ describe('a workspace’s policy', () => {
 
     it('what someone did, let in by a grant that was cut off: not counted', () => {
       const { h, base } = start();
-      // Bo (an admin) lets Dee in, as Ada (the owner, who ranks above him) takes Bo out; Dee then makes a space.
+      // Bo (an admin) lets Dee in, as Ada (the owner) takes Bo out; Dee then makes a space.
       const made = h.add(grant(dee, 'member'), bo, base);
-      h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
-      h.add({ t: 'space', id: '44'.repeat(16), audience: [dee.id] }, dee, [made.id]);
+      const out = h.add({ t: 'revoke', group: 'workspace', who: bo.id }, ada, base);
+      const space = h.add({ t: 'space', id: '44'.repeat(16), audience: [dee.id] }, dee, [made.id]);
       const p = h.now();
       expect(p.role(bo.id)).toBeNull();
       expect(p.role(dee.id)).toBeNull();
       expect(p.spaces.size).toBe(0);
+      // Both on record: Bo's grant lost to his removal; Dee's space, made on it, did not count either.
+      expect(p.clashes).toEqual(expect.arrayContaining([{ lost: made.id, won: out.id, why: 'removed' }, { lost: space.id, won: null, why: 'unfounded' }]));
     });
 
     it('keeps a removal’s cutoff: the commits the person had made that still count', () => {
@@ -387,13 +431,4 @@ describe('a workspace’s policy', () => {
     expect(p.mayAssignAdmins(bo.id)).toBe(true);
   });
 
-  it('in a workspace from before: whoever seals it is its owner', () => {
-    const h = history(false);
-    h.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
-    expect(h.now().owner).toBeNull();
-    expect(h.now().mayAssignAdmins(bo.id)).toBe(true);
-    h.add({ t: 'seal', geneses: h.now().geneses }, bo);
-    expect(h.now().owner).toBe(bo.id);
-    expect(h.now().mayAssignAdmins(ada.id)).toBe(false);
   });
-});

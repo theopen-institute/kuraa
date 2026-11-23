@@ -4,6 +4,13 @@
 // and who may read and change it: people, groups, or its admins), which name
 // the groups. Everyone sees them; admins change them. Where there is no policy
 // yet (a workspace on this computer only), nothing is shown.
+//
+// Changes made at the same time that could not both count (0078): each said in
+// words, the one giving less having counted. Everyone in the workspace sees
+// them (every device holds the changes anyway, and a member whose place one
+// decided should see why); admins, or whoever the change needs, have **Make it
+// again**, which makes the losing change after both. A workspace from before
+// 0066 says it must be founded again, with the button for whoever may.
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, PeopleInfo, RulesInfo } from './api.js';
 import { S } from './strings.js';
@@ -57,11 +64,11 @@ const everythingWords = computed(() => {
   return own?.write ? S.rules.says(null, own.write.map(nameOf)) : S.rules.none;
 });
 
-const newVerifier = ref('');
-function addVerifier() {
+const refounded = ref(false);
+function refound() {
   void act(async () => {
-    await props.api.addVerifier(newVerifier.value.trim());
-    newVerifier.value = '';
+    await props.api.refound();
+    refounded.value = true;
   });
 }
 
@@ -77,6 +84,20 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
 </script>
 
 <template>
+  <!-- A workspace from before 0066 (0078): founded again by its owner (or, with none, an admin). -->
+  <section v-if="rules?.refound || refounded" class="menu-section" data-testid="refound">
+    <h3>{{ S.rules.refound }}</h3>
+    <p v-if="refounded" class="menu-facts" role="status">{{ S.rules.refoundDone }}</p>
+    <template v-else-if="rules?.refound">
+      <p class="menu-facts warn">{{ S.rules.refoundAbout(rules.refound.owner) }}</p>
+      <template v-if="rules.refound.may">
+        <p class="menu-facts">{{ S.rules.refoundYou }}</p>
+        <div class="menu-actions">
+          <button type="button" :disabled="busy" data-testid="refound-button" @click="refound">{{ S.rules.refound }}</button>
+        </div>
+      </template>
+    </template>
+  </section>
   <section v-if="rules && people?.founded" class="menu-section" data-testid="rules">
     <h3>{{ S.rules.groups }}</h3>
     <p class="menu-facts">{{ S.rules.groupsAbout }}</p>
@@ -128,25 +149,17 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
       <button type="submit" :disabled="!newPath.trim()" data-testid="rule-open">{{ S.rules.setFor }}</button>
     </form>
 
-    <!-- Email checks (0066, step 6): shown once a verifier is named; naming the first is under Advanced, for admins. -->
-    <template v-if="rules.verifiers?.length">
-      <h3>{{ S.rules.verifiers }}</h3>
-      <p class="menu-facts">{{ S.rules.verifiersAbout }}</p>
-      <ul class="menu-devices" data-testid="verifiers">
-        <li v-for="v in rules.verifiers" :key="v.key">
-          <span class="device-who">{{ v.url }}</span>
-          <button v-if="rules.admin" type="button" :disabled="busy" @click="act(() => api.removeVerifier(v.key))">{{ S.rules.remove }}</button>
+    <!-- Clashes (0078): shown, never settled silently; the one that lost made again on purpose. -->
+    <template v-if="rules.clashes?.length">
+      <h3>{{ S.rules.clashes }}</h3>
+      <p class="menu-facts">{{ rules.clashes.some((c) => c.redo) ? S.rules.clashesAboutAdmin : S.rules.clashesAbout }}</p>
+      <ul class="menu-devices" data-testid="clashes">
+        <li v-for="c in rules.clashes" :key="c.lost" :data-testid="`clash:${c.lost}`">
+          <span class="device-who">{{ c.words }}</span>
+          <button v-if="c.redo" type="button" :disabled="busy" :title="S.rules.redoTitle" :data-testid="`redo:${c.lost}`" @click="act(() => api.redoClash(c.lost))">{{ S.rules.redo }}</button>
         </li>
       </ul>
     </template>
-    <details v-if="rules.admin" class="person-advanced" data-testid="verifiers-advanced">
-      <summary>{{ S.rules.advanced }}</summary>
-      <p class="menu-facts">{{ S.rules.verifiersAbout }}</p>
-      <form class="person-row rule-new-group" @submit.prevent="addVerifier">
-        <input v-model="newVerifier" :placeholder="S.rules.verifierPlaceholder" spellcheck="false" data-testid="verifier-add-url">
-        <button type="submit" :disabled="busy || !newVerifier.trim()" data-testid="verifier-add">{{ S.rules.add }}</button>
-      </form>
-    </details>
     <ErrorBanner v-if="error" :error="error" inline />
   </section>
 </template>

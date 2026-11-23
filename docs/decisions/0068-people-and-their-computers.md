@@ -1,5 +1,7 @@
 # 0068 · People, with their computers; one's own removed by oneself
 
+*Since [0078](0078-restrictive-wins.md):* there are no email checks, escrow or email invites: nothing of them is shown.
+
 > Changes Workspace settings' Devices ([0064](0064-four-kinds-of-settings.md)) and who may remove a
 > device ([0066](0066-permissions-without-a-centre.md), step 2). What a device is, and what removing
 > one does (0050: it stops syncing, for good; a new secret), are as before.

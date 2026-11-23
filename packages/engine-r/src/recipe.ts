@@ -9,9 +9,9 @@
 // option `images`, from --r-image; the default image always): an image is code.
 // Its ENTRYPOINT is overridden where it runs, but its ONBUILD instructions run
 // when the image is built, with the network, so allow only images you trust.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ImageRecipe } from '@kuraa/run-kit';
+import { readWorkspaceFileSync, type ImageRecipe } from '@kuraa/run-kit';
 import { MANIFEST, readManifest } from './packages.js';
 
 /** The starter set: R with the tidyverse (and the system libraries most packages need). */
@@ -81,10 +81,9 @@ export function imageRecipe(requirements: unknown, workspace: string, options?: 
     TYPST,
   ];
   const context: Record<string, string> = {};
-  const lockfile = join(workspace, 'renv.lock');
-  if (req.renv === true && existsSync(lockfile)) {
-    // Its content, not a placeholder: sessions and the installer must build the same image.
-    context['renv.lock'] = readFileSync(lockfile, 'utf8');
+  if (req.renv === true && existsSync(join(workspace, 'renv.lock'))) {
+    // Its content, not a placeholder: sessions and the installer must build the same image. Never through a link (0037).
+    context['renv.lock'] = readWorkspaceFileSync(workspace, 'renv.lock').toString('utf8');
     lines.push(
       'COPY renv.lock /tmp/renv.lock',
       `RUN R -q -e 'install.packages("renv"); renv::restore(lockfile = "/tmp/renv.lock", library = .libPaths()[1], prompt = FALSE)'`,

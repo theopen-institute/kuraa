@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
@@ -134,28 +134,63 @@ describe('host safety', () => {
     expect(readdirSync(outside)).toEqual(['secret.md']);
   });
 
-  it('never follows a link pushed over git, even in place of a file open in a room', async () => {
+  it('refuses a push that adds a link, and checks out a link come another way as a plain file', async () => {
     await start();
-    const a = await connect('notes.md');
+    expect(git(dir, 'config', 'core.symlinks')).toBe('false');
     const clone = mkdtempSync(join(tmpdir(), 'kuraa-clone-'));
     dirs.push(clone);
     const url = running.url.replace('http://', `http://kuraa:${running.token}@`) + '/git';
     await gitAsync(tmpdir(), 'clone', '-q', url, clone);
     git(clone, 'config', 'user.name', 'Pusher');
     git(clone, 'config', 'user.email', 'pusher@example.org');
+    // The review's proof: .kuraa/workspace.json a link out of the workspace, for the host to write through.
+    mkdirSync(join(clone, '.kuraa'));
+    symlinkSync(join(outside, 'secret.md'), join(clone, '.kuraa', 'workspace.json'));
     rmSync(join(clone, 'notes.md'));
     symlinkSync(join(outside, 'secret.md'), join(clone, 'notes.md'));
-    symlinkSync(join(outside, 'secret.md'), join(clone, 'evil.md'));
     git(clone, 'add', '-A');
     git(clone, 'commit', '-q', '-m', 'Links');
+    await expect(gitAsync(clone, 'push', '-q', 'origin', 'HEAD:main')).rejects.toThrow(/symbolic link/);
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Initial');
+    expect(existsSync(join(dir, '.kuraa', 'workspace.json'))).toBe(false);
+    // Pushes without one still go in.
+    git(clone, 'reset', '-q', '--hard', 'origin/main');
+    writeFileSync(join(clone, 'other.md'), '# Other\n\nPushed.\n');
+    git(clone, 'commit', '-qam', 'Plain');
     await gitAsync(clone, 'push', '-q', 'origin', 'HEAD:main');
+    expect(file('other.md')).toBe('# Other\n\nPushed.\n');
+    // A link that comes in another way (merged from elsewhere) is a file holding where it pointed.
+    git(clone, 'checkout', '-q', 'HEAD@{2}');
+    git(dir, 'fetch', '-q', clone, 'HEAD');
+    git(dir, 'checkout', 'FETCH_HEAD', '--', 'notes.md');
+    expect(lstatSync(join(dir, 'notes.md')).isSymbolicLink()).toBe(false);
+    expect(file()).toBe(join(outside, 'secret.md'));
+  });
+
+  it('never follows a link put in place of a file open in a room', async () => {
+    await start();
+    const a = await connect('notes.md');
+    rmSync(join(dir, 'notes.md'));
+    symlinkSync(join(outside, 'secret.md'), join(dir, 'notes.md'));
+    symlinkSync(join(outside, 'secret.md'), join(dir, 'evil.md'));
     expect((await api('/api/files?path=evil.md')).status).toBe(403);
     expect((await api('/api/rooms?path=evil.md')).status).toBe(403);
     // Edits to the open room are not written through the link.
-    a.write(insertAt(a.read(), 'Light rain', 'Pushed over: '));
+    a.write(insertAt(a.read(), 'Light rain', 'Linked over: '));
     await until(() => a.messages.some((m) => m.type === 'save-status' && m.state === 'failing'), 15_000, 'a save failure said');
     expect(readFileSync(join(outside, 'secret.md'), 'utf8')).toBe('# Secret\n');
-    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Links');
+  });
+
+  it('reads a file for the API from what it opened, so a link put there after the check is not followed', async () => {
+    symlinkSync(join(outside, 'secret.md'), join(dir, 'secret.md'));
+    await start();
+    // As if the link had come between the check and the read: the check passes it.
+    const host = running.host as unknown as { resolvePath: (p: string) => string };
+    host.resolvePath = (p: string) => join(dir, p);
+    const res = await api('/api/files?path=secret.md');
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain('Secret');
+    expect((await api('/api/files?path=other.md')).status).toBe(200);
   });
 
   it('saving a room with nothing changed since it was committed runs no git; anything changed is still committed', async () => {

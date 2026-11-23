@@ -107,3 +107,24 @@ test('two browsers co-edit one paragraph and see each other', async ({ browser }
   await expect(alice.getByTestId('past-version')).toContainText(PARAGRAPH);
   await expect(alice.getByTestId('past-version')).not.toContainText('Alice saw herons.');
 });
+
+test('marks on an image and on maths survive two people editing: in the file and on both pages', async ({ browser }) => {
+  const path = `runs/marks-${Date.now().toString(36)}.md`;
+  const text = '# Marks\n\nSee *![a gull](gull.png)* and **$x^2$** here.\n\nWe counted.\n';
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: text }),
+  });
+  expect(res.status).toBe(201);
+  const alice = await open(browser, 'Alice Ng', 'alice@example.org', path);
+  const bob = await open(browser, 'Bob Ferreira', 'bob@example.org', path);
+  await caretIn(alice, 'We counted', 'end');
+  await alice.keyboard.type(' Alice.', { delay: 25 });
+  await expect(bob.getByTestId('editor').locator('p', { hasText: 'We counted' })).toContainText('Alice.');
+  await caretIn(bob, 'We counted', 'start');
+  await bob.keyboard.type('Bob: ', { delay: 25 });
+  const file = () => readFileSync(join(E2E.dir, path), 'utf8');
+  await expect.poll(file, { timeout: 15_000 }).toBe('# Marks\n\nSee *![a gull](gull.png)* and **$x^2$** here.\n\nBob: We counted. Alice.\n');
+  for (const page of [alice, bob]) await expect(page.getByTestId('editor').locator('em img')).toHaveCount(1);
+});

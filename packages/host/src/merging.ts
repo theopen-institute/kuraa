@@ -12,9 +12,9 @@
 import { isUtf8 } from 'node:buffer';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mergeLines, countMarkers, type DocumentType, type MergeSide } from '@kuraa/kernel';
-import type { Git } from './git.js';
+import { gitVersion, type Git } from './git.js';
 
 export const MERGE_AUTHOR = { name: 'Kuraa', email: 'merge@kuraa.invalid' };
 
@@ -25,19 +25,33 @@ export const MERGE_AUTHOR = { name: 'Kuraa', email: 'merge@kuraa.invalid' };
  */
 // 3: files someone may not change keep this side's version (0066, keeps).
 // 4: a merge says which version made it (Kuraa-Merge), so others can make it again to check it (0066).
-export const MERGE_VERSION = 4;
+// 5: git merges with no settings or attributes of this computer's or repository's (Git.forMerging).
+export const MERGE_VERSION = 5;
 
 /**
  * How this device merges, as a short text devices compare: the merge version,
- * and the types that merge files their own way, at their versions. Devices
- * whose signatures differ could merge the same commits differently, so between
- * them only one makes merges (see peers.ts).
+ * the git it runs (another git may merge trees differently), and the types that
+ * merge files their own way, at their versions. Devices whose signatures differ
+ * could merge the same commits differently, so between them only one makes
+ * merges (see peers.ts, 0038).
  */
-export function mergeSignature(types: DocumentType[]): string {
-  return [`merge@${MERGE_VERSION}`, ...types.filter((t) => t.merge).map((t) => `${t.id}@${t.version}`).sort()].join(' ');
+export function mergeSignature(types: DocumentType[], git = gitVersion()): string {
+  return [`merge@${MERGE_VERSION}`, `git@${git}`, ...types.filter((t) => t.merge).map((t) => `${t.id}@${t.version}`).sort()].join(' ');
+}
+
+/**
+ * What a merge's `Kuraa-Merge` trailer says: the version of merging and, where
+ * the signature is given, a short hash of it. Another git, or other versions of
+ * the types, may merge the same commits differently, so peers/gate.ts makes a
+ * merge again to check it only where the trailer says what its own would.
+ */
+export function mergeTrailerValue(signature?: string): string {
+  return signature ? `${MERGE_VERSION} ${createHash('sha256').update(signature).digest('hex').slice(0, 12)}` : String(MERGE_VERSION);
 }
 
 export interface MergeOptions {
+  /** How this device merges (mergeSignature), said in the merge's trailer. */
+  signature?: string;
   /** The type that opens a file, to merge it as a document. */
   typeFor(path: string, head: string): DocumentType | undefined;
   /**
@@ -102,9 +116,17 @@ function besideName(path: string, commit: string): string {
   return dot > slash + 1 ? `${path.slice(0, dot)}.conflict-${short}${path.slice(dot)}` : `${path}.conflict-${short}`;
 }
 
-/** Merge commits `x` and `y`, without touching the working tree or any branch. */
-export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOptions): Promise<MergeOutcome> {
+/**
+ * Merge commits `x` and `y`, without touching the working tree or any branch.
+ * Git is run as every device runs it (Git.forMerging): this computer's and
+ * this repository's settings and attributes do not change the merge (0025).
+ */
+export async function mergeCommits(repo: Git, x: string, y: string, opts: MergeOptions): Promise<MergeOutcome> {
   const none = { conflicts: [], copies: [] };
+  if (x === y) return { commit: x, kind: 'same', ...none };
+  // By id: merging's git has no branches of its own.
+  [x, y] = (await repo.out(['rev-parse', `${x}^{commit}`, `${y}^{commit}`])).split('\n') as [string, string];
+  const git = await repo.forMerging(opts.tmpDir);
   if (x === y) return { commit: x, kind: 'same', ...none };
   if (await isAncestor(git, y, x)) return { commit: x, kind: 'same', ...none };
   const keeps = opts.keeps ?? new Map<string, string | null>();
@@ -201,7 +223,7 @@ export async function mergeCommits(git: Git, x: string, y: string, opts: MergeOp
     }
   }
   // Trailers: which version of merging made it (to make it again: peers/gate.ts), and the changes it refused.
-  lines.push('', `Kuraa-Merge: ${MERGE_VERSION}`);
+  lines.push('', `Kuraa-Merge: ${mergeTrailerValue(opts.signature)}`);
   for (const x of (opts.refused ?? []).filter((r) => keeps.has(r.path))) lines.push(`Kuraa-Refused: ${x.commit} ${x.path}`);
   const commit = await git.out(['commit-tree', '--no-gpg-sign', finalTree, '-p', c1, '-p', c2, '-m', lines.join('\n')], {
     env: {

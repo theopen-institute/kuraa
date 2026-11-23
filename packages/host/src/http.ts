@@ -6,9 +6,9 @@
 // a context.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createHash, timingSafeEqual } from 'node:crypto';
-import { existsSync, lstatSync, statSync, createReadStream } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { constants, existsSync, lstatSync, statSync, createReadStream } from 'node:fs';
+import { mkdir, open, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
 import type { Host } from './host.js';
@@ -20,6 +20,7 @@ import { renameOver, unportablePath } from './files.js';
 import { renderRoutes, searchRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
+import { corsHeaders, hostAllowed, refuseHost } from './origins.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -253,12 +254,26 @@ const fileRoutes: Route[] = [
     send(res, 200, { files, folders: marks.folders });
   }),
 
-  route('GET', '/api/files', ({ host, res, q }) => {
-    const abs = host.resolvePath(host.relPath(str(q.get('path'), 'path')));
-    if (!existsSync(abs) || !statSync(abs).isFile()) throw new HttpError(404, 'No such file');
+  route('GET', '/api/files', async ({ host, res, q }) => {
+    const path = host.relPath(str(q.get('path'), 'path'));
+    const abs = host.resolvePath(path);
+    // Opened refusing a link, then read from what was opened: a link put there since it was checked is not followed (0037).
+    let fh;
+    try {
+      fh = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'ELOOP') throw new HttpError(403, `${path} is a link to somewhere else: the app does not open or follow links`);
+      if (code === 'ENOENT' || code === 'ENOTDIR') throw new HttpError(404, 'No such file');
+      throw e;
+    }
+    if (!(await fh.stat()).isFile()) {
+      await fh.close();
+      throw new HttpError(404, 'No such file');
+    }
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     // A read that fails half-way ends the answer, not the host.
-    createReadStream(abs).on('error', () => res.destroy()).pipe(res);
+    fh.createReadStream().on('error', () => res.destroy()).pipe(res);
   }),
 
   route('POST', '/api/files', async ({ host, req, res }) => {
@@ -871,10 +886,13 @@ export function createRequestHandler(host: Host) {
     const isApi = path.startsWith('/api/');
     const isGit = path === '/git' || path.startsWith('/git/');
 
-    // Allow a web client served from another origin (e.g. the Vite dev server).
-    res.setHeader('access-control-allow-origin', '*');
-    res.setHeader('access-control-allow-headers', 'authorization, content-type');
-    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    // Only at a name for this computer, when it listens there alone; pages
+    // elsewhere read its answers only from origins the operator named (origins.ts).
+    if (!hostAllowed(req, host.requests)) {
+      refuseHost(res);
+      return true;
+    }
+    corsHeaders(req, res, host.requests);
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -912,6 +930,38 @@ export function createRequestHandler(host: Host) {
   };
 }
 
+/**
+ * Refuses a push whose new commits add a symbolic link anywhere (as a file, or
+ * a file made one): the host never follows links (0037), and a pushed one would
+ * otherwise be checked out into the working tree. Links already in the history
+ * do not stop a push.
+ */
+const PRE_RECEIVE = `#!/bin/sh
+# Written by kuraa, for pushes to its host only (git http-backend, core.hooksPath).
+while read old new ref; do
+  case "$new" in *[!0]*) ;; *) continue ;; esac
+  if git log --raw -m --root --no-renames --format= "$new" --not --all | grep -q '^:[0-7]* 120000 '; then
+    echo "kuraa: $ref adds a symbolic link, which this workspace does not take." >&2
+    exit 1
+  fi
+done
+exit 0
+`;
+
+/**
+ * The folder of hooks pushes run (in .git/kuraa, kuraa's own): written each
+ * time, so it is always there and this version, and moved into place, so a push
+ * at the same moment never runs half of it.
+ */
+async function pushHooks(host: Host): Promise<string> {
+  const dir = join(await host.git.gitDir(), 'kuraa', 'hooks');
+  await mkdir(dir, { recursive: true });
+  const tmp = join(dir, `.pre-receive-${randomBytes(6).toString('hex')}`);
+  await writeFile(tmp, PRE_RECEIVE, { mode: 0o755 });
+  await renameOver(tmp, join(dir, 'pre-receive'));
+  return dir;
+}
+
 /** The repository over git's smart HTTP protocol, through `git http-backend`. */
 async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const pathInfo = '/.git' + url.pathname.replace(/^\/git/, '');
@@ -919,7 +969,8 @@ async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse,
     // A push updates the working tree, which must be clean: commit open rooms first.
     await host.serial(() => host.commitAll());
   }
-  const child = host.git.spawn(['-c', 'http.receivepack=true', '-c', 'http.uploadpack=true', 'http-backend'], {
+  // Pushes run kuraa's hooks, not the repository's: a push may not add a link (0037).
+  const child = host.git.spawn(['-c', 'http.receivepack=true', '-c', 'http.uploadpack=true', '-c', `core.hooksPath=${await pushHooks(host)}`, 'http-backend'], {
     GIT_PROJECT_ROOT: host.dir,
     GIT_HTTP_EXPORT_ALL: '1',
     PATH_INFO: pathInfo,

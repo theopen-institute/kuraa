@@ -72,6 +72,8 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   if ((await readdir(dir)).length) throw new Error(`${dir} is not empty: join into a new folder`);
   const git = new Git(dir);
   await git.run(['init', '-q']);
+  // A link in another device's commits is checked out as a file holding where it points, never as a link (gate.ts refuses them too).
+  await git.run(['config', 'core.symlinks', 'false']);
   const stateDir = join(await git.gitDir(), 'kuraa');
   // A link carries no secret (0050): the members are found by its own topic, and by dialling the
   // devices it names; the secret comes with the welcome. A link made before carries the secret.

@@ -23,9 +23,12 @@ const CONTROL = 'kuraa/control/1';
  * 4: 0071 (git served as protocol v0 only, records compared by what they say,
  * a want answered once, grants that sign their link's expiry and maker, and
  * branches said only to paired devices); 5: 0072 (devices are in as their people
- * are: no pairing records; a policy ranked by who made it; keys dropped).
+ * are: no pairing records; a policy ranked by who made it; keys dropped); 6: the
+ * network review's fixes (links unlinked, and those let in by them admitted, in
+ * the policy; a workspace from before kept to its own geneses and seal; room
+ * edits saying whose they are; policy operations asked for by commits).
  */
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):
@@ -43,6 +46,10 @@ const ROOMS = 'kuraa/rooms/1';
 const OUTPUTS = 'kuraa/outputs/1';
 /** How much of a stream (git, a tunnel) may be sent and not yet taken by the reader at the other end, in bytes. */
 const GIT_WINDOW = 1024 * 1024;
+/** The most of a stream sent at once: so the other end, keeping to the window, never has more than a piece past it. */
+const GIT_PIECE = 64 * 1024;
+/** Taken and not yet read past this, the other end is not keeping to the window: the stream is closed. */
+const GIT_OVERRUN = 2 * GIT_WINDOW;
 /** The most streams (git, tunnels) the other end may have open on one link at once (0071): each runs a process, or holds a connection, here. */
 const MAX_STREAMS = 32;
 /** Run outputs carrying more than this, while the connection is backed up, are not sent: they come with the outputs ref later (0071). */
@@ -122,13 +129,17 @@ export type ControlMessage =
        * (its join).
        */
       proof?: unknown[];
+      /** A device joining by a link: the signing key its join will be signed with (the device letting it in says so: policy.ts, admit). */
+      signer?: string;
     }
   /** The answer to a joining device: what it needs to set itself up, and the records (the joining device checks who welcomed it by them). */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; branch: string; records: unknown[]; /** The workspace's secret: the link does not carry it (0050). */ secret?: string }
   /** This device's branches changed, to these (name → commit): fetch them, unless this device has them already. */
   | { type: 'refs'; heads?: Record<string, string>; outputs?: Record<string, string>; spaces?: Record<string, string> }
-  /** Signed membership records the other device lacks: just taken or made here, or asked for (want). */
-  | { type: 'records'; records: unknown[] }
+  /** Signed membership records the other device lacks: just taken or made here, or asked for (want); `unheld`: policy operations asked for (ops) that it does not hold. */
+  | { type: 'records'; records: unknown[]; unheld?: string[] }
+  /** Asking for policy operations that commits it sent name (gate.ts): sent those it holds, and told of those it does not (records, unheld). */
+  | { type: 'ops'; ids: string[] }
   /** Asking for the records this device lacks: it says which it has (each by the start of the hash of what it says, records.ts, shortKey). */
   | { type: 'want'; have: string[]; /** It answers a want of the other end's: not answered with another (0071). */ reply?: boolean }
   /**
@@ -351,10 +362,24 @@ export class PeerLink {
     };
     const stream = new Duplex({
       write: (chunk: Buffer, _enc, cb) => {
-        inflight += chunk.length;
-        backedUp = !msg.data.send(chunk);
-        waiting = cb;
-        release();
+        // In pieces, each waiting for the window as a write does: the other end never has more than a piece past it.
+        let at = 0;
+        const next = () => {
+          if (channel.closed) return cb();
+          while (at < chunk.length) {
+            const piece = chunk.subarray(at, at + GIT_PIECE);
+            at += piece.length;
+            inflight += piece.length;
+            backedUp = !msg.data.send(piece);
+            if (at < chunk.length && (backedUp || inflight > GIT_WINDOW)) {
+              waiting = next;
+              return;
+            }
+          }
+          waiting = cb;
+          release();
+        };
+        next();
       },
       final: (cb) => {
         msg.end.send(Buffer.alloc(0));
@@ -406,6 +431,8 @@ export class PeerLink {
       encoding: c.buffer,
       onmessage: (b) => {
         unacked += b.length;
+        // Sent past the window (a writer that does not wait for acks): closed, before it piles up here.
+        if (unacked > GIT_OVERRUN) return void channel.close();
         // Taken while the reader keeps up; once it does not, said when it reads again (read).
         if (stream.push(b) && unacked >= GIT_WINDOW / 4) ack();
       },

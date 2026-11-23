@@ -44,7 +44,8 @@ app. Either way it is the same kind of server, a hub
 ([decision 0030](docs/decisions/0030-one-kind-of-server.md)).
 
 The host prints its URL, the access token, a link that opens the client with the token filled
-in, and for `--dir` a `git clone` command.
+in, and for `--dir` a `git clone` command. Run as a service (`kuraa-host install --service`), it
+leaves the token out, as its output is a log file.
 
 **Whoever has the access code of a host listening only on this computer is its owner**, as the
 person using the desktop app is ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)):
@@ -65,6 +66,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--host` | `127.0.0.1` | Use `0.0.0.0` to let collaborators on your network connect (Settings, opening folders and your identity are then off) | Command line only (as `--port`) |
 | `--token` | random | Or set `KURAA_TOKEN` | Command line only (as `--port`) |
 | `--static` | none | The built web client to serve | Command line only (as `--port`) |
+| `--allow-origin` | none | A page served elsewhere that may use the server (its origin, e.g. `https://notes.example.org`); repeatable. The server's own page, `pnpm dev` and the desktop app need none | Command line only (as `--port`) |
 | `--dir` | off | Serve this one folder, and nothing else | Command line only; **Open a folder…** adds one to your workspaces |
 | `--settings` | `settings.json` in your app data folder | Where Settings are kept | Command line only |
 | `--workspaces` | Settings, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Settings: New workspaces |

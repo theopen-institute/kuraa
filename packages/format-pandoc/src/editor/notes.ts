@@ -3,9 +3,10 @@
 // Pandoc numbers notes in the order their references appear (inline notes
 // included), whatever their labels. So references and notes show those numbers;
 // labels are fixed ids, never rewritten, so cut and paste keeps a reference and
-// its note together. After each of the user's own edits the notes are kept
-// together at the end of the document in number order. In a note, Enter goes
-// back to the text and Shift+Enter starts a new paragraph.
+// its note together. A new note is put among the notes in number order; notes
+// are never moved after that, since moving one (a delete and an insert, to
+// Yjs) would lose what someone else is typing in it at the time. In a note,
+// Enter goes back to the text and Shift+Enter starts a new paragraph.
 import type { EditorContext } from '@kuraa/editor-kit';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { Plugin, PluginKey, Selection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
@@ -68,14 +69,18 @@ function numberOf(decorations: readonly Decoration[]): number | null | undefined
 }
 
 // ---------------------------------------------------------------------------
-// Keeping the notes in order
+// Putting the notes in order
 
 /**
- * Keep the top-level notes together at the end of the document, in the order of
+ * Put the top-level notes together at the end of the document, in the order of
  * their first reference; notes nothing refers to come last, in their current
  * order. A second note with the same label and the same content (two people
  * arranging at once) is dropped. Labels never change. The cursor stays where it
  * was, even inside a note that moves. Null if the notes are already in place.
+ *
+ * Not run as people edit: it moves notes, and a note moved while someone else
+ * types in it loses their typing. New notes take their place as they are made
+ * (ensureNote); this is for a command, to tidy a file whose notes are elsewhere.
  */
 export function arrangeNotes(state: EditorState): Transaction | null {
   const { doc } = state;
@@ -92,7 +97,7 @@ export function arrangeNotes(state: EditorState): Transaction | null {
   });
   if (!top.length) return null;
 
-  // This runs after every edit: earlier notes are looked up by label, not rescanned.
+  // Earlier notes are looked up by label, not rescanned.
   const byLabel = new Map<string, PMNode[]>();
   const kept = top.filter((n) => {
     const same = byLabel.get(n.label);
@@ -127,20 +132,35 @@ export function arrangeNotes(state: EditorState): Transaction | null {
   return tr;
 }
 
-/** Arrange the notes after each of the user's own edits (not remote ones, not undo). */
-function arrangePlugin(ctx: EditorContext): Plugin {
-  return new Plugin({
-    appendTransaction(trs, _old, state) {
-      if (!trs.some((tr) => tr.docChanged && !ctx.isRemote(tr))) return null;
-      return arrangeNotes(state);
-    },
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Making notes, and moving between a note and its reference
 
-/** After inserting a reference, make sure its note exists; if not, add an empty one and put the cursor in it. */
+/**
+ * Where a new note for `label` goes: among the notes at the end of the document,
+ * before the first whose reference comes later (notes nothing refers to come
+ * last); at the end if there are none. Only an insertion: no note is moved.
+ */
+function newNoteAt(doc: PMNode, label: string): number {
+  const rank = new Map<string, number>();
+  doc.descendants((node) => {
+    if (node.type.name === REF && !rank.has(String(node.attrs.label))) rank.set(String(node.attrs.label), rank.size);
+    return true;
+  });
+  const mine = rank.get(label) ?? Infinity;
+  // The notes together at the end of the document.
+  let first = doc.childCount;
+  while (first > 0 && doc.child(first - 1).type.name === NOTE) first--;
+  let pos = doc.content.size;
+  for (let i = doc.childCount - 1; i >= first; i--) pos -= doc.child(i).nodeSize;
+  for (let i = first; i < doc.childCount; i++) {
+    const note = doc.child(i);
+    if ((rank.get(String(note.attrs.label)) ?? Infinity) > mine) return pos;
+    pos += note.nodeSize;
+  }
+  return doc.content.size;
+}
+
+/** After inserting a reference, make sure its note exists; if not, add an empty one in its place and put the cursor in it. */
 function ensureNote(tr: Transaction, schema: Schema, label: string): Transaction {
   const def = schema.nodes[NOTE]!;
   let exists = false;
@@ -149,9 +169,9 @@ function ensureNote(tr: Transaction, schema: Schema, label: string): Transaction
     return !exists;
   });
   if (exists) return tr;
-  const end = tr.doc.content.size;
-  tr.insert(end, def.create({ label }, schema.nodes.paragraph!.create()));
-  return tr.setSelection(TextSelection.create(tr.doc, end + 2)).scrollIntoView();
+  const at = newNoteAt(tr.doc, label);
+  tr.insert(at, def.create({ label }, schema.nodes.paragraph!.create()));
+  return tr.setSelection(TextSelection.create(tr.doc, at + 2)).scrollIntoView();
 }
 
 /** ⌥⌘F: a footnote labelled one past the highest number, and its note. */
@@ -377,7 +397,7 @@ class NoteView implements NodeView {
 export function footnotes(schema: Schema, ctx: EditorContext) {
   const has = !!(schema.nodes[REF] && schema.nodes[NOTE]);
   return {
-    plugins: has ? [numbersPlugin(), ...(ctx.readOnly ? [] : [arrangePlugin(ctx)])] : [],
+    plugins: has ? [numbersPlugin()] : [],
     rules: has && schema.nodes[INLINE] ? noteRules(schema) : [],
     keys: (has ? { 'Mod-Alt-f': insertFootnote(schema) } : {}) as Record<string, Command>,
     /** Enter in a note goes back to the text. */

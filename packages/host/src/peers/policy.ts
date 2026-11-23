@@ -15,13 +15,22 @@
 //   devices writes down, as a legacy genesis, everyone it knows of, and all of
 //   them count together (everyone an admin, as every member had the same say:
 //   0038), until an admin seals the list: then only the geneses the seal names.
+//   Only legacy geneses a device holds as its workspace's own count (`legacy`:
+//   those it had or made, and those signed by someone they make an admin), never
+//   one a stranger brings; and a device keeps to the seal it first saw count
+//   (`seal`), so no seal made later, by anyone, takes the workspace over.
 // - grant, revoke: a person put in a group (as admin or member) or taken out.
 //   An admin of the group, or of the workspace, may. Taking someone out of the
 //   workspace takes them out of every group. The workspace keeps one admin at
 //   least; anyone may leave a group.
 // - join: whoever was let in by an invite link puts themselves in the group the
 //   link names, as it says, signed by an admin of it (the link's grant). A link
-//   for one person puts one in.
+//   for one person puts one in. A grant signed since links are let in by
+//   (`kuraa-grant/3`) counts only for whom a device in the workspace let in by
+//   the link (`admit`, in the join's past): that device checked, by its clock,
+//   that the link had not expired, so the policy needs none.
+// - unlink: an invite link lets no one in any more: no join by it counts but
+//   those in the unlink's past. An admin of the link's group's to make.
 //
 // - rule: who may change what (0066, step 3): a path (the whole workspace `''`,
 //   a folder `dir/`, or a file) and who may write there: people, groups
@@ -88,7 +97,9 @@ export type PolicyOp =
   | { t: 'perm'; path: string; write?: string[]; read?: string[]; space?: string }
   | { t: 'owner'; who: string }
   | { t: 'drop'; key: string; cutoff?: string[] }
-  | { t: 'witness'; who: string; on: boolean };
+  | { t: 'witness'; who: string; on: boolean }
+  | { t: 'unlink'; link: string; group: string }
+  | { t: 'admit'; link: string; key: string };
 
 /**
  * A file's or folder's permission (0069): who may change it, and (a folder's)
@@ -131,6 +142,8 @@ function encodeOp(op: PolicyOp): string {
     case 'owner': return ['owner', op.who].join('\0');
     case 'drop': return ['drop', op.key, ...(op.cutoff ? [op.cutoff.join(',')] : [])].join('\0');
     case 'witness': return ['witness', op.who, op.on ? 'on' : 'off'].join('\0');
+    case 'unlink': return ['unlink', op.link, op.group].join('\0');
+    case 'admit': return ['admit', op.link, op.key].join('\0');
   }
 }
 
@@ -152,6 +165,15 @@ export const grantMessage = (workspace: string, genesis: string | null, link: st
  */
 export const linkGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean, expires: number, issuer: string) =>
   Buffer.from(['kuraa-grant/2', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
+
+/**
+ * What an admin's signing key signs, since links are let in by (`admit`), to let
+ * an invite link's holder into a group: as linkGrantMessage, and saying that a
+ * join by it counts only for whom a device in the workspace let in by the link.
+ * Whether the link had expired is that device's to say, as it lets them in.
+ */
+export const admittedGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean, expires: number, issuer: string) =>
+  Buffer.from(['kuraa-grant/3', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
 
 /** Make an operation, signed with a person's signing key. */
 export function makeOp(workspace: string, op: PolicyOp, parents: string[], key: KeyPair): PolicyEntry {
@@ -242,6 +264,10 @@ export function readOp(v: unknown): PolicyOp | null {
       const cutoff = sortedUnique(o.cutoff, /^[0-9a-f]{40,64}$/);
       return cutoff ? { t: 'drop', key: o.key, cutoff } : null;
     }
+    case 'unlink':
+      return typeof o.link === 'string' && /^[0-9a-f]{16}$/.test(o.link) && typeof o.group === 'string' && groupName.test(o.group) ? { t: 'unlink', link: o.link, group: o.group } : null;
+    case 'admit':
+      return typeof o.link === 'string' && /^[0-9a-f]{16}$/.test(o.link) && typeof o.key === 'string' && hexKey.test(o.key) ? { t: 'admit', link: o.link, key: o.key } : null;
     case 'perm': {
       if (typeof o.path !== 'string' || !(isRulePath(o.path) || /^h:[0-9a-f]{64}$/.test(o.path))) return null;
       const write = o.write === undefined ? undefined : sortedUnique(o.write, writerTest);
@@ -268,6 +294,15 @@ export interface PolicyContext {
   workspace: string;
   /** The genesis this workspace is pinned to; null: one from before, whose legacy geneses count. */
   pin: string | null;
+  /**
+   * One from before: the legacy geneses this device holds as its workspace's
+   * own (those it held when it first worked the policy out so, made, or was
+   * welcomed with). With them count those signed by someone they (or those so
+   * counted) name, and no other. Undefined: every legacy genesis.
+   */
+  legacy?: string[];
+  /** One from before, sealed: the seal this device keeps to (the first it saw count); no other counts. */
+  seal?: string | null;
   /** The person (identity ID) a signing key is, as the records show; null if no one's. */
   personOf(signingKey: string): string | null;
   /** The emails attested of a person by verifiers this workspace counts (step 6). */
@@ -359,6 +394,12 @@ export class Policy {
 
   /** The workspace it is of: what private paths are hashed with (set as it is made). */
   workspace = '';
+
+  /** A workspace from before: the seal that sealed it, which a device keeps to (set as it is made). */
+  sealId: string | null = null;
+
+  /** Invite links unlinked (set as it is made): they let no one in. */
+  unlinked = new Set<string>();
 
   /** Who may change where, as rules: path (or its hash) → who; the permissions that say who may change. */
   get rules(): Map<string, string[]> {
@@ -465,31 +506,111 @@ export function evaluate(entries: PolicyEntry[], ctx: PolicyContext): Policy {
   const byId = new Map<string, PolicyEntry>();
   for (const e of entries) if (!byId.has(e.id)) byId.set(e.id, e);
   const order = linearize(byId);
-  const genesisOk = (e: PolicyEntry) => e.op.t === 'genesis' && (ctx.pin ? e.id === ctx.pin && !e.op.legacy : e.op.legacy);
-  const all = order.filter((e) => genesisOk(e)).map((e) => e.id);
-  const first = apply(order, all, ctx);
-  // A workspace from before: once an admin sealed its legacy geneses, only those the seal names.
-  if (!ctx.pin && first.seal) {
-    const named = all.filter((g) => first.seal!.includes(g));
-    const second = apply(order, named, ctx);
-    return second.policy;
+  if (ctx.pin) return apply(order, order.filter((e) => e.op.t === 'genesis' && e.id === ctx.pin && !e.op.legacy).map((e) => e.id), ctx).policy;
+  const legacy = countedLegacy(order, ctx);
+  // Kept to a seal (the first this device saw count): only the geneses it names, and no other seal.
+  const kept = ctx.seal ? byId.get(ctx.seal) : undefined;
+  if (kept?.op.t === 'seal') {
+    const named = kept.op.geneses;
+    return apply(order, legacy.filter((g) => named.includes(g)), ctx).policy;
+  }
+  // (Kept to a seal this device no longer holds: no other counts meanwhile.)
+  const first = apply(order, legacy, ctx);
+  // A workspace from before: once an admin sealed its legacy geneses, only those the seal names, and only that seal.
+  if (first.seal) {
+    const named = first.seal.geneses;
+    return apply(order, legacy.filter((g) => named.includes(g)), { ...ctx, seal: first.seal.id }).policy;
   }
   return first.policy;
 }
 
+/**
+ * The legacy geneses that count (a workspace from before), in the one order:
+ * those this device holds as its own (`ctx.legacy`), and those signed by
+ * someone they, or those so counted, name; every one, where it says none.
+ */
+function countedLegacy(order: PolicyEntry[], ctx: PolicyContext): string[] {
+  const legacy = order.filter((e) => e.op.t === 'genesis' && e.op.legacy);
+  if (!ctx.legacy) return legacy.map((e) => e.id);
+  const own = new Set(ctx.legacy);
+  const counted = new Set<string>();
+  const admins = new Set<string>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of legacy) {
+      if (counted.has(e.id) || e.op.t !== 'genesis') continue;
+      const signer = ctx.personOf(e.signer);
+      if (!own.has(e.id) && !(signer && admins.has(signer))) continue;
+      counted.add(e.id);
+      for (const a of e.op.admins) admins.add(a);
+      grew = true;
+    }
+  }
+  return legacy.filter((e) => counted.has(e.id)).map((e) => e.id);
+}
+
 /** Parents first, then by hash; operations whose parents are not all known wait (left out). */
 function linearize(byId: Map<string, PolicyEntry>): PolicyEntry[] {
-  const known = new Set<string>();
+  // How many of each one's parents are not in the order yet, and which name each as a parent.
+  const missing = new Map<PolicyEntry, number>();
+  const children = new Map<string, PolicyEntry[]>();
+  const ready = new Heap<PolicyEntry>((a, b) => a.id < b.id);
+  for (const e of byId.values()) {
+    if ((e.op.t === 'genesis') !== (e.parents.length === 0)) continue;
+    const parents = [...new Set(e.parents)];
+    missing.set(e, parents.length);
+    if (!parents.length) ready.push(e);
+    for (const p of parents) {
+      const list = children.get(p);
+      if (list) list.push(e);
+      else children.set(p, [e]);
+    }
+  }
   const out: PolicyEntry[] = [];
-  let pending = [...byId.values()].filter((e) => (e.op.t === 'genesis') === (e.parents.length === 0));
-  for (;;) {
-    // One at a time, the lowest of those ready first: an operation that becomes ready meanwhile is sorted with the rest.
-    const ready = pending.filter((e) => e.parents.every((p) => known.has(p))).sort((a, b) => (a.id < b.id ? -1 : 1));
-    const next = ready[0];
-    if (!next) return out;
+  // One at a time, the lowest of those ready first: an operation that becomes ready meanwhile is sorted with the rest.
+  for (let next = ready.pop(); next; next = ready.pop()) {
     out.push(next);
-    known.add(next.id);
-    pending = pending.filter((e) => e !== next);
+    for (const c of children.get(next.id) ?? []) {
+      const left = missing.get(c)! - 1;
+      missing.set(c, left);
+      if (left === 0) ready.push(c);
+    }
+  }
+  return out;
+}
+
+/** A binary heap, the least on top: so the one order takes time growing with its length, not its square. */
+class Heap<T> {
+  private readonly items: T[] = [];
+  constructor(private readonly less: (a: T, b: T) => boolean) {}
+
+  push(x: T): void {
+    const a = this.items;
+    a.push(x);
+    for (let i = a.length - 1; i > 0;) {
+      const up = (i - 1) >> 1;
+      if (!this.less(a[i]!, a[up]!)) break;
+      [a[i], a[up]] = [a[up]!, a[i]!];
+      i = up;
+    }
+  }
+
+  pop(): T | undefined {
+    const a = this.items;
+    const top = a[0];
+    const last = a.pop();
+    if (!a.length || last === undefined) return top;
+    a[0] = last;
+    for (let i = 0; ;) {
+      const l = 2 * i + 1;
+      let m = i;
+      if (l < a.length && this.less(a[l]!, a[m]!)) m = l;
+      if (l + 1 < a.length && this.less(a[l + 1]!, a[m]!)) m = l + 1;
+      if (m === i) break;
+      [a[i], a[m]] = [a[m]!, a[i]!];
+      i = m;
+    }
+    return top;
   }
 }
 
@@ -501,7 +622,7 @@ interface State {
   verifiers: Map<string, string>;
   owner: string | null;
   usedLinks: Set<string>;
-  seal: string[] | null;
+  seal: { id: string; geneses: string[] } | null;
   applied: string[];
   /** When each person took the place they have in the workspace: the position, in the one order, of the operation that gave it them (0072: seniority). */
   since: Map<string, number>;
@@ -511,6 +632,10 @@ interface State {
   dropped: Map<string, string[]>;
   /** Witnesses (0072). */
   witnesses: Set<string>;
+  /** Invite links unlinked, as `<link> <group>`. */
+  unlinked: Set<string>;
+  /** Whom a device in the workspace let in by a link, as `<link> <signing key>`. */
+  admitted: Set<string>;
 }
 
 /** An operation that takes someone out of a group, or makes them no longer its admin: what its cutoff is about (step 4). */
@@ -535,7 +660,7 @@ function freshState(order: PolicyEntry[], counted: Set<string>): State {
   // A workspace's own genesis names its first admin, its owner (0070); legacy geneses name none.
   const own = order.find((e) => counted.has(e.id) && e.op.t === 'genesis' && !e.op.legacy);
   const owner = own && own.op.t === 'genesis' ? own.op.admins[0] ?? null : null;
-  return { groups, perms: new Map(), spaces: new Map(), verifiers: new Map(), owner, usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id), since, ownerSince: 0, dropped: new Map(), witnesses: new Set() };
+  return { groups, perms: new Map(), spaces: new Map(), verifiers: new Map(), owner, usedLinks: new Set(), seal: null, applied: order.filter((e) => counted.has(e.id)).map((e) => e.id), since, ownerSince: 0, dropped: new Map(), witnesses: new Set(), unlinked: new Set(), admitted: new Set() };
 }
 
 const adminCount = (s: State) => [...s.groups.get(WORKSPACE)!].filter(([, r]) => r === 'admin').length;
@@ -586,10 +711,15 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
       return may && !lastAdmin && !!s.groups.get(op.group)?.has(op.who);
     }
     case 'join': {
-      const message = op.issuer !== undefined
+      // Not by a link unlinked in its past.
+      if (s.unlinked.has(`${op.link} ${op.group}`)) return false;
+      const signed = (m: Buffer) => crypto.verify(m, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+      // A grant since links are let in by: only for whom a device in the workspace let in by it, in its past.
+      const admitted = op.issuer !== undefined && signed(admittedGrantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer));
+      if (admitted && !s.admitted.has(`${op.link} ${e.signer}`)) return false;
+      const grantOk = admitted || signed(op.issuer !== undefined
         ? linkGrantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer)
-        : grantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once);
-      const grantOk = crypto.verify(message, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+        : grantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once));
       const granter = grantOk ? ctx.personOf(op.granter) : null;
       // A link that makes admins of the workspace, only the owner's (0070).
       if (op.group === WORKSPACE && op.role === 'admin' && !now.mayAssignAdmins(granter)) return false;
@@ -607,7 +737,13 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
       return now.isAdmin(by) && (!ofAdmin || now.mayAssignAdmins(by));
     }
     case 'seal':
-      return !s.seal && now.isAdmin(by);
+      // Where a device keeps to a seal, no other counts.
+      return !s.seal && now.isAdmin(by) && (!ctx.seal || e.id === ctx.seal);
+    case 'unlink':
+      return now.isAdmin(by, op.group);
+    case 'admit':
+      // Anyone in the workspace lets someone in by a link, as a device of theirs checks it.
+      return !!now.role(by);
     case 'rule':
     case 'verifier':
     case 'perm':
@@ -668,7 +804,7 @@ function effect(e: PolicyEntry, by: string, s: State, at: number): boolean {
       return true;
     case 'seal':
       if (s.seal) return false;
-      s.seal = op.geneses;
+      s.seal = { id: e.id, geneses: op.geneses };
       // A workspace from before: whoever sealed it is its owner (0070).
       if (!s.owner) {
         s.owner = by;
@@ -705,6 +841,12 @@ function effect(e: PolicyEntry, by: string, s: State, at: number): boolean {
     case 'witness':
       if (op.on) s.witnesses.add(op.who);
       else s.witnesses.delete(op.who);
+      return true;
+    case 'unlink':
+      s.unlinked.add(`${op.link} ${op.group}`);
+      return true;
+    case 'admit':
+      s.admitted.add(`${op.link} ${op.key}`);
       return true;
     case 'genesis':
       return false;
@@ -809,6 +951,18 @@ function fold(ops: PolicyEntry[], env: Env): Folded {
     // Cutoffs: whatever else those taken out did at the same time.
     const removals = counting.filter((x) => env.meta.has(x.e.id) || x.e.op.t === 'drop').map((x) => x.e);
     for (const e of ops) if (!voided.has(e.id) && removals.some((r) => cuts(r, e))) voided.add(e.id);
+    // A link unlinked: no join by it made at the same time counts (one after is not allowed at all).
+    const unlinks = ops.filter((u) => u.op.t === 'unlink' && !voided.has(u.id));
+    for (const e of ops) {
+      const op = e.op;
+      if (op.t === 'join' && !voided.has(e.id) && unlinks.some((u) => u.op.t === 'unlink' && u.op.link === op.link && u.op.group === op.group && concurrent(u.id, e.id))) voided.add(e.id);
+    }
+    // Seals made at the same time (a workspace from before): one counts, the one naming the most of the
+    // geneses that count (taking the fewest out), then by its maker's rank, then by hash.
+    const named = (e: PolicyEntry) => (e.op.t === 'seal' ? e.op.geneses.filter((g) => env.counted.has(g)).length : 0);
+    const seals = ops.filter((e) => e.op.t === 'seal' && !voided.has(e.id))
+      .sort((a, b) => named(b) - named(a) || compareKeys(keyOf(a), keyOf(b)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const e of seals.slice(1)) voided.add(e.id);
     // What counts must be allowed by what counts of its past: an operation whose maker had their say from
     // one that does not count (a grant cut off, a handover that lost) does not count either; and so on.
     const kept = ops.filter((e) => !voided.has(e.id));
@@ -850,7 +1004,7 @@ function fold(ops: PolicyEntry[], env: Env): Folded {
   }
 }
 
-function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { policy: Policy; seal: string[] | null } {
+function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { policy: Policy; seal: { id: string; geneses: string[] } | null } {
   const counted = new Set(geneses);
   // Operations that descend from a genesis that counts; each one's past (all it descends from).
   const rooted = new Set(counted);
@@ -906,5 +1060,7 @@ function apply(order: PolicyEntry[], geneses: string[], ctx: PolicyContext): { p
   }
   const policy = new Policy(state.groups, [...counted], state.applied, heads, state.usedLinks, !!state.seal, state.perms, disputes, cutoffs, state.spaces, state.verifiers, ctx.claimsOf, ctx.claimed, state.owner, state.dropped, state.witnesses);
   policy.workspace = ctx.workspace;
+  policy.sealId = state.seal?.id ?? null;
+  policy.unlinked = new Set([...state.unlinked].map((u) => u.split(' ')[0]!));
   return { policy, seal: state.seal };
 }

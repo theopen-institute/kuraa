@@ -22,7 +22,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
-  DEFAULT_POLICY, parseSize,
+  DEFAULT_POLICY, parseSize, readWorkspaceFile, writeWorkspaceFile,
   type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
   type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RenderTools, type RunComponent,
   type Tool, type ToolUse,
@@ -260,10 +260,13 @@ export class Runner {
 
   private async config(): Promise<WorkspaceRunConfig> {
     try {
-      const parsed = JSON.parse(await readFile(join(this.o.root, '.kuraa', 'run.json'), 'utf8')) as unknown;
+      // Never through a link (0037).
+      const parsed = JSON.parse((await readWorkspaceFile(this.o.root, '.kuraa/run.json')).toString('utf8')) as unknown;
       return parsed && typeof parsed === 'object' ? (parsed as WorkspaceRunConfig) : {};
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') this.o.log(`.kuraa/run.json is not valid JSON; ignoring it (${(e as Error).message})`);
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'ELOOP') this.o.log(`ignoring .kuraa/run.json: ${(e as Error).message}`);
+      else if (code !== 'ENOENT') this.o.log(`.kuraa/run.json is not valid JSON; ignoring it (${(e as Error).message})`);
       return {};
     }
   }
@@ -444,7 +447,7 @@ export class Runner {
   private async recordedParts(tool: Tool): Promise<string[]> {
     if (!tool.parts) return [];
     try {
-      const parsed = JSON.parse(await readFile(join(this.o.root, tool.parts.record), 'utf8')) as { packages?: unknown };
+      const parsed = JSON.parse((await readWorkspaceFile(this.o.root, tool.parts.record)).toString('utf8')) as { packages?: unknown };
       return Array.isArray(parsed.packages) ? parsed.packages.filter((p): p is string => typeof p === 'string' && tool.parts!.valid(p)) : [];
     } catch {
       return [];
@@ -457,9 +460,8 @@ export class Runner {
     const now = await this.recordedParts(tool);
     const fresh = names.filter((n) => !now.includes(n));
     if (!fresh.length) return;
-    const file = join(this.o.root, parts.record);
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, `${JSON.stringify({ packages: [...new Set([...now, ...fresh])].sort() }, null, 2)}\n`);
+    // Never through a link (0037).
+    await writeWorkspaceFile(this.o.root, parts.record, `${JSON.stringify({ packages: [...new Set([...now, ...fresh])].sort() }, null, 2)}\n`);
     await this.o.commit([parts.record], `${parts.label}: add ${fresh.join(', ')}`, by);
   }
 

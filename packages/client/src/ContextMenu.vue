@@ -57,6 +57,7 @@ const outside = (e: Event) => {
   if (!menu.value?.contains(e.target as Node)) emit('close');
 };
 const close = () => emit('close');
+let listening = 0;
 
 onMounted(() => {
   // Keep it on the screen.
@@ -68,13 +69,16 @@ onMounted(() => {
   menu.value!.querySelector('button')?.focus();
   window.addEventListener('mousedown', outside, true);
   window.addEventListener('contextmenu', outside, true);
-  window.addEventListener('scroll', close, true);
+  // Scrolling closes it from the next frame: a scroll made just before it opened (the row
+  // scrolled into view as it was right-clicked) is only told of then, before this runs.
+  listening = requestAnimationFrame(() => window.addEventListener('scroll', close, true));
   window.addEventListener('blur', close);
   window.addEventListener('resize', close);
 });
 onBeforeUnmount(() => {
   window.removeEventListener('mousedown', outside, true);
   window.removeEventListener('contextmenu', outside, true);
+  cancelAnimationFrame(listening);
   window.removeEventListener('scroll', close, true);
   window.removeEventListener('blur', close);
   window.removeEventListener('resize', close);

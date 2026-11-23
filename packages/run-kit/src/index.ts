@@ -33,6 +33,7 @@ import type { Readable, Writable } from 'node:stream';
 import type { ChunkOutput } from '@kuraa/session/model';
 
 export type { ChunkOutput };
+export { readWorkspaceFile, readWorkspaceFileSync, writeWorkspaceFile } from './workspace-files.js';
 
 /** Bumped whenever this contract changes incompatibly. */
 export const RUN_API_VERSION = 1;

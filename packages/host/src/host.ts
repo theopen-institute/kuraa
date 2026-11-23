@@ -5,7 +5,7 @@ import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, r
 import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { TypeRegistry, hashText, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { TypeRegistry, mergeLines, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeSeed, patchState, type ChunkRef, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { Git, NON_INTERACTIVE } from './git.js';
@@ -18,6 +18,7 @@ import { Runner, type RunOptions } from './runner.js';
 import { Renders } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
+import { gateFor, upgradeAllowed, type RequestGate } from './origins.js';
 import { conflictsIn, mergeCommits, mergeSignature, type MergeOutcome } from './merging.js';
 import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
@@ -51,6 +52,12 @@ export interface HostOptions {
   token: string;
   host?: string;
   port?: number;
+  /**
+   * Who may talk to it from a web page (origins.ts). Default: what listening at
+   * `host` allows, with no other origins; a hub gives its own, as requests to its
+   * workspaces come through it.
+   */
+  requests?: RequestGate;
   /** Directory of a built web client to serve at `/`. */
   staticDir?: string;
   identity?: { name: string; email: string };
@@ -126,6 +133,7 @@ interface RoomRecord {
   baseCommit: string | null;
   /** The file text as last written or seen, parsed. */
   previous: ParsedDocument;
+  /** The git blob id of the file's text as last written or seen (blobId): a change on the disk is any other. */
   lastHash: string;
   /** Latest encoded room state; seeds the room when it is reopened. */
   state: Uint8Array | null;
@@ -135,6 +143,12 @@ interface RoomRecord {
   dirty: boolean;
   /** Flushed but not committed. */
   uncommitted: boolean;
+  /**
+   * Its last person here left while another device that may change it had it
+   * open from the same seed: what is not committed of it is in that device's
+   * room too, and that device commits it (not this one, nor both).
+   */
+  leftShared: boolean;
   /**
    * The hash of the file's text (as `lastHash`) when it was known to be the
    * branch's committed version: committing then has nothing to do. Null: not known.
@@ -215,6 +229,8 @@ export class Host {
   spaces!: Spaces;
   readonly dir: string;
   readonly token: string;
+  /** Who may talk to it from a web page (origins.ts). */
+  readonly requests: RequestGate;
   readonly timings: HostTimings;
   /**
    * Places this workspace keeps a copy on and syncs with, by id: the syncs the
@@ -255,6 +271,7 @@ export class Host {
   constructor(readonly options: HostOptions) {
     this.dir = resolve(options.dir);
     this.token = options.token;
+    this.requests = options.requests ?? gateFor(options.host ?? '127.0.0.1');
     this.workspace = basename(this.dir);
     this.timings = { ...DEFAULT_TIMINGS, ...options.timings };
     const identity = options.identity;
@@ -355,6 +372,9 @@ export class Host {
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.
     await this.git.run(['config', 'receive.denyCurrentBranch', 'updateInstead']);
+    // A link that comes in a commit (from a push, a device or the online copy) is
+    // checked out as a plain file holding where it points: never followed (0037).
+    await this.git.run(['config', 'core.symlinks', 'false']);
 
     const handler = createRequestHandler(this);
     this.relay = new Relay({
@@ -378,6 +398,7 @@ export class Host {
       },
       empty: (room) => this.onRoomEmpty(room),
       request: handler,
+      upgrade: (req) => upgradeAllowed(req, this.requests),
     }, { host: this.options.host ?? '127.0.0.1', port: this.options.port ?? 0 });
     this.address = await this.relay.listen();
     this.startWatcher();
@@ -573,7 +594,7 @@ export class Host {
       if (existing) return existing;
       // Taken only if the branch and the file are as they were read: else made in the queue, read again.
       const text = now.branch === prep.branch ? await this.readText(this.resolvePath(path), path).catch(() => null) : null;
-      if (text !== null && hashText(text) === hashText(prep.text) && !this.records.has(prep.key)) {
+      if (text !== null && text === prep.text && !this.records.has(prep.key)) {
         const rec = this.installRecord(prep);
         this.noteCommitted(rec, prep.text);
         return rec;
@@ -621,19 +642,21 @@ export class Host {
     if (cached && cached.typeId === type.id && cached.typeVersion === type.version) {
       const previous = type.parse(cached.text);
       const state = Buffer.from(cached.state, 'base64');
+      // A cache kept before the hash was the text's blob (a short hash, not to be trusted to tell texts apart): as its text's.
+      const lastHash = isBlobId(cached.lastHash) ? cached.lastHash : blobId(cached.text);
       return {
         key, path, branch, type, text, previous, state, seedText: null,
-        generation: cached.generation, baseCommit: cached.baseCommit, lastHash: cached.lastHash,
+        generation: cached.generation, baseCommit: cached.baseCommit, lastHash,
         lastCommit: cached.lastCommit, lastCommitAt: cached.lastCommitAt,
         // Edits in the cached state that never reached the file are unflushed edits.
         dirty: type.serialize(decodeDoc(state, type.schema), previous) !== cached.text,
         // The file changed while the host was away: an outside change against the cache.
-        needsOutsideCheck: hashText(text) !== cached.lastHash,
+        needsOutsideCheck: blobId(text) !== lastHash,
       };
     }
     return {
       key, path, branch, type, text, previous: type.parse(text), state: null, seedText: text,
-      generation: blobId(text), baseCommit: head, lastHash: hashText(text),
+      generation: blobId(text), baseCommit: head, lastHash: blobId(text),
       lastCommit: null, lastCommitAt: null, dirty: false, needsOutsideCheck: false,
     };
   }
@@ -657,9 +680,9 @@ export class Host {
    * changed, needs no git at all (commitNow).
    */
   private noteCommitted(rec: RoomRecord, text: string): void {
-    const hash = hashText(text);
+    const hash = blobId(text);
     void this.git.run(['rev-parse', '-q', '--verify', `refs/heads/${rec.branch}:${rec.path}`], { allowFail: true }).then((r) => {
-      if (r.code === 0 && r.stdout.trim() === blobId(text) && rec.lastHash === hash && !rec.uncommitted) rec.committedHash = hash;
+      if (r.code === 0 && r.stdout.trim() === hash && rec.lastHash === hash && !rec.uncommitted) rec.committedHash = hash;
     }, () => undefined);
   }
 
@@ -670,6 +693,7 @@ export class Host {
       seedText: null,
       dirty: false,
       uncommitted: false,
+      leftShared: false,
       committedHash: null,
       contributors: new Map(),
       editingSince: null,
@@ -702,12 +726,13 @@ export class Host {
     if (rec.timers.drop) clearTimeout(rec.timers.drop);
     rec.timers.drop = undefined;
     rec.usedAt = Date.now();
+    // Someone is in it again: its edits are this device's to commit, or not, as for any room it has open.
+    rec.leftShared = false;
     // Only the host creates room content: from saved state, or a fresh seed.
     if (rec.state) return { state: rec.state };
-    // The file as the room was made from it is already parsed (rec.previous), unless it changed since: not parsed again.
+    // The room starts from the text its seed is named for (a change before anyone came started it again: reseed).
+    // That text is usually the file's as already parsed (rec.previous): not parsed again.
     rec.state = seedState(rec.type, rec.seedText ?? rec.previous.text, rec.previous);
-    // The file changed after the room was named (an outside change): start from the blob, then make that change.
-    if (rec.seedText !== null && rec.seedText !== rec.previous.text) rec.state = patchState(rec.state, rec.previous.doc);
     rec.seedText = null;
     this.saveCache(rec).catch((e) => this.log(`could not keep ${rec.path}'s room: ${e}`));
     return { state: rec.state };
@@ -729,9 +754,16 @@ export class Host {
     }
   }
 
+  /** A room kept warm whose edits not committed are another device's to commit (leftShared), nobody being in it here since. */
+  private leftToOthers(rec: RoomRecord): boolean {
+    return rec.leftShared && !this.relay.clients(rec.room);
+  }
+
   private onRoomEmpty(room: string): void {
     const rec = this.byRoom.get(room);
     if (!rec) return;
+    // Another device still has it open: that device commits what is in it (the room kept warm here hears no more of it).
+    rec.leftShared = !!this.peers?.rooms.heldElsewhere(rec.room);
     this.peers?.rooms.closed(this.roomKey(rec));
     void this.serial(async () => {
       await this.flushNow(rec);
@@ -775,11 +807,12 @@ export class Host {
     rec.timers = {};
   }
 
-  /** The room's current document, from the relay or the saved state. */
+  /** The room's current document, from the relay or the saved state (or the text it is to start from). */
   private current(rec: RoomRecord) {
     const live = this.relay.read(rec.room, rec.type.schema);
     if (live) return live;
-    return rec.state ? decodeDoc(rec.state, rec.type.schema) : rec.previous.doc;
+    if (rec.state) return decodeDoc(rec.state, rec.type.schema);
+    return rec.seedText !== null && rec.seedText !== rec.previous.text ? rec.type.parse(rec.seedText).doc : rec.previous.doc;
   }
 
   // -------------------------------------------------------------------------
@@ -843,7 +876,7 @@ export class Host {
       throw e;
     }
     const notText = !!disk && !isUtf8(disk);
-    if (disk && !notText && hashText(disk.toString('utf8')) !== rec.lastHash) {
+    if (disk && !notText && blobId(disk.toString('utf8')) !== rec.lastHash) {
       // Changed outside the app since it was last seen: merged in first (applyOutside writes the result).
       return this.applyOutside(rec, disk.toString('utf8'));
     }
@@ -861,7 +894,7 @@ export class Host {
         this.saveFailed(rec, e);
         throw e;
       }
-      rec.lastHash = hashText(text);
+      rec.lastHash = blobId(text);
       rec.previous = rec.type.parse(text);
       rec.uncommitted = true;
       rec.lastFlushAt = new Date().toISOString();
@@ -886,6 +919,8 @@ export class Host {
   async commitNow(rec: RoomRecord, message?: string): Promise<string | null> {
     // A room shared with other devices is committed by one of them (peers/rooms.ts); a named version, by whoever names it.
     if (message === undefined && this.peers && !this.peers.rooms.commits(rec.room)) return null;
+    // Left while shared, and nobody in it here since: the device that still had it open commits its edits.
+    if (message === undefined && this.leftToOthers(rec)) return null;
     const st = await this.readGitState();
     if (pausedBecause(st)) return null;
     const t = rec.timers;
@@ -916,7 +951,7 @@ export class Host {
         }
         committed = await this.commitToBranch(rec.branch, rec.path, now, withTrailers(text, people, [...extra, ...(await this.policyTrailer())]));
         rec.previous = rec.type.parse(now);
-        rec.lastHash = hashText(now);
+        rec.lastHash = blobId(now);
         rec.dirty = false;
       }
     } catch (e) {
@@ -1345,7 +1380,7 @@ export class Host {
       return this.flushNow(rec);
     }
     const text = bytes.toString('utf8');
-    if (hashText(text) === rec.lastHash) return;
+    if (blobId(text) === rec.lastHash) return;
     await this.applyOutside(rec, text);
   }
 
@@ -1371,9 +1406,9 @@ export class Host {
     const at = new Date().toISOString();
     const theirs = rec.type.parse(text);
     if (!rec.dirty) {
-      this.applyDoc(rec, theirs.doc);
       rec.previous = theirs;
-      rec.lastHash = hashText(text);
+      this.applyDoc(rec, theirs.doc, text);
+      rec.lastHash = blobId(text);
       if (!quiet) this.broadcast(rec, { type: 'outside-change', at, merged: false });
       this.log(`outside change applied to ${rec.path}`);
       await this.saveCache(rec);
@@ -1383,9 +1418,9 @@ export class Host {
     const ours = rec.type.serialize(this.current(rec), rec.previous);
     const merged = await this.git.mergeFile(ours, base, text, join(this.cacheDir, '..'));
     rec.previous = theirs;
-    rec.lastHash = hashText(text);
+    rec.lastHash = blobId(text);
     if (!merged.conflict) {
-      this.applyDoc(rec, rec.type.parse(merged.text).doc);
+      this.applyDoc(rec, rec.type.parse(merged.text).doc, merged.text);
       if (!quiet) this.broadcast(rec, { type: 'outside-change', at, merged: true });
       this.log(`outside change merged into ${rec.path}`);
     } else {
@@ -1396,12 +1431,32 @@ export class Host {
     await this.flushNow(rec);
   }
 
-  private applyDoc(rec: RoomRecord, doc: ReturnType<DocumentType['parse']>['doc']): void {
-    if (this.relay.apply(rec.room, doc)) {
-      rec.state = this.relay.state(rec.room);
-    } else if (rec.state) {
-      rec.state = patchState(rec.state, doc);
-    }
+  /**
+   * Make a document (`text`, parsed) the room's. Someone in the room here: as a
+   * minimal difference, which reaches them and the other devices with the room
+   * open. Nobody in it here: the room hears nothing of the same room on other
+   * devices, so a change made into it here would be this host's alone, and a room
+   * from the same seed elsewhere, holding the same change made there, would show
+   * it twice once they joined. The same seed must mean the same history (0027):
+   * it starts again from the text instead (reseed).
+   */
+  private applyDoc(rec: RoomRecord, doc: ReturnType<DocumentType['parse']>['doc'], text: string): void {
+    if (this.relay.clients(rec.room) && this.relay.apply(rec.room, doc)) rec.state = this.relay.state(rec.room);
+    else this.reseed(rec, text);
+  }
+
+  /**
+   * Start a room nobody is in afresh from a text, named by its blob as a new room
+   * is: rooms on other devices that start from it start the same (0027). Its old
+   * state is dropped; what was in it and not in the text is the caller's to keep.
+   */
+  private reseed(rec: RoomRecord, text: string): void {
+    this.byRoom.delete(rec.room);
+    rec.generation = blobId(text);
+    rec.room = this.roomName(rec);
+    rec.state = null;
+    rec.seedText = text;
+    this.byRoom.set(rec.room, rec);
   }
 
   /**
@@ -1557,15 +1612,39 @@ export class Host {
    */
   async merge(x: string, y: string, override?: (path: string) => string | undefined): Promise<MergeOutcome> {
     // Who may change what (0066): judged by the workspace's policy, where it has one (peers/gate.ts).
-    const g = this.gate ? await this.gate(x, y) : null;
+    const g = this.gate ? await this.judgeBoth(x, y) : null;
     if (g?.waitFor.length) throw new WaitingForPolicy(g.waitFor);
-    const outcome = await mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused });
+    const outcome = await mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), override, tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused, signature: this.mergeSignature });
     // A merge holding a live room's text cannot be made again elsewhere: signed, it is its maker's (0066), and judged as theirs.
     if (outcome.kind === 'merge' && outcome.overridden?.length && this.peers) {
       const raw = (await this.git.run(['cat-file', 'commit', outcome.commit])).bytes;
       outcome.commit = await this.git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.peers.node.signingKey()) });
     }
     return outcome;
+  }
+
+  /**
+   * Judge the new commits on both sides of a merge (gate.ts judges those one
+   * side brings the other), whichever side this device is on: every device
+   * merging the same two commits keeps out the same changes, and so makes the
+   * same merge (0025). A file kept as it was keeps the side whose change was not
+   * refused; where both sides' were, it keeps its version where they meet.
+   */
+  private async judgeBoth(x: string, y: string): Promise<GateResult> {
+    const [theirs, ours] = await Promise.all([this.gate!(x, y), this.gate!(y, x)]);
+    const waitFor = [...new Set([...theirs.waitFor, ...ours.waitFor])].sort();
+    if (waitFor.length) return { keeps: new Map(), refused: [], waitFor };
+    const keeps = new Map([...theirs.keeps, ...ours.keeps]);
+    const both = [...theirs.keeps.keys()].filter((p) => ours.keeps.has(p));
+    if (both.length) {
+      const base = (await this.git.run(['merge-base', x, y], { allowFail: true })).stdout.trim();
+      for (const path of both) {
+        const r = base ? await this.git.run(['rev-parse', '-q', '--verify', `${base}:${path}`], { allowFail: true }) : null;
+        keeps.set(path, r?.code === 0 ? r.stdout.trim() : null);
+      }
+    }
+    const refused = [...theirs.refused, ...ours.refused].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.commit < b.commit ? -1 : a.commit > b.commit ? 1 : 0));
+    return { keeps, refused, waitFor: [] };
   }
 
   /** The tree of the merge of two commits as this device makes it, plainly (to check another's merge: peers/gate.ts). */
@@ -1594,32 +1673,49 @@ export class Host {
       // only the device that commits a shared room brings changes from git into
       // it, and the others get them through the room, so no change is made twice
       // there. Here, such a room's file is put back as committed for the move, and
-      // the room written out again after it. A room with uncommitted edits is
-      // handled the same way, its edits being in the room.
+      // the room written out again after it. Only a room someone is in here is so
+      // (commits() is true of one nobody is in): a room kept warm hears nothing of
+      // the others, and takes the change from git as any room does.
       // A room shared with the device whose work this is, too: it holds both sides' edits already, and the
       // merge took its text, so git brings nothing into it (or it would get the other side's edits twice).
       const branch = await this.git.branch();
-      const held = [...this.records.values()].filter((r) => r.branch === branch && (r.uncommitted || (this.peers && !this.peers.rooms.commits(r.room)) || override?.(r.path) !== undefined));
-      for (const rec of held) {
+      const shared = (r: RoomRecord) => (this.peers && !this.peers.rooms.commits(r.room)) || override?.(r.path) !== undefined;
+      const held = [...this.records.values()].filter((r) => r.branch === branch && shared(r));
+      // Rooms kept warm with edits not committed here (commitAll committed the rest): those left while
+      // shared are another device's to commit, which has them in its room; others (their commit failed) are
+      // merged with what comes, as an outside change. Either way the file is put back as committed for the move.
+      const kept = [...this.records.values()].filter((r) => r.branch === branch && !shared(r) && r.uncommitted);
+      for (const rec of [...held, ...kept]) {
         const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
         if (before.code === 0) await this.writeAtomic(this.resolvePath(rec.path), before.stdout);
         else await rm(this.resolvePath(rec.path), { force: true });
         const text = before.code === 0 ? before.stdout : '';
         rec.previous = rec.type.parse(text);
-        rec.lastHash = hashText(text);
-        rec.dirty = true;
+        rec.lastHash = blobId(text);
+        rec.dirty = held.includes(rec) || !this.leftToOthers(rec);
         rec.uncommitted = false;
       }
       const r = await this.git.run(['merge', '--ff-only', '-q', outcome.commit], { allowFail: true });
       if (r.code !== 0) throw new Error(`Could not update the files to ${outcome.commit.slice(0, 7)}: ${(r.stderr || r.stdout).trim()}`);
       for (const rec of this.records.values()) if (rec.branch === branch) rec.baseCommit = outcome.commit;
       for (const rec of held) {
-        // Uncommitted edits of a room this device commits (none, after commitAll) would merge in as an outside change.
-        if (override?.(rec.path) === undefined && !(this.peers && !this.peers.rooms.commits(rec.room))) continue;
+        // The room holds what is to be in the file: written out again, over the move's version.
         const now = existsSync(this.resolvePath(rec.path)) ? await this.readText(this.resolvePath(rec.path), rec.path) : '';
         rec.previous = rec.type.parse(now);
-        rec.lastHash = hashText(now);
+        rec.lastHash = blobId(now);
         await this.flushNow(rec);
+      }
+      for (const rec of kept) {
+        if (!this.leftToOthers(rec)) {
+          // Its edits, merged with the move's version by checkAll below, are written and committed after.
+          this.commitSoon(rec.room);
+          continue;
+        }
+        // Started again from the file as the move left it: its edits are the other device's to bring.
+        const now = existsSync(this.resolvePath(rec.path)) ? await this.readText(this.resolvePath(rec.path), rec.path) : '';
+        rec.previous = rec.type.parse(now);
+        rec.lastHash = blobId(now);
+        this.reseed(rec, now);
       }
       this.log(`${outcome.kind === 'merge' ? 'merged' : 'moved to'} ${outcome.commit.slice(0, 7)}${outcome.conflicts.length ? ` (conflicts kept in ${outcome.conflicts.map((c) => c.path).join(', ')})` : ''}`);
       await this.checkAll();
@@ -1732,6 +1828,8 @@ export class Host {
       this.relay.closeRoom(old);
       await this.flushNow(rec);
       await this.saveCache(rec);
+      // Committed after the usual wait, by whichever device commits it, as if its people had just typed.
+      this.commitSoon(rec.room);
     });
   }
 
@@ -2118,6 +2216,9 @@ function withTrailers(message: string, coAuthors: PresenceUser[], extra: string[
   const unique = [...new Set([...trailers, ...extra])];
   return unique.length ? `${message}\n\n${unique.join('\n')}` : message;
 }
+
+/** Whether a string is a blob id, as blobId makes. */
+const isBlobId = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
 
 /** A text's git blob id, as `git hash-object` gives it. */
 export function blobId(text: string): string {

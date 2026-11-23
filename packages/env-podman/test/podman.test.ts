@@ -42,6 +42,15 @@ describe('podman run arguments', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('refuse to run rather than hide a path whose name would break the mount option', () => {
+    // A comma ends Podman's option: `destination=/work/a,source=/` would be read as more options.
+    for (const name of ['a,source=/', 'say "hi"', 'line\nbreak']) {
+      expect(() => runArgs({ ...base, policy: { ...DEFAULT_POLICY, hide: ['.git', name] } })).toThrow('could not be kept out of the container');
+    }
+    // Other names, with = and : too, are passed as they are.
+    expect(runArgs({ ...base, policy: { ...DEFAULT_POLICY, hide: ['a=b:c d'] } })).toContain('--mount=type=tmpfs,destination=/work/a=b:c d,tmpfs-size=4k,tmpfs-mode=0,notmpcopyup');
+  });
+
   it('open up only what the policy allows', () => {
     const args = runArgs({ ...base, policy: { ...DEFAULT_POLICY, workspace: 'read-write', network: true, memory: '8g' } });
     expect(args).toContain('--volume=/Users/p/notes:/work:rw');

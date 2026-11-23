@@ -10,7 +10,9 @@
 // connects to it over TCP, encrypted and checked as Hyperswarm's connections
 // are (Noise, @hyperswarm/secret-stream, with the same keys): the rest of the
 // peer layer cannot tell the two kinds apart. Of two devices that hear each
-// other, the one with the lower key connects.
+// other, the one with the lower key connects. The tag covers the address it is
+// said from, so what one device said, said again from another computer, sends
+// no one to that computer.
 //
 // Said when a device starts, when its network changes, and when it looks for
 // a device that is missing; asking those that hear it to say where they are.
@@ -40,7 +42,15 @@ export interface LanMember {
 
 interface Said { k: string; p: number; t: string[]; a?: boolean }
 
-const tag = (key: Buffer, device: string, port: number) => createHmac('sha256', key).update(`kuraa lan\0${device}\0${port}`).digest('hex').slice(0, 32);
+/** A device's tag for a workspace: its key, port, and the address it says it from ('' where it cannot tell: only taken from this computer itself). */
+export const lanTag = (key: Buffer, device: string, port: number, from: string) => createHmac('sha256', key).update(`kuraa lan/2\0${device}\0${port}\0${from}`).digest('hex').slice(0, 32);
+
+/** An address of this computer itself. */
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+
+/** Whether tags heard from `host` say a device of the workspace whose code is `key` listens on `port` there. */
+export const saidBy = (tags: Set<string>, key: Buffer, device: string, port: number, host: string) =>
+  tags.has(lanTag(key, device, port, host)) || (LOOPBACK.test(host) && tags.has(lanTag(key, device, port, '')));
 
 /** This computer's addresses on its networks (IPv4, not its own loopback). */
 function localAddresses(): string[] {
@@ -159,11 +169,11 @@ class LocalNetwork {
     if (!this.socket || !this.members.has(m) || !m.port()) return;
     const keys = m.keys().slice(0, 32);
     if (!keys.length) return;
-    const said: Said = { k: m.key, p: m.port(), t: keys.map((k) => tag(k, m.key, m.port())), ...(ask ? { a: true } : {}) };
-    const text = JSON.stringify(said);
+    const said = (from: string): string => JSON.stringify({ k: m.key, p: m.port(), t: keys.map((k) => lanTag(k, m.key, m.port(), from)), ...(ask ? { a: true } : {}) } satisfies Said);
     this.networks();
-    const senders = [...this.senders.values()];
-    for (const sender of senders.length ? senders : [this.socket]) sender.send(text, LAN_PORT, LAN_GROUP, () => undefined);
+    // Each network's from its own address, which the tags cover; with none, from wherever the system says.
+    if (!this.senders.size) this.socket.send(said(''), LAN_PORT, LAN_GROUP, () => undefined);
+    for (const [address, sender] of this.senders) sender.send(said(address), LAN_PORT, LAN_GROUP, () => undefined);
   }
 
   private heard(buf: Buffer, host: string): void {
@@ -178,7 +188,8 @@ class LocalNetwork {
     const tags = new Set(m.t.filter((t): t is string => typeof t === 'string'));
     for (const member of this.members) {
       if (member.key === m.k) continue;
-      if (!member.keys().some((k) => tags.has(tag(k, m.k, m.p)))) continue;
+      // Said from the address it came from (or, from this computer itself, from one it could not tell).
+      if (!member.keys().some((k) => saidBy(tags, k, m.k, m.p, host))) continue;
       member.found(m.k, host, m.p);
       const last = this.answered.get(member) ?? 0;
       if (m.a && Date.now() - last > 1000) {

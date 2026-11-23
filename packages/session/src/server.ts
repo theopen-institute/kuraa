@@ -30,6 +30,8 @@ export interface RelayHooks {
   empty(room: string): void;
   /** HTTP requests that are not WebSocket upgrades. Return true when handled. */
   request(req: IncomingMessage, res: ServerResponse): boolean | Promise<boolean>;
+  /** Whether a WebSocket may be opened (its Host and Origin headers, say). False closes it. Default: any. */
+  upgrade?(req: IncomingMessage): boolean;
 }
 
 export interface RelayOptions {
@@ -79,7 +81,7 @@ export class Relay {
       },
       onUpgrade: async ({ request, socket }) => {
         const url = new URL(request.url ?? '/', 'http://localhost');
-        if (url.pathname !== this.path) {
+        if (url.pathname !== this.path || this.hooks.upgrade?.(request) === false) {
           (socket as { destroy(): void }).destroy();
           throw null;
         }

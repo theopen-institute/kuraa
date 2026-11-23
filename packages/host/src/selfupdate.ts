@@ -22,7 +22,7 @@
 // the service (systemd on Linux, launchd on macOS) that does the starting.
 import { createHash, createPublicKey, verify as verifySignature, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, cpSync, existsSync, openSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -186,6 +186,18 @@ const version = readFileSync(join(root, 'current'), 'utf8').trim();
 await import(pathToFileURL(join(root, 'versions', version, 'kuraa-host.mjs')).href);
 `;
 
+/** Set in the environment of the service `install --service` writes. */
+export const SERVICE_ENV = 'KURAA_SERVICE';
+
+/**
+ * Whether this server runs as an installed service, whose output goes to a log
+ * (kuraa.log, the journal) rather than to a person: it never prints its access
+ * code there. One installed before the service said so is known by launchd's label.
+ */
+export function runsAsService(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[SERVICE_ENV] === '1' || env.XPC_SERVICE_NAME === 'org.kuraa.server';
+}
+
 /** Where `install` puts the server unless told. */
 export const defaultServerRoot = () => join(homedir(), '.kuraa', 'server');
 
@@ -228,6 +240,8 @@ export function installServer(o: { here: string; version: string; root: string; 
       '[Service]',
       `ExecStart=${argv.map(quote).join(' ')}`,
       `Environment=KURAA_TOKEN=${token}`,
+      // So it does not print its access code into the journal (cli.ts).
+      `Environment=${SERVICE_ENV}=1`,
       // Stopped to update (or by mistake): started again.
       'Restart=always',
       'RestartSec=5',
@@ -236,6 +250,8 @@ export function installServer(o: { here: string; version: string; root: string; 
       'WantedBy=default.target',
       '',
     ].join('\n'), { mode: 0o600 });
+    // Its access code is in it: for this user alone, even where it was there before (mode applies only to a new file).
+    chmodSync(file, 0o600);
     said.push(
       `Wrote ${file} (its access code: ${token}). Start it, now and at every boot:`,
       '  systemctl --user daemon-reload && systemctl --user enable --now kuraa',
@@ -253,7 +269,7 @@ export function installServer(o: { here: string; version: string; root: string; 
 <dict>
   <key>Label</key><string>org.kuraa.server</string>
   <key>ProgramArguments</key><array>${argv.map((a) => `<string>${xml(a)}</string>`).join('')}</array>
-  <key>EnvironmentVariables</key><dict><key>KURAA_TOKEN</key><string>${token}</string></dict>
+  <key>EnvironmentVariables</key><dict><key>KURAA_TOKEN</key><string>${token}</string><key>${SERVICE_ENV}</key><string>1</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${xml(log)}</string>
@@ -261,6 +277,10 @@ export function installServer(o: { here: string; version: string; root: string; 
 </dict>
 </plist>
 `, { mode: 0o600 });
+    // Its access code is in it, and the log is the server's own: both for this user alone.
+    chmodSync(file, 0o600);
+    closeSync(openSync(log, 'a', 0o600));
+    chmodSync(log, 0o600);
     said.push(`Wrote ${file} (its access code: ${token}). Start it, now and at every login:`, `  launchctl load -w ${file}`, `Its log: ${log}`);
   } else {
     said.push('No service for this system: run it with --auto-update under whatever starts it again when it stops.');

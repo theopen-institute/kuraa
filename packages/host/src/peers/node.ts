@@ -139,7 +139,10 @@ const MAX_VERSIONS = 256;
  * runs without GIT_PROTOCOL (uploadPackEnv), so it speaks protocol v0 whatever
  * the device asks for: in v2, upload-pack takes a want for any object it holds,
  * shown or not, so a device that learned a hidden commit's id could fetch it;
- * in v0 it takes wants only for what it showed.
+ * in v0 it takes wants only for what it showed. Left as it is: git answers a
+ * device's `have` for any object held here (ACK), shown or not, so a device in
+ * can learn whether a commit whose id it already knows is here, though not
+ * fetch it. Closing that needs serving each device from objects of its own.
  */
 export function uploadPackArgs(hidden: string[]): string[] {
   return [
@@ -172,6 +175,10 @@ export function digestOf(records: MemberRecord[]): string {
 /** The most records taken from one message, and the most said to be held in a want (0071): a member cannot make every device do unbounded work. */
 const MAX_RECORDS = 5000;
 const MAX_HAVE = 100_000;
+
+/** How often a device not known to be in has the records it shows weighed, at most, and how many devices' a minute (node.ts, mayWeigh). */
+const PROOF_EACH_MS = 1_000;
+const PROOF_PER_MINUTE = 60;
 
 /**
  * The records to give a device: all, but the workspace's secret never to a
@@ -239,6 +246,8 @@ export interface NodeEvents {
   members?(): void;
   /** A device turned this one away, saying why. */
   refused?(link: PeerLink, reason: string): void;
+  /** A device does not hold these policy operations, asked for as its commits name them (gate.ts). */
+  unheld?(link: PeerLink, ids: string[]): void;
 }
 
 export class PeerNode {
@@ -344,6 +353,8 @@ export class PeerNode {
     // device was in from before, everyone an admin. A device joining writes none: it takes the workspace's.
     if (!ws && found && !joinAs) await this.ensureGenesis(true);
     else if (ws && !this.o.joining) await this.ensureGenesis(false);
+    // Links this device revoked, or made and expired, unlinked in the policy, where their grants could still let someone in.
+    if (ws && !this.o.joining) await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
     // What the records say, applied, in case a record was kept and this device stopped before applying it.
     await this.identity.reconcile();
     for (const r of await this.identity.records()) this.told.add(r.sig);
@@ -710,6 +721,8 @@ export class PeerNode {
       const origin = await this.identity.originSecret();
       if (origin) for (const t of topicsFor(origin)) want.set(t.toString('hex'), { server: true, client: true });
       if (!this.o.joining) {
+        // A link from before that has expired since (its grant counts without anyone letting its holder in): unlinked.
+        await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
         const links = await this.identity.linkTopics();
         for (const t of links.topics) if (!want.has(t)) want.set(t, { server: true, client: false });
         if (links.next && links.next < next) next = links.next;
@@ -1130,6 +1143,28 @@ export class PeerNode {
   }
 
   /**
+   * Whether to weigh the proof a device not known to be in sends with its hello
+   * (Identity.proven): each costs working the policy out anew, and anyone can
+   * connect. At most once in PROOF_EACH_MS for each device, and PROOF_PER_MINUTE
+   * in all; past that it is turned away, and shows its proof again next time.
+   */
+  private mayWeigh(key: string): boolean {
+    const now = Date.now();
+    if ((this.weighed.get(key) ?? 0) > now - PROOF_EACH_MS) return false;
+    this.weighings = this.weighings.filter((t) => t > now - 60_000);
+    if (this.weighings.length >= PROOF_PER_MINUTE) return false;
+    this.weighings.push(now);
+    this.weighed.delete(key);
+    this.weighed.set(key, now);
+    // The oldest forgotten: any device can connect.
+    if (this.weighed.size > MAX_VERSIONS) this.weighed.delete(this.weighed.keys().next().value!);
+    return true;
+  }
+
+  private readonly weighed = new Map<string, number>();
+  private weighings: number[] = [];
+
+  /**
    * Let in a device by an invite link (0072): for as long as it is connected,
    * with a remote to fetch from. It is in for good, on every device, once its
    * person's join (the link's grant) is in the policy.
@@ -1216,6 +1251,8 @@ export class PeerNode {
       ...(shown && (this.o.ticket || paired) ? { link: shown } : {}),
       // To a device that may not know this one is in (0072): what shows it is.
       ...(!paired && !this.o.joining ? { proof: await this.identity.proof() } : {}),
+      // Joining: the key its join will be signed with, for the device letting it in to say so in the policy (admit).
+      ...(this.o.joining && this.o.ticket ? { signer: (await this.signingKeyNow()).publicKey.toString('hex') } : {}),
     };
   }
 
@@ -1281,6 +1318,14 @@ export class PeerNode {
     }
     else if (m.type === 'records') {
       if (link.hello?.workspace === this.ws.id && Array.isArray(m.records)) await this.takeRecords(link, m.records.slice(0, MAX_RECORDS));
+      if (link.hello?.workspace === this.ws.id && Array.isArray(m.unheld)) {
+        const ids = m.unheld.slice(0, 100).filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x));
+        const held = new Set((await this.identity.records()).filter((r) => r.kind === 'policy').map((r) => r.subject));
+        if (ids.length) this.events.unheld?.(link, ids.filter((id) => !held.has(id)));
+      }
+    }
+    else if (m.type === 'ops') {
+      if (link.hello?.workspace === this.ws.id && Array.isArray(m.ids)) await this.answerOps(link, m.ids.slice(0, 100));
     }
     else if (m.type === 'want') {
       if (link.hello?.workspace === this.ws.id && Array.isArray(m.have)) await this.answerWant(link, m.have.slice(0, MAX_HAVE), m.reply === true);
@@ -1349,9 +1394,11 @@ export class PeerNode {
       }
       return bye('not paired with this device');
     }
-    // A device this one does not know to be in, showing it is (0072): its records taken, and it is judged again.
-    if (!member && same && Array.isArray(h.proof) && h.proof.length) {
-      await this.takeRecords(link, h.proof.slice(0, MAX_PROOF));
+    // A device this one does not know to be in, showing it is (0072): of its records, those about it, taken only if
+    // they show it is in, and it is judged again. Nothing else a stranger sends is kept, or passed on.
+    if (!member && same && Array.isArray(h.proof) && h.proof.length && this.mayWeigh(link.key)) {
+      const proven = await this.identity.proven(link.key, h.proof.slice(0, MAX_PROOF));
+      if (proven.length) await this.takeRecords(link, proven);
       member = (await this.identity.members()).find((x) => x.key === link.key);
     }
     // Let in by a link here a moment ago, connecting again before its join came (0072).
@@ -1370,6 +1417,8 @@ export class PeerNode {
         if (!name) return { why: 'this device was removed from the workspace' };
         // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
         if (l.once) await this.identity.useLink(l.id);
+        // Let in by it, in the policy (admit): its holder's join counts, the link checked here, by this device's clock.
+        if (typeof h.signer === 'string') await this.identity.admit(l.id, h.signer, await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not say in the policy who was let in: ${e.message}`));
         return { l, name };
       });
       if ('why' in admitted) return bye(admitted.why);
@@ -1416,7 +1465,7 @@ export class PeerNode {
       if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
       const l = decodeLink(t);
       // In the workspace, as the policy the link's genesis roots says (0072): someone who only knows its secret is not.
-      const known = await this.identity.devicesIn(records, this.ws.id);
+      const known = await this.identity.devicesIn(records, this.ws.id, l.issuer.key);
       known.add(l.issuer.key);
       if (!known.has(link.key)) {
         this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
@@ -1445,7 +1494,7 @@ export class PeerNode {
       this.saidFor = '';
       await this.syncPerson();
     }
-    await this.takeRecords(link, records);
+    await this.takeRecords(link, records, { welcomed: true });
     // Let in by a link that puts this person in a group: said in the policy (0066).
     const person = await this.person();
     if (person && this.o.ticket) {
@@ -1481,10 +1530,23 @@ export class PeerNode {
     if ([...theirs].some((x) => !known.has(x))) link.send({ type: 'want', have: [...known], reply: true });
   }
 
+  /**
+   * A device asked for policy operations that commits this one sent name
+   * (gate.ts): those held are sent, and the rest said not to be held here, so
+   * it does not wait for them for ever (peers.ts, knownFrom).
+   */
+  private async answerOps(link: PeerLink, ids: unknown[]): Promise<void> {
+    const asked = new Set(ids.filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)));
+    if (!asked.size) return;
+    const held = (await this.identity.records()).filter((r) => r.kind === 'policy' && asked.has(r.subject));
+    const unheld = [...asked].filter((id) => !held.some((r) => r.subject === id));
+    link.send({ type: 'records', records: held, unheld });
+  }
+
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */
-  private async takeRecords(link: PeerLink, records: unknown[]): Promise<void> {
+  private async takeRecords(link: PeerLink, records: unknown[], o: { welcomed?: boolean } = {}): Promise<void> {
     const before = new Set((await this.identity.members()).map((m) => m.key));
-    const taken = await this.identity.takeRecords(records);
+    const taken = await this.identity.takeRecords(records, o);
     if (!taken.length) return;
     // Out (0072): dropped, its key revoked, or its person taken out.
     const removed = new Set(await this.identity.removed());

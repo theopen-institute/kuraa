@@ -322,6 +322,30 @@ describe('pnpm host', () => {
     }
   });
 
+  it('as an installed service, never prints its access code into its log', async () => {
+    const base = temp('kuraa-cli-service-');
+    const dir = join(base, 'notes');
+    mkdirSync(dir);
+    const settings = join(base, 'settings.json');
+    writeFileSync(settings, JSON.stringify({ runCode: false }));
+    const child = spawn(join(import.meta.dirname, '../../../node_modules/.bin/tsx'), ['packages/host/src/cli.ts', '--dir', dir, '--init', '--settings', settings, '--port', '0', '--static', base], {
+      cwd: join(import.meta.dirname, '../../..'),
+      env: { ...process.env, KURAA_TOKEN: 'service-secret-token', KURAA_SERVICE: '1' },
+    });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    try {
+      await until(() => /git clone: /.test(out), 30_000, 'the host to start');
+      expect(out).toContain('token:     KURAA_TOKEN in the service');
+      expect(out).toContain('/?token=<token>');
+      expect(out).not.toContain('service-secret-token');
+    } finally {
+      child.kill('SIGTERM');
+      await new Promise((r) => child.once('exit', r));
+    }
+  });
+
   it('refuses the flags that are gone, saying why', () => {
     const r = (() => {
       try {

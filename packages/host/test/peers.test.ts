@@ -21,6 +21,7 @@ import { createPerson, type Person } from '../src/peers/person.js';
 import { joinWorkspace as joinWorkspaceAs, startHost, type RunningHost } from '../src/index.js';
 import type { PeerOptions } from '../src/peers/peers.js';
 import type { RunOptions } from '../src/runner.js';
+import type { HostTimings } from '../src/host.js';
 import type { RunRecord } from '@kuraa/session/model';
 import { hashText } from '@kuraa/kernel';
 import { Git } from '../src/git.js';
@@ -130,9 +131,9 @@ async function joinWorkspace(o: Parameters<typeof joinWorkspaceAs>[0]) {
 
 type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort' | 'outputsPublishMs'>;
 
-async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net } = {}): Promise<RunningHost> {
-  const { person, node, dialMs, lookupsMs, bootstrap, net, ...rest } = extra;
-  const h = await startHost({ ...rest, dir, timings: FAST, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
+async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net; timings?: Partial<HostTimings> } = {}): Promise<RunningHost> {
+  const { person, node, dialMs, lookupsMs, bootstrap, net, timings, ...rest } = extra;
+  const h = await startHost({ ...rest, dir, timings: { ...FAST, ...timings }, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
   hosts.push(h);
   return h;
 }
@@ -141,7 +142,7 @@ async function start(dir: string, extra: { types?: DocumentType[]; person?: Pers
 const inviteFrom = (h: RunningHost) => h.host.peers!.inviteLink({ hours: 24, once: true });
 
 /** Two paired devices: Ada's (the first) and Bo's (joined by an invite link). */
-async function pair(first: Parameters<typeof start>[1] = {}): Promise<{ a: RunningHost; b: RunningHost; dirA: string; dirB: string }> {
+async function pair(first: Parameters<typeof start>[1] = {}, second: Parameters<typeof start>[1] = {}): Promise<{ a: RunningHost; b: RunningHost; dirA: string; dirB: string }> {
   const dirA = repo();
   const a = await start(dirA, first);
   const invitation = await inviteFrom(a);
@@ -151,7 +152,7 @@ async function pair(first: Parameters<typeof start>[1] = {}): Promise<{ a: Runni
   await joinWorkspace({ dir: dirB, invitation, name: 'bee', bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, log: process.env.PEER_LOG ? (m) => console.log(`[join] ${m}`) : undefined });
   git(dirB, 'config', 'user.name', 'Bo');
   git(dirB, 'config', 'user.email', 'bo@example.org');
-  const b = await start(dirB);
+  const b = await start(dirB, second);
   await until(async () => (await a.host.peers!.status()).devices.some((d) => d.online) && (await b.host.peers!.status()).devices.some((d) => d.online), 15_000, 'both online');
   return { a, b, dirA, dirB };
 }
@@ -223,6 +224,18 @@ describe('devices of one workspace', () => {
     expect(merged).toMatch(/It rained all day\.[\s\S]*It poured\.|It poured\.[\s\S]*It rained all day\./);
   });
 
+  it('bring in a commit naming policy no one holds, once the device it came from says it does not hold it either', async () => {
+    const { b, dirA, dirB } = await pair();
+    await b.close();
+    hosts.splice(hosts.indexOf(b), 1);
+    // A commit saying it was made under a policy operation that does not exist: waited for, it would never come.
+    writeFileSync(join(dirA, 'notes.md'), NOTES.replace('The tide was out.', 'The tide was far out.'));
+    git(dirA, 'commit', '-q', '-am', `Ada, apart\n\nKuraa-Policy: ${'ee'.repeat(32)}`);
+    await start(dirB);
+    await until(() => head(dirB) === head(dirA), 20_000, 'the commit brought in');
+    expect(file(dirB)).toContain('The tide was far out.');
+  });
+
   it('make one history with a device that merges differently (another version), the lower key merging', async () => {
     const { a, b, dirA, dirB } = await pair();
     await b.close();
@@ -263,8 +276,12 @@ describe('devices of one workspace', () => {
     const body = git(dirA, 'log', '-1', '--format=%B');
     expect(['Ada', 'Bo']).toContain(authors);
     expect(body).toMatch(/^Edit Field notes: Day one, Day two \((Ada, Bo|Bo, Ada)\)/);
-    expect(body).toContain('Co-authored-by: Ada <ada@example.org>');
-    expect(body).toContain('Co-authored-by: Bo <bo@example.org>');
+    // Whoever edited on the other device is credited as the records say who that device is (by name, and by an
+    // address only where a verifier checked it), not as its messages say: here, by name.
+    const committer = git(dirA, 'log', '-1', '--format=%an');
+    const other = committer === 'Ada' ? 'Bo' : 'Ada';
+    expect(body).toContain(`Co-authored-by: ${committer} <${committer.toLowerCase()}@example.org>`);
+    expect(body).not.toContain(`Co-authored-by: ${other} <`);
     expect(body).toContain('Kuraa-Kind: autosave');
   });
 });
@@ -833,6 +850,86 @@ describe('a shared room and a third device', () => {
     expect(ada.read().eq(bo.read())).toBe(true);
     await until(() => want(file(dirA)) && file(dirA) === file(dirB) && file(dirB) === file(dirC) && head(dirA) === head(dirB) && head(dirB) === head(dirC), 25_000, 'all three the same');
     expect(file(dirA).match(/many/g)).toHaveLength(1);
+  });
+});
+
+describe('a room kept warm on one device while the other goes on (0027)', () => {
+  // Bo leaves the document his device shares with Ada's; his device keeps its room warm (not live,
+  // so it hears no more of the room). Ada edits and commits; Bo's device takes the commit. Whichever
+  // device committed the room while both were in it, Bo's device neither writes the room's old text
+  // over the commit nor, when he comes back, shows Ada's edit twice.
+  for (const warm of ['lower', 'higher'] as const) {
+    it(`takes the other's commit once, and writes nothing old over it: the warm room on the device with the ${warm} key`, async () => {
+      const WARM = { dropMs: 120_000 };
+      const { a, b, dirA, dirB } = await pair({ timings: WARM }, { timings: WARM });
+      const low = a.host.peers!.node.myKey < b.host.peers!.node.myKey;
+      // Bo is on the device whose room is to stay warm; Ada on the other.
+      const [ada$, bo$, dirAda, dirBo] = (warm === 'lower') === low ? [b, a, dirB, dirA] : [a, b, dirA, dirB];
+      const ada = await connect(ada$, ADA);
+      const bo = await connect(bo$, BO);
+      ada.write(insertAt(ada.read(), 'The tide', 'Ada1: '));
+      await until(() => bo.read().textContent.includes('Ada1: '), 15_000, 'the shared room');
+      const settled = () => file(dirAda) === file(dirBo) && head(dirAda) === head(dirBo) && git(dirAda, 'status', '--porcelain') === '' && git(dirBo, 'status', '--porcelain') === '';
+      await until(() => file(dirAda).includes('Ada1') && settled(), 20_000, 'the first commit on both');
+      bo.destroy();
+      await until(() => !bo$.host.liveRooms().length, 5000, 'Bo’s room not live');
+      ada.write(insertAt(ada.read(), 'It rained', 'Ada2: '));
+      await until(() => file(dirAda).includes('Ada2') && git(dirAda, 'status', '--porcelain') === '', 20_000, 'Ada’s edit committed');
+      await until(() => head(dirBo) === head(dirAda), 20_000, 'Ada’s commit on Bo’s device');
+      await new Promise((r) => setTimeout(r, 1500));
+      // Bo's device kept the commit as it came: no old text written over it.
+      expect(file(dirBo)).toBe(file(dirAda));
+      expect(git(dirBo, 'status', '--porcelain')).toBe('');
+      // Bo comes back: Ada's edit once, in both rooms. His room started again from the commit, so one
+      // device takes the other's room: whoever is in the room replaced follows it, as the app does.
+      let one = ada;
+      let two = await connect(bo$, BO);
+      const follow = async (c: HeadlessClient, h: RunningHost, user: typeof ADA) => {
+        if (!c.messages.some((m) => m.type === 'reseeded')) return c;
+        c.destroy();
+        return connect(h, user);
+      };
+      const joined = async () => {
+        one = await follow(one, ada$, ADA);
+        two = await follow(two, bo$, BO);
+        const seeds = [ada$, bo$].map((h) => h.host.liveRooms()[0]?.seed);
+        return !!seeds[0] && seeds[0] === seeds[1] && one.read().eq(two.read());
+      };
+      await until(joined, 15_000, 'one room');
+      expect(two.read().textContent.match(/Ada2/g)).toHaveLength(1);
+      two.write(insertAt(two.read(), 'We counted', 'Bo: '));
+      await until(async () => (await joined()) && one.read().textContent.includes('Bo: '), 15_000, 'Bo’s edit in Ada’s room');
+      await until(() => file(dirAda).includes('Bo: ') && settled(), 25_000, 'the same on both').catch((e: Error) => {
+        if (process.env.PEER_LOG) console.log('FILE ADA', file(dirAda), '\nFILE BO', file(dirBo), git(dirAda, 'status', '--porcelain'), '|', git(dirBo, 'status', '--porcelain'), head(dirAda), head(dirBo));
+        throw e;
+      });
+      for (const t of [one.read().textContent, two.read().textContent, file(dirAda), git(dirAda, 'show', 'HEAD:notes.md')]) expect(t.match(/Ada2/g)).toHaveLength(1);
+      expect(file(dirAda)).toBe(NOTES.replace('The tide', 'Ada1: The tide').replace('We counted', 'Bo: We counted').replace('It rained', 'Ada2: It rained'));
+    });
+  }
+
+  it('commits a warm room’s edits with the old text gone, once the other device has gone too', async () => {
+    const WARM = { dropMs: 120_000 };
+    const { a, b, dirA, dirB } = await pair({ timings: WARM }, { timings: WARM });
+    const ada = await connect(a, ADA);
+    const bo = await connect(b, BO);
+    ada.write(insertAt(ada.read(), 'The tide', 'Ada1: '));
+    await until(() => bo.read().textContent.includes('Ada1: '), 15_000, 'the shared room');
+    await until(() => file(dirA).includes('Ada1') && head(dirA) === head(dirB) && git(dirA, 'status', '--porcelain') === '' && git(dirB, 'status', '--porcelain') === '', 20_000, 'the first commit on both');
+    bo.destroy();
+    await until(() => !b.host.liveRooms().length, 5000, 'Bo’s room not live');
+    ada.write(insertAt(ada.read(), 'It rained', 'Ada2: '));
+    await until(() => file(dirA).includes('Ada2') && git(dirA, 'status', '--porcelain') === '', 20_000, 'Ada’s edit committed');
+    await until(() => head(dirB) === head(dirA), 20_000, 'Ada’s commit on Bo’s device');
+    ada.destroy();
+    await a.close();
+    hosts.splice(hosts.indexOf(a), 1);
+    const bo2 = await connect(b, BO);
+    expect(bo2.read().textContent.match(/Ada2/g)).toHaveLength(1);
+    bo2.write(insertAt(bo2.read(), 'We counted', 'Bo: '));
+    await until(() => git(dirB, 'status', '--porcelain') === '' && git(dirB, 'show', 'HEAD:notes.md').includes('Bo: '), 20_000, 'Bo’s edit committed');
+    expect(file(dirB)).toBe(NOTES.replace('The tide', 'Ada1: The tide').replace('We counted', 'Bo: We counted').replace('It rained', 'Ada2: It rained'));
+    expect(git(dirB, 'show', 'HEAD:notes.md')).toBe(file(dirB).trimEnd());
   });
 });
 

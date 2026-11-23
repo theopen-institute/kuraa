@@ -2,6 +2,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { request, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -11,6 +12,7 @@ import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless } from '@kuraa/session/testing';
 import { Hub, OWNER_OFF, SettingsStore, slugOf, startHost, startHub, type RunningHost, type RunningHub } from '../src/index.js';
 import { isLoopback } from '../src/hub.js';
+import { gateFor, hostAllowed } from '../src/origins.js';
 
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -182,6 +184,58 @@ describe('a hub', () => {
     expect(own.owner).toBe(true);
     expect(own.listing()).toMatchObject({ canOpenFolder: true, canChangeSettings: true });
     expect(own.listing().ownerOff).toBeUndefined();
+  });
+
+  it('answers pages only at a name for this computer, and lets other origins read it or open rooms only if named', async () => {
+    const dir = temp('kuraa-hub-gate-');
+    git(dir, 'init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n');
+    git(dir, 'add', '-A');
+    git(dir, '-c', 'user.name=A', '-c', 'user.email=a@a', 'commit', '-qm', 'Initial');
+    const h = await startHub({ folder: { dir }, hosts: { timings: FAST }, allowOrigins: ['http://dev.example:5173/'] });
+    running.push(h);
+    const id = slugOf(basename(dir));
+    const { port } = new URL(h.url);
+    /** A request with the headers a browser would send (fetch cannot set Host). */
+    const ask = (path: string, headers: Record<string, string>, method = 'GET') => new Promise<{ status: number; headers: IncomingHttpHeaders }>((done, fail) => {
+      request({ host: '127.0.0.1', port, path, method, headers: { authorization: `Bearer ${h.token}`, ...headers } }, (res) => {
+        res.resume();
+        done({ status: res.statusCode!, headers: res.headers });
+      }).on('error', fail).end();
+    });
+    // A name made to point here (DNS rebinding) is turned away, by the hub and by its workspaces.
+    expect((await ask('/hub/api/workspaces', { host: `evil.example:${port}` })).status).toBe(421);
+    expect((await ask(`/w/${id}/api/tree`, { host: `evil.example:${port}` })).status).toBe(421);
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, 'localhost:5173']) expect((await ask(`/w/${id}/api/tree`, { host })).status).toBe(200);
+    // Another origin reads nothing unless named: no CORS headers for it.
+    const other = await ask(`/w/${id}/api/tree`, { host: `127.0.0.1:${port}`, origin: 'https://evil.example' }, 'OPTIONS');
+    expect(other.headers['access-control-allow-origin']).toBeUndefined();
+    const named = await ask(`/w/${id}/api/tree`, { host: `127.0.0.1:${port}`, origin: 'http://dev.example:5173' }, 'OPTIONS');
+    expect(named.headers['access-control-allow-origin']).toBe('http://dev.example:5173');
+    expect((await ask('/hub/api/workspaces', { host: `127.0.0.1:${port}`, origin: 'http://dev.example:5173' })).headers['access-control-allow-origin']).toBe('http://dev.example:5173');
+    // Rooms: from its own origin, one named and the desktop app's files; not from another, nor at another name.
+    const opens = (headers: Record<string, string>) => new Promise<boolean>((done) => {
+      request({ host: '127.0.0.1', port, path: `/w/${id}/collab`, headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', ...headers } })
+        .on('upgrade', (_res, socket) => {
+          socket.destroy();
+          done(true);
+        })
+        .on('response', () => done(false))
+        .on('error', () => done(false))
+        .end();
+    });
+    expect(await opens({ host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` })).toBe(true);
+    expect(await opens({ host: `127.0.0.1:${port}`, origin: 'http://dev.example:5173' })).toBe(true);
+    expect(await opens({ host: `127.0.0.1:${port}`, origin: 'file://' })).toBe(true);
+    expect(await opens({ host: `127.0.0.1:${port}`, origin: 'https://evil.example' })).toBe(false);
+    expect(await opens({ host: `evil.example:${port}`, origin: `http://evil.example:${port}` })).toBe(false);
+  });
+
+  it('on the network, answers at any name', () => {
+    const asking = (host: string) => ({ headers: { host } }) as IncomingMessage;
+    expect(hostAllowed(asking('kuraa.example.org'), gateFor('0.0.0.0'))).toBe(true);
+    expect(hostAllowed(asking('kuraa.example.org'), gateFor('127.0.0.1'))).toBe(false);
+    expect(hostAllowed(asking('[::1]:4321'), gateFor('::1'))).toBe(true);
   });
 
   it('a host started on its own says it is not a hub, so a client shows it as one workspace', async () => {

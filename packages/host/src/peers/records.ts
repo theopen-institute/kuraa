@@ -7,7 +7,9 @@
 // and the policy has that person in the workspace, the key not dropped or
 // revoked. Records signed in themselves by people's and keys' own signatures
 // (key-event, vouch, revoke-key, signs, policy, attest) are taken whoever made or
-// passed them on; the rest (link, revoke-link, secret) only from a device in.
+// passed them on; the rest (link, revoke-link, secret) only from a device in. From
+// a device not known to be in, only those about it, and only if they show it is
+// in (Identity.proven): nothing else a stranger sends is kept, or passed on.
 // Pairing records from before (add) are kept but say nothing; removals from
 // before (remove) still count, and none is made. An acknowledgement (ack) says
 // how much of the policy a device holds: removals it holds are confirmed, in

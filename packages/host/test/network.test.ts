@@ -164,14 +164,20 @@ describe('invites and pairing, under a policy', () => {
     const pairs = (d: typeof mallory) => signRecord({ kind: 'add', workspace: ws.id, subject: hex(d.device), name: 'new' }, bo.device);
     await id.takeRecords([pairs(mallory), ...mallory.records]);
     expect((await id.members()).map((m) => m.key)).not.toContain(hex(mallory.device));
-    // Dee came in by Ada's link (her join, with its grant, signed with her key): her device is in.
+    // Dee came in by Ada's link (her join, with its grant, signed with her key), a device in having let her in by it: her device is in.
     const deeId = identity();
     const dee = deviceOf(ws.id, deeId, 'Dee');
     const l = decodeLink(await id.createLink(1, true, { relays: [], tcp: [] }, { key: adaKey }));
     const g = l.grant!;
-    const join = makeOp(ws.id, { t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key }, (await id.policy()).heads, dee.signing);
-    const joined = signRecord({ kind: 'policy', workspace: ws.id, subject: join.id, op: join.op, parents: join.parents, signer: join.signer, proof: join.proof }, dee.device);
-    await id.takeRecords([pairs(dee), ...dee.records, joined]);
+    const joinOp = { t: 'join' as const, group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key };
+    const record = (e: ReturnType<typeof makeOp>) => signRecord({ kind: 'policy', workspace: ws.id, subject: e.id, op: e.op, parents: e.parents, signer: e.signer, proof: e.proof }, dee.device);
+    // Not let in by anyone yet: her join, with the grant alone, does not count.
+    const early = makeOp(ws.id, joinOp, (await id.policy()).heads, dee.signing);
+    await id.takeRecords([pairs(dee), ...dee.records, record(early)]);
+    expect((await id.policy()).role(deeId.id)).toBeNull();
+    await id.admit(l.id, hex(dee.signing), adaKey);
+    const join = makeOp(ws.id, joinOp, (await id.policy()).heads, dee.signing);
+    await id.takeRecords([record(join)]);
     expect((await id.members()).map((m) => m.key)).toContain(hex(dee.device));
     expect((await id.policy()).role(deeId.id)).toBe('member');
   });

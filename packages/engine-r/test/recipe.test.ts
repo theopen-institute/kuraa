@@ -1,10 +1,10 @@
 // The R engine's container recipe: R with the driver's packages, plus what the
 // workspace asks for, with names that cannot smuggle in commands.
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_IMAGE, imageRecipe } from '../src/index.js';
+import { DEFAULT_IMAGE, imageRecipe, readManifest } from '../src/index.js';
 
 const ws = () => mkdtempSync(join(tmpdir(), 'kuraa-recipe-'));
 
@@ -38,6 +38,21 @@ describe('R image recipe', () => {
     expect(containerfile).toContain('COPY renv.lock /tmp/renv.lock');
     expect(containerfile).toContain('renv::restore(lockfile = "/tmp/renv.lock"');
     expect(Object.keys(context!)).toEqual(['renv.lock']);
+  });
+
+  it('never reads renv.lock or the package manifest through a link (0037)', () => {
+    const outside = ws();
+    writeFileSync(join(outside, 'secret'), '{"system":["libsecret-dev"]}');
+    const dir = ws();
+    symlinkSync(join(outside, 'secret'), join(dir, 'renv.lock'));
+    expect(() => imageRecipe({ renv: true }, dir)).toThrow('symbolic link');
+    mkdirSync(join(dir, '.kuraa'));
+    symlinkSync(join(outside, 'secret'), join(dir, '.kuraa', 'r-packages.json'));
+    expect(readManifest(dir).system).toEqual([]);
+    const through = ws();
+    symlinkSync(outside, join(through, '.kuraa'));
+    writeFileSync(join(outside, 'r-packages.json'), '{"system":["libsecret-dev"]}');
+    expect(readManifest(through).system).toEqual([]);
   });
 
   it('refuses names that are not plain package names', () => {

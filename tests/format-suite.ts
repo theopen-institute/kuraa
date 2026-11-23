@@ -1,7 +1,9 @@
-// The six required format tests, shared by every markdown-family type.
+// The six required format tests, shared by every markdown-family type, and the
+// same through a room (as collaborators and the host see a document: Yjs).
 import { describe, expect, it } from 'vitest';
 import { Transform } from 'prosemirror-transform';
 import type { DocumentType } from '../packages/kernel/src/index.js';
+import { decodeDoc, encodeDoc, patchState } from '../packages/session/src/server.js';
 import { hasPandoc, normalise, pandocAst, randomEdit, rng, textblocks } from './format-helpers.js';
 
 export { corpusFiles } from './format-helpers.js';
@@ -43,6 +45,44 @@ export function runFormatSuite(type: DocumentType, files: { name: string; text: 
             const tail = f.text.slice(range.to);
             expect(out.slice(out.length - tail.length), `suffix after block ${top}`).toBe(tail);
             expect(out).toContain('EDITED');
+          }
+        });
+      }
+    });
+
+    // A document goes through a room (Yjs, through y-prosemirror) on its way to everyone: the
+    // host's copy, and each collaborator's editor. It must come out as it went in, marks on
+    // images, maths, citations and the like too, or the first save rewrites what it lost.
+    describe('identity through the room', () => {
+      for (const f of files) {
+        it(f.name, () => {
+          const parsed = type.parse(f.text);
+          const viaRoom = decodeDoc(encodeDoc(parsed.doc), type.schema);
+          expect(viaRoom.eq(parsed.doc)).toBe(true);
+          expect(type.serialize(viaRoom, parsed)).toBe(f.text);
+        });
+      }
+    });
+
+    describe('locality through the room', () => {
+      for (const f of files) {
+        it(f.name, () => {
+          const parsed = type.parse(f.text);
+          const state = encodeDoc(parsed.doc);
+          const r = rng(f.text.length + 1);
+          const candidates = editableTopBlocks(parsed.doc);
+          const picks = Array.from({ length: Math.min(8, candidates.length) }, () => r.pick(candidates));
+          for (const top of new Set(picks)) {
+            // The edit made as an editor makes it into the room (a minimal difference), and read back.
+            const tb = textblocks(parsed.doc).find((t) => t.top === top)!;
+            const edited = new Transform(parsed.doc).insert(tb.pos + 1, parsed.doc.type.schema.text('EDITED ')).doc;
+            const back = decodeDoc(patchState(state, edited), type.schema);
+            expect(back.eq(edited), `block ${top} through the room`).toBe(true);
+            const out = type.serialize(back, parsed);
+            const range = parsed.blocks[top]!;
+            expect(out.slice(0, range.from), `prefix before block ${top}`).toBe(f.text.slice(0, range.from));
+            const tail = f.text.slice(range.to);
+            expect(out.slice(out.length - tail.length), `suffix after block ${top}`).toBe(tail);
           }
         });
       }

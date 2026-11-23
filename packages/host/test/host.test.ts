@@ -11,6 +11,7 @@ import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { rmarkdown } from '@kuraa/format-rmarkdown';
 import { textSchema } from '@kuraa/format-text';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
+import { hashText } from '@kuraa/kernel';
 import { gitIdentity, inspectFolder, startHost, type RunningHost } from '../src/index.js';
 import syncGit from '@kuraa/sync-git';
 /** The online copy is a component (decision 0059): hosts here have it, as every program that starts one gives it. */
@@ -144,6 +145,57 @@ describe('host', () => {
     const b = await connect('notes.md', BOB);
     expect(b.read().textContent).toContain('Late: The tide');
     expect(b.read().textContent).toContain('Heavy then Light rain');
+  });
+
+  it('starts a room nobody is in afresh from a file changed outside it, warm or from its cache: the same seed, the same history (0027)', async () => {
+    await running.close();
+    running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
+    const blob = () => git(dir, 'hash-object', 'notes.md');
+    const a = await connect('notes.md');
+    a.write(insertAt(a.read(), 'Light rain', 'Heavy then '));
+    await until(() => file().includes('Heavy then') && git(dir, 'status', '--porcelain') === '', 15_000, 'committed');
+    a.destroy();
+    clients.splice(0);
+    await until(() => !running.host.liveRooms().length, 5000, 'nobody in the room');
+    // Kept warm: a change made outside is not patched into it (by this host alone), it starts again from the file.
+    writeFileSync(join(dir, 'notes.md'), file().replace('The tide', 'Outside: The tide'));
+    await until(async () => (await roomFor('notes.md')).generation === blob(), 15_000, 'the room started from the changed file');
+    const b = await connect('notes.md', BOB);
+    expect(b.read().eq(pandocMarkdown.parse(file()).doc)).toBe(true);
+    b.destroy();
+    clients.splice(0);
+    await until(() => !running.host.liveRooms().length, 5000, 'nobody in the room');
+    // From its cache: resumed only while the file is as the cache knew it.
+    await running.close();
+    running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
+    expect((await roomFor('notes.md')).generation).toBe(blob());
+    await running.close();
+    writeFileSync(join(dir, 'notes.md'), file().replace('Light rain', 'Light rain, again'));
+    running = await startHost({ dir, timings: { ...FAST, dropMs: 60_000 }, token: running.token, run: ONLINE });
+    expect((await roomFor('notes.md')).generation).toBe(blob());
+    const c = await connect('notes.md', BOB);
+    expect(c.read().textContent.match(/again/g)).toHaveLength(1);
+    expect(c.read().eq(pandocMarkdown.parse(file()).doc)).toBe(true);
+  });
+
+  it('takes an outside change whatever its short hash: two texts with the same FNV hash and length are told apart', async () => {
+    // Two words of one length that leave FNV-1a (hashText, 32 bit) in the same state: found by trying.
+    const seen = new Map<string, string>();
+    let pair: [string, string] | null = null;
+    for (let i = 0; !pair; i++) {
+      const w = i.toString(36).padStart(5, '0');
+      const h = hashText(NOTES.replace('Light rain', `Light ${w}`));
+      const had = seen.get(h);
+      if (had) pair = [had, w];
+      else seen.set(h, w);
+    }
+    const [one, two] = pair;
+    writeFileSync(join(dir, 'notes.md'), NOTES.replace('Light rain', `Light ${one}`));
+    git(dir, 'commit', '-q', '-am', 'One');
+    const a = await connect('notes.md');
+    expect(a.read().textContent).toContain(`Light ${one}`);
+    writeFileSync(join(dir, 'notes.md'), NOTES.replace('Light rain', `Light ${two}`));
+    await until(() => a.read().textContent.includes(`Light ${two}`), 15_000, 'the outside change in the room');
   });
 
   it('M4: commits with co-authors, lists history and shows an earlier version', async () => {

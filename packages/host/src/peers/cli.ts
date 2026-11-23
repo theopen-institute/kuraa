@@ -143,7 +143,8 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
     case 'revoke-invite': {
       if (!arg) throw new Error('Usage: kuraa-host revoke-invite <id> (kuraa-host invites lists them)');
       const { id } = await identityAt(values.dir!);
-      await id.revokeLink(arg);
+      // Unlinked in the policy too, signed by this computer's key for its person: no join by it counts after.
+      await id.revokeLink(arg, await signingKey());
       return say(`Revoked ${arg}. Devices that joined by it stay; other devices learn of it when they next meet this one.`);
     }
     case 'join': {

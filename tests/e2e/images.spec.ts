@@ -53,3 +53,26 @@ test('a pasted image is kept beside the document and shown; a typed one too', as
   expect(text).toContain('![Growth Curve](images/growth-curve.png)');
   expect(text).toContain('Again: ![the curve](images/growth-curve.png) and a missing ![x](images/none.png)');
 });
+
+test('an image at a web address is shown only once asked for', async ({ page }) => {
+  const path = `remote-${Date.now().toString(36)}.md`;
+  const res = await fetch(`${E2E.url}/api/files`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content: '# Remote\n\n![a pixel](https://tracker.invalid/pixel.png)\n' }),
+  });
+  expect(res.status).toBe(201);
+  const asked: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('tracker.invalid')) asked.push(r.url());
+  });
+  await page.goto(`/?token=${E2E.token}&name=Image%20Tester&email=img%40example.org`);
+  await page.getByTestId(`file:${path}`).click();
+  const image = page.getByTestId('editor').getByTestId('image');
+  await expect(image.getByTestId('image-load')).toContainText('tracker.invalid');
+  await expect(image.locator('img')).not.toHaveAttribute('src', /./);
+  expect(asked).toEqual([]);
+  await image.getByTestId('image-load').click();
+  await expect(image.locator('img')).toHaveAttribute('src', 'https://tracker.invalid/pixel.png');
+  await expect(image.getByTestId('image-load')).toHaveCount(0);
+});

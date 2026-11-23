@@ -19,6 +19,12 @@
 // that may not change it takes the room of one that may, never the other way
 // round. Every device sees the same devices in the room, and holds the same
 // policy, so they agree without any setting they share.
+//
+// An edit passed on from another device says whose it is (`origin`, the device
+// it was made on): taken only if both that device's person and the one passing
+// it on may change the document, and passed on only where this device's would.
+// Who edited is credited as the devices' records say, not as a message says;
+// and a device sets where people are (awareness) only for those it brought.
 import type { PresenceUser } from '@kuraa/session/server';
 import type { Host, RoomView } from '../host.js';
 import type { PeerLink } from './link.js';
@@ -31,7 +37,7 @@ type RoomMessage =
   | { type: 'room'; op: 'open'; key: string; seed: string; sv: Bytes; people?: PresenceUser[] }
   | { type: 'room'; op: 'close'; key: string }
   | { type: 'room'; op: 'sync'; key: string; seed: string; sv: Bytes; update: Bytes; people?: PresenceUser[] }
-  | { type: 'room'; op: 'update'; key: string; update: Bytes; by?: PresenceUser | null }
+  | { type: 'room'; op: 'update'; key: string; update: Bytes; by?: PresenceUser | null; /** The device the edit was made on, where it was passed on. */ origin?: string }
   | { type: 'room'; op: 'awareness'; key: string; update: Bytes }
   | { type: 'room'; op: 'want'; key: string }
   | { type: 'room'; op: 'state'; key: string; seed: string; state: Bytes; base?: string | null };
@@ -49,6 +55,58 @@ export function bytesOf(v: unknown): Uint8Array {
 
 const EMPTY = new Uint8Array();
 
+/** What the relay is told an edit came through (applyPeerUpdate's `peer`): the device passing it on, and the one it was made on. */
+const through = (link: string, origin: string) => (origin === link ? link : `${link}>${origin}`);
+
+/** An awareness update (y-protocols): each client's id, clock and state (JSON; null, gone). */
+interface AwarenessEntry { id: number; clock: number; state: string }
+
+/** An awareness update read (y-protocols' encoding: lib0 variable-length numbers and strings); null if it is not one. */
+export function readAwareness(bytes: Uint8Array): AwarenessEntry[] | null {
+  let at = 0;
+  const uint = (): number => {
+    let n = 0;
+    for (let mult = 1; ; mult *= 128) {
+      if (at >= bytes.length || mult > 2 ** 49) throw new Error('short');
+      const b = bytes[at++]!;
+      n += (b & 127) * mult;
+      if (b < 128) return n;
+    }
+  };
+  try {
+    const out: AwarenessEntry[] = [];
+    for (let count = uint(); count > 0; count--) {
+      const id = uint();
+      const clock = uint();
+      const length = uint();
+      if (at + length > bytes.length) return null;
+      out.push({ id, clock, state: Buffer.from(bytes.subarray(at, at + length)).toString('utf8') });
+      at += length;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** An awareness update made of entries (readAwareness, back). */
+export function writeAwareness(entries: AwarenessEntry[]): Uint8Array {
+  const out: number[] = [];
+  const uint = (n: number) => {
+    for (; n >= 128; n = Math.floor(n / 128)) out.push((n % 128) | 128);
+    out.push(n);
+  };
+  uint(entries.length);
+  for (const e of entries) {
+    uint(e.id);
+    uint(e.clock);
+    const text = Buffer.from(e.state, 'utf8');
+    uint(text.length);
+    out.push(...text);
+  }
+  return new Uint8Array(out);
+}
+
 export class Rooms {
   /** What each device has open: device key → room key → seed. */
   private readonly remote = new Map<string, Map<string, string>>();
@@ -61,6 +119,10 @@ export class Rooms {
   private readonly handedTo = new Map<string, string>();
   /** Another device opened a document here not open there before (for run outputs under way: outputs.ts). */
   onOpened: ((link: PeerLink, path: string) => void) | null = null;
+  /** Whose clients' awareness each device brought, room by room: room name → client id → device. */
+  private readonly clients = new Map<string, Map<number, string>>();
+  /** Who each device is, as the records say, to credit with its edits (credit). */
+  private readonly people = new Map<string, PresenceUser>();
 
   constructor(private readonly host: Host, private readonly node: PeerNode) {
     const relay = host.sessionRelay;
@@ -68,9 +130,13 @@ export class Rooms {
       const room = host.roomView(name);
       if (!room) return;
       const by = source.from === 'host' ? null : source.user;
+      // Made here, or passed on from the device it was made on (through): passed on only where this device takes it.
+      const [via, origin] = source.from === 'peer' ? source.peer.split('>') as [string, string?] : [null, undefined];
+      const from = origin ?? via ?? this.node.myKey;
+      if (via && !this.node.mayWrite(from, room.path)) return;
       for (const link of this.peersIn(room)) {
-        if (source.from === 'peer' && source.peer === link.key) continue;
-        this.send(link, { type: 'room', op: 'update', key: room.key, update, by });
+        if (link.key === via || link.key === from) continue;
+        this.send(link, { type: 'room', op: 'update', key: room.key, update, by, ...(from !== this.node.myKey ? { origin: from } : {}) });
       }
     }));
     this.stops.push(relay.onAwareness((name, update, peer) => {
@@ -106,7 +172,59 @@ export class Rooms {
   /** A device connected: tell it which rooms are open here. */
   connected(link: PeerLink): void {
     if (link.hello?.workspace !== this.node.ws.id) return;
+    void this.know(link.key, link.remote);
     for (const room of this.host.liveRooms()) if (this.reads(link, room.path)) this.send(link, this.openMessage(room));
+  }
+
+  /** Who a device is, as the records say (its person, and an address verified of them), for credit. */
+  private async know(device: string, remote: string | null): Promise<PresenceUser> {
+    const person = await this.node.identity.personOf(device).catch(() => null);
+    const email = person ? (await this.node.identity.emailsOf(person.key).catch(() => []))[0] ?? '' : '';
+    const user = { name: person?.name || remote || 'someone on another device', email, color: '' };
+    this.people.set(device, user);
+    return user;
+  }
+
+  /**
+   * Whom to credit with edits made on a device: its person, as the records say;
+   * not as the message says, which any device could make say anyone. The colour
+   * a message says, which credits no one, is kept.
+   */
+  private credit(device: string, said?: PresenceUser | null): PresenceUser {
+    const known = this.people.get(device);
+    if (!known) void this.know(device, this.node.links.get(device)?.remote ?? null);
+    const user = known ?? { name: this.node.links.get(device)?.remote ?? 'someone on another device', email: '', color: '' };
+    return { ...user, color: typeof said?.color === 'string' ? said.color.slice(0, 32) : '' };
+  }
+
+  /**
+   * Of an awareness update from a device, the entries it may set: for clients
+   * it brought, or new ones; never for this device's own clients, or another
+   * device's. Null if none.
+   */
+  private ownAwareness(link: PeerLink, name: string, update: Uint8Array): Uint8Array | null {
+    const entries = readAwareness(update);
+    if (!entries) return null;
+    const owners = this.clients.get(name) ?? new Map<number, string>();
+    this.clients.set(name, owners);
+    const present = new Set((readAwareness(this.host.sessionRelay.awarenessState(name) ?? EMPTY) ?? []).map((e) => e.id));
+    const mine = entries.filter((e) => {
+      const owner = owners.get(e.id);
+      return owner === link.key || (owner === undefined && !present.has(e.id));
+    });
+    for (const e of mine) {
+      if (e.state === 'null') owners.delete(e.id);
+      else owners.set(e.id, link.key);
+    }
+    return mine.length ? writeAwareness(mine) : null;
+  }
+
+  /** A device's clients are gone from a room (or every room): no longer its. */
+  private forgetClients(device: string, name?: string): void {
+    for (const [room, owners] of this.clients) {
+      if (name !== undefined && room !== name) continue;
+      for (const [id, owner] of owners) if (owner === device) owners.delete(id);
+    }
   }
 
   /** A device went away: its people leave the rooms, and rooms it committed are committed here now. */
@@ -115,6 +233,8 @@ export class Rooms {
     this.remote.delete(link.key);
     for (const [key, to] of this.handedTo) if (to === link.key) this.handedTo.delete(key);
     this.host.sessionRelay.removePeerAwareness(link.key);
+    this.forgetClients(link.key);
+    this.people.delete(link.key);
     if (had) this.recommit(had.keys());
   }
 
@@ -171,8 +291,8 @@ export class Rooms {
         if (m.seed === room.seed) {
           // A room handed over is theirs now too.
           if (this.handedTo.get(room.key) === link.key) this.handedTo.delete(room.key);
-          // Who edited it there since its last commit: credited by whichever device commits.
-          if (Array.isArray(m.people) && theyMay) this.host.addContributors(room.name, m.people);
+          // Who edited it there since its last commit: credited by whichever device commits (its person, as the records say).
+          if (Array.isArray(m.people) && m.people.length && theyMay) this.host.addContributors(room.name, [this.credit(link.key)]);
           if (m.op === 'sync' && theyMay) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, null);
           const update = relay.diff(room.name, bytesOf(m.sv));
           if (m.op === 'open') this.send(link, { type: 'room', op: 'sync', key: room.key, seed: room.seed, sv: relay.stateVector(room.name) ?? EMPTY, update: update ?? EMPTY, people: this.host.roomContributors(room.name) });
@@ -192,16 +312,24 @@ export class Rooms {
         theirs.delete(m.key);
         if (room) {
           relay.removePeerAwareness(link.key, room.name);
+          this.forgetClients(link.key, room.name);
           this.recommit([m.key]);
         }
         return;
-      case 'update':
-        // Only from a device whose person may change the document (0066): any other's edits are not taken.
-        if (room && theirs.get(m.key) === room.seed && this.node.mayWrite(link.key, room.path)) relay.applyPeerUpdate(room.name, bytesOf(m.update), link.key, m.by ?? null);
+      case 'update': {
+        // Only from a device whose person may change the document (0066), made on one whose person may too: any other's
+        // edits are not taken, whoever passes them on.
+        const origin = typeof m.origin === 'string' && /^[0-9a-f]{64}$/.test(m.origin) ? m.origin : link.key;
+        if (room && theirs.get(m.key) === room.seed && this.node.mayWrite(link.key, room.path) && this.node.mayWrite(origin, room.path)) {
+          relay.applyPeerUpdate(room.name, bytesOf(m.update), through(link.key, origin), this.credit(origin, m.by));
+        }
         return;
-      case 'awareness':
-        if (room && theirs.get(m.key) === room.seed) relay.applyPeerAwareness(room.name, bytesOf(m.update), link.key);
+      }
+      case 'awareness': {
+        const own = room && theirs.get(m.key) === room.seed ? this.ownAwareness(link, room.name, bytesOf(m.update)) : null;
+        if (room && own) relay.applyPeerAwareness(room.name, own, link.key);
         return;
+      }
       case 'want': {
         // Answered in turn with this device's git work (Host.serial), never in the middle of it. Bringing
         // the other device's commits in may change this room as an outside change; the state sent must
@@ -274,13 +402,27 @@ export class Rooms {
 
   /**
    * Whether this device commits the room: it may change the document, and has
-   * the lowest key of the devices with it open that may (0066).
+   * the lowest key of the devices with it open that may (0066). A room nobody is
+   * in here (kept warm) is not shared, whoever has the same room open elsewhere:
+   * it hears nothing of theirs, so it is this device's to commit (unless it was
+   * left to them: Host.leftToOthers), and takes changes from git as any room does.
    */
   commits(name: string): boolean {
     const room = this.host.roomView(name);
     if (!room) return true;
     if (!this.node.mayWrite(this.node.myKey, room.path)) return false;
-    return this.peersIn(room).filter((l) => this.node.mayWrite(l.key, room.path)).every((l) => this.node.myKey < l.key);
+    if (!this.host.sessionRelay.clients(name)) return true;
+    return this.writersIn(room).every((l) => this.node.myKey < l.key);
+  }
+
+  /** Whether another device that may change the document has this room open, from the same seed: its room holds all of this one's edits. */
+  heldElsewhere(name: string): boolean {
+    const room = this.host.roomView(name);
+    return !!room && this.writersIn(room).length > 0;
+  }
+
+  private writersIn(room: RoomView): PeerLink[] {
+    return this.peersIn(room).filter((l) => this.node.mayWrite(l.key, room.path));
   }
 
   close(): void {

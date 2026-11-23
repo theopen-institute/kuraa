@@ -1,0 +1,202 @@
+diff --git a/dist/y-prosemirror.cjs b/dist/y-prosemirror.cjs
+index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..28ec3dd809cef9aaa60289bbcd64db03d0029187 100644
+--- a/dist/y-prosemirror.cjs
++++ b/dist/y-prosemirror.cjs
+@@ -861,6 +861,8 @@ const createNodeFromYElement = (
+   }
+   try {
+     const attrs = el.getAttributes(snapshot);
++    const marks = marksFromJSON(attrs[NODE_MARKS], schema);
++    delete attrs[NODE_MARKS];
+     if (snapshot !== undefined) {
+       if (!isVisible(/** @type {Y.Item} */ (el._item), snapshot)) {
+         attrs.ychange = computeYChange
+@@ -872,7 +874,7 @@ const createNodeFromYElement = (
+           : { type: 'added' };
+       }
+     }
+-    const node = schema.node(el.nodeName, attrs, children);
++    const node = schema.node(el.nodeName, attrs, children, marks);
+     meta.mapping.set(el, node);
+     return node
+   } catch (e) {
+@@ -953,6 +955,8 @@ const createTypeFromElementNode = (node, meta) => {
+       type.setAttribute(key, val);
+     }
+   }
++  const marks = nodeMarksJSON(node);
++  if (marks) type.setAttribute(NODE_MARKS, marks);
+   type.insert(
+     0,
+     normalizePNodeContent(node).map((n) =>
+@@ -979,6 +983,47 @@ const createTypeFromTextOrElementNode = (node, meta) =>
+  */
+ const isObject = (val) => typeof val === 'object' && val !== null;
+ 
++/**
++ * Marks on a node that is not text (an image, an inline atom) are kept in this
++ * attribute of its element, as JSON (kuraa's patch: y-prosemirror keeps marks
++ * only on text).
++ */
++const NODE_MARKS = 'pm-marks';
++
++/**
++ * A node's marks, as the attribute keeps them; null if it has none.
++ * @param {any} pnode
++ */
++const nodeMarksJSON = (pnode) => {
++  const marks = pnode.marks.filter((/** @type {any} */ mark) => mark.type.name !== 'ychange');
++  return marks.length ? marks.map((/** @type {any} */ mark) => mark.toJSON()) : null;
++};
++
++/**
++ * A node's attributes with its marks among them, as its element keeps them.
++ * @param {any} pnode
++ */
++const attrsWithMarks = (pnode) => {
++  const marks = pnode.isText ? null : nodeMarksJSON(pnode);
++  return marks ? Object.assign({}, pnode.attrs, { [NODE_MARKS]: marks }) : pnode.attrs;
++};
++
++/**
++ * The marks an element's attribute keeps, those the schema has (others are left out).
++ * @param {any} json
++ * @param {any} schema
++ */
++const marksFromJSON = (json, schema) => {
++  if (!Array.isArray(json)) return undefined;
++  const marks = [];
++  for (const m of json) {
++    try {
++      marks.push(schema.markFromJSON(m));
++    } catch (e) {}
++  }
++  return marks;
++};
++
+ /**
+  * @param {any} pattrs
+  * @param {any} yattrs
+@@ -1054,7 +1099,7 @@ const equalYTypePNode = (ytype, pnode) => {
+   ) {
+     const normalizedContent = normalizePNodeContent(pnode);
+     return ytype._length === normalizedContent.length &&
+-      equalAttrs(ytype.getAttributes(), pnode.attrs) &&
++      equalAttrs(ytype.getAttributes(), attrsWithMarks(pnode)) &&
+       ytype.toArray().every((ychild, i) =>
+         equalYTypePNode(ychild, normalizedContent[i])
+       )
+@@ -1227,10 +1272,10 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+   // update attributes
+   if (yDomFragment instanceof Y__namespace.XmlElement) {
+     const yDomAttrs = yDomFragment.getAttributes();
+-    const pAttrs = pNode.attrs;
++    const pAttrs = attrsWithMarks(pNode);
+     for (const key in pAttrs) {
+       if (pAttrs[key] !== null) {
+-        if (yDomAttrs[key] !== pAttrs[key] && key !== 'ychange') {
++        if (yDomAttrs[key] !== pAttrs[key] && key !== 'ychange' && !(key === NODE_MARKS && isObject(yDomAttrs[key]) && equalAttrs(yDomAttrs[key], pAttrs[key]))) {
+           yDomFragment.setAttribute(key, pAttrs[key]);
+         }
+       } else {
+diff --git a/src/plugins/sync-plugin.js b/src/plugins/sync-plugin.js
+index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..3a88fe49656ae860dd7bc159f35d324685aa9bb7 100644
+--- a/src/plugins/sync-plugin.js
++++ b/src/plugins/sync-plugin.js
+@@ -787,6 +787,8 @@ export const createNodeFromYElement = (
+   }
+   try {
+     const attrs = el.getAttributes(snapshot)
++    const marks = marksFromJSON(attrs[NODE_MARKS], schema)
++    delete attrs[NODE_MARKS]
+     if (snapshot !== undefined) {
+       if (!isVisible(/** @type {Y.Item} */ (el._item), snapshot)) {
+         attrs.ychange = computeYChange
+@@ -798,7 +800,7 @@ export const createNodeFromYElement = (
+           : { type: 'added' }
+       }
+     }
+-    const node = schema.node(el.nodeName, attrs, children)
++    const node = schema.node(el.nodeName, attrs, children, marks)
+     meta.mapping.set(el, node)
+     return node
+   } catch (e) {
+@@ -879,6 +881,8 @@ const createTypeFromElementNode = (node, meta) => {
+       type.setAttribute(key, val)
+     }
+   }
++  const marks = nodeMarksJSON(node)
++  if (marks) type.setAttribute(NODE_MARKS, marks)
+   type.insert(
+     0,
+     normalizePNodeContent(node).map((n) =>
+@@ -905,6 +909,47 @@ const createTypeFromTextOrElementNode = (node, meta) =>
+  */
+ const isObject = (val) => typeof val === 'object' && val !== null
+ 
++/**
++ * Marks on a node that is not text (an image, an inline atom) are kept in this
++ * attribute of its element, as JSON (kuraa's patch: y-prosemirror keeps marks
++ * only on text).
++ */
++const NODE_MARKS = 'pm-marks'
++
++/**
++ * A node's marks, as the attribute keeps them; null if it has none.
++ * @param {any} pnode
++ */
++const nodeMarksJSON = (pnode) => {
++  const marks = pnode.marks.filter((/** @type {any} */ mark) => mark.type.name !== 'ychange')
++  return marks.length ? marks.map((/** @type {any} */ mark) => mark.toJSON()) : null
++}
++
++/**
++ * A node's attributes with its marks among them, as its element keeps them.
++ * @param {any} pnode
++ */
++const attrsWithMarks = (pnode) => {
++  const marks = pnode.isText ? null : nodeMarksJSON(pnode)
++  return marks ? Object.assign({}, pnode.attrs, { [NODE_MARKS]: marks }) : pnode.attrs
++}
++
++/**
++ * The marks an element's attribute keeps, those the schema has (others are left out).
++ * @param {any} json
++ * @param {any} schema
++ */
++const marksFromJSON = (json, schema) => {
++  if (!Array.isArray(json)) return undefined
++  const marks = []
++  for (const m of json) {
++    try {
++      marks.push(schema.markFromJSON(m))
++    } catch (e) {}
++  }
++  return marks
++}
++
+ /**
+  * @param {any} pattrs
+  * @param {any} yattrs
+@@ -980,7 +1025,7 @@ const equalYTypePNode = (ytype, pnode) => {
+   ) {
+     const normalizedContent = normalizePNodeContent(pnode)
+     return ytype._length === normalizedContent.length &&
+-      equalAttrs(ytype.getAttributes(), pnode.attrs) &&
++      equalAttrs(ytype.getAttributes(), attrsWithMarks(pnode)) &&
+       ytype.toArray().every((ychild, i) =>
+         equalYTypePNode(ychild, normalizedContent[i])
+       )
+@@ -1153,10 +1198,10 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+   // update attributes
+   if (yDomFragment instanceof Y.XmlElement) {
+     const yDomAttrs = yDomFragment.getAttributes()
+-    const pAttrs = pNode.attrs
++    const pAttrs = attrsWithMarks(pNode)
+     for (const key in pAttrs) {
+       if (pAttrs[key] !== null) {
+-        if (yDomAttrs[key] !== pAttrs[key] && key !== 'ychange') {
++        if (yDomAttrs[key] !== pAttrs[key] && key !== 'ychange' && !(key === NODE_MARKS && isObject(yDomAttrs[key]) && equalAttrs(yDomAttrs[key], pAttrs[key]))) {
+           yDomFragment.setAttribute(key, pAttrs[key])
+         }
+       } else {

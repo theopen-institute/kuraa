@@ -41,7 +41,12 @@ export const DOCUMENT_ICON: FileIcon = {
   paths: ['M4 1.5h5.5l3 3v10H4z', 'M9.5 1.5v3h3', 'M6 7.5h4.5', 'M6 9.5h4.5', 'M6 11.5h3'],
 };
 
-export const PANDOC_VERSION = 2;
+/**
+ * Part of a room's name (and its seed): a client or device of another version
+ * never joins its rooms. 3: marks on what is not text (an image, maths, a
+ * citation) go through rooms, so a room made before, without them, is not resumed.
+ */
+export const PANDOC_VERSION = 3;
 
 export const pandocNodeViews: Record<string, NodeViewHint> = {
   code_block: { kind: 'code', languageAttr: 'info' },

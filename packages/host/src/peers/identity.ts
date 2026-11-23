@@ -15,6 +15,8 @@
 //   link this device joined by: .git/kuraa/joined-link.
 // - Every record, signed by the device that made it: .git/kuraa/records.json
 //   (records.ts). The config above is what the records this device took say, applied.
+// - A workspace from before policies: the legacy geneses this device holds as its
+//   own, and the seal it keeps to (policy.ts): .git/kuraa/legacy.json.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -25,7 +27,7 @@ import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
 import type { Attestation } from './attest.js';
-import { evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
+import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
@@ -82,6 +84,12 @@ export function remoteName(name: string): string {
   // Remotes are folders under .git/refs/remotes: none Windows could not make (con, nul, …).
   return !clean ? 'device' : reservedName(clean) ? `${clean}-device` : clean;
 }
+
+/** A workspace from before policies (policy.ts): the legacy geneses a device holds as its own, and the seal it keeps to. */
+interface LegacyState { geneses: string[]; seal: string | null }
+
+/** The legacy geneses among records. */
+const legacyGeneses = (list: MemberRecord[]) => list.filter((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.op.legacy).map((r) => r.subject);
 
 export class Identity {
   /** Changes to the members, one at a time (a device may be paired by two routes at once). */
@@ -270,7 +278,7 @@ export class Identity {
     const ws = await this.workspace();
     const before = await this.getAll('kuraa.removed');
     // Worked out once for the same records: asked for at every hello.
-    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${(await this.pin()) ?? ''}\0${Math.floor(Date.now() / 60_000)}\0${before.join(',')}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${(await this.pin()) ?? ''}\0${JSON.stringify(await this.legacy())}\0${before.join(',')}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
     if (this.devicesMemo?.key === key) return this.devicesMemo.value;
     const value = this.devicesBy(records, await this.policy(records), ws?.id ?? '', new Set(before));
     this.devicesMemo = { key, value };
@@ -302,29 +310,60 @@ export class Identity {
    * a device joining, which holds none yet, to tell whether the device letting
    * it in is one, under the genesis its link names.
    */
-  async devicesIn(list: unknown[], workspace: string): Promise<Set<string>> {
+  async devicesIn(list: unknown[], workspace: string, issuer?: string): Promise<Set<string>> {
     const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
-    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
+    // A workspace from before: the legacy geneses its link's maker's person signed are where the joining device
+    // starts from (with those their admins signed); where it signed none, all of them, as before.
+    const w = this.who(records);
+    const by = issuer ? w.personOf.get(w.signsWith.get(issuer) ?? '')?.key : undefined;
+    const legacy = records.filter((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.op.legacy && !!by && w.personOf.get(r.signer!)?.key === by).map((r) => r.subject);
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin(), legacy.length ? { geneses: legacy, seal: null } : null);
     if (!policy.founded) return new Set();
     return new Set(this.devicesBy(records, policy, workspace, new Set()).in.keys());
   }
 
   /**
-   * The records that show this device to be in (0072), for a device that may not
-   * know yet: its person's key events, the key it signs with, that key vouched
-   * for, and the policy operations that key signed.
+   * The records about one device (0072): the key it signs with, that key
+   * vouched for, its person's key events and attestations, and the policy
+   * operations that key signed. What a device not known to be in shows, and all
+   * that is taken of it.
    */
-  async proof(): Promise<MemberRecord[]> {
-    const list = await this.records();
-    const self = (await this.deviceKey()).publicKey.toString('hex');
-    const signs = this.latest('signs', self, list);
+  private about(device: string, list: MemberRecord[]): MemberRecord[] {
+    const signs = this.latest('signs', device, list);
     if (!signs) return [];
     const key = signs.subject;
     const vouches = list.filter((r) => r.kind === 'vouch' && r.subject === key);
     const persons = new Set(vouches.map((r) => r.person));
     const events = list.filter((r) => r.kind === 'key-event' && persons.has(r.subject));
+    const attestations = list.filter((r) => r.kind === 'attest' && persons.has(r.subject));
     const ops = list.filter((r) => r.kind === 'policy' && r.signer === key);
-    return [signs, ...vouches, ...events, ...ops].slice(0, MAX_PROOF);
+    return [signs, ...vouches, ...events, ...attestations, ...ops];
+  }
+
+  /** The records that show this device to be in (0072), for a device that may not know yet. */
+  async proof(): Promise<MemberRecord[]> {
+    return this.about((await this.deviceKey()).publicKey.toString('hex'), await this.records()).slice(0, MAX_PROOF);
+  }
+
+  /**
+   * Of the records a device not known to be in sends to show it is (its hello's
+   * proof), those to keep: only those about it (about), and only if with them it
+   * is in; of its policy operations, only those that count. None (empty) if it
+   * is not in with them: nothing of a stranger's is kept, or passed on.
+   */
+  async proven(device: string, list: unknown[]): Promise<MemberRecord[]> {
+    const ws = await this.workspace();
+    if (!ws) return [];
+    const have = await this.records();
+    const known = new Set(have.map((r) => r.sig));
+    const sent = list.slice(0, MAX_PROOF).map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === ws.id && !known.has(r.sig));
+    const mine = this.about(device, [...have, ...sent]).filter((r) => !known.has(r.sig));
+    if (!mine.length) return [];
+    const all = [...have, ...mine];
+    const policy = await this.evaluatePolicy(all, ws.id, await this.pin(), await this.legacy());
+    if (!this.devicesBy(all, policy, ws.id, new Set(await this.getAll('kuraa.removed'))).in.has(device)) return [];
+    const counted = new Set(policy.applied);
+    return mine.filter((r) => r.kind !== 'policy' || counted.has(r.subject));
   }
 
   /**
@@ -334,7 +373,7 @@ export class Identity {
    */
   async devicesOf(workspace: string): Promise<Set<string>> {
     const records = (await this.records()).filter((r) => r.workspace === workspace);
-    const policy = await this.evaluatePolicy(records, workspace, await this.pin());
+    const policy = await this.evaluatePolicy(records, workspace, await this.pin(), null);
     return new Set(this.devicesBy(records, policy, workspace, new Set(await this.getAll('kuraa.removed'))).in.keys());
   }
 
@@ -385,8 +424,34 @@ export class Identity {
     return cache && cache.stamp && cache.stamp === (await this.stamp(file)) ? cache : null;
   }
 
+  /** Records kept while others are being taken (batch): written once, after, not the whole file again for each. */
+  private pending: { list: MemberRecord[]; changed: boolean } | null = null;
+
+  /** Keep the records `fn` keeps, and write them down once, after it. */
+  private async batch<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.pending) return fn();
+    this.pending = { list: await this.records(), changed: false };
+    try {
+      return await fn();
+    } finally {
+      const { list, changed } = this.pending;
+      this.pending = null;
+      if (changed) await this.writeRecords(list);
+    }
+  }
+
+  private async writeRecords(list: MemberRecord[]): Promise<void> {
+    await mkdir(this.stateDir, { recursive: true });
+    // Readable only by this computer's user: they hold the workspace's secret (records.ts, secret).
+    await writeFile(this.recordsFile, JSON.stringify(list, null, 1), { mode: 0o600 });
+    // As written: not read again (each record's signatures checked) until another process changes the file.
+    const stamp = await this.stamp(this.recordsFile);
+    this.recordsCache = stamp ? { stamp, value: list } : null;
+  }
+
   /** The records this device has made or accepted. */
   async records(): Promise<MemberRecord[]> {
+    if (this.pending) return [...this.pending.list];
     const cached = await this.fresh(this.recordsFile, this.recordsCache);
     if (cached) return [...cached.value];
     try {
@@ -433,11 +498,9 @@ export class Identity {
         list = list.filter((x) => !same.includes(x));
       }
     }
-    list.push(r);
-    await mkdir(this.stateDir, { recursive: true });
-    // Readable only by this computer's user: they hold the workspace's secret (records.ts, secret).
-    await writeFile(this.recordsFile, JSON.stringify(list, null, 1), { mode: 0o600 });
-    this.recordsCache = null;
+    list = [...list, r];
+    if (this.pending) this.pending = { list, changed: true };
+    else await this.writeRecords(list);
     return true;
   }
 
@@ -677,16 +740,74 @@ export class Identity {
     await this.write(['config', 'kuraa.genesis', genesis]);
   }
 
+  private get legacyFile(): string {
+    return join(this.stateDir, 'legacy.json');
+  }
+
+  private legacyCache: { stamp: string; value: LegacyState } | null = null;
+
+  /**
+   * A workspace from before (no pin): the legacy geneses this device holds as
+   * its own, and the seal it keeps to (policy.ts, docs/policy.md). The first
+   * time it is asked, those it holds then (its own, and those its devices had
+   * passed on to each other, before any stranger could bring one). Null for a
+   * workspace pinned to its genesis.
+   */
+  private async legacy(): Promise<LegacyState | null> {
+    if (await this.pin()) return null;
+    const ws = await this.workspace();
+    if (!ws) return null;
+    const stamp = await this.stamp(this.legacyFile);
+    if (stamp && this.legacyCache?.stamp === stamp) return this.legacyCache.value;
+    try {
+      const v = JSON.parse(await readFile(this.legacyFile, 'utf8')) as { geneses?: unknown; seal?: unknown };
+      const hex = (x: unknown): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+      const value: LegacyState = { geneses: Array.isArray(v.geneses) ? v.geneses.filter(hex) : [], seal: hex(v.seal) ? v.seal : null };
+      this.legacyCache = { stamp, value };
+      return value;
+    } catch {
+      const records = this.pending?.list ?? (await this.records());
+      return this.writeLegacy({ geneses: legacyGeneses(records.filter((r) => r.workspace === ws.id)), seal: null });
+    }
+  }
+
+  private async writeLegacy(value: LegacyState): Promise<LegacyState> {
+    await mkdir(this.stateDir, { recursive: true });
+    await writeFile(this.legacyFile, JSON.stringify(value), { mode: 0o600 });
+    this.legacyCache = { stamp: await this.stamp(this.legacyFile), value };
+    return value;
+  }
+
+  /**
+   * A workspace from before, once records came or were made: a device welcomed
+   * holding no legacy genesis of its own takes those it was welcomed with as its
+   * own; a legacy genesis this device made is its own; and once a seal counts, the
+   * device keeps to it (no seal made after, by anyone, counts here).
+   */
+  private async settleLegacy(o: { welcomed?: MemberRecord[]; made?: string } = {}): Promise<void> {
+    let state = await this.legacy();
+    if (!state) return;
+    const before = JSON.stringify(state);
+    if (!state.geneses.length && o.welcomed?.length) state = { ...state, geneses: legacyGeneses(o.welcomed) };
+    if (o.made && !state.geneses.includes(o.made)) state = { ...state, geneses: [...state.geneses, o.made] };
+    if (JSON.stringify(state) !== before) await this.writeLegacy(state);
+    if (!state.seal) {
+      const sealed = (await this.policy()).sealId;
+      if (sealed) await this.writeLegacy({ ...state, seal: sealed });
+    }
+  }
+
   /** The workspace's policy, as the operations on record make it. */
   async policy(list?: MemberRecord[]): Promise<Policy> {
     const records = list ?? (await this.records());
     const ws = await this.workspace();
     const pin = await this.pin();
+    const legacy = await this.legacy();
     // Worked out once for the same records (0071): it is asked for often, and costs more the more there are.
-    // Attestations expire, so not for longer than a minute.
-    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${Math.floor(Date.now() / 60_000)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    // Nothing in it depends on this computer's clock (attestations expire by their verifier's: claims).
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${JSON.stringify(legacy)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
     if (this.policyMemo?.key === key) return this.policyMemo.policy;
-    const policy = this.evaluatePolicy(records, ws?.id ?? '', pin);
+    const policy = this.evaluatePolicy(records, ws?.id ?? '', pin, legacy);
     this.policyMemo = { key, policy };
     policy.catch(() => {
       if (this.policyMemo?.policy === policy) this.policyMemo = null;
@@ -696,13 +817,14 @@ export class Identity {
 
   private policyMemo: { key: string; policy: Promise<Policy> } | null = null;
 
-  private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null): Promise<Policy> {
+  private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null, legacy: LegacyState | null): Promise<Policy> {
     const w = this.who(records);
     const entries = records.filter((r) => r.kind === 'policy' && r.workspace === workspace).map(policyEntry);
     // A key its person revoked (or left behind recovering) is still theirs for what it signed before (0072).
     const ctx = {
       workspace,
       pin,
+      ...(legacy ? { legacy: legacy.geneses, seal: legacy.seal } : {}),
       personOf: (key: string) => (w.personOf.get(key) ?? w.formerly.get(key))?.key ?? null,
       cutKey: (key: string) => (w.personOf.has(key) ? undefined : w.cut.get(key)),
     };
@@ -713,12 +835,20 @@ export class Identity {
     return evaluate(entries, { ...ctx, claimsOf: (id) => [...(claims.get(id) ?? [])], claimed: new Set([...claims.values()].flatMap((c) => [...c])) });
   }
 
-  /** The emails attested of each person, by the verifiers given, unexpired. */
-  private claims(records: MemberRecord[], verifiers: Map<string, string>, now = Date.now()): Map<string, Set<string>> {
+  /**
+   * The emails attested of each person, by the verifiers given, unexpired. Not
+   * by this computer's clock, which devices would read differently, but by the
+   * verifier's: an attestation has expired once one the same verifier made
+   * after it ran out is on record. Every device holding the same records
+   * counts the same ones.
+   */
+  private claims(records: MemberRecord[], verifiers: Map<string, string>): Map<string, Set<string>> {
+    const latest = new Map<string, number>();
+    for (const r of records) if (r.kind === 'attest' && r.attestation) latest.set(r.attestation.verifier, Math.max(latest.get(r.attestation.verifier) ?? 0, r.attestation.at));
     const out = new Map<string, Set<string>>();
     for (const r of records) {
       const a = r.attestation;
-      if (r.kind !== 'attest' || !a || !verifiers.has(a.verifier) || a.expires <= now) continue;
+      if (r.kind !== 'attest' || !a || !verifiers.has(a.verifier) || a.expires <= latest.get(a.verifier)!) continue;
       out.set(a.id, (out.get(a.id) ?? new Set()).add(a.claim.slice(6)));
     }
     return out;
@@ -910,7 +1040,8 @@ export class Identity {
     const self = (await this.deviceKey()).publicKey.toString('hex');
     if (policy.founded || records.some((r) => r.kind === 'policy' && r.op?.t === 'genesis' && r.by === self)) return;
     const people = new Set([person, ...(await this.people()).map((p) => p.key)]);
-    await this.makePolicy({ t: 'genesis', admins: [...people].sort(), legacy: true }, key);
+    // This device's own: it counts here, and with the others' wherever they hold its maker an admin (policy.ts).
+    await this.settleLegacy({ made: await this.makePolicy({ t: 'genesis', admins: [...people].sort(), legacy: true }, key) });
   }
 
   /** What this device knows, to judge a record by. */
@@ -1003,7 +1134,7 @@ export class Identity {
    */
   async linkTopics(now = Date.now()): Promise<{ topics: string[]; next: number }> {
     const ws = await this.workspace();
-    const revoked = new Set(await this.revokedLinks());
+    const revoked = new Set([...(await this.revokedLinks()), ...(await this.policy()).unlinked]);
     const topics = new Set<string>();
     let next = 0;
     for (const r of await this.records()) {
@@ -1047,6 +1178,7 @@ export class Identity {
       await this.keepRecord(r);
       await this.applyOrLater(r, { rethrow: true });
       await this.syncRemotesOrLater();
+      if (kind === 'policy') await this.settleLegacy();
       return r;
     });
   }
@@ -1056,41 +1188,49 @@ export class Identity {
    * no more can be (one taken may make another's maker known to be in).
    * Returns those taken.
    */
-  takeRecords(list: unknown[]): Promise<MemberRecord[]> {
+  takeRecords(list: unknown[], o: { welcomed?: boolean } = {}): Promise<MemberRecord[]> {
     return this.serial(async () => {
-      if (this.unapplied) await this.reconcileNow();
-      const known = new Set((await this.records()).map((r) => r.sig));
-      let waiting = list.map(readRecord).filter((r): r is MemberRecord => !!r && !known.has(r.sig));
-      const taken: MemberRecord[] = [];
-      if (!waiting.length) return taken;
-      // What this device knows, read once and kept up to date as records are taken.
-      const standing = await this.standing();
-      for (let progress = true; progress && waiting.length;) {
-        progress = false;
-        const next: MemberRecord[] = [];
-        // Who is an admin, worked out again once a round (0071), not after each record: a record that waits for
-        // what one taken this round says is judged again in the next.
-        let stale = false;
-        for (const r of waiting) {
-          const verdict = judge(r, standing);
-          if (verdict === 'take') {
-            // One that says what a newer record says already is passed over: nothing changes.
-            if (!(await this.keepRecord(r))) continue;
-            await this.applyOrLater(r, { rethrow: false });
-            // Who is in, and who is an admin, may have changed: a record waiting for that is judged again.
-            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'remove'].includes(r.kind)) stale = true;
-            taken.push(r);
-            progress = true;
-          } else if (verdict === 'wait') next.push(r);
-        }
-        if (stale) Object.assign(standing, await this.standing());
-        waiting = next;
-      }
-      // One could not be applied: try again now, and if that fails too, before the next change.
-      if (this.unapplied) await this.reconcileNow().catch(() => undefined);
-      if (taken.length) await this.syncRemotesOrLater();
+      // Kept all at once, written down once (not the whole file again for each).
+      const taken = await this.batch(() => this.takeNow(list));
+      // A workspace from before: the legacy geneses of the device that welcomed this one; the seal it keeps to (settleLegacy).
+      if (taken.some((r) => r.kind === 'policy')) await this.settleLegacy(o.welcomed ? { welcomed: taken } : {});
       return taken;
     });
+  }
+
+  private async takeNow(list: unknown[]): Promise<MemberRecord[]> {
+    if (this.unapplied) await this.reconcileNow();
+    const known = new Set((await this.records()).map((r) => r.sig));
+    let waiting = list.map(readRecord).filter((r): r is MemberRecord => !!r && !known.has(r.sig));
+    const taken: MemberRecord[] = [];
+    if (!waiting.length) return taken;
+    // What this device knows, read once and kept up to date as records are taken.
+    const standing = await this.standing();
+    for (let progress = true; progress && waiting.length;) {
+      progress = false;
+      const next: MemberRecord[] = [];
+      // Who is an admin, worked out again once a round (0071), not after each record: a record that waits for
+      // what one taken this round says is judged again in the next.
+      let stale = false;
+      for (const r of waiting) {
+        const verdict = judge(r, standing);
+        if (verdict === 'take') {
+          // One that says what a newer record says already is passed over: nothing changes.
+          if (!(await this.keepRecord(r))) continue;
+          await this.applyOrLater(r, { rethrow: false });
+          // Who is in, and who is an admin, may have changed: a record waiting for that is judged again.
+          if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'remove'].includes(r.kind)) stale = true;
+          taken.push(r);
+          progress = true;
+        } else if (verdict === 'wait') next.push(r);
+      }
+      if (stale) Object.assign(standing, await this.standing());
+      waiting = next;
+    }
+    // One could not be applied: try again now, and if that fails too, before the next change.
+    if (this.unapplied) await this.reconcileNow().catch(() => undefined);
+    if (taken.length) await this.syncRemotesOrLater();
+    return taken;
   }
 
   // Invite links ------------------------------------------------------------
@@ -1136,7 +1276,8 @@ export class Identity {
       if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
       if (group === WORKSPACE && role === 'admin' && !policy.mayAssignAdmins(who)) throw new Error('Only the workspace’s owner invites people as admins');
       const genesis = await this.pin();
-      granted = { group, role, genesis, granter: signer, signature: crypto.sign(linkGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer), grant.key.secretKey).toString('hex') };
+      // Counting only for whom a device in the workspace lets in by it (admit), which checks it has not expired.
+      granted = { group, role, genesis, granter: signer, signature: crypto.sign(admittedGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer), grant.key.secretKey).toString('hex') };
     }
     const through = await this.cameInThrough();
     // Its own topic, not the workspace's secret: whoever holds the link finds the members by it
@@ -1144,7 +1285,7 @@ export class Identity {
     const topic = randomBytes(32).toString('hex');
     const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic), key.secretKey).toString('hex');
     const list = await this.links();
-    list.push({ id, expires, once, created: Date.now() });
+    list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true } : {}) });
     await mkdir(this.stateDir, { recursive: true });
     await writeFile(this.linksFile, JSON.stringify(list), { mode: 0o600 });
     await this.decide('link', id, { topic, expires });
@@ -1165,9 +1306,11 @@ export class Identity {
     if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
     // Signed with the link's expiry and maker (0071): a grant from before is not, and could be put in a link that never expires.
     const signed = (m: Buffer) => crypto.verify(m, Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'));
-    if (!signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
+    if (!signed(admittedGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key)) && !signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
       return signed(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once)) ? 'the link was made by an older kuraa: ask for a new one' : 'the link is not signed by the person it names';
     }
+    // Unlinked in the policy (revoked by an admin, wherever): it lets no one in.
+    if (policy.unlinked.has(l.id)) return l.once ? 'the link was used, or revoked' : 'the link was revoked';
     const who = this.who(await this.records()).personOf.get(g.granter)?.key ?? null;
     if (!policy.isAdmin(who, g.group)) return 'the person who made the link may no longer invite people';
     return null;
@@ -1207,10 +1350,56 @@ export class Identity {
     return [...out].sort();
   }
 
-  /** Revoke a link, on record (passed on to the others): no device lets anyone join by it any more (those who did stay). */
-  async revokeLink(id: string): Promise<void> {
+  /**
+   * Revoke a link, on record (passed on to the others): no device lets anyone
+   * join by it any more (those who did stay). With this person's signing key,
+   * where the workspace has a policy, unlinked in it too: a join by it that was
+   * not made before, from anyone, counts for nothing (policy.ts).
+   */
+  async revokeLink(id: string, key?: KeyPair): Promise<void> {
     if (!/^[0-9a-f]{16}$/.test(id)) throw new Error('Not a link id');
     await this.decide('revoke-link', id);
+    if (key) await this.unlink(id, key);
+  }
+
+  /** Unlink a link in the policy (policy.ts), if this person may (an admin of its group) and it is not already. */
+  private async unlink(id: string, key: KeyPair): Promise<void> {
+    const policy = await this.policy();
+    if (!policy.founded || policy.unlinked.has(id)) return;
+    const records = await this.records();
+    const me = this.who(records).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
+    // Its group: as this device made it, or as the joins by it say; else the workspace.
+    const mine = (await this.links()).find((l) => l.id === id);
+    const joined = records.find((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.link === id)?.op;
+    const group = mine?.group ?? (joined?.t === 'join' ? joined.group : WORKSPACE);
+    if (!policy.isAdmin(me, group)) return;
+    await this.makePolicy({ t: 'unlink', link: id, group }, key);
+  }
+
+  /**
+   * Unlink in the policy what no longer lets anyone in but its join could still
+   * count by (policy.ts: a grant from before links were let in by): links this
+   * device revoked on record, and links it made that have expired. Their
+   * grants then let no one in, whoever holds them.
+   */
+  async unlinkStale(key: KeyPair, now = Date.now()): Promise<void> {
+    if (!(await this.workspace()) || !(await this.policy()).founded) return;
+    const records = await this.records();
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const used = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject));
+    const stale = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name !== 'used' && r.by === self).map((r) => r.subject));
+    for (const l of await this.links()) if (!l.admitted && l.expires && l.expires <= now && !used.has(l.id)) stale.add(l.id);
+    for (const id of stale) await this.unlink(id, key);
+  }
+
+  /**
+   * Say in the policy that this device let someone in by a link (policy.ts,
+   * admit): it checked the link, so a join by its grant counts for them.
+   * `signer`: the key their join is signed with.
+   */
+  async admit(link: string, signer: string, key: KeyPair): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(signer) || !(await this.policy()).founded) return;
+    await this.makePolicy({ t: 'admit', link, key: signer }, key);
   }
 
   /** A link for one person has let them in: on record, so no device lets anyone else in by it. */
@@ -1251,6 +1440,9 @@ export interface IssuedLink {
   /** For one person: it lets one device in. */
   once: boolean;
   created: number;
+  /** The group its grant lets its holder into; and whether that grant counts only for whom a device lets in (policy.ts, admit). */
+  group?: string;
+  admitted?: boolean;
 }
 
 /**

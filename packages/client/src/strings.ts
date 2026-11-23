@@ -235,6 +235,9 @@ export const S = {
     outsideApplied: 'A change made outside the app is now in this document.',
     outsideConflict: (name: string) => `Someone changed this file outside the app while it was being edited here. Their version was kept beside it, as ${name}; the document here is unchanged.`,
     joinedOther: 'Joined the people editing this on another device.',
+    /** Who made each side of edits carried into a joined room, should they clash: these edits, and the room's. */
+    yourEdits: 'Your edits',
+    joinedSide: 'Another device',
     outputsFailed: 'Could not load the outputs of the code chunks.',
   },
 

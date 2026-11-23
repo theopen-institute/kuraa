@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import crypto from 'hypercore-crypto';
-import { evaluate, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyContext, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
+import { admittedGrantMessage, evaluate, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyContext, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
 
 const WS = 'cd'.repeat(16);
 const ISSUER = 'ee'.repeat(32);
@@ -36,8 +36,10 @@ type OpSpec =
   | { t: 'owner'; who: number }
   | { t: 'perm'; path: number; write: number[] }
   | { t: 'space'; id: number; audience: number[] }
-  | { t: 'join'; group: number; role: Role; granter: number; link: number; once: boolean }
-  | { t: 'drop'; whose: number };
+  | { t: 'join'; group: number; role: Role; granter: number; link: number; once: boolean; admitted: boolean }
+  | { t: 'drop'; whose: number }
+  | { t: 'unlink'; link: number; group: number }
+  | { t: 'admit'; link: number; who: number };
 
 const person = fc.integer({ min: 0, max: people.length - 1 });
 const role = fc.constantFrom<Role>('admin', 'member');
@@ -50,8 +52,10 @@ const opSpec: fc.Arbitrary<OpSpec> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ t: fc.constant('owner' as const), who: person }) },
   { weight: 2, arbitrary: fc.record({ t: fc.constant('perm' as const), path: fc.integer({ min: 0, max: PATHS.length - 1 }), write: fc.uniqueArray(person, { maxLength: 2 }) }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('space' as const), id: fc.integer({ min: 0, max: SPACES.length - 1 }), audience: fc.uniqueArray(person, { minLength: 1, maxLength: 3 }) }) },
-  { weight: 2, arbitrary: fc.record({ t: fc.constant('join' as const), group, role, granter: person, link: fc.integer({ min: 0, max: LINKS.length - 1 }), once: fc.boolean() }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant('join' as const), group, role, granter: person, link: fc.integer({ min: 0, max: LINKS.length - 1 }), once: fc.boolean(), admitted: fc.boolean() }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('drop' as const), whose: person }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('unlink' as const), link: fc.integer({ min: 0, max: LINKS.length - 1 }), group }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('admit' as const), link: fc.integer({ min: 0, max: LINKS.length - 1 }), who: person }) },
 );
 const DEVICES = 3;
 const device = fc.integer({ min: 0, max: DEVICES - 1 });
@@ -90,10 +94,14 @@ function toOp(spec: OpSpec, by: number, ctx: PolicyContext): PolicyOp {
     case 'perm': return spec.write.length ? { t: 'perm', path: PATHS[spec.path]!, write: spec.write.map((i) => ids[i]!).sort() } : { t: 'perm', path: PATHS[spec.path]! };
     case 'space': return { t: 'space', id: SPACES[spec.id]!, audience: spec.audience.map((i) => ids[i]!).sort() };
     case 'drop': return { t: 'drop', key: people[spec.whose]!.key.publicKey.toString('hex') };
+    case 'unlink': return { t: 'unlink', link: LINKS[spec.link]!, group: GROUPS[spec.group]! };
+    case 'admit': return { t: 'admit', link: LINKS[spec.link]!, key: people[spec.who]!.key.publicKey.toString('hex') };
     case 'join': {
       const g = GROUPS[spec.group]!;
       const link = LINKS[spec.link]!;
-      const grant = crypto.sign(linkGrantMessage(WS, ctx.pin, link, g, spec.role, spec.once, 0, ISSUER), people[spec.granter]!.key.secretKey).toString('hex');
+      // A grant from before links were let in by (counting by itself), or one since (counting only for whom a device in let in).
+      const message = spec.admitted ? admittedGrantMessage : linkGrantMessage;
+      const grant = crypto.sign(message(WS, ctx.pin, link, g, spec.role, spec.once, 0, ISSUER), people[spec.granter]!.key.secretKey).toString('hex');
       return { t: 'join', group: g, role: spec.role, link, once: spec.once, granter: people[spec.granter]!.key.publicKey.toString('hex'), grant, expires: 0, issuer: ISSUER };
     }
   }
@@ -154,6 +162,9 @@ function pasts(entries: PolicyEntry[]): Map<string, Set<string>> {
 
 const isPerson = (w: string) => /^[0-9a-f]{64}$/.test(w);
 
+/** The workspace's pin, as begin() made it: its first genesis. */
+const pinOf = (entries: PolicyEntry[], pinned: boolean) => (pinned ? entries.find((e) => e.op.t === 'genesis')!.id : null);
+
 /** The rules every policy keeps (docs/policy.md, *What always holds*); a list of those it breaks. */
 function broken(p: Policy, entries: PolicyEntry[], pinned: boolean): string[] {
   const out: string[] = [];
@@ -186,6 +197,15 @@ function broken(p: Policy, entries: PolicyEntry[], pinned: boolean): string[] {
     for (const e of applied) if (e !== d && e.signer === key && !past.get(d.id)!.has(e.id)) out.push(`${e.op.t} signed by a dropped key counted, not before the drop`);
   }
   if ([...p.dropped.keys()].some((k) => !applied.some((d) => d.op.t === 'drop' && d.op.key === k))) out.push('a key dropped by no drop that counted');
+  // Nothing by a link unlinked counts but what is in the unlink's past; a grant since links were let in by, only for whom
+  // someone in the workspace let in by its link before.
+  for (const j of applied) {
+    const op = j.op;
+    if (op.t !== 'join') continue;
+    for (const u of applied) if (u.op.t === 'unlink' && u.op.link === op.link && u.op.group === op.group && !past.get(u.id)!.has(j.id)) out.push('a join counted that was not before its link was unlinked');
+    const admitted = crypto.verify(admittedGrantMessage(WS, pinOf(entries, pinned), op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer ?? ''), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+    if (admitted && !applied.some((a) => a.op.t === 'admit' && a.op.link === op.link && a.op.key === j.signer && past.get(j.id)!.has(a.id))) out.push('a join by a grant since counted with no one letting its maker in');
+  }
   return out;
 }
 

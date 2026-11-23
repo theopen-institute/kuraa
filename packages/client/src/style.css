@@ -605,6 +605,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .image-node.ProseMirror-selectednode img { outline: 2px solid var(--accent); }
 .image-node.image-missing::after { content: attr(data-missing); font: 12px var(--mono); color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 2px 6px; }
 .image-node.image-missing img { display: none; }
+.image-node.image-remote img { display: none; }
+.image-node .image-load { font: 12px var(--font); color: var(--muted); background: var(--panel); border-radius: 4px; padding: 2px 6px; }
 .image-uploading { font: 12px var(--font); color: var(--muted); background: var(--panel); border-radius: 4px; padding: 2px 6px; }
 .prose th { background: var(--panel); font-family: var(--font); font-weight: 600; text-align: left; }
 .prose td, .prose th { min-width: 3em; }

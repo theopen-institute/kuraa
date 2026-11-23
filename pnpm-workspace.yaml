@@ -6,3 +6,5 @@ allowBuilds:
   esbuild: true
   # electron-builder's, for Squirrel.Windows installers, which the app does not make (it ships NSIS).
   electron-winstaller: false
+patchedDependencies:
+  y-prosemirror@1.3.7: patches/y-prosemirror@1.3.7.patch

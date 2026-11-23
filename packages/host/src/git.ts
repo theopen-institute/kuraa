@@ -1,7 +1,8 @@
 // Git, called as a child process: the one on PATH, or one a shell bundles (useGit).
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { lstatSync } from 'node:fs';
-import { delimiter, resolve } from 'node:path';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync, lstatSync } from 'node:fs';
+import { copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { delimiter, join, resolve } from 'node:path';
 
 export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
@@ -54,6 +55,53 @@ export function gitEnv(...layers: (Record<string, string> | undefined)[]): NodeJ
  */
 const AS_STORED = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'];
 
+/**
+ * A file with nothing in it, for git to read settings and attributes from.
+ * Git for Windows takes this name for its own null device (NUL) too.
+ */
+const NOTHING = '/dev/null';
+
+/**
+ * Settings a merge is made with, whatever this computer's or this repository's
+ * settings say, and whatever another git takes them to be by default: the same
+ * merge everywhere (0025). No attributes file of anyone's (`*.md merge=union`
+ * in someone's ~/.gitconfig would merge what others keep as a conflict).
+ */
+const MERGE_SETTINGS = [
+  '-c', 'merge.renames=true', '-c', 'merge.directoryRenames=conflict', '-c', 'merge.renameLimit=7000',
+  '-c', 'merge.conflictStyle=merge', '-c', 'i18n.commitEncoding=UTF-8', '-c', 'i18n.logOutputEncoding=UTF-8',
+  '-c', `core.attributesFile=${NOTHING}`,
+];
+
+/** Git's empty tree, by object format: attributes are read from it, so there are none. */
+const EMPTY_TREE: Record<string, string> = {
+  sha1: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+  sha256: '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321',
+};
+
+/** No settings from the system's or this person's git files, nor any passed down by a git that started this process. */
+const NO_SETTINGS: Record<string, string> = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: NOTHING, GIT_CONFIG_PARAMETERS: '', GIT_CONFIG_COUNT: '0' };
+
+const versions = new Map<string, string>();
+
+/**
+ * The version of the git this process runs (useGit), as `git --version` says
+ * it, once. Another git may merge the same commits differently, so it is part
+ * of how a device merges (merging.ts, mergeSignature).
+ */
+export function gitVersion(): string {
+  let v = versions.get(program.command);
+  if (v === undefined) {
+    try {
+      v = execFileSync(program.command, ['--version'], { env: gitEnv(), encoding: 'utf8', timeout: 10_000 }).trim().replace(/^git version /, '').replace(/\s+/g, '-');
+    } catch {
+      v = 'unknown';
+    }
+    versions.set(program.command, v);
+  }
+  return v;
+}
+
 /** Start git with `args`, its input and output piped. */
 export function spawnGit(args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; detached?: boolean } = {}): ChildProcessWithoutNullStreams {
   return spawn(program.command, [...AS_STORED, ...args], { detached: OWN_GROUP, ...opts });
@@ -80,7 +128,8 @@ function killGroup(child: ChildProcessWithoutNullStreams): void {
 }
 
 export class Git {
-  constructor(readonly dir: string, private env: Record<string, string> = {}) {}
+  /** `settings`: put before every command's own arguments (`-c name=value`). */
+  constructor(readonly dir: string, private env: Record<string, string> = {}, private readonly settings: string[] = []) {}
 
   setEnv(env: Record<string, string>): void {
     this.env = { ...this.env, ...env };
@@ -129,7 +178,7 @@ export class Git {
 
   private runOnce(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): Promise<GitResult & { signal: NodeJS.Signals | null }> {
     return new Promise((resolve, reject) => {
-      const child = spawnGit(args, { cwd: this.dir, env: gitEnv(this.env, opts.env) });
+      const child = spawnGit([...this.settings, ...args], { cwd: this.dir, env: gitEnv(this.env, opts.env) });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
       child.stdout.on('data', (d: Buffer) => out.push(d));
@@ -172,20 +221,54 @@ export class Git {
 
   /** Three-way text merge. Returns the merged text and whether it conflicted. */
   async mergeFile(ours: string, base: string, theirs: string, tmpDir: string): Promise<{ text: string; conflict: boolean }> {
-    const { writeFile, mkdir, rm } = await import('node:fs/promises');
-    const { join } = await import('node:path');
     const dir = join(tmpDir, `merge-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(dir, { recursive: true });
     try {
       await writeFile(join(dir, 'ours'), ours);
       await writeFile(join(dir, 'base'), base);
       await writeFile(join(dir, 'theirs'), theirs);
-      const r = await this.run(['merge-file', '-p', join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { allowFail: true });
+      // Markers as git makes them by default, whatever anyone's merge.conflictStyle.
+      const r = await this.run([...MERGE_SETTINGS, 'merge-file', '-p', join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { allowFail: true, env: NO_SETTINGS });
       if (r.code < 0 || r.code > 127) throw new Error(`git merge-file failed: ${r.stderr}`);
       return { text: r.stdout, conflict: r.code !== 0 };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * This repository's git as merges use it (merging.ts), the same on every
+   * device (0025): nothing of this computer's or this repository's settings, nor
+   * of attributes (the person's, the system's, `.git/info/attributes`, the working
+   * tree's `.gitattributes`), nor replaced objects. It runs in a git folder of its
+   * own under `tmpDir` that has only this repository's objects (and its shallow
+   * commits, if any); what it writes goes into those objects. Commits are named
+   * by id: it has no branches.
+   */
+  async forMerging(tmpDir: string): Promise<Git> {
+    const [objects, shallow, format = 'sha1'] = (await this.out(['rev-parse', '--git-path', 'objects', '--git-path', 'shallow', '--show-object-format'])).split('\n');
+    const own = join(tmpDir, `merge-git-${format}`);
+    if (!existsSync(join(own, 'config'))) {
+      await mkdir(join(own, 'refs'), { recursive: true });
+      await mkdir(join(own, 'objects'), { recursive: true });
+      await writeFile(join(own, 'HEAD'), 'ref: refs/heads/main\n');
+      const config = `[core]\n\trepositoryformatversion = ${format === 'sha1' ? 0 : 1}\n\tbare = true\n${format === 'sha1' ? '' : `[extensions]\n\tobjectformat = ${format}\n`}`;
+      // Whole or not at all: another merge may be reading it.
+      const tmp = join(own, `config.${process.pid}-${Math.random().toString(36).slice(2)}`);
+      await writeFile(tmp, config);
+      await rename(tmp, join(own, 'config'));
+    }
+    const shallowAt = resolve(this.dir, shallow!);
+    if (existsSync(shallowAt)) await copyFile(shallowAt, join(own, 'shallow'));
+    else await rm(join(own, 'shallow'), { force: true });
+    return new Git(own, {
+      ...NO_SETTINGS,
+      GIT_DIR: own,
+      GIT_OBJECT_DIRECTORY: resolve(this.dir, objects!),
+      GIT_ATTR_NOSYSTEM: '1',
+      GIT_ATTR_SOURCE: EMPTY_TREE[format] ?? EMPTY_TREE.sha1!,
+      GIT_NO_REPLACE_OBJECTS: '1',
+    }, MERGE_SETTINGS);
   }
 
   /** Spawn a git subcommand with streaming IO (for http-backend). */

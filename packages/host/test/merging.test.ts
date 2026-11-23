@@ -2,13 +2,13 @@
 // conflict, and the same commit wherever it is made.
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TypeRegistry } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Git } from '../src/git.js';
-import { mergeCommits } from '../src/merging.js';
+import { MERGE_VERSION, mergeCommits, mergeSignature } from '../src/merging.js';
 import { startHost, type RunningHost } from '../src/index.js';
 import syncGit from '@kuraa/sync-git';
 
@@ -101,6 +101,104 @@ describe('mergeCommits', () => {
   });
 });
 
+describe('merges whatever this computer’s git settings (0025)', () => {
+  /** Run `fn` with git set up against merging the same way as others: settings and attributes of the person's, the system's, and the repository's. */
+  async function hostile<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+    const home = mkdtempSync(join(tmpdir(), 'kuraa-home-'));
+    dirs.push(home);
+    const union = join(home, 'attributes');
+    writeFileSync(union, '* merge=union\n');
+    const config = `[core]\n\tattributesFile = ${union}\n[merge]\n\trenames = false\n\tdirectoryRenames = false\n\tconflictStyle = diff3\n[i18n]\n\tcommitEncoding = ISO-8859-1\n\tlogOutputEncoding = ISO-8859-1\n`;
+    writeFileSync(join(home, '.gitconfig'), config);
+    mkdirSync(join(home, 'xdg', 'git'), { recursive: true });
+    writeFileSync(join(home, 'xdg', 'git', 'attributes'), '* merge=union\n');
+    writeFileSync(join(home, 'system'), config);
+    // The repository's own: its settings, info/attributes, and a .gitattributes not committed.
+    git(dir, 'config', 'merge.renames', 'false');
+    git(dir, 'config', 'merge.conflictStyle', 'zdiff3');
+    git(dir, 'config', 'i18n.commitEncoding', 'ISO-8859-1');
+    mkdirSync(join(dir, '.git', 'info'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'info', 'attributes'), '* merge=union\n');
+    writeFileSync(join(dir, '.gitattributes'), '* merge=union\n');
+    const vars = { HOME: home, XDG_CONFIG_HOME: join(home, 'xdg'), GIT_CONFIG_GLOBAL: join(home, '.gitconfig'), GIT_CONFIG_SYSTEM: join(home, 'system'), GIT_CONFIG_PARAMETERS: "'merge.renames'='false'" };
+    const was = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, vars);
+    try {
+      return await fn();
+    } finally {
+      for (const [k, v] of Object.entries(was)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmSync(join(dir, '.gitattributes'));
+    }
+  }
+
+  it('makes the same merge commit with hostile settings and attributes as without', async () => {
+    const dir = repo();
+    // A clash in one sentence (git: a conflict; with merge=union: both lines), and a file renamed on one side, changed on the other.
+    writeFileSync(join(dir, 'a.md'), '# A\n\nOne.\n\nTwo.\n\nThree.\n\nFour.\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'A file');
+    git(dir, 'checkout', '-q', '-b', 'ada');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nThe tide was low.\n\nWe counted crabs.\n\nIt rained.\n');
+    git(dir, 'mv', 'a.md', 'b.md');
+    git(dir, 'commit', '-q', '-am', 'Ada');
+    const ada = git(dir, 'rev-parse', 'HEAD');
+    git(dir, 'checkout', '-q', '-b', 'bo', 'main');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nThe tide was gone.\n\nWe counted crabs.\n\nIt rained.\n');
+    writeFileSync(join(dir, 'a.md'), '# A\n\nOne.\n\nTwo.\n\nThree.\n\nFour, and five.\n');
+    git(dir, 'commit', '-q', '-am', 'Bo');
+    const bo = git(dir, 'rev-parse', 'HEAD');
+    git(dir, 'checkout', '-q', 'main');
+
+    const plain = await mergeCommits(new Git(dir), ada, bo, opts(dir));
+    const odd = await hostile(dir, () => mergeCommits(new Git(dir), ada, bo, opts(dir)));
+    expect(odd).toEqual(plain);
+    expect(plain.conflicts).toEqual([{ path: 'notes.md', count: 1 }]);
+    expect(show(dir, `${plain.commit}:notes.md`)).toContain(':::: {.conflict}');
+    // The change followed the rename.
+    expect(git(dir, 'ls-tree', '--name-only', plain.commit).split('\n')).toEqual(['b.md', 'gone.md', 'notes.md', 'plot.png']);
+    expect(show(dir, `${plain.commit}:b.md`)).toContain('Four, and five.');
+    expect(git(dir, 'cat-file', 'commit', plain.commit)).not.toContain('encoding');
+    expect(git(dir, 'log', '-1', '--format=%B', plain.commit)).toContain(`Kuraa-Merge: ${MERGE_VERSION}`);
+  });
+
+  it('merges an outside edit with git’s own markers, whatever merge.conflictStyle says', async () => {
+    const dir = repo();
+    const base = 'a\nb\nc\n';
+    const plain = await new Git(dir).mergeFile('a\nX\nc\n', base, 'a\nY\nc\n', join(dir, '.git', 'kuraa'));
+    const odd = await hostile(dir, () => new Git(dir).mergeFile('a\nX\nc\n', base, 'a\nY\nc\n', join(dir, '.git', 'kuraa')));
+    // The markers name temporary files, different each time.
+    const label = (r: { text: string; conflict: boolean }) => ({ ...r, text: r.text.replace(/^(<<<<<<<|>>>>>>>) .*$/gm, '$1') });
+    expect(label(odd)).toEqual(label(plain));
+    expect(plain.conflict).toBe(true);
+    expect(plain.text).not.toContain('|||||||');
+  });
+
+  it('merges in a repository with sha256 ids', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-merge-'));
+    dirs.push(dir);
+    git(dir, 'init', '-q', '-b', 'main', '--object-format=sha256');
+    git(dir, 'config', 'user.name', 'Base');
+    git(dir, 'config', 'user.email', 'base@example.org');
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nThe tide was out.\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Base');
+    const ada = branch(dir, 'ada', 'Ada', { 'notes.md': '# Notes\n\nThe tide was low.\n' });
+    const bo = branch(dir, 'bo', 'Bo', { 'notes.md': '# Notes\n\nThe tide was gone.\n' });
+    const r = await mergeCommits(new Git(dir), ada, bo, opts(dir));
+    expect(r.commit).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.conflicts).toEqual([{ path: 'notes.md', count: 1 }]);
+  });
+
+  it('says which git merges, as part of how this device merges (0038)', () => {
+    expect(mergeSignature([], '2.55.0')).toBe(`merge@${MERGE_VERSION} git@2.55.0`);
+    expect(mergeSignature([], '2.55.0')).not.toBe(mergeSignature([], '2.39.5-(Apple-Git-154)'));
+    expect(mergeSignature([])).toMatch(/ git@\d+\.\d+/);
+  });
+});
+
 describe('Sync', () => {
   it('keeps a conflict in the document instead of stopping, and the tree counts it', async () => {
     const dir = repo();
@@ -135,13 +233,15 @@ describe('Sync', () => {
     const ada = branch(dir, 'ada', 'Ada', { 'notes.md': '# Notes\n\nThe low tide was out.\n\nWe counted crabs.\n\nIt rained.\n' });
     // The same sentence: by words, both edits stay; line by line, it would be a conflict.
     const bo = branch(dir, 'bo', 'Bo', { 'notes.md': '# Notes\n\nThe tide was out today.\n\nWe counted crabs.\n\nIt rained.\n' });
-    const everything = await mergeCommits(new Git(dir), ada, bo, opts(dir));
+    // As a host with every format on merges them (its trailer names how it merges).
+    const signature = await startSignature(dir);
+    const everything = await mergeCommits(new Git(dir), ada, bo, { ...opts(dir), signature });
     // Markdown off: notes.md opens as a Text file here, but is merged as the document it is.
     running = await startHost({ dir, port: 0, formats: ['text'] });
     expect(running.host.registry.resolve('notes.md')?.id).toBe('text');
     expect(everything.conflicts).toEqual([]);
     expect((await running.host.merge(ada, bo)).commit).toBe(everything.commit);
-    expect(running.host.mergeSignature).toBe((await startSignature(dir)));
+    expect(running.host.mergeSignature).toBe(signature);
   });
 });
 

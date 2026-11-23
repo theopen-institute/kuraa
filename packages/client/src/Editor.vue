@@ -18,6 +18,7 @@ import { editorContext, historyKeys, nodeViewsFor } from './editing.js';
 import { SourceEditor } from './SourceEditor.js';
 import { linesPlugins } from './lines.js';
 import { ChunkRunner, collectChunks } from './runs.js';
+import { carryOver } from './carry.js';
 import { defaultBlock } from './blocks.js';
 import { locateMatch, replaceWithText, selectionFor, type MatchTarget } from './docActions.js';
 import FindBar from './FindBar.vue';
@@ -173,8 +174,11 @@ function reportConflicts(doc: EditorView['state']['doc'], now = false) {
   else conflictTimer = setTimeout(run, 300);
 }
 
+/** Edits made in a room that was replaced before the host had them: carried into the next (carry.ts). */
+type Carried = { base: EditorView['state']['doc']; ours: EditorView['state']['doc'] };
+
 /** Connect to the file's room and build the editor. Returns how to undo it. */
-function open(): () => void {
+function open(carried: Carried | null = null): () => void {
   const { api, path, type, formatEditor } = props;
   const token = props.settings.token;
   let cancelled = false;
@@ -212,7 +216,16 @@ function open(): () => void {
       cacheKey: `${api.baseUrl}|${room.branch}|${path}`,
       token,
       user: user.value,
-      onStatus: (s) => report({ connection: s }),
+      onStatus: (s) => {
+        report({ connection: s });
+        // Refused: perhaps the room was replaced while this was away from it (a laptop asleep), and the
+        // host knows only the new one. Then moved to it, with the edits made meanwhile, as when told so.
+        if (s === 'unauthorized') {
+          void api.room(path).then((now) => {
+            if (!cancelled && now.room !== room.room) void replaced(null);
+          }, () => undefined);
+        }
+      },
       onPeers: (peers) => report({ peers }),
       onUnsynced: (n) => report({ unsynced: n }),
       onMessage: (m: RoomMessage) => {
@@ -227,10 +240,7 @@ function open(): () => void {
         else if (m.type === 'reseeded') {
           // The room was replaced (joined with another device's): move to the new one.
           update({ notice: { kind: 'info', text: m.why ?? S.editor.joinedOther } });
-          setTimeout(() => {
-            // Not if the editor was closed or moved on meanwhile: that would open a room nobody closes.
-            if (!cancelled) reopen();
-          }, 50);
+          setTimeout(() => void replaced(m.why ?? null), 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
         else if (m.type === 'tools') emit('toolsChanged');
         else if (m.type === 'save-status') {
@@ -242,10 +252,31 @@ function open(): () => void {
       },
     });
     connection = conn;
+    /**
+     * Move to the room that replaced this one. A branch switched (`why`): the old room stays, on its
+     * branch, and edits on their way still reach it. Otherwise (another device's room taken in its
+     * place, or the room started again): the old one is gone, and the edits the host did not have are
+     * carried into the new one; nothing opens the old one again, so its cache here goes.
+     */
+    let moving = false;
+    const replaced = async (why: string | null) => {
+      // Not if the editor was closed or moved on meanwhile: that would open a room nobody closes.
+      if (cancelled || moving) return;
+      moving = true;
+      if (why) await conn.settled(2000);
+      const carry = why ? null : conn.unsent(type.schema);
+      if (!why) conn.forget();
+      if (!cancelled) reopen(carry);
+    };
     await conn.ready;
     if (cancelled) {
       conn.destroy();
       return;
+    }
+    if (carried) {
+      // Before the editor shows it: the edits the room this one replaced never had, made again here.
+      const doc = carryOver(type, carried.base, carried.ours, conn.snapshot(type.schema), [{ by: user.value.name || S.editor.yourEdits }, { by: S.editor.joinedSide }]);
+      if (doc) conn.apply(doc);
     }
     const history = { undo: conn.undo, redo: conn.redo };
     const layout = type.editor?.layout;
@@ -327,9 +358,9 @@ function open(): () => void {
 }
 
 let close: (() => void) | null = null;
-function reopen() {
+function reopen(carried: Carried | null = null) {
   close?.();
-  close = open();
+  close = open(carried);
 }
 onMounted(() => {
   close = open();

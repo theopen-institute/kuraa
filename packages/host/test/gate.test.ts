@@ -9,8 +9,9 @@ import { TypeRegistry } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Git } from '../src/git.js';
 import { commitSigned } from '../src/signing.js';
-import { MERGE_VERSION, mergeCommits } from '../src/merging.js';
+import { MERGE_VERSION, mergeCommits, mergeTrailerValue } from '../src/merging.js';
 import { gate, type GateContext } from '../src/peers/gate.js';
+import { startHost } from '../src/index.js';
 import { evaluate, makeOp, type PolicyEntry, type PolicyOp } from '../src/peers/policy.js';
 
 const WS = 'ab'.repeat(16);
@@ -84,7 +85,7 @@ describe('the gate, step 4', () => {
 
   it('makes merges again: one holding a change of its own is judged as that change; an honest one, or one that kept a side, is not', async () => {
     const r = repo();
-    const ctx: GateContext = { ...policy({ t: 'rule', path: 'notes.md', by: [ada.id] }), remake: async (a, b) => run(r.dir, 'rev-parse', `${(await mergeCommits(r.git, a, b, { typeFor: (p, h) => registry.resolve(p, h), tmpDir: join(r.dir, '.git', 'tmp') })).commit}^{tree}`), mergeVersion: MERGE_VERSION };
+    const ctx: GateContext = { ...policy({ t: 'rule', path: 'notes.md', by: [ada.id] }), remake: async (a, b) => run(r.dir, 'rev-parse', `${(await mergeCommits(r.git, a, b, { typeFor: (p, h) => registry.resolve(p, h), tmpDir: join(r.dir, '.git', 'tmp') })).commit}^{tree}`), mergeTrailer: String(MERGE_VERSION) };
     const left = await commit(r, 'free.md', 'Ada’s.\n', ada.key);
     run(r.dir, 'checkout', '-q', '-b', 'side', r.base);
     const right = await commit(r, 'free.md', 'Anyone may.\n\nBo’s line.\n', bo.key);
@@ -105,5 +106,59 @@ describe('the gate, step 4', () => {
     run(r.dir, 'add', 'notes.md');
     const claimed = run(r.dir, 'commit-tree', run(r.dir, 'write-tree'), '-p', left, '-p', right, '-m', `Merge\n\nKept notes.md as it was: not Bo to change\n\nKuraa-Merge: ${MERGE_VERSION}`);
     expect([...(await gate(r.git, r.base, claimed, ctx)).keeps.keys()]).toEqual(['notes.md']);
+    // A merge made by another git or other types (its trailer's hash differs) is not made again here, where it
+    // could come out otherwise: what it changes of its own is what differs from both sides.
+    let remade = 0;
+    const other: GateContext = { ...ctx, remake: async (a, b) => { remade++; return ctx.remake!(a, b); }, mergeTrailer: mergeTrailerValue('merge@5 git@9.9 pandoc@3') };
+    const elsewhere = run(r.dir, 'commit-tree', tree, '-p', left, '-p', right, '-m', `Merge\n\nKuraa-Merge: ${mergeTrailerValue('merge@5 git@1.0 pandoc@3')}`);
+    expect((await gate(r.git, r.base, elsewhere, other)).keeps.size).toBe(0);
+    expect(remade).toBe(0);
+  });
+
+  it('keeps out the same changes whichever side of a merge a device is on, so both make the same merge (0025)', async () => {
+    const r = repo();
+    const ctx: GateContext = policy({ t: 'rule', path: 'notes.md', by: [ada.id] });
+    // Ada, on her device, changes what anyone may; Bo, on his, what only Ada may.
+    const left = await commit(r, 'free.md', 'Ada’s.\n', ada.key);
+    run(r.dir, 'checkout', '-q', '-b', 'side', r.base);
+    const right = await commit(r, 'notes.md', '# Notes\n\nBo’s tide.\n', bo.key);
+    run(r.dir, 'checkout', '-q', 'main');
+    const h = await startHost({ dir: r.dir });
+    try {
+      h.host.gate = (x, y) => gate(h.host.git, x, y, ctx);
+      // Ada's device merges Bo's work into hers; Bo's, hers into his.
+      const onAdas = await h.host.merge(left, right);
+      const onBos = await h.host.merge(right, left);
+      expect(onBos.commit).toBe(onAdas.commit);
+      expect(run(r.dir, 'show', `${onAdas.commit}:notes.md`)).toBe('# Notes\n\nThe tide was out.');
+      expect(run(r.dir, 'show', `${onAdas.commit}:free.md`)).toBe('Ada’s.');
+      expect(run(r.dir, 'log', '-1', '--format=%B', onAdas.commit)).toContain(`Kuraa-Refused: ${right} notes.md`);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('takes a merge that kept a file as it was where both sides’ changes to it were kept out', async () => {
+    const r = repo();
+    const ctx: GateContext = policy({ t: 'rule', path: 'notes.md', by: [ada.id] });
+    // Bo changes what only Ada may, on two devices apart.
+    const left = await commit(r, 'notes.md', '# Notes\n\nBo’s tide, on the laptop.\n', bo.key);
+    run(r.dir, 'checkout', '-q', '-b', 'side', r.base);
+    const right = await commit(r, 'notes.md', '# Notes\n\nBo’s tide, on the desktop.\n', bo.key);
+    run(r.dir, 'checkout', '-q', 'main');
+    const h = await startHost({ dir: r.dir });
+    try {
+      h.host.gate = (x, y) => gate(h.host.git, x, y, ctx);
+      const merged = await h.host.merge(left, right);
+      expect(run(r.dir, 'show', `${merged.commit}:notes.md`)).toBe('# Notes\n\nThe tide was out.');
+      // Another device judging that merge refuses Bo's two changes, but not the merge itself.
+      const remakeCtx: GateContext = { ...ctx, remake: (a, b) => h.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(h.host.mergeSignature) };
+      for (const c of [ctx, remakeCtx]) {
+        const g = await gate(r.git, r.base, merged.commit, c);
+        expect(g.refused.map((x) => x.commit)).not.toContain(merged.commit);
+      }
+    } finally {
+      await h.close();
+    }
   });
 });

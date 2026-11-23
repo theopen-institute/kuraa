@@ -178,7 +178,7 @@ export class SourceEditor {
     tr.setMeta(FROM_SOURCE, true);
     tr.setMeta(DELIBERATE_EDIT, true); // the header can be edited here
     this.view.dispatch(tr);
-    // The format may have tidied the result (footnotes kept in order, say): show that.
+    // The format may have tidied the result (a new footnote put in its place, say): show that.
     if (!this.view.state.doc.eq(parsed)) this.fromDocument();
   }
 

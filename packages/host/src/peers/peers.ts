@@ -16,7 +16,7 @@ import { gate, policyWaits, type GateResult } from './gate.js';
 import { commitSigner } from '../signing.js';
 import { digestOf } from './node.js';
 import { emailOf } from './attest.js';
-import { MERGE_VERSION, isAncestor } from '../merging.js';
+import { isAncestor, mergeTrailerValue } from '../merging.js';
 import { randomBytes } from 'node:crypto';
 import { PEER_SPACES } from './node.js';
 import { spaceRef } from '../spaces.js';
@@ -243,7 +243,7 @@ export class Peers {
   /** Spaces from a device not brought in as they were (NotBrought), already logged: `remote/ref` → commit. */
   private readonly notBrought = new Map<string, string>();
   /** The workspace's policy and what goes with it for judging work, as of a set of records (gate). */
-  private gateCache: { digest: string; ctx: Promise<Omit<import('./gate.js').GateContext, 'remake' | 'mergeVersion'> | null> } | null = null;
+  private gateCache: { digest: string; ctx: Promise<Omit<import('./gate.js').GateContext, 'remake' | 'mergeTrailer'> | null> } | null = null;
   private announceTimer: NodeJS.Timeout | undefined;
   private stopRefs: (() => void) | null = null;
   private closed = false;
@@ -278,6 +278,13 @@ export class Peers {
     },
     // Records came (the policy work waits for may be among them): what waits is tried again now.
     members: () => this.retryNow(),
+    // Operations its commits name that it does not hold: not waited for (knownFrom).
+    unheld: (link, ids) => {
+      const had = this.unheld.get(link.key) ?? new Set<string>();
+      for (const id of ids) had.add(id);
+      this.unheld.set(link.key, had);
+      this.retryNow();
+    },
     room: (link, m) => this.rooms.message(link, m),
     outputs: (link, frame) => void this.outputs?.receive(link.key, frame),
   };
@@ -321,7 +328,32 @@ export class Peers {
   private async gate(x: string | null, y: string): Promise<GateResult> {
     const ctx = await this.gateContext();
     if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
-    return gate(this.host.git, x, y, { ...ctx, remake: (a, b) => this.host.remakeMergeTree(a, b), mergeVersion: MERGE_VERSION });
+    return gate(this.host.git, x, y, { ...ctx, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+  }
+
+  /**
+   * The policy operations commits from a device are judged knowing (gate.ts):
+   * those held here, and those the device said it does not hold, though its
+   * commits name them (node.ts, ops). A device holds every operation the commits
+   * it has name (it waited for them itself, or made them): one that does not
+   * named one that is no one's, and its commits are judged by the policy held,
+   * not waited on for ever.
+   */
+  private knownFrom(known: Set<string>, device: string | null): Set<string> {
+    const unheld = device ? this.unheld.get(device) : undefined;
+    return unheld?.size ? new Set([...known, ...unheld]) : known;
+  }
+
+  /** Operations a device said it does not hold, though commits it sent name them (knownFrom). */
+  private readonly unheld = new Map<string, Set<string>>();
+  /** The device whose work is being brought in (inside host.serial): whose commits the gate judges. */
+  private bringing: string | null = null;
+
+  /** Ask a device for the policy operations its commits name that this one lacks; those it does not hold, it says (unheld). */
+  private askFor(link: PeerLink, ops: string[]): void {
+    const unheld = this.unheld.get(link.key);
+    const ask = ops.filter((id) => !unheld?.has(id)).slice(0, 100);
+    if (ask.length) link.send({ type: 'ops', ids: ask });
   }
 
   /** The policy, people and cutoffs work is judged by, worked out once for each set of records (0071); null: no policy. */
@@ -348,9 +380,9 @@ export class Peers {
   }
 
   /** The policy operations the commits `theirs` brings to `ours` name and this device lacks (gate.ts, policyWaits). */
-  private async policyWaits(ours: string | null, theirs: string): Promise<string[]> {
+  private async policyWaits(ours: string | null, theirs: string, device: string): Promise<string[]> {
     const ctx = await this.gateContext();
-    return ctx ? policyWaits(this.host.git, ours, theirs, ctx.known) : [];
+    return ctx ? policyWaits(this.host.git, ours, theirs, this.knownFrom(ctx.known, device)) : [];
   }
 
   /** Try a device's sync again later, backing off (0071). */
@@ -393,6 +425,8 @@ export class Peers {
   }
 
   async start(): Promise<void> {
+    // A link in another device's commits is checked out as a file holding where it points, never as a link (gate.ts refuses them too).
+    await this.host.git.run(['config', 'core.symlinks', 'false'], { allowFail: true });
     if (this.opts.node) await this.node.becomeMember(this.memberOptions(), this.events);
     else await this.node.start(true);
     this.stopRefs = this.host.onRefsChanged(() => this.announce());
@@ -636,17 +670,19 @@ export class Peers {
         return false;
       }
       this.waiting.delete(key);
-      const waits = await this.policyWaits(mine || null, oid);
+      const waits = await this.policyWaits(mine || null, oid, link.key);
       try {
         if (waits.length) throw new WaitingForPolicy(waits);
         const current = (await this.host.git.branch()) === branch;
-        const outcome = await this.host.bringSpace(id, branch, oid, current ? this.rooms.override(link, branch, id) : undefined);
+        this.bringing = link.key;
+        const outcome = await this.host.bringSpace(id, branch, oid, current ? this.rooms.override(link, branch, id) : undefined).finally(() => void (this.bringing = null));
         this.waitingForPolicy.delete(key);
         this.notBrought.delete(key);
         if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${link.remote}${describeOutcome(outcome)}`);
         return false;
       } catch (e) {
         if (!(e instanceof WaitingForPolicy)) throw e;
+        this.askFor(link, e.heads);
         if (!this.waitingForPolicy.has(key)) this.host.log(`peers: ${link.remote}'s work in a space is ${e.message}`);
         this.waitingForPolicy.add(key);
         return true;
@@ -679,11 +715,13 @@ export class Peers {
       let outcome;
       try {
         // Waiting for the policy is known before the room's edits are committed for it (0071).
-        const waits = await this.policyWaits(mine || null, oid);
+        const waits = await this.policyWaits(mine || null, oid, link.key);
         if (waits.length) throw new WaitingForPolicy(waits);
-        outcome = await this.host.bringBranch(branch, oid, branch === current ? this.rooms.override(link, branch, null) : undefined);
+        this.bringing = link.key;
+        outcome = await this.host.bringBranch(branch, oid, branch === current ? this.rooms.override(link, branch, null) : undefined).finally(() => void (this.bringing = null));
       } catch (e) {
         if (!(e instanceof WaitingForPolicy)) throw e;
+        this.askFor(link, e.heads);
         // The policy travels with the records, which come with every hello: soon (retryLater, retryNow).
         if (!this.waitingForPolicy.has(`${from}/${branch}`)) this.host.log(`peers: ${from}'s work on ${branch} is ${e.message}`);
         this.waitingForPolicy.add(`${from}/${branch}`);
@@ -732,7 +770,8 @@ export class Peers {
 
   /** Revoke an invite link, on record, and tell the other devices. */
   async revokeLink(id: string): Promise<void> {
-    await this.node.identity.revokeLink(id);
+    // Unlinked in the policy too (0066): no join by it counts after, whoever holds its grant.
+    await this.node.identity.revokeLink(id, await this.node.signingKeyNow());
     await this.node.membersChanged();
   }
 

@@ -37,12 +37,11 @@ history sidebar starts closed.
 **Footnotes behave as in a word processor.** Pandoc numbers notes in the order their references
 appear (inline notes included), whatever their labels, so the editor shows those numbers and
 treats labels as fixed ids that are never rewritten; cut and paste therefore keeps a reference and
-its note together. After each of the user's own edits (not remote ones, not undo), the notes are
-kept together at the end of the document in number order: a new note takes its place, and moving
-a reference moves its note. Notes nothing refers to come last, marked "–"; clicking that offers
-to delete them. Only the editing client arranges, so two clients do not move the same note; an
-identical duplicate, should one arise anyway, is dropped. A file arranged differently elsewhere
-is rearranged on the first edit, not on opening.
+its note together. A new note is put among the notes in number order; notes already there are
+never moved by an edit, since moving a note deletes it and puts it back, and someone typing in it
+at that moment would lose what they typed ([0075](0075-review-fixes.md)). Notes nothing refers to
+are marked "–"; clicking that offers to delete them. (Until 0075 the notes were rearranged into
+number order after each of the user's own edits.)
 
 While typing in a note, **Enter goes back to the text**, just after the reference, and
 **Shift+Enter starts a new paragraph** in the note (elsewhere, Shift+Enter is a line break). In a

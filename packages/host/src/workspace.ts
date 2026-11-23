@@ -2,8 +2,9 @@
 // repository, whose name goes on commits, and make it one. Shells call these
 // instead of running git themselves, so the host stays the only part of the
 // system that touches the working tree.
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { readWorkspaceFile, writeWorkspaceFile } from '@kuraa/run-kit';
 import { Git } from './git.js';
 
 /**
@@ -50,20 +51,18 @@ export function parseName(text: string): string | null {
   return null;
 }
 
-/** A workspace's name, from its working tree; null where none is set (a workspace made before 0061, or a folder opened). */
+/** A workspace's name, from its working tree; null where none is set (a workspace made before 0061, or a folder opened), or it is a link (0037). */
 export async function readWorkspaceName(dir: string): Promise<string | null> {
   try {
-    return parseName(await readFile(join(dir, NAME_FILE), 'utf8'));
+    return parseName((await readWorkspaceFile(dir, NAME_FILE)).toString('utf8'));
   } catch {
     return null;
   }
 }
 
-/** Write a workspace's name file (not committed). */
+/** Write a workspace's name file (not committed); refused if it, or .kuraa, is a link (0037). */
 export async function writeWorkspaceName(dir: string, name: string): Promise<void> {
-  const file = join(dir, NAME_FILE);
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, nameText(name));
+  await writeWorkspaceFile(dir, NAME_FILE, nameText(name));
 }
 
 export interface FolderInfo {

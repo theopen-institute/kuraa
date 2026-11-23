@@ -5,6 +5,7 @@
 // kuraa-host --dir <workspace> [--init]    one folder; nothing is added from the app
 // Either way the server is a hub (hub.ts): each workspace at /w/<id>, its list at /hub/api.
 //   serving:      [--port 4321] [--host 127.0.0.1] [--token T] [--static dir] [--settings file]
+//                 [--allow-origin <origin>]...   pages served elsewhere that may use it (origins.ts)
 //
 // Listening only on this computer (the default), whoever has the access code is
 // its owner (decision 0047): Preferences, Open a folder…, their identity and the
@@ -39,6 +40,7 @@ import { homedir } from 'node:os';
 import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 import { mailCommand } from './verifier.js';
+import { runsAsService } from './selfupdate.js';
 
 if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
   try {
@@ -88,6 +90,7 @@ const { values } = parseArgs({
     host: { type: 'string', default: '127.0.0.1' },
     token: { type: 'string' },
     static: { type: 'string' },
+    'allow-origin': { type: 'string', multiple: true },
     bootstrap: { type: 'string', multiple: true },
     relay: { type: 'string', multiple: true },
     'peer-port': { type: 'string' },
@@ -157,6 +160,7 @@ const hub = await startHub({
   host: values.host!,
   token: values.token ?? process.env.KURAA_TOKEN,
   staticDir: values.static,
+  allowOrigins: values['allow-origin'],
   // What only flags set: more components, the sandbox, the Podman program, engines named.
   hosts: {
     run: {
@@ -185,11 +189,14 @@ else console.log(`[kuraa] workspace: ${hub.hub.root}`);
 console.log(`[kuraa] settings:  ${settingsFile}`);
 if (!hub.hub.owner) console.log(`[kuraa] ${OWNER_OFF}`);
 console.log(`[kuraa] url:       ${hub.url}`);
-console.log(`[kuraa] token:     ${hub.token}`);
-if (values.static) console.log(`[kuraa] open:      ${hub.url}/?token=${hub.token}`);
+// As a service its output is a log file, so its access code is not written there: it is in the service's own settings.
+const service = runsAsService();
+const token = service ? '<token>' : hub.token;
+console.log(`[kuraa] token:     ${service ? 'KURAA_TOKEN in the service (not shown in its log)' : token}`);
+if (values.static) console.log(`[kuraa] open:      ${hub.url}/?token=${token}`);
 if (values.dir) {
   const [w] = hub.hub.list();
-  console.log(`[kuraa] git clone: git clone http://kuraa:${hub.token}@${hub.url.replace(/^https?:\/\//, '')}/w/${w!.id}/git ${w!.id}`);
+  console.log(`[kuraa] git clone: git clone http://kuraa:${token}@${hub.url.replace(/^https?:\/\//, '')}/w/${w!.id}/git ${w!.id}`);
 }
 
 // Write and commit pending edits, then exit. A signal often arrives twice at once

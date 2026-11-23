@@ -86,6 +86,19 @@ export function imageTag(recipe: ImageRecipe): string {
   return `localhost/kuraa-env:${hash.slice(0, 16)}`;
 }
 
+/**
+ * A path to hide, as it can go in a --mount option: Podman splits those at
+ * commas and reads quotes, so a path with either (or a control character) could
+ * end the option early and mount something else, or nothing. Such a path is
+ * refused, and the run with it: what it would hide is never shown instead.
+ */
+function mountablePath(rel: string): string {
+  if (/[,"\x00-\x1f\x7f]/.test(rel)) {
+    throw new Error(`Code cannot run here while "${rel}" is in the workspace: its name has a comma, a quote or a control character, so it could not be kept out of the container. Rename it to run code.`);
+  }
+  return rel;
+}
+
 /** `podman run` arguments for a session, from the policy. */
 export function runArgs(opts: {
   name: string; tag: string; policy: Policy;
@@ -112,7 +125,7 @@ export function runArgs(opts: {
       // would put a copy of .git inside instead of hiding it.
       // A file (a document of a narrower audience, 0066): an empty one in its place, as /dev/null is.
       ...policy.hide.map((p) => {
-        const rel = p.replace(/^\/+|\/+$/g, '');
+        const rel = mountablePath(p.replace(/^\/+|\/+$/g, ''));
         return isFile(join(opts.workspace, rel))
           ? `--mount=type=bind,source=/dev/null,destination=${INSIDE.workspace}/${rel},readonly`
           : `--mount=type=tmpfs,destination=${INSIDE.workspace}/${rel},tmpfs-size=4k,tmpfs-mode=0,notmpcopyup`;

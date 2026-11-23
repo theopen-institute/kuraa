@@ -8,7 +8,7 @@ import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkArchive, compareVersions, currentVersion, installServer, installedRoot, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
+import { checkArchive, compareVersions, currentVersion, installServer, installedRoot, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
 
 const temps: string[] = [];
 const temp = () => {
@@ -118,6 +118,28 @@ describe('a released server', () => {
     const plist = readFileSync(join(home, 'Library', 'LaunchAgents', 'org.kuraa.server.plist'), 'utf8');
     expect(plist).toContain('<string>--auto-update</string>');
     expect(plist).toContain('<key>KeepAlive</key><true/>');
+  });
+
+  it('keeps the service and its log, which hold its access code, for this user alone, even written over ones there before', () => {
+    if (process.platform === 'win32') return;
+    const home = temp();
+    const root = join(home, 'server');
+    const plist = join(home, 'Library', 'LaunchAgents', 'org.kuraa.server.plist');
+    const unit = join(home, '.config', 'systemd', 'user', 'kuraa.service');
+    for (const file of [plist, unit, join(root, 'kuraa.log')]) {
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, 'before', { mode: 0o644 });
+    }
+    installServer({ here: releaseDir('0.1.0'), version: '0.1.0', root, service: true, args: [], platform: 'darwin', home, node: '/usr/bin/node' });
+    installServer({ here: releaseDir('0.1.0'), version: '0.1.0', root, service: true, args: [], platform: 'linux', home, node: '/usr/bin/node' });
+    for (const file of [plist, unit, join(root, 'kuraa.log')]) expect(statSync(file).mode & 0o077).toBe(0);
+    // The log is kept, not emptied; and the service says it is one, so the server does not print its code there.
+    expect(readFileSync(join(root, 'kuraa.log'), 'utf8')).toBe('before');
+    expect(readFileSync(plist, 'utf8')).toContain('<key>KURAA_SERVICE</key><string>1</string>');
+    expect(readFileSync(unit, 'utf8')).toContain('Environment=KURAA_SERVICE=1');
+    expect(runsAsService({ KURAA_SERVICE: '1' })).toBe(true);
+    expect(runsAsService({ XPC_SERVICE_NAME: 'org.kuraa.server' })).toBe(true);
+    expect(runsAsService({ XPC_SERVICE_NAME: '0' })).toBe(false);
   });
 
   it('restarts to update at night, between 3 and 5', () => {

@@ -2,7 +2,9 @@
 // pasted or dropped is kept in the workspace (in `images/` next to the
 // document, under a safe name not yet taken) and an image pointing at it goes
 // where it was put. Images show by loading the workspace's file from the host;
-// web addresses show as they are, and anything else (file:, javascript:) does not.
+// an image at a web address shows only once the person asks (its server would
+// otherwise learn who opened the document, and when: anyone editing it could
+// put one there to find out), and anything else (file:, javascript:) does not.
 import type { EditorContext } from '@kuraa/editor-kit';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { Plugin, PluginKey } from 'prosemirror-state';
@@ -30,10 +32,25 @@ export function imageRules(schema: Schema): InputRule[] {
   ];
 }
 
+/** Web addresses the person chose to load images from, while this page is open: shown at once from then on. */
+const loadedRemote = new Set<string>();
+
+/** Where an image's src shows it from: the workspace, a web address (asked first), data in the document itself, or nowhere. */
+export function imageSource(docPath: string | undefined, src: string): { kind: 'workspace'; path: string } | { kind: 'remote'; url: string } | { kind: 'data'; url: string } | { kind: 'none' } {
+  const safe = safeUrl(src, 'image');
+  if (!safe) return { kind: 'none' };
+  if (/^data:/i.test(safe)) return { kind: 'data', url: safe };
+  if (/^https?:/i.test(safe)) return { kind: 'remote', url: safe };
+  const local = docPath ? workspacePath(docPath, safe) : null;
+  return local ? { kind: 'workspace', path: local } : { kind: 'none' };
+}
+
 class ImageView implements NodeView {
   dom: HTMLElement;
   private readonly img: HTMLImageElement;
   private shown = '';
+  /** Asks to load an image at a web address, until it is. */
+  private ask: HTMLButtonElement | null = null;
 
   constructor(private node: PMNode, private readonly view: EditorView, private readonly getPos: () => number | undefined, private readonly ctx: EditorContext) {
     this.dom = document.createElement('span');
@@ -61,22 +78,48 @@ class ImageView implements NodeView {
     this.dom.title = [title, src, 'Double-click to describe it'].filter(Boolean).join('\n');
     if (src === this.shown) return;
     this.shown = src;
-    this.dom.classList.remove('image-missing');
+    this.dom.classList.remove('image-missing', 'image-remote');
+    this.ask?.remove();
+    this.ask = null;
     this.img.removeAttribute('src');
-    const safe = safeUrl(src, 'image');
-    if (!safe) return this.missing();
-    const local = this.ctx.path ? workspacePath(this.ctx.path, safe) : null;
-    if (!local || /^(https?:|data:)/i.test(safe)) {
-      if (/^(https?:|data:)/i.test(safe)) this.img.src = safe;
-      else this.missing();
+    const source = imageSource(this.ctx.path, src);
+    if (source.kind === 'none') return this.missing();
+    if (source.kind === 'data') {
+      this.img.src = source.url;
       return;
     }
+    if (source.kind === 'remote') return loadedRemote.has(source.url) ? void (this.img.src = source.url) : this.askToLoad(source.url);
     if (!this.ctx.files) return this.missing();
-    void this.ctx.files.imageUrl(local).then((url) => {
+    void this.ctx.files.imageUrl(source.path).then((url) => {
       if (this.shown !== src) return;
       if (url) this.img.src = url;
       else this.missing();
     });
+  }
+
+  /** In the image's place: where it is, and a button to load it. */
+  private askToLoad(url: string) {
+    this.dom.classList.add('image-remote');
+    const ask = document.createElement('button');
+    ask.type = 'button';
+    ask.className = 'image-load';
+    ask.dataset.testid = 'image-load';
+    let where = url;
+    try {
+      where = new URL(url).host;
+    } catch { /* as written */ }
+    ask.textContent = `Show image from ${where}`;
+    ask.title = `${url}\nShowing it lets that website know you opened this document.`;
+    ask.addEventListener('click', (e) => {
+      e.preventDefault();
+      loadedRemote.add(url);
+      this.dom.classList.remove('image-remote');
+      ask.remove();
+      this.ask = null;
+      if (this.shown === String(this.node.attrs.src)) this.img.src = url;
+    });
+    this.ask = ask;
+    this.dom.append(ask);
   }
 
   private missing() {
@@ -89,6 +132,11 @@ class ImageView implements NodeView {
     this.node = node;
     this.render();
     return true;
+  }
+
+  /** The button's clicks are its own, not the editor's (which would select the image). */
+  stopEvent(e: Event): boolean {
+    return this.ask !== null && e.target === this.ask;
   }
 
   ignoreMutation() { return true; }

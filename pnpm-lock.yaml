@@ -171,6 +171,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  y-prosemirror@1.3.7: 1fd3adf9b11e367a69d622f2ed647282f73d2eb5721c806eaf50b88d84979f6f
+
 importers:
 
   .:
@@ -638,7 +641,7 @@ importers:
         version: 9.0.12(yjs@13.6.33)
       y-prosemirror:
         specifier: ^1.3.7
-        version: 1.3.7(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33)
+        version: 1.3.7(patch_hash=1fd3adf9b11e367a69d622f2ed647282f73d2eb5721c806eaf50b88d84979f6f)(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33)
       y-protocols:
         specifier: ^1.0.7
         version: 1.0.7(yjs@13.6.33)
@@ -6578,7 +6581,7 @@ snapshots:
       lib0: 0.2.120
       yjs: 13.6.33
 
-  y-prosemirror@1.3.7(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33):
+  y-prosemirror@1.3.7(patch_hash=1fd3adf9b11e367a69d622f2ed647282f73d2eb5721c806eaf50b88d84979f6f)(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33):
     dependencies:
       lib0: 0.2.120
       prosemirror-model: 1.25.13

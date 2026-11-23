@@ -8,6 +8,7 @@ import { redo, undo, yCursorPlugin, ySyncPlugin, ySyncPluginKey, yUndoPlugin, yX
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import type { Command, Plugin, Transaction } from 'prosemirror-state';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
+import { applyDocument, trackAcknowledged } from './acked.js';
 
 
 /**
@@ -69,6 +70,17 @@ export interface RoomConnection {
   isRemote(tr: Transaction): boolean;
   /** Try to connect again now, rather than after the wait between attempts (Try again, while offline). */
   reconnect(): void;
+  /**
+   * Edits made here that the host has not acknowledged: the room as the host last
+   * had all of this client's edits, and as it is here. Null when the host has them all.
+   */
+  unsent(schema: Schema): { base: PMNode; ours: PMNode } | null;
+  /** Wait until the host has every edit made here (true), or `ms` pass (false). */
+  settled(ms: number): Promise<boolean>;
+  /** Make a document the room's, as a minimal difference: an edit of this client's (before the editor is made). */
+  apply(doc: PMNode): void;
+  /** Close, and forget this room's cache here (the room was replaced: nothing will open it again). */
+  forget(): void;
   destroy(): void;
 }
 
@@ -106,6 +118,10 @@ export function connectRoom(options: RoomOptions): RoomConnection {
     if (fragment.length > 0) resolveReady();
   });
 
+  let unsynced = 0;
+  const waiting = new Set<(arrived: boolean) => void>();
+  const acked = trackAcknowledged(ydoc, () => unsynced);
+
   // The host records name and email for co-author credit; they travel with the connection.
   const params = new URLSearchParams({ name: options.user.name, email: options.user.email, color: options.user.color });
   const provider = new HocuspocusProvider({
@@ -127,7 +143,11 @@ export function connectRoom(options: RoomOptions): RoomConnection {
         // Ignore malformed messages.
       }
     },
-    onUnsyncedChanges: ({ number }) => options.onUnsynced?.(number),
+    onUnsyncedChanges: ({ number }) => {
+      unsynced = number;
+      if (!number) for (const fn of [...waiting]) fn(true);
+      options.onUnsynced?.(number);
+    },
   });
 
   const awareness = provider.awareness!;
@@ -145,6 +165,18 @@ export function connectRoom(options: RoomOptions): RoomConnection {
   awareness.on('change', emitPeers);
   emitPeers();
 
+  let destroyed = false;
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    awareness.off('change', emitPeers);
+    acked.stop();
+    for (const fn of [...waiting]) fn(false);
+    provider.destroy();
+    void cache?.destroy();
+    ydoc.destroy();
+  };
+
   return {
     ready,
     plugins: () => [ySyncPlugin(fragment), yCursorPlugin(awareness, { cursorBuilder }), yUndoPlugin()],
@@ -154,11 +186,26 @@ export function connectRoom(options: RoomOptions): RoomConnection {
     setUser,
     reconnect: () => void provider.configuration.websocketProvider.connect(),
     snapshot: (schema) => yXmlFragmentToProseMirrorRootNode(fragment, schema),
-    destroy: () => {
-      awareness.off('change', emitPeers);
-      provider.destroy();
-      void cache?.destroy();
-      ydoc.destroy();
+    unsent: (schema) => acked.unsent(schema),
+    settled: (ms) => new Promise<boolean>((resolve) => {
+      if (!unsynced) return resolve(true);
+      const done = (arrived: boolean) => {
+        clearTimeout(timer);
+        waiting.delete(done);
+        resolve(arrived);
+      };
+      const timer = setTimeout(() => done(false), ms);
+      waiting.add(done);
+    }),
+    apply: (doc) => applyDocument(ydoc, doc),
+    forget: () => {
+      destroy();
+      try {
+        indexedDB.deleteDatabase(options.room);
+      } catch {
+        // Storage may be unavailable; nothing was kept then.
+      }
     },
+    destroy,
   };
 }

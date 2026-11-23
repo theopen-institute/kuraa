@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Mount, PackageContext, PackageInfo, PackageManager, PackageResult } from '@kuraa/run-kit';
+import { readWorkspaceFile, readWorkspaceFileSync, writeWorkspaceFile, type Mount, type PackageContext, type PackageInfo, type PackageManager, type PackageResult } from '@kuraa/run-kit';
 import { R_INSTALLER } from './install-script.js';
 import { imageRecipe } from './recipe.js';
 import { REPLY_PREFIX } from './driver.js';
@@ -42,7 +42,8 @@ const empty = (): Manifest => ({ requested: [], packages: {}, environment: {}, s
 export function readManifest(workspace: string): Manifest {
   let m: Record<string, unknown>;
   try {
-    m = JSON.parse(readFileSync(join(workspace, MANIFEST), 'utf8')) as Record<string, unknown>;
+    // Never through a link (0037): a manifest pointing elsewhere is no manifest.
+    m = JSON.parse(readWorkspaceFileSync(workspace, MANIFEST).toString('utf8')) as Record<string, unknown>;
   } catch {
     return empty();
   }
@@ -197,12 +198,11 @@ async function runInstaller(ctx: PackageContext, request: { refs: string[]; envi
 }
 
 async function saveManifest(ctx: PackageContext, m: Manifest, message: string): Promise<void> {
-  const file = join(ctx.workspace, MANIFEST);
   const next = formatManifest(m);
-  const now = await readFile(file, 'utf8').catch(() => '');
+  const now = await readWorkspaceFile(ctx.workspace, MANIFEST).then((b) => b.toString('utf8'), () => '');
   if (now === next) return;
-  await mkdir(join(ctx.workspace, '.kuraa'), { recursive: true });
-  await writeFile(file, next);
+  // Never through a link (0037).
+  await writeWorkspaceFile(ctx.workspace, MANIFEST, next);
   await ctx.commit([MANIFEST], message);
 }
 

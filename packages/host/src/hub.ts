@@ -39,6 +39,7 @@ import { Verifier, type VerifierOptions } from './verifier.js';
 import { renameOver, reservedName } from './files.js';
 import { serialQueue } from './serial.js';
 import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from './http.js';
+import { corsHeaders, gateFor, hostAllowed, isLoopback, refuseHost, upgradeAllowed, type RequestGate } from './origins.js';
 import { cleanName, initWorkspace, inspectFolder, readWorkspaceName } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
 import type { JoinProgress } from './peers/join.js';
@@ -77,8 +78,10 @@ export interface HubOptions {
   port?: number;
   /** The built web client, served at `/`. */
   staticDir?: string;
+  /** Pages at other origins that may use the hub (--allow-origin; origins.ts). */
+  allowOrigins?: string[];
   /** For every workspace's host: formats, running code, timings, identity, logging. */
-  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'knownKeys' | 'identityLog' | 'run'> & {
+  hosts?: Omit<HostOptions, 'dir' | 'token' | 'host' | 'port' | 'staticDir' | 'label' | 'peers' | 'init' | 'invites' | 'managePerson' | 'manageOnline' | 'personChanged' | 'knownKeys' | 'identityLog' | 'run' | 'requests'> & {
     /** Running code. With settings, only what flags set: engines here (--engine) win over the setting. */
     run?: Partial<RunOptions>;
   };
@@ -181,6 +184,8 @@ export class Hub {
   /** Joins under way, by the id the app gave to ask how each is going. */
   private readonly joins = new Map<string, JoinStatus>();
   address: AddressInfo | null = null;
+  /** Who may talk to it from a web page (origins.ts): its workspaces' hosts let in the same. */
+  private readonly gate: RequestGate;
 
   constructor(readonly o: HubOptions) {
     if (o.root && o.folder) throw new Error('A hub needs a folder of workspaces (root) or one folder (folder), not both');
@@ -188,6 +193,7 @@ export class Hub {
     this.rootDir = this.rootFor();
     this.registry = o.registry ?? join(this.rootDir, '.kuraa-workspaces.json');
     this.token = o.token ?? randomBytes(18).toString('base64url');
+    this.gate = gateFor(o.host ?? '127.0.0.1', o.allowOrigins);
   }
 
   /** The hub's folder: the one folder, or where new workspaces go (--workspaces, else the setting, else the default). */
@@ -368,7 +374,7 @@ export class Hub {
       const peerOptions = this.peerOptions();
       const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
-        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, peers, log: (m) => this.log(`[${e.id}] ${m}`),
+        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, requests: this.gate, peers, log: (m) => this.log(`[${e.id}] ${m}`),
         // The list says what the workspace calls itself (0061), and keeps it for when it is not open.
         onName: (name) => this.named(e, name),
         // People may invite others to a hub's workspaces from the app (every member has the same say, 0038);
@@ -644,11 +650,17 @@ export class Hub {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const w = /^\/w\/([a-z0-9-]+)(\/.*)?$/.exec(url.pathname);
+    if (!hostAllowed(req, this.gate)) return refuseHost(res);
     try {
       // A verifier's routes (/verify, /verify/…): public, each guarded by what it asks for (verifier.ts).
       if (this.verifier && (await this.verifier.handle(req, res, url))) return;
       if (w) return this.proxy(req, res, w[1]!, `${w[2] ?? '/'}${url.search}`);
       if (url.pathname.startsWith('/hub/api/')) {
+        corsHeaders(req, res, this.gate);
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204);
+          return void res.end();
+        }
         if (!sameToken(tokenOf(req), this.token)) return send(res, 401, { error: 'Unauthorized' });
         return await this.api(req, res, url);
       }
@@ -722,7 +734,7 @@ export class Hub {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const w = /^\/w\/([a-z0-9-]+)(\/.*)$/.exec(url.pathname);
     const h = w && this.hosts.get(w[1]!);
-    if (!h) return void socket.destroy();
+    if (!h || !upgradeAllowed(req, this.gate)) return void socket.destroy();
     const target = new URL(h.url);
     const upstream = connect(Number(target.port), target.hostname, () => {
       const lines = [`${req.method} ${w[2]}${url.search} HTTP/${req.httpVersion}`];
@@ -764,13 +776,9 @@ export interface RunningHub {
   close(): Promise<void>;
 }
 
-/** Start a hub on a folder of workspaces. */
-/** Whether an address to listen on is this computer alone. */
-export function isLoopback(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
-  return h === 'localhost' || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h) || /^::ffff:127(\.\d{1,3}){3}$/.test(h);
-}
+export { isLoopback };
 
+/** Start a hub on a folder of workspaces. */
 export async function startHub(options: HubOptions): Promise<RunningHub> {
   const hub = new Hub(options);
   return { hub, url: localUrl(await hub.start()), token: hub.token, close: () => hub.close() };

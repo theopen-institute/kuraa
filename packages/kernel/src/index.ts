@@ -196,7 +196,11 @@ export class HookBus {
   }
 }
 
-/** A stable short hash (FNV-1a, 32 bit) usable in any runtime. */
+/**
+ * A stable short hash (FNV-1a, 32 bit) usable in any runtime: to name a chunk's
+ * code. Two texts may share one, so it never decides whether a file changed (the
+ * host compares git blob ids for that).
+ */
 export function hashText(text: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {

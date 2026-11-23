@@ -26,6 +26,7 @@
 //
 // The git config this layer has always used (remotes, kuraa.removed,
 // kuraa.revokedlinks) stays: it is what the records taken say, applied.
+import { createHash } from 'node:crypto';
 import crypto from 'hypercore-crypto';
 import { eventHash, eventIdentity, readEvent, type KeyEvent } from './kel.js';
 import { entrySigned, readOp, type PolicyEntry, type PolicyOp } from './policy.js';
@@ -110,6 +111,31 @@ export function signRecord(r: Omit<MemberRecord, 'v' | 'sig' | 'by' | 'at'> & { 
   return { ...body, sig: crypto.sign(message(body), key.secretKey).toString('hex') };
 }
 
+/**
+ * What a record says, as a key two devices compare (0071): what is kept once,
+ * whoever passed it on (a person's event, a policy operation, an attestation),
+ * by that; anything else by its signature. Two devices holding the same event
+ * passed on by different devices hold the same records, as far as asking for
+ * what is missing goes (node.ts, digestOf), and do not ask each other for ever.
+ */
+export function recordKey(r: MemberRecord): string {
+  if (r.kind === 'key-event' && r.event) return `e:${eventHash(r.event)}`;
+  if (r.kind === 'policy') return `p:${r.subject}`;
+  if (r.kind === 'attest' && r.attestation) return `a:${r.attestation.sig}`;
+  return `s:${r.sig}`;
+}
+
+/** A record's key, short (node.ts, want): 64 bits of its hash. */
+export const shortKey = (r: MemberRecord) => createHash('sha256').update(recordKey(r)).digest('hex').slice(0, 16);
+
+/**
+ * How far ahead of this device's clock a record may say it was made (0071):
+ * further, and it waits until it is no longer ahead. The latest of some records
+ * counts (the secret, which key a device signs with, a person's name), so one
+ * dated years ahead would count for good.
+ */
+export const FUTURE_MS = 10 * 60_000;
+
 /** A record from another device, checked for shape and signature; null if it is not one. */
 export function readRecord(v: unknown): MemberRecord | null {
   if (!v || typeof v !== 'object') return null;
@@ -188,6 +214,14 @@ export interface Standing {
   /** Devices whose person is an admin; and those whose person makes and unmakes admins (the owner): only they remove an admin's computer (0070). */
   adminDevices?: Set<string>;
   assigners?: Set<string>;
+  /**
+   * Whether a device is a person's that the policy has in the workspace (or in
+   * a group of it), as the records taken and those being taken say (0071): a
+   * device paired by a member who is not an admin counts once its person is in.
+   */
+  inWorkspace?: (device: string) => boolean;
+  /** Now, as this device's clock says (ms). */
+  now?: number;
 }
 
 /** Records only an admin's device may make (0066), or, for a device, one of the same person's (0068): removing a device. */
@@ -203,6 +237,13 @@ export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' 
   if (r.by === s.self) return 'take';
   if (s.removed.has(r.by)) return 'refuse';
   if (!s.members.has(r.by)) return 'wait';
+  if (r.at > (s.now ?? Date.now()) + FUTURE_MS) return 'wait';
+  // A device paired (0071): by an admin's device; by anyone else's, once the person it is has come in by an
+  // admin's grant (an invite link's, said in the policy), so no member pairs devices the admins did not let in.
+  if (r.kind === 'add' && s.managers && !s.managers.has(r.by) && !s.inWorkspace?.(r.subject)) return 'wait';
+  // A revocation's cutoff (the commits that still count) is said by a device of the person revoking (0071): no
+  // one else may wrap their signature with commits of their own choosing.
+  if (r.kind === 'revoke-key' && s.persons?.get(r.by) !== r.person) return 'wait';
   // Not (yet) an admin's, nor the same person's as the device it removes: it may be, once the policy or vouch that says so is taken.
   if (forAdmins(r.kind) && s.managers) {
     const whose = s.persons?.get(r.by);

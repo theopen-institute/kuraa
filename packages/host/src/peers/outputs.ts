@@ -156,6 +156,10 @@ export interface SharedOutputsDeps {
 
 export class SharedOutputs {
   private readonly devices = new Map<string, DeviceOutputs>();
+  /** Each member's outputs commit last judged and not taken for good (older, or not signed by it). */
+  private readonly passed = new Map<string, string>();
+  /** Each member's outputs commit fetched but not taken (it could not be read, or its ref moved meanwhile): fetched and judged again (lacks, 0071). */
+  private readonly failed = new Map<string, string>();
   private readonly live = new Map<string, Live>();
   private readonly prepared = new Map<string, Prepared>();
   private chain: Promise<unknown> = Promise.resolve();
@@ -288,7 +292,9 @@ export class SharedOutputs {
     for (const id of this.prepared.keys()) if (!ids.has(id)) this.prepared.delete(id);
     if (hidden.length) files.push({ path: 'hidden.json', content: Buffer.from(JSON.stringify({ ids: hidden })) });
 
-    const made = await this.commit(files);
+    // Dated after the last this device published, whatever its clock says now (0071): the others take the newest by date.
+    const last = before ? (await this.readCommit(before))?.at ?? 0 : 0;
+    const made = await this.commit(files, Math.max(Math.floor(Date.now() / 1000), last + 1));
     if (before && (await git.out(['rev-parse', `${made}^{tree}`])) === (await git.out(['rev-parse', `${before}^{tree}`]))) return null;
     const raw = (await git.run(['cat-file', 'commit', made])).bytes;
     const signed = await git.out(['hash-object', '-t', 'commit', '-w', '--stdin'], { input: signCommitObject(raw, await this.d.signing()) });
@@ -300,10 +306,10 @@ export class SharedOutputs {
   }
 
   /** A commit of these files and nothing else, with no parent (git fast-import: one process, however many files). */
-  private async commit(files: { path: string; content?: Buffer; oid?: string }[]): Promise<string> {
+  private async commit(files: { path: string; content?: Buffer; oid?: string }[], at = Math.floor(Date.now() / 1000)): Promise<string> {
     const tmp = `refs/kuraa/tmp/outputs-${process.pid}-${randomBytes(4).toString('hex')}`;
     const message = Buffer.from('Run outputs\n');
-    const parts: Buffer[] = [Buffer.from(`commit ${tmp}\ncommitter kuraa <> ${Math.floor(Date.now() / 1000)} +0000\ndata ${message.length}\n`), message];
+    const parts: Buffer[] = [Buffer.from(`commit ${tmp}\ncommitter kuraa <> ${at} +0000\ndata ${message.length}\n`), message];
     for (const f of files) {
       if (f.oid) parts.push(Buffer.from(`M 100644 ${f.oid} ${f.path}\n`));
       else parts.push(Buffer.from(`M 100644 inline ${f.path}\ndata ${f.content!.length}\n`), f.content!, Buffer.from('\n'));
@@ -361,6 +367,8 @@ export class SharedOutputs {
       const run = readRun(meta.run, new Map([...plots.keys()].map((k) => [k, k])), LIVE_STATES);
       if (!run) return;
       if (PENDING.has(run.state)) {
+        // As many under way as are kept finished, at the most (0071): a device cannot grow this without end.
+        if (!live.pending.has(run.id) && live.pending.size >= MAX_LIVE_RUNS) return;
         live.pending.set(run.id, run);
         this.d.changed(run.path, [{ ...run, outputs: [], device: name }], []);
         return;
@@ -444,9 +452,11 @@ export class SharedOutputs {
   async lacks(theirs: Record<string, string> | null): Promise<boolean> {
     if (!theirs) return false;
     const members = new Set((await this.d.members()).map((m) => m.key));
-    const unknown = Object.entries(theirs).filter(([key, oid]) => key !== this.d.myKey && members.has(key) && this.devices.get(key)?.oid !== oid).map(([, oid]) => oid);
+    const unknown = Object.entries(theirs).filter(([key, oid]) => key !== this.d.myKey && members.has(key) && this.devices.get(key)?.oid !== oid && this.passed.get(key) !== oid);
     if (!unknown.length) return false;
-    const r = await this.d.git.run(['cat-file', '--batch-check'], { input: `${unknown.join('\n')}\n`, allowFail: true });
+    // One fetched before but not taken then (it could not be read, say) is fetched and judged again (0071).
+    if (unknown.some(([key, oid]) => this.failed.get(key) === oid)) return true;
+    const r = await this.d.git.run(['cat-file', '--batch-check'], { input: `${unknown.map(([, oid]) => oid).join('\n')}\n`, allowFail: true });
     return r.stdout.split('\n').some((l) => l.endsWith(' missing'));
   }
 
@@ -478,17 +488,28 @@ export class SharedOutputs {
       if (!commit) continue;
       const signer = await this.d.signerOf(key);
       if (signer ? commit.signer !== signer : key !== from) {
-        this.d.log(`outputs: ${remote} passed on outputs of ${members.get(key)} not signed by it; not taken`);
+        if (this.passed.get(key) !== oid) this.d.log(`outputs: ${remote} passed on outputs of ${members.get(key)} not signed by it; not taken`);
+        this.passed.set(key, oid);
         continue;
       }
-      if (now && (commit.at < now.at || (commit.at === now.at && oid < now.oid))) continue;
+      if (now && (commit.at < now.at || (commit.at === now.at && oid < now.oid))) {
+        this.passed.set(key, oid);
+        continue;
+      }
       const read = await this.read(key, oid, commit.at, now).catch((e: Error) => {
         this.d.log(`outputs: could not read ${members.get(key)}’s: ${e.message}`);
         return null;
       });
-      if (!read) continue;
+      if (!read) {
+        this.failed.set(key, oid);
+        continue;
+      }
       const moved = await git.run(['update-ref', `${OUTPUTS}${key}`, oid, now?.oid ?? ''], { allowFail: true });
-      if (moved.code !== 0) continue;
+      if (moved.code !== 0) {
+        this.failed.set(key, oid);
+        continue;
+      }
+      this.failed.delete(key);
       this.devices.set(key, read);
       this.reconcile(key, read);
       changed = true;

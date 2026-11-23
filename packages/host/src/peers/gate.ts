@@ -76,14 +76,34 @@ export function trailers(message: string, key: string): string[] {
   return out;
 }
 
-/** Judge the commits in `theirs` that `ours` does not hold. */
-export async function gate(git: Git, ours: string, theirs: string, ctx: GateContext): Promise<GateResult> {
+/** The policy operations the commits in `theirs` that `ours` does not hold name and this device lacks (0071): cheap, to know before anything else is done. */
+export async function policyWaits(git: Git, ours: string | null, theirs: string, known: Set<string>): Promise<string[]> {
+  const log = (await git.run(['log', '--format=%B%x1e', ...(ours ? [`${ours}..${theirs}`] : [theirs])], { allowFail: true })).stdout;
+  const out = new Set<string>();
+  for (const named of trailers(log, POLICY_TRAILER)) for (const h of named.split(/\s+/)) if (/^[0-9a-f]{64}$/.test(h) && !known.has(h)) out.add(h);
+  return [...out].sort();
+}
+
+/** Judge the commits in `theirs` that `ours` does not hold (null: none, a history arriving for the first time). */
+export async function gate(git: Git, ours: string | null, theirs: string, ctx: GateContext): Promise<GateResult> {
   const none: GateResult = { keeps: new Map(), refused: [], waitFor: [] };
-  const list = (await git.run(['rev-list', '--topo-order', '--reverse', '--parents', `${ours}..${theirs}`], { allowFail: true })).stdout.split('\n').filter(Boolean).map((l) => l.split(' '));
+  const range = ours ? [`${ours}..${theirs}`] : [theirs];
+  // The policy operations they name, all at once first (0071): if one has not come, nothing else is judged yet.
+  const messages = new Map<string, string>();
+  const log = (await git.run(['log', '--format=%H%x00%B%x1e', ...range], { allowFail: true })).stdout;
+  for (const entry of log.split('\x1e')) {
+    const at = entry.indexOf('\0');
+    if (at < 0) continue;
+    messages.set(entry.slice(0, at).trim(), entry.slice(at + 1));
+  }
+  const waitFor = new Set<string>();
+  for (const message of messages.values()) for (const named of trailers(message, POLICY_TRAILER)) for (const h of named.split(/\s+/)) if (/^[0-9a-f]{64}$/.test(h) && !ctx.known.has(h)) waitFor.add(h);
+  if (waitFor.size) return { ...none, waitFor: [...waitFor].sort() };
+  const list = (await git.run(['rev-list', '--topo-order', '--reverse', '--parents', ...range], { allowFail: true })).stdout.split('\n').filter(Boolean).map((l) => l.split(' '));
   if (!list.length) return none;
   const cutKeys = ctx.cutKeys ?? new Map<string, { person: string; heads: string[] }>();
   const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0;
-  const waitFor = new Set<string>();
+  if (!judging) return none;
   // Last refused change of each file (null once someone who may change it has), and the commit that proposes its text.
   const tainted = new Map<string, { commit: string; by: string | null } | null>();
   const among = async (c: string, heads: string[]) => {
@@ -91,9 +111,7 @@ export async function gate(git: Git, ours: string, theirs: string, ctx: GateCont
     return false;
   };
   for (const [c, ...parents] of list as [string, ...string[]][]) {
-    const message = await git.out(['show', '-s', '--format=%B', c]);
-    for (const named of trailers(message, POLICY_TRAILER)) for (const h of named.split(/\s+/)) if (/^[0-9a-f]{64}$/.test(h) && !ctx.known.has(h)) waitFor.add(h);
-    if (!judging) continue;
+    const message = messages.get(c) ?? await git.out(['show', '-s', '--format=%B', c]);
     const signer = await commitSigner(git, c);
     let by = signer ? ctx.personOf(signer) : null;
     // Past a cutoff: refused, whatever the rules.
@@ -116,12 +134,11 @@ export async function gate(git: Git, ours: string, theirs: string, ctx: GateCont
       else tainted.set(path, { commit: c, by });
     }
   }
-  if (waitFor.size) return { ...none, waitFor: [...waitFor].sort() };
   const keeps = new Map<string, string | null>();
   const refused: GateResult['refused'] = [];
   for (const [path, t] of [...tainted].sort(([a], [b]) => (a < b ? -1 : 1))) {
     if (!t) continue;
-    const here = (await git.run(['ls-tree', '-z', ours, '--', path])).stdout.split('\0').filter(Boolean)[0];
+    const here = ours ? (await git.run(['ls-tree', '-z', ours, '--', path])).stdout.split('\0').filter(Boolean)[0] : undefined;
     keeps.set(path, here ? here.split(/\s+/)[2]! : null);
     if (t.commit) refused.push({ commit: t.commit, path, by: t.by ? ctx.nameOf(t.by) ?? null : null });
   }

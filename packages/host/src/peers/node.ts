@@ -24,7 +24,7 @@ import Hyperswarm, { type Discovery, type SwarmConnection } from 'hyperswarm';
 import { gitEnv, gitPath, spawnGit, type Git } from '../git.js';
 import { GitBridge } from './bridge.js';
 import { useDht } from './dht.js';
-import { Relay, isRelayKey } from './relay.js';
+import { isRelayKey, useRelay, type Relay } from './relay.js';
 import { Identity, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, topicsFor, type Member, type WorkspaceIdentity } from './identity.js';
 import { joinLan } from './lan.js';
 import NoiseSecretStream from '@hyperswarm/secret-stream';
@@ -32,7 +32,7 @@ import type { Socket } from 'node:net';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { dialTcp, listenTcp, parseAddress } from './tcp.js';
-import { revokeKeyMessage, traced } from './records.js';
+import { recordKey, revokeKeyMessage, shortKey, traced, type MemberRecord } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
 import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
@@ -115,9 +115,44 @@ const DIAL_MS = 60_000;
  * lookup finds every device of the workspace that is online, however many are
  * missing. Each waits up to a quarter more at random, so two devices that lost
  * each other at once do not both look, and dial, at the same moment. After the
- * last, Hyperswarm's own lookup every ten minutes goes on.
+ * last, the last goes on (0071), for as long as anyone is missing: Hyperswarm's
+ * own lookup every ten minutes does nothing for a device that reaches its
+ * members only over TCP, nor for one whose members' topics changed meanwhile.
  */
 const LOOKUPS_MS = [15_000, 60_000, 120_000, 240_000, 480_000];
+
+/** How long a device that connected may take to be let in (its hello, an invite link) before its link is closed (0071). */
+const HELLO_MS = 60_000;
+
+/** On the local network, how long the device with the higher key waits for the lower to connect before it does (0071: the lower one's firewall may refuse). */
+const LAN_FALLBACK_MS = 5_000;
+
+/** The most devices of another kuraa version remembered (versions), so one that keeps connecting cannot grow it. */
+const MAX_VERSIONS = 256;
+
+/**
+ * What `git upload-pack` serving a device runs with (0071): the refs it may not
+ * fetch hidden, and fetching by id refused however git is configured here. It
+ * runs without GIT_PROTOCOL (uploadPackEnv), so it speaks protocol v0 whatever
+ * the device asks for: in v2, upload-pack takes a want for any object it holds,
+ * shown or not, so a device that learned a hidden commit's id could fetch it;
+ * in v0 it takes wants only for what it showed.
+ */
+export function uploadPackArgs(hidden: string[]): string[] {
+  return [
+    ...hidden.flatMap((h) => ['-c', `transfer.hideRefs=${h}`]),
+    '-c', 'uploadpack.allowAnySHA1InWant=false',
+    '-c', 'uploadpack.allowReachableSHA1InWant=false',
+    '-c', 'uploadpack.allowTipSHA1InWant=false',
+  ];
+}
+
+/** The environment `git upload-pack` serving a device runs in: never with a GIT_PROTOCOL, the device's or this process's (uploadPackArgs). */
+export function uploadPackEnv(): NodeJS.ProcessEnv {
+  const env = gitEnv({});
+  for (const k of Object.keys(env)) if (k.toUpperCase() === 'GIT_PROTOCOL') delete env[k];
+  return env;
+}
 
 /**
  * News for whoever runs this process (the desktop app updates itself on it):
@@ -126,10 +161,14 @@ const LOOKUPS_MS = [15_000, 60_000, 120_000, 240_000, 480_000];
  */
 export const versionNews = new EventEmitter();
 
-/** Which records a device holds, as one hash: the same records, the same hash, in any order. */
-export function digestOf(records: { sig: string }[]): string {
-  return createHash('sha256').update(records.map((r) => r.sig).sort().join('\n')).digest('hex');
+/** Which records a device holds, as one hash: the same records, the same hash, in any order (by what each says, recordKey: 0071). */
+export function digestOf(records: MemberRecord[]): string {
+  return createHash('sha256').update([...new Set(records.map(recordKey))].sort().join('\n')).digest('hex');
 }
+
+/** The most records taken from one message, and the most said to be held in a want (0071): a member cannot make every device do unbounded work. */
+const MAX_RECORDS = 5000;
+const MAX_HAVE = 100_000;
 
 /**
  * The records to give a device: all, but the workspace's secret never to a
@@ -146,8 +185,6 @@ function xor(a: Buffer, b: Buffer): Buffer {
   return out;
 }
 
-/** A record named by the start of its signature, to say which records a device has. */
-const shortSig = (sig: string) => sig.slice(0, 16);
 
 /** How long a connection of this layer's own (local network, TCP, tunnel) may stay quiet before it counts as gone: three keepalives. */
 const QUIET_MS = 15_000;
@@ -230,8 +267,13 @@ export class PeerNode {
   private presenceTimer: NodeJS.Timeout | undefined;
   /** Devices met that speak another protocol (PROTOCOL), and which: they do not sync until updated. */
   readonly versions = new Map<string, number>();
-  /** The relay this device offers the other members (relay.ts), if any. */
+  /** The relay this device offers the other members (relay.ts): the process's, shared by its workspaces. */
   private relay: Relay | null = null;
+  private releaseRelay: (() => Promise<void>) | null = null;
+  /** On the local network: devices with a lower key heard of, to connect to if they do not (lanFound). */
+  private readonly lanLater = new Map<string, NodeJS.Timeout>();
+  /** Tunnels between two computers' devices over a link they have for another workspace (also): kept, as a direct link is (keepsOwn). */
+  private readonly alsoStreams = new WeakSet<object>();
   /** The local network (lan.ts): how this device says where it is, and its codes. */
   private lan: { say(ask: boolean): void; leave(): void } | null = null;
   private lanKeys: Buffer[] = [];
@@ -305,13 +347,18 @@ export class PeerNode {
     await this.refresh();
     await this.bridge.start();
     this.hints = await this.readHints();
+    if (this.closing) return;
     localNodes(this.computer).set(this.myKey, this);
     // The process's DHT node, shared with every other workspace's swarm (dht.ts); this workspace's own key.
-    const dht = await useDht(this.o.bootstrap?.map(bootstrapNode), { port: this.o.dhtPort, ephemeral: this.o.serveDht === false ? true : undefined });
+    const dhtOptions = { port: this.o.dhtPort, ephemeral: this.o.serveDht === false ? true : undefined };
+    const dht = await useDht(this.o.bootstrap?.map(bootstrapNode), dhtOptions);
+    // Closed meanwhile: close() found no swarm to destroy, so this lets go of the node.
+    if (this.closing) return void (await dht.destroy());
     this.swarm = new Hyperswarm({
       keyPair: this.key,
       dht,
       // A device connected on the local network or over TCP is not connected to again through the DHT.
+      // Hyperswarm bans whomever this refuses, for good: a device let go of when its link closes (unban).
       firewall: (remote) => {
         const key = remote.toString('hex');
         return this.refuse(key) || this.keepsOwn(key) || this.o.direct?.(key) === false;
@@ -319,12 +366,18 @@ export class PeerNode {
       relayThrough: (force) => this.relayFor(force),
     });
     if (this.o.offerRelay !== false) {
-      this.relay = new Relay(dht);
-      await this.relay.start().catch((e: Error) => {
-        this.relay = null;
-        this.o.log(`peers: no relay offered: ${e.message}`);
-      });
+      try {
+        const r = await useRelay(this.o.bootstrap?.map(bootstrapNode), dhtOptions);
+        if (this.closing) await r.release();
+        else {
+          this.relay = r.relay;
+          this.releaseRelay = r.release;
+        }
+      } catch (e) {
+        this.o.log(`peers: no relay offered: ${(e as Error).message}`);
+      }
     }
+    if (this.closing) return;
     this.swarm.on('connection', (conn) => this.connected(conn));
     // Just started: this device dials the others, found by the topic and directly (the others do not
     // know it is back). Hyperswarm looks the topic up again when the network changes; so does this, on its schedule.
@@ -332,6 +385,7 @@ export class PeerNode {
     for (const k of joinAs?.dial ?? []) this.dial(k);
     await this.retopic();
     if (this.o.lan !== false || this.o.peerPort) await this.startTcp();
+    if (this.closing) return;
     // Servers this device knows take TCP: for when the DHT cannot be reached (and joining, the link's).
     await this.dialKnown();
     for (const hint of joinAs?.tcp ?? []) {
@@ -395,23 +449,27 @@ export class PeerNode {
 
   private nextLookup(): void {
     const delays = this.o.lookupsMs ?? LOOKUPS_MS;
-    if (this.closing || this.lookupStep >= delays.length) return;
-    const ms = delays[this.lookupStep++]!;
+    if (this.closing || !delays.length) return;
+    // After the last, the last again: lookup stops the schedule once no one is missing.
+    const ms = delays[Math.min(this.lookupStep++, delays.length - 1)]!;
     this.lookupTimer = setTimeout(() => void this.lookup().catch((e: Error) => this.o.log(`peers: looking for the workspace's devices: ${e.message}`)), ms + Math.random() * (ms / 4));
     this.lookupTimer.unref();
   }
 
   /**
    * One lookup of the workspace's topics (Hyperswarm dials whom it finds), while
-   * anyone is missing; the schedule stops once no one is. With no member here at
-   * all, the members are dialled too: if the workspace's secret was made anew
-   * while this device was away, no one is on the topics it knows.
+   * anyone is missing; the schedule stops once no one is. The members missing
+   * are dialled too, by key (0071): if the workspace's secret was made anew while
+   * some were away, those and the others are on different topics, and only
+   * dialling brings them together again. Members reached only through another
+   * device are tunnelled to again (reach).
    */
   private async lookup(): Promise<void> {
     if (this.closing || !(await this.missing())) return;
-    if (!this.connectedHere().length) for (const m of await this.identity.members()) this.dial(m.key);
+    for (const m of await this.identity.members()) if (!this.links.get(m.key)?.accepted) this.dial(m.key);
     await this.dialKnown();
     this.lan?.say(true);
+    await this.reach();
     for (const [hex, { d, client }] of [...this.discoveries]) {
       if (!client) continue;
       // A topic Hyperswarm let go of (it does, when its DHT node cannot announce): joined again.
@@ -441,11 +499,18 @@ export class PeerNode {
     this.lan.say(true);
   }
 
-  /** Whether a device has a link here that is not to be replaced by one through the DHT: on the local network, or over TCP. */
+  /** Whether a device has a link here that is not to be replaced by one through the DHT: on the local network, over TCP, or through a link between the two computers (also). */
   private keepsOwn(key: string): boolean {
     const link = this.links.get(key);
-    const kind = link && !link.closed ? this.kinds.get(link.conn) : undefined;
-    return kind === 'lan' || kind === 'tcp';
+    if (!link || link.closed) return false;
+    const kind = this.kinds.get(link.conn);
+    return kind === 'lan' || kind === 'tcp' || this.alsoStreams.has(link.conn);
+  }
+
+  /** Let Hyperswarm connect to a device again: it bans whomever the firewall refused while a link of this layer's own was open (0071). */
+  private unban(key: string): void {
+    if (this.refuse(key)) return;
+    (this.swarm as unknown as { peers?: Map<string, { ban(v: boolean): void }> } | null)?.peers?.get(key)?.ban(false);
   }
 
   /** A link to the device, not closed. */
@@ -456,8 +521,16 @@ export class PeerNode {
 
   /** A device of the workspace said where it is on the local network: connected to, if this one has the lower key and is not connected to it. */
   private lanFound(key: string, host: string, port: number): void {
-    if (this.myKey > key) return;
-    this.dialTcpTo(key, `${host.includes(':') ? `[${host}]` : host}:${port}`, 'lan');
+    const address = `${host.includes(':') ? `[${host}]` : host}:${port}`;
+    if (this.myKey < key) return this.dialTcpTo(key, address, 'lan');
+    // The other connects; if it has not in a few seconds (its firewall, say, refuses what it sends), this one does.
+    if (this.lanLater.has(key) || this.live(key)) return;
+    const t = setTimeout(() => {
+      this.lanLater.delete(key);
+      if (!this.live(key)) this.dialTcpTo(key, address, 'lan');
+    }, LAN_FALLBACK_MS);
+    t.unref();
+    this.lanLater.set(key, t);
   }
 
   /** Connect to a device over TCP (on the local network, or to a server), unless connected or connecting to it. */
@@ -483,7 +556,7 @@ export class PeerNode {
    * other end has proved its key (`expect`, if known), a link like any other,
    * unless there is one.
    */
-  private ownOpened(stream: NoiseSecretStream, kind: Exclude<Via, 'internet'>, done: () => void, expect?: string): void {
+  private ownOpened(stream: NoiseSecretStream, kind: Exclude<Via, 'internet'>, done: () => void, expect?: string, also = false): void {
     stream.on('error', () => undefined);
     // Gone quiet (both ends send keepalives every 5 s): the other end is asleep or off the network, and the
     // link closes, rather than seeming open until TCP gives up many minutes later. The handshake too.
@@ -491,14 +564,29 @@ export class PeerNode {
     void stream.opened.then((ok) => {
       done();
       const key = stream.remotePublicKey?.toString('hex');
-      if (!ok || !key || (expect && key !== expect) || this.closing || this.refuse(key) || this.live(key) || (kind !== 'tunnel' && this.o.direct?.(key) === false)) return void stream.destroy();
+      if (!ok || !key || (expect && key !== expect) || this.closing || this.refuse(key) || (this.live(key) && !this.replaces(key, stream, kind)) || (kind !== 'tunnel' && this.o.direct?.(key) === false)) return void stream.destroy();
       (stream as unknown as { rawStream?: { setTimeout?(ms: number): void } }).rawStream?.setTimeout?.(0);
       this.kinds.set(stream, kind);
+      if (also) this.alsoStreams.add(stream);
       this.connected(stream as unknown as SwarmConnection);
     }, () => {
       done();
       stream.destroy();
     });
+  }
+
+  /**
+   * Whether a connection of this layer's own takes the place of the link a
+   * device has (0071): when both dialled each other at once over the local
+   * network or TCP, each end keeps the same one, the one the lower key started
+   * (as Hyperswarm does), rather than each its own, which closes both.
+   */
+  private replaces(key: string, stream: NoiseSecretStream, kind: Exclude<Via, 'internet'>): boolean {
+    const had = this.links.get(key)!.conn as unknown as { isInitiator?: boolean };
+    const hadKind = this.kinds.get(had);
+    if (kind === 'tunnel' || !hadKind || hadKind === 'tunnel') return false;
+    const lowerStarted = (c: { isInitiator?: boolean }) => !!c.isInitiator === this.myKey < key;
+    return lowerStarted(stream as unknown as { isInitiator?: boolean }) && !lowerStarted(had);
   }
 
   // Tunnels: another device's connection, carried on a link (link.ts) -----------
@@ -509,12 +597,12 @@ export class PeerNode {
    * end, takes them itself. End to end, the two run Noise inside: `via` reads
    * nothing. A connection made directly later takes its place (connected).
    */
-  tunnelTo(key: string, via: PeerLink): void {
+  tunnelTo(key: string, via: PeerLink, also = false): void {
     if (this.closing || key === this.myKey || this.removedKeys.has(key) || this.live(key) || this.ownDialling.has(key) || via.closed) return;
     this.ownDialling.add(key);
-    const raw = via.openTunnel({ to: key, from: this.myKey });
+    const raw = via.openTunnel({ to: key, from: this.myKey, ...(also ? { also: true } : {}) });
     const stream = new NoiseSecretStream(true, raw, { keyPair: this.key, remotePublicKey: Buffer.from(key, 'hex'), keepAlive: 5000 });
-    this.ownOpened(stream, 'tunnel', () => this.ownDialling.delete(key), key);
+    this.ownOpened(stream, 'tunnel', () => this.ownDialling.delete(key), key, also);
   }
 
   /**
@@ -525,26 +613,28 @@ export class PeerNode {
   private tunnelAsked(link: PeerLink, ask: TunnelAsk, stream: Duplex): void {
     if (!link.accepted || this.closing) return void stream.destroy();
     const here = localNodes(this.computer).get(ask.to);
-    if (here) return here.tunnelArrived(ask.from, stream);
+    if (here) return here.tunnelArrived(ask.from, stream, !!ask.also);
     const next = this.links.get(ask.to);
     const passing = this.passing.get(link.key) ?? 0;
     if (ask.from !== link.key || link.hello?.workspace !== this.ws.id || !next?.accepted || next.hello?.workspace !== this.ws.id || passing >= MAX_PASSED_ON) return void stream.destroy();
     this.passing.set(link.key, passing + 1);
-    const onward = next.openTunnel(ask);
-    let ended = false;
+    const onward = next.openTunnel({ to: ask.to, from: ask.from });
+    // Counted until both ways are done (one way ending first is a half close: bytes still go the other).
+    let open = 2;
     const end = () => {
-      if (ended) return;
-      ended = true;
-      this.passing.set(link.key, (this.passing.get(link.key) ?? 1) - 1);
+      if (--open) return;
+      const left = (this.passing.get(link.key) ?? 1) - 1;
+      if (left > 0) this.passing.set(link.key, left);
+      else this.passing.delete(link.key);
     };
     pipeline(stream, onward, end);
     pipeline(onward, stream, end);
   }
 
   /** A tunnel from another device has reached this one: a link like any other, once it proves it is `from`. */
-  tunnelArrived(from: string, stream: Duplex): void {
+  tunnelArrived(from: string, stream: Duplex, also = false): void {
     if (this.closing || this.refuse(from) || this.live(from)) return void stream.destroy();
-    this.ownOpened(new NoiseSecretStream(false, stream, { keyPair: this.key, keepAlive: 5000 }), 'tunnel', () => undefined, from);
+    this.ownOpened(new NoiseSecretStream(false, stream, { keyPair: this.key, keepAlive: 5000 }), 'tunnel', () => undefined, from, also);
   }
 
   /**
@@ -580,7 +670,7 @@ export class PeerNode {
       const pad = createHmac('sha256', k).update(`kuraa also key\0${link.key}\0${this.myKey}`).digest();
       const theirs = xor(Buffer.from(enc, 'hex'), pad).toString('hex');
       if (theirs === n.myKey || n.live(theirs)) continue;
-      if (n.myKey < theirs) n.tunnelTo(theirs, link);
+      if (n.myKey < theirs) n.tunnelTo(theirs, link, true);
       // The other connects: it hears of this computer's workspaces in turn (once a link).
       else if (!this.alsoAnswered.has(link)) {
         this.alsoAnswered.add(link);
@@ -1000,6 +1090,14 @@ export class PeerNode {
   /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
   async refresh(): Promise<void> {
     this.removedKeys = new Set(await this.identity.removed());
+    // What is remembered of removed devices: let go of.
+    let pruned = false;
+    for (const k of this.removedKeys) {
+      if (k in this.hints.seen || k in this.hints.tcp) pruned = true;
+      delete this.hints.seen[k];
+      delete this.hints.tcp[k];
+    }
+    if (pruned) this.saveHints();
     await this.updateAccess().catch((e: Error) => this.o.log(`peers: could not read the workspace's policy: ${e.message}`));
     // The keys commits here are signed with, named by their person (or device), as git checks them.
     const signers: { name: string; key: string }[] = [];
@@ -1008,6 +1106,15 @@ export class PeerNode {
       if (key) signers.push({ name: (await this.identity.personOf(key))?.name || d.name, key });
     }
     await writeAllowedSigners(this.o.git, join(this.o.stateDir, 'allowed_signers'), signers).catch((e: Error) => this.o.log(`peers: allowed signers: ${e.message}`));
+  }
+
+  private admitting: Promise<unknown> = Promise.resolve();
+
+  /** Run `fn` after any other run so has finished. */
+  private oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.admitting.then(fn, fn);
+    this.admitting = run.catch(() => undefined);
+    return run;
   }
 
   /** Pair with a device this one lets in (by an invite link), on record so the others pair with it too. */
@@ -1028,9 +1135,19 @@ export class PeerNode {
 
   private connected(conn: SwarmConnection): void {
     const key = conn.remotePublicKey.toString('hex');
+    // Through the DHT: gone quiet (its keepalives stop) counts as gone, as for this layer's own (QUIET_MS).
+    if (!this.kinds.has(conn)) (conn as unknown as { setTimeout?(ms: number): void }).setTimeout?.(QUIET_MS);
     this.links.get(key)?.close();
+    // Not let in a while after connecting (no hello, or none that lets it in): closed, not kept up by keepalives for good.
+    const helloTimer = setTimeout(() => {
+      if (!link.accepted && !link.closed && !this.o.joining) link.close();
+    }, HELLO_MS);
+    helloTimer.unref();
     const link: PeerLink = new PeerLink(conn, () => {
+      clearTimeout(helloTimer);
       if (this.links.get(key) === link) this.links.delete(key);
+      // Hyperswarm may connect to it again (its firewall refused it while this link was open).
+      if (!this.closing && !this.live(key)) this.unban(key);
       if (!link.accepted || this.closing) return;
       this.hints.seen[key] = Date.now();
       this.saveHints();
@@ -1065,7 +1182,8 @@ export class PeerNode {
       // others asks for what it lacks (want). Nothing for a device not known yet (it may never be let in).
       digest: paired ? digestOf(await this.identity.records()) : '',
       merges: this.o.merges ?? '',
-      heads: await this.heads(),
+      // Its branches, only to a device it is paired with (0071): anyone on the local network can connect.
+      ...(paired ? { heads: await this.heads() } : {}),
       // The spaces its person may read, as this device has them (0066): fetched when they differ.
       ...(paired ? { spaces: await this.spaceHeads(link.key) } : {}),
       ...(paired ? { outputs: await outputRefs(this.o.git) } : {}),
@@ -1076,8 +1194,9 @@ export class PeerNode {
       ...(paired && this.o.relays?.length ? { relays: this.o.relays.filter(isRelayKey).slice(0, 4) } : {}),
       ...(paired ? { tcp: this.publicAddress ? [this.publicAddress] : [] } : {}),
       ...(paired && this.dhtAddress ? { dht: this.dhtAddress } : {}),
-      // A device that came in by a link shows it to devices that may not know it yet.
-      ...(shown ? { link: shown } : {}),
+      // A device joining shows its link to whomever it reaches; one that came in by a link, only to members
+      // that may not know it yet (0071): a device not paired must not get a link that may still let people in.
+      ...(shown && (this.o.ticket || paired) ? { link: shown } : {}),
     };
   }
 
@@ -1135,10 +1254,10 @@ export class PeerNode {
       if (link.hello?.workspace === this.ws.id) this.events.outputs?.(link, m.frame);
     }
     else if (m.type === 'records') {
-      if (link.hello?.workspace === this.ws.id && Array.isArray(m.records)) await this.takeRecords(link, m.records);
+      if (link.hello?.workspace === this.ws.id && Array.isArray(m.records)) await this.takeRecords(link, m.records.slice(0, MAX_RECORDS));
     }
     else if (m.type === 'want') {
-      if (link.hello?.workspace === this.ws.id && Array.isArray(m.have)) await this.answerWant(link, m.have);
+      if (link.hello?.workspace === this.ws.id && Array.isArray(m.have)) await this.answerWant(link, m.have.slice(0, MAX_HAVE), m.reply === true);
     }
     else if (m.type === 'also') {
       if (Array.isArray(m.entries)) this.heardAlso(link, m.entries);
@@ -1160,7 +1279,10 @@ export class PeerNode {
     const theirs = typeof h.protocol === 'number' && Number.isInteger(h.protocol) ? h.protocol : 1;
     if (theirs !== PROTOCOL) {
       const known = this.versions.get(link.key);
+      this.versions.delete(link.key);
       this.versions.set(link.key, theirs);
+      // The oldest forgotten: any device can say hello.
+      if (this.versions.size > MAX_VERSIONS) this.versions.delete(this.versions.keys().next().value!);
       if (known !== theirs) this.o.log(`peers: ${h.name} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
       if (theirs > PROTOCOL) versionNews.emit('newer');
       link.send({ type: 'bye', reason: theirs > PROTOCOL ? 'this device runs an older kuraa: update it to sync' : 'the other device runs an older kuraa: update that one to sync' });
@@ -1170,12 +1292,17 @@ export class PeerNode {
     this.versions.delete(link.key);
     // Again, from a device already accepted: what it now knows of the members.
     if (link.accepted) {
+      // A device is let in as one workspace's, or a related one's: it does not become another's (0071).
+      if (h.workspace !== link.hello?.workspace) return link.close();
+      const before = JSON.stringify([link.heads, link.spaces]);
       link.hello = h;
       link.heads = readHeads(h.heads);
       link.spaces = readHeads(h.spaces);
       link.outputs = readOutputs(h.outputs);
       if (h.workspace === this.ws.id) this.noteHints(link.key, h);
       if (h.workspace === this.ws.id) await this.gossip(link, h);
+      // Its branches or the spaces this device may read changed (it may have been let read one): fetched (0071).
+      if (JSON.stringify([link.heads, link.spaces]) !== before) this.events.refs?.(link);
       return;
     }
     const bye = (reason: string) => {
@@ -1199,13 +1326,21 @@ export class PeerNode {
     }
     if (!member) {
       if (!same || typeof h.link !== 'string') return bye('not paired with this device');
-      const why = await this.refuseLink(h.link);
-      if (why) return bye(`not paired with this device, and ${why}`);
-      const l = decodeLink(h.link);
-      const name = await this.admit(link.key, h.name);
-      if (!name) return bye('this device was removed from the workspace');
-      // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
-      if (l.once) await this.identity.useLink(l.id);
+      const code = h.link;
+      // One device let in by a link at a time here (0071): two at once by a link for one person would both
+      // pass the check before either used it up.
+      const admitted = await this.oneAtATime(async (): Promise<{ why: string } | { l: ReturnType<typeof decodeLink>; name: string }> => {
+        const why = await this.refuseLink(code);
+        if (why) return { why: `not paired with this device, and ${why}` };
+        const l = decodeLink(code);
+        const name = await this.admit(link.key, h.name);
+        if (!name) return { why: 'this device was removed from the workspace' };
+        // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
+        if (l.once) await this.identity.useLink(l.id);
+        return { l, name };
+      });
+      if ('why' in admitted) return bye(admitted.why);
+      const { l, name } = admitted;
       const how = `by invite link ${l.id}${l.once ? ', now used' : ''}`;
       member = { key: link.key, name };
       await this.refresh();
@@ -1220,6 +1355,7 @@ export class PeerNode {
     link.remote = member.name;
     link.hello = h;
     link.heads = readHeads(h.heads);
+    link.spaces = readHeads(h.spaces);
     link.outputs = readOutputs(h.outputs);
     if (same) await this.gossip(link, h);
     if (same) this.noteHints(link.key, h);
@@ -1287,20 +1423,24 @@ export class PeerNode {
    */
   private async gossip(link: PeerLink, h: Extract<ControlMessage, { type: 'hello' }>): Promise<void> {
     const mine = await this.identity.records();
-    if (typeof h.digest === 'string' && h.digest !== digestOf(mine)) link.send({ type: 'want', have: mine.map((r) => shortSig(r.sig)) });
+    if (typeof h.digest === 'string' && h.digest !== digestOf(mine)) link.send({ type: 'want', have: [...new Set(mine.map(shortKey))] });
   }
 
   /**
    * A member asked for the records it lacks: send them. If it has some this one
-   * lacks, ask for those in turn.
+   * lacks, ask for those in turn, once (`reply`: this want answers one of this
+   * device's, and is not answered with another, 0071). Records one end takes
+   * and the other never does (a signer one of them does not know yet) are then
+   * asked for again at the next hello, not back and forth for ever.
    */
-  private async answerWant(link: PeerLink, have: unknown[]): Promise<void> {
+  private async answerWant(link: PeerLink, have: unknown[], reply: boolean): Promise<void> {
     const theirs = new Set(have.filter((x): x is string => typeof x === 'string'));
     const mine = await this.identity.records();
-    const lacking = forDevice(mine.filter((r) => !theirs.has(shortSig(r.sig))), link.key, new Set(await this.identity.removed()));
+    const lacking = forDevice(mine.filter((r) => !theirs.has(shortKey(r))), link.key, new Set(await this.identity.removed()));
     if (lacking.length) link.send({ type: 'records', records: lacking });
-    const known = new Set(mine.map((r) => shortSig(r.sig)));
-    if ([...theirs].some((x) => !known.has(x))) link.send({ type: 'want', have: [...known] });
+    if (reply) return;
+    const known = new Set(mine.map(shortKey));
+    if ([...theirs].some((x) => !known.has(x))) link.send({ type: 'want', have: [...known], reply: true });
   }
 
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */
@@ -1359,17 +1499,17 @@ export class PeerNode {
    * that only hidden refs reach, and takes no want for what it did not show.
    */
   private hiddenRefs(device: string): string[] {
-    const args = ['-c', `transfer.hideRefs=${PEER_SPACES}`, '-c', `transfer.hideRefs=${SPACES}`];
+    const hidden = [PEER_SPACES, SPACES];
     const a = this.access;
-    if (!a) return args;
+    if (!a) return hidden;
     const person = a.personOf.get(device) ?? null;
-    for (const id of a.policy.spaces.keys()) if (a.policy.mayRead(person, id)) args.push('-c', `transfer.hideRefs=!${SPACES}${id}/`);
-    return args;
+    for (const id of a.policy.spaces.keys()) if (a.policy.mayRead(person, id)) hidden.push(`!${SPACES}${id}/`);
+    return hidden;
   }
 
   /** The tips of the spaces a device's person may read, as this device has them (`<id>/<branch>` → commit), for its hello (0066). */
-  private async spaceHeads(device: string): Promise<Record<string, string>> {
-    const out = await this.o.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', SPACES], { allowFail: true });
+  private async spaceHeads(device: string, listed?: string): Promise<Record<string, string>> {
+    const out = { stdout: listed ?? (await this.o.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', SPACES], { allowFail: true })).stdout };
     const a = this.access;
     const person = a?.personOf.get(device) ?? null;
     const heads: Record<string, string> = {};
@@ -1379,6 +1519,13 @@ export class PeerNode {
       if (m && a?.policy.mayRead(person, m[1]!)) heads[`${m[1]}/${m[2]}`] = oid!;
     }
     return heads;
+  }
+
+  /** Whether a device's person may read a space: yes, no, or not known here yet (its operation has not come) (0071). */
+  spaceAccess(device: string, space: string): 'read' | 'no' | 'unknown' {
+    const a = this.access;
+    if (!a || !a.policy.founded || !a.policy.spaces.has(space)) return 'unknown';
+    return a.policy.mayRead(a.personOf.get(device) ?? null, space) ? 'read' : 'no';
   }
 
   /** Whether a device's person may read a file of a space (null: the workspace's own, which anyone in it reads) (0066). */
@@ -1392,8 +1539,10 @@ export class PeerNode {
   /** Let a paired device fetch: `git upload-pack`, nothing that writes; no space its person may not read (0066). */
   private serveGit(link: PeerLink, service: string, protocol: string, stream: Duplex): void {
     if (!link.accepted || service !== 'git-upload-pack') return void stream.destroy();
-    const child = spawnGit([...this.hiddenRefs(link.key), 'upload-pack', '--strict', '--timeout=600', join(this.o.dir, '.git')], {
-      env: gitEnv(protocol ? { GIT_PROTOCOL: protocol } : {}),
+    // Protocol v0 whatever the device asks for (uploadPackArgs): its GIT_PROTOCOL is not passed on.
+    void protocol;
+    const child = spawnGit([...uploadPackArgs(this.hiddenRefs(link.key)), 'upload-pack', '--strict', '--timeout=600', join(this.o.dir, '.git')], {
+      env: uploadPackEnv(),
       detached: false,
     });
     child.stderr.resume();
@@ -1454,7 +1603,9 @@ export class PeerNode {
 
   /** Tell every connected device where this one's branches and outputs are, and the spaces each may read (0066). */
   async broadcastRefs(heads: Record<string, string>, outputs: Record<string, string>): Promise<void> {
-    for (const link of this.links.values()) if (link.accepted) link.send({ type: 'refs', heads, outputs, spaces: await this.spaceHeads(link.key) });
+    // The spaces read once, and each device told those its person may read (0071: not once for each device).
+    const listed = (await this.o.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', SPACES], { allowFail: true })).stdout;
+    for (const link of this.links.values()) if (link.accepted) link.send({ type: 'refs', heads, outputs, spaces: await this.spaceHeads(link.key, listed) });
   }
 
   /** Tell every connected device something. */
@@ -1469,6 +1620,7 @@ export class PeerNode {
     clearTimeout(this.presenceTimer);
     clearTimeout(this.topicTimer);
     for (const t of this.tunnelTimers.values()) clearTimeout(t);
+    for (const t of this.lanLater.values()) clearTimeout(t);
     if (this.key && localNodes(this.computer).get(this.myKey) === this) localNodes(this.computer).delete(this.myKey);
     this.lan?.leave();
     this.tcp?.stop();
@@ -1478,7 +1630,7 @@ export class PeerNode {
     }
     for (const t of this.dialling.values()) clearTimeout(t);
     for (const link of this.links.values()) link.close();
-    await this.relay?.close();
+    await this.releaseRelay?.();
     await this.swarm?.destroy();
     await this.bridge.close();
   }

@@ -1591,7 +1591,7 @@ export class Host {
   }
 
   /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */
-  gate: ((x: string, y: string) => Promise<GateResult>) | null = null;
+  gate: ((x: string | null, y: string) => Promise<GateResult>) | null = null;
 
   /**
    * Bring a commit into the current branch: a fast-forward, or a merge made as
@@ -1791,6 +1791,12 @@ export class Host {
     // What the working tree has of the space now (its branch, or the one it is read from).
     const readNow = current && this.spaces.refOf(id) ? (await this.git.run(['rev-parse', '-q', '--verify', `${this.spaces.refOf(id)}^{commit}`], { allowFail: true })).stdout.trim() : '';
     const base = mine || readNow;
+    if (!base && this.gate) {
+      // A space's history arriving here for the first time is judged too (0071): taken whole, or not at all.
+      const g = await this.gate(null, theirs);
+      if (g.waitFor.length) throw new WaitingForPolicy(g.waitFor);
+      if (g.refused.length) throw new NotBrought(`holds changes not its makers’ to make (${[...new Set(g.refused.map((r) => r.path))].join(', ')}): not brought in`);
+    }
     const outcome = base ? await this.merge(base, theirs, override) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
     if (outcome.commit === mine) return outcome;
     await this.git.run(['update-ref', '-m', `bring in a space's ${branch}`, own, outcome.commit, mine]);
@@ -2117,6 +2123,9 @@ export class WaitingForPolicy extends Error {
     super(`waiting for the workspace's policy (${heads.map((h) => h.slice(0, 8)).join(', ')}) before bringing this work in`);
   }
 }
+
+/** Work another device has that is not brought in as it is, nor tried again until it changes (0071): a space's history whose first commits are refused. */
+export class NotBrought extends Error {}
 
 function withTrailers(message: string, coAuthors: PresenceUser[], extra: string[]): string {
   const trailers = coAuthors

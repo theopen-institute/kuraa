@@ -71,7 +71,7 @@ export type PolicyOp =
   | { t: 'genesis'; admins: string[]; legacy: boolean }
   | { t: 'grant'; group: string; who: string; role: Role }
   | { t: 'revoke'; group: string; who: string; cutoff?: string[] }
-  | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string }
+  | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string; /** The link's expiry and maker (0071: signed in the grant, linkGrantMessage); none in a join from before. */ expires?: number; issuer?: string }
   | { t: 'seal'; geneses: string[] }
   | { t: 'rule'; path: string; by: string[] }
   | { t: 'space'; id: string; audience: string[] }
@@ -107,7 +107,7 @@ function encodeOp(op: PolicyOp): string {
     case 'genesis': return ['genesis', op.admins.join(','), op.legacy ? 'legacy' : ''].join('\0');
     case 'grant': return ['grant', op.group, op.who, op.role].join('\0');
     case 'revoke': return ['revoke', op.group, op.who, ...(op.cutoff ? [op.cutoff.join(',')] : [])].join('\0');
-    case 'join': return ['join', op.group, op.role, op.link, op.once ? 'once' : 'anyone', op.granter, op.grant].join('\0');
+    case 'join': return ['join', op.group, op.role, op.link, op.once ? 'once' : 'anyone', op.granter, op.grant, ...(op.issuer !== undefined ? [String(op.expires ?? 0), op.issuer] : [])].join('\0');
     case 'seal': return ['seal', op.geneses.join(',')].join('\0');
     case 'rule': return ['rule', op.path, op.by.join(',')].join('\0');
     case 'space': return ['space', op.id, op.audience.join(',')].join('\0');
@@ -124,9 +124,17 @@ export const policyMessage = (workspace: string, op: PolicyOp, parents: string[]
 /** An operation's hash. */
 export const opHash = (workspace: string, op: PolicyOp, parents: string[], signer: string) => sha256(policyMessage(workspace, op, parents, signer).toString('latin1'));
 
-/** What an admin's signing key signs to let an invite link's holder into a group (the link's grant). */
+/** What an admin's signing key signed, before 0071, to let an invite link's holder into a group (the link's grant): not its expiry, nor its maker. */
 export const grantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean) =>
   Buffer.from(['kuraa-grant', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone'].join('\0'));
+
+/**
+ * What an admin's signing key signs to let an invite link's holder into a group
+ * (0071): with when the link stops letting people in and the device that made
+ * it, so no member can sign the same grant into a link that never expires.
+ */
+export const linkGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean, expires: number, issuer: string) =>
+  Buffer.from(['kuraa-grant/2', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
 
 /** Make an operation, signed with a person's signing key. */
 export function makeOp(workspace: string, op: PolicyOp, parents: string[], key: KeyPair): PolicyEntry {
@@ -190,7 +198,8 @@ export function readOp(v: unknown): PolicyOp | null {
     case 'join':
       return typeof o.group === 'string' && groupName.test(o.group) && role(o.role) && typeof o.link === 'string' && /^[0-9a-f]{16}$/.test(o.link)
         && typeof o.once === 'boolean' && typeof o.granter === 'string' && hexKey.test(o.granter) && typeof o.grant === 'string' && hexSig.test(o.grant)
-        ? { t: 'join', group: o.group, role: o.role, link: o.link, once: o.once, granter: o.granter, grant: o.grant } : null;
+        && (o.issuer === undefined || (typeof o.issuer === 'string' && hexKey.test(o.issuer) && typeof o.expires === 'number' && Number.isSafeInteger(o.expires) && o.expires >= 0))
+        ? { t: 'join', group: o.group, role: o.role, link: o.link, once: o.once, granter: o.granter, grant: o.grant, ...(typeof o.issuer === 'string' ? { expires: o.expires as number, issuer: o.issuer } : {}) } : null;
     case 'seal': {
       const geneses = sortedUnique(o.geneses, hexKey);
       return geneses && geneses.length ? { t: 'seal', geneses } : null;
@@ -500,7 +509,10 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: PolicyContext): bool
       return may && !lastAdmin && !!s.groups.get(op.group)?.has(op.who);
     }
     case 'join': {
-      const grantOk = crypto.verify(grantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+      const message = op.issuer !== undefined
+        ? linkGrantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer)
+        : grantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once);
+      const grantOk = crypto.verify(message, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
       const granter = grantOk ? ctx.personOf(op.granter) : null;
       // A link that makes admins of the workspace, only the owner's (0070).
       if (op.group === WORKSPACE && op.role === 'admin' && !now.mayAssignAdmins(granter)) return false;

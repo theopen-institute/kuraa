@@ -135,7 +135,8 @@ export class Rooms {
   /** A room closed here (no one has it open). */
   closed(key: string): void {
     const path = pathOf(key);
-    for (const link of this.node.links.values()) if (link.accepted && (path === null || this.reads(link, path))) this.send(link, { type: 'room', op: 'close', key });
+    // Only to this workspace's devices (0071): a fork's are not told what is open here.
+    for (const link of this.node.links.values()) if (link.accepted && link.hello?.workspace === this.node.ws.id && (path === null || this.reads(link, path))) this.send(link, { type: 'room', op: 'close', key });
   }
 
   message(link: PeerLink, raw: { type: 'room'; [k: string]: unknown }): void {
@@ -262,17 +263,13 @@ export class Rooms {
    * For merging a device's commits: the text a file is to have, if its room is
    * shared with that device (the room already holds both sides' edits).
    */
-  override(link: PeerLink): (path: string) => string | undefined {
+  override(link: PeerLink, branch: string, space: string | null): (path: string) => string | undefined {
     return (path) => {
-      const room = this.host.liveRooms().find((r) => r.path === path);
+      // The room of that file on that branch, in that history: the workspace's, or the space's (0071).
+      const room = this.host.liveRooms().find((r) => r.path === path && r.branch === branch && this.host.spaceOf(r.path) === space);
       if (!room || !this.sharedWith(link, room)) return undefined;
       return this.host.roomText(room.name);
     };
-  }
-
-  /** Whether the room is shared with the device. */
-  shares(link: PeerLink, path: string): boolean {
-    return this.override(link)(path) !== undefined;
   }
 
   /**

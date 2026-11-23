@@ -19,9 +19,12 @@ const CONTROL = 'kuraa/control/1';
  * a change would keep an older device from understanding a newer one. 1: before
  * the hello said it; 2: 0050 (records by hash, links without the secret, acks
  * on git streams); 3: 0066 (identities with logs, the workspace's policy: only
- * admins' devices invite and remove, which an older one would not hold to).
+ * admins' devices invite and remove, which an older one would not hold to);
+ * 4: 0071 (git served as protocol v0 only, records compared by what they say,
+ * a want answered once, grants that sign their link's expiry and maker, and
+ * branches said only to paired devices).
  */
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):
@@ -39,9 +42,17 @@ const ROOMS = 'kuraa/rooms/1';
 const OUTPUTS = 'kuraa/outputs/1';
 /** How much of a stream (git, a tunnel) may be sent and not yet taken by the reader at the other end, in bytes. */
 const GIT_WINDOW = 1024 * 1024;
+/** The most streams (git, tunnels) the other end may have open on one link at once (0071): each runs a process, or holds a connection, here. */
+const MAX_STREAMS = 32;
+/** Run outputs carrying more than this, while the connection is backed up, are not sent: they come with the outputs ref later (0071). */
+const OUTPUTS_BACKED_UP_BYTES = 64 * 1024;
 
-/** What a tunnel is asked for: a connection to device `to`, from device `from` (keys, hex). */
-export interface TunnelAsk { to: string; from: string }
+/**
+ * What a tunnel is asked for: a connection to device `to`, from device `from`
+ * (keys, hex); `also`: between two computers' devices over a link the two have
+ * for another workspace, kept as a direct link is (node.ts, also).
+ */
+export interface TunnelAsk { to: string; from: string; also?: boolean }
 
 /** A message on the rooms or outputs channel: its fields as JSON, less those that are bytes, which follow as they are. */
 interface RoomFrame { meta: Record<string, unknown> & { bin?: string[] }; data: Buffer[] }
@@ -110,8 +121,8 @@ export type ControlMessage =
   | { type: 'refs'; heads?: Record<string, string>; outputs?: Record<string, string>; spaces?: Record<string, string> }
   /** Signed membership records the other device lacks: just taken or made here, or asked for (want). */
   | { type: 'records'; records: unknown[] }
-  /** Asking for the records this device lacks: it says which it has (the start of each signature). */
-  | { type: 'want'; have: string[] }
+  /** Asking for the records this device lacks: it says which it has (each by the start of the hash of what it says, records.ts, shortKey). */
+  | { type: 'want'; have: string[]; /** It answers a want of the other end's: not answered with another (0071). */ reply?: boolean }
   /**
    * Which other workspaces this device's computer is in, each as a code from its
    * secret and this computer's device in it, hidden by the same (node.ts, sayAlso).
@@ -132,7 +143,8 @@ export function readHeads(v: unknown): Record<string, string> | null {
   const entries = Object.entries(v as Record<string, unknown>);
   if (entries.length > 10_000) return null;
   for (const [name, oid] of entries) {
-    if (typeof oid !== 'string' || !/^[0-9a-f]{40,64}$/.test(oid) || !name || name.length > 1000 || name.includes('..') || name.startsWith('-')) return null;
+    // A ref's name as git allows one (no control characters, spaces or what git refuses), or none at all.
+    if (typeof oid !== 'string' || !/^[0-9a-f]{40,64}$/.test(oid) || !name || name.length > 1000 || name.includes('..') || name.startsWith('-') || name.startsWith('/') || name.endsWith('/') || name.endsWith('.lock') || name.includes('//') || name.includes('@{') || /[\x00-\x20\x7f~^:?*[\\]/.test(name)) return null;
     out[name] = oid;
   }
   return out;
@@ -179,6 +191,12 @@ export class PeerLink {
   spaces: Record<string, string> | null = null;
   /** The run outputs it has, as it last said (device key → commit); null: not said. */
   outputs: Record<string, string> | null = null;
+  /** When the link was made: one never let in is closed after a while (node.ts). */
+  readonly opened = Date.now();
+  /** Streams the other end has open on this link now (git, tunnels): at most MAX_STREAMS. */
+  private streams = 0;
+  /** The outputs channel is backed up: large frames wait for the outputs ref (sendOutputs). */
+  private outputsBacked = false;
 
   constructor(readonly conn: SwarmConnection, private readonly onClose: () => void) {
     this.key = conn.remotePublicKey.toString('hex');
@@ -196,7 +214,7 @@ export class PeerLink {
     this.rooms = this.mux.createChannel({ protocol: ROOMS })!;
     this.sendFrame = this.rooms.addMessage({ encoding: roomFrame, onmessage: (f) => this.receiveFrame(f) });
     this.rooms.open();
-    this.outputsChannel = this.mux.createChannel({ protocol: OUTPUTS })!;
+    this.outputsChannel = this.mux.createChannel({ protocol: OUTPUTS, ondrain: () => void (this.outputsBacked = false) })!;
     this.sendOutputsFrame = this.outputsChannel.addMessage({
       encoding: roomFrame,
       onmessage: (f) => {
@@ -206,7 +224,7 @@ export class PeerLink {
     this.outputsChannel.open();
     this.mux.pair({ protocol: GIT }, (id) => this.acceptGit(id));
     this.mux.pair({ protocol: TUNNEL }, (id) => {
-      if (id) this.byteChannel(TUNNEL, id, null);
+      if (id && this.streams < MAX_STREAMS) this.byteChannel(TUNNEL, id, null, true);
     });
     conn.on('error', () => this.close());
     conn.on('close', () => this.close());
@@ -243,7 +261,9 @@ export class PeerLink {
   /** Send a message about run outputs (outputs.ts), if the other end takes them; returns whether it was sent. */
   sendOutputs(f: OutputsFrame): boolean {
     if (!this.takesOutputs) return false;
-    this.sendOutputsFrame.send({ meta: f.meta, data: f.data });
+    // A slow connection (a relay, a tunnel): plots are not piled up in memory for it; finished runs come with the outputs ref.
+    if (this.outputsBacked && f.data.reduce((n, b) => n + b.length, 0) > OUTPUTS_BACKED_UP_BYTES) return false;
+    if (!this.sendOutputsFrame.send({ meta: f.meta, data: f.data })) this.outputsBacked = true;
     return true;
   }
 
@@ -277,8 +297,8 @@ export class PeerLink {
   }
 
   private acceptGit(id: Buffer | null): void {
-    if (!id) return;
-    this.byteChannel(GIT, id, null);
+    if (!id || this.streams >= MAX_STREAMS) return;
+    this.byteChannel(GIT, id, null, true);
   }
 
   /** Answer tunnels the other end asks for (node.ts). */
@@ -298,7 +318,9 @@ export class PeerLink {
    * connection is backed up: a fast writer (git upload-pack sending a large
    * pack) cannot pile a pack up in memory, here or at a slow reader there.
    */
-  private byteChannel(protocol: string, id: Buffer, ask: object | null): Duplex {
+  private byteChannel(protocol: string, id: Buffer, ask: object | null, incoming = false): Duplex {
+    if (incoming) this.streams++;
+    let counted = incoming;
     // The channel's messages, made once the channel is (the stream needs them first).
     const msg = {} as { data: Message<Buffer>; end: Message<Buffer>; ack: Message<number> };
     let ended = false;
@@ -345,6 +367,10 @@ export class PeerLink {
         release();
       },
       onclose: () => {
+        if (counted) {
+          counted = false;
+          this.streams--;
+        }
         release();
         if (!ended) stream.push(null);
         stream.destroy();
@@ -356,12 +382,14 @@ export class PeerLink {
         if (ask) return void stream.destroy();
         if (protocol === GIT) {
           const r = m as { service?: unknown; protocol?: unknown };
-          if (this.gitHandler && typeof r.service === 'string') this.gitHandler(r.service, typeof r.protocol === 'string' ? r.protocol : '', stream);
+          // The protocol the other end asks for, as git says it (`version=2`, and the like): passed to nothing else.
+          const protocol = typeof r.protocol === 'string' && /^[a-z0-9=:._-]{0,100}$/i.test(r.protocol) ? r.protocol : '';
+          if (this.gitHandler && typeof r.service === 'string') this.gitHandler(r.service, protocol, stream);
           else stream.destroy();
         } else {
           const r = m as { to?: unknown; from?: unknown };
           const key = /^[0-9a-f]{64}$/;
-          if (this.tunnelHandler && typeof r.to === 'string' && key.test(r.to) && typeof r.from === 'string' && key.test(r.from)) this.tunnelHandler({ to: r.to, from: r.from }, stream);
+          if (this.tunnelHandler && typeof r.to === 'string' && key.test(r.to) && typeof r.from === 'string' && key.test(r.from)) this.tunnelHandler({ to: r.to, from: r.from, ...((m as { also?: unknown }).also === true ? { also: true } : {}) }, stream);
           else stream.destroy();
         }
       },

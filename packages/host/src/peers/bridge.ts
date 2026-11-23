@@ -7,7 +7,7 @@
 // device's `git upload-pack`, and passes git's protocol through it. Only fetching
 // is possible: a device never writes to another's repository; each brings what
 // it fetched into its own branches.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
@@ -114,7 +114,10 @@ export class GitBridge {
       this.server!.listen(0, '127.0.0.1', () => resolve());
     });
     const port = (this.server.address() as { port: number }).port;
-    await writeFile(join(this.o.stateDir, 'peer.json'), JSON.stringify({ port, token: this.token }), { mode: 0o600 });
+    const file = join(this.o.stateDir, 'peer.json');
+    await writeFile(file, JSON.stringify({ port, token: this.token }), { mode: 0o600 });
+    // Readable only by this computer's user, also where the file was made before with other rights.
+    await chmod(file, 0o600).catch(() => undefined);
   }
 
   private serve(sock: Socket): void {
@@ -134,7 +137,8 @@ export class GitBridge {
         return void sock.destroy();
       }
       const rest = head.subarray(nl + 1);
-      if (req.token !== this.token) return void sock.destroy();
+      // Compared in constant time (0071), so its prefix cannot be learned by timing.
+      if (typeof req.token !== 'string' || req.token.length !== this.token.length || !timingSafeEqual(Buffer.from(req.token), Buffer.from(this.token))) return void sock.destroy();
       const url = String(req.url ?? '');
       const service = String(req.service ?? '');
       if (!url.startsWith(KURAA_SCHEME)) return void sock.end(`error not a kuraa:// URL: ${url}\n`);

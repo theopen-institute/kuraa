@@ -23,7 +23,7 @@ import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
 import type { Attestation } from './attest.js';
-import { evaluate, grantMessage, isGroupName, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
+import { evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyOp, type Role } from './policy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
 import { keptKey, type KeyPair } from '../keys.js';
@@ -266,9 +266,14 @@ export class Identity {
     // each of their identity's keys, so what a key no longer theirs signs never pushes out what theirs did.
     if (byPerson(r.kind)) {
       const same = list.filter((x) => x.kind === r.kind && x.person === r.person && x.subject === r.subject && x.personKey === r.personKey);
-      if (r.kind === 'revoke-key' && same.length) return false;
-      if (same.some((x) => x.at > r.at || (x.at === r.at && x.sig > r.sig))) return false;
-      list = list.filter((x) => !same.includes(x));
+      // A revocation, once from each of the person's devices (0071): each says the commits it had, and every
+      // device keeps them all (cutKeys takes them together), so all judge the key's commits alike.
+      if (r.kind === 'revoke-key') {
+        if (same.some((x) => x.by === r.by)) return false;
+      } else {
+        if (same.some((x) => x.at > r.at || (x.at === r.at && x.sig > r.sig))) return false;
+        list = list.filter((x) => !same.includes(x));
+      }
     }
     list.push(r);
     await mkdir(this.stateDir, { recursive: true });
@@ -448,9 +453,25 @@ export class Identity {
   async policy(list?: MemberRecord[]): Promise<Policy> {
     const records = list ?? (await this.records());
     const ws = await this.workspace();
+    const pin = await this.pin();
+    // Worked out once for the same records (0071): it is asked for often, and costs more the more there are.
+    // Attestations expire, so not for longer than a minute.
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${Math.floor(Date.now() / 60_000)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    if (this.policyMemo?.key === key) return this.policyMemo.policy;
+    const policy = this.evaluatePolicy(records, ws?.id ?? '', pin);
+    this.policyMemo = { key, policy };
+    policy.catch(() => {
+      if (this.policyMemo?.policy === policy) this.policyMemo = null;
+    });
+    return policy;
+  }
+
+  private policyMemo: { key: string; policy: Promise<Policy> } | null = null;
+
+  private async evaluatePolicy(records: MemberRecord[], workspace: string, pin: string | null): Promise<Policy> {
     const w = this.who(records);
-    const entries = records.filter((r) => r.kind === 'policy' && r.workspace === ws?.id).map(policyEntry);
-    const ctx = { workspace: ws?.id ?? '', pin: await this.pin(), personOf: (key: string) => w.personOf.get(key)?.key ?? null };
+    const entries = records.filter((r) => r.kind === 'policy' && r.workspace === workspace).map(policyEntry);
+    const ctx = { workspace, pin, personOf: (key: string) => w.personOf.get(key)?.key ?? null };
     const base = evaluate(entries, ctx);
     if (!base.verifiers.size) return base;
     // Then again, with the emails attested by the verifiers it counts (step 6).
@@ -671,7 +692,9 @@ export class Identity {
    */
   async newSecret(): Promise<string> {
     const secret = randomBytes(32).toString('hex');
-    await this.decide('secret', secret);
+    // The latest counts: later than any on record, even if this computer's clock is behind (0071).
+    const latest = Math.max(0, ...(await this.records()).filter((r) => r.kind === 'secret').map((r) => r.at));
+    await this.decide('secret', secret, { at: Math.max(Date.now(), latest + 1) });
     return secret;
   }
 
@@ -720,7 +743,7 @@ export class Identity {
    * A change this device makes: signed with its key, kept, applied here, and
    * passed on. Any member may make one, and every other takes it (records.ts, judge).
    */
-  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; attestation?: Attestation; topic?: string; expires?: number } = {}): Promise<MemberRecord> {
+  decide(kind: RecordKind, subject: string, extra: { name?: string; proof?: string; keyProof?: string; person?: string; personKey?: string; event?: KeyEvent; op?: PolicyOp; parents?: string[]; signer?: string; heads?: string[]; attestation?: Attestation; topic?: string; expires?: number; at?: number } = {}): Promise<MemberRecord> {
     return this.serial(async () => {
       const ws = await this.workspace();
       if (!ws) throw new Error('This repository is not a workspace shared between devices');
@@ -746,9 +769,25 @@ export class Identity {
       if (!waiting.length) return taken;
       // What this device knows, read once and kept up to date as records are taken.
       const standing = await this.standing();
+      // A device paired by a member who is not an admin: in once its person is (records.ts, judge), as the records
+      // taken and these say together. What decides it is signed by the people themselves (their keys, an admin's
+      // grant in the policy), whoever passed it on, so these may count for it before they are taken.
+      // Set up whenever there are pairings to judge: a device joining has no policy yet when it starts, and has one after the first round.
+      if (waiting.some((r) => r.kind === 'add' && !standing.managers?.has(r.by))) {
+        const all = [...(await this.records()), ...waiting];
+        const policy = await this.policy(all);
+        const w = this.who(all);
+        standing.inWorkspace = (device) => {
+          const id = w.personOf.get(w.signsWith.get(device) ?? '')?.key;
+          return !!id && [...policy.groups.values()].some((g) => g.has(id));
+        };
+      }
       for (let progress = true; progress && waiting.length;) {
         progress = false;
         const next: MemberRecord[] = [];
+        // Who is an admin, worked out again once a round (0071), not after each record: a record that waits for
+        // what one taken this round says is judged again in the next.
+        let stale = false;
         for (const r of waiting) {
           const verdict = judge(r, standing);
           if (verdict === 'take') {
@@ -761,11 +800,12 @@ export class Identity {
               standing.removed.add(r.subject);
             }
             // Who is an admin may have changed: a record waiting for that is judged again.
-            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) Object.assign(standing, await this.managers());
+            if (['policy', 'vouch', 'key-event', 'signs', 'revoke-key', 'add'].includes(r.kind)) stale = true;
             taken.push(r);
             progress = true;
           } else if (verdict === 'wait') next.push(r);
         }
+        if (stale) Object.assign(standing, await this.managers());
         waiting = next;
       }
       // One could not be applied: try again now, and if that fails too, before the next change.
@@ -804,6 +844,8 @@ export class Identity {
     const key = await this.deviceKey();
     const id = randomBytes(8).toString('hex');
     const policy = await this.policy();
+    const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
+    const issuer = key.publicKey.toString('hex');
     let granted: LinkGrant | undefined;
     if (policy.founded) {
       if (!grant) throw new Error('Only a person can invite to this workspace: this computer has no identity');
@@ -815,10 +857,8 @@ export class Identity {
       if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
       if (group === WORKSPACE && role === 'admin' && !policy.mayAssignAdmins(who)) throw new Error('Only the workspace’s owner invites people as admins');
       const genesis = await this.pin();
-      granted = { group, role, genesis, granter: signer, signature: crypto.sign(grantMessage(ws.id, genesis, id, group, role, once), grant.key.secretKey).toString('hex') };
+      granted = { group, role, genesis, granter: signer, signature: crypto.sign(linkGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer), grant.key.secretKey).toString('hex') };
     }
-    const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
-    const issuer = key.publicKey.toString('hex');
     const through = await this.cameInThrough();
     // Its own topic, not the workspace's secret: whoever holds the link finds the members by it
     // while it lets people in (every member announces it, from the link record), and nothing after.
@@ -844,7 +884,11 @@ export class Identity {
     const g = l.grant;
     if (!g) return 'the link was made by an older kuraa: ask for a new one';
     if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
-    if (!crypto.verify(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once), Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'))) return 'the link is not signed by the person it names';
+    // Signed with the link's expiry and maker (0071): a grant from before is not, and could be put in a link that never expires.
+    const signed = (m: Buffer) => crypto.verify(m, Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'));
+    if (!signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
+      return signed(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once)) ? 'the link was made by an older kuraa: ask for a new one' : 'the link is not signed by the person it names';
+    }
     const who = this.who(await this.records()).personOf.get(g.granter)?.key ?? null;
     if (!policy.isAdmin(who, g.group)) return 'the person who made the link may no longer invite people';
     return null;
@@ -860,7 +904,7 @@ export class Identity {
     const records = await this.records();
     const signer = key.publicKey.toString('hex');
     if (records.some((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.link === l.id && r.signer === signer)) return;
-    await this.makePolicy({ t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature }, key);
+    await this.makePolicy({ t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key }, key);
   }
 
   /**

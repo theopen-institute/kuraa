@@ -11,8 +11,9 @@
 // trust: between two devices that merge differently (another version of
 // kuraa), only the one with the lower key makes the merges, and the other
 // takes them.
-import { WaitingForPolicy, describeOutcome, type Host } from '../host.js';
-import { RESOLVED_TRAILER, gate, type GateResult } from './gate.js';
+import { NotBrought, WaitingForPolicy, describeOutcome, type Host } from '../host.js';
+import { RESOLVED_TRAILER, gate, policyWaits, type GateResult } from './gate.js';
+import { digestOf } from './node.js';
 import { suggestions, type Suggestion } from './suggestions.js';
 import { emailOf } from './attest.js';
 import { MERGE_VERSION, isAncestor } from '../merging.js';
@@ -220,6 +221,21 @@ export class Peers {
   private readonly againOutputs = new Set<string>();
   /** Work waiting on a device that merges differently, already logged: `remote/branch`. */
   private readonly waiting = new Set<string>();
+  /**
+   * A device's sync to try again (0071): a fetch failed, work waits for its
+   * policy, or bringing something in failed. One timer per device, backing off
+   * (to a minute), and at once when records come (the policy may be among them).
+   */
+  private readonly retries = new Map<string, NodeJS.Timeout>();
+  private readonly retryMs = new Map<string, number>();
+  /** The latest link to each device: a sync under way reads it each round (one that reconnected meanwhile said other heads). */
+  private readonly linkTo = new Map<string, PeerLink>();
+  /** What each link last said of its branches and spaces: outputs alone need no sync of branches. */
+  private readonly refsSaid = new WeakMap<PeerLink, string>();
+  /** Spaces from a device not brought in as they were (NotBrought), already logged: `remote/ref` → commit. */
+  private readonly notBrought = new Map<string, string>();
+  /** The workspace's policy and what goes with it for judging work, as of a set of records (gate). */
+  private gateCache: { digest: string; ctx: Promise<Omit<import('./gate.js').GateContext, 'remake' | 'mergeVersion'> | null> } | null = null;
   private announceTimer: NodeJS.Timeout | undefined;
   private stopRefs: (() => void) | null = null;
   private closed = false;
@@ -229,17 +245,31 @@ export class Peers {
   private readonly events: NodeEvents = {
     accepted: (link) => {
       this.rooms.connected(link);
+      this.refsSaid.set(link, JSON.stringify([link.heads, link.spaces]));
       this.syncFrom(link);
       this.syncOutputs(link);
     },
     closed: (link) => {
       this.rooms.disconnected(link);
       this.outputs?.disconnected(link.key);
+      const remote = link.remote;
+      if (remote && this.linkTo.get(remote) === link) {
+        this.linkTo.delete(remote);
+        clearTimeout(this.retries.get(remote));
+        this.retries.delete(remote);
+      }
     },
     refs: (link) => {
-      this.syncFrom(link);
+      // Its branches or spaces moved: synced. Outputs alone (said often, while code runs): only those (0071).
+      const said = JSON.stringify([link.heads, link.spaces]);
+      if (this.refsSaid.get(link) !== said || !link.heads) {
+        this.refsSaid.set(link, said);
+        this.syncFrom(link);
+      }
       this.syncOutputs(link);
     },
+    // Records came (the policy work waits for may be among them): what waits is tried again now.
+    members: () => this.retryNow(),
     room: (link, m) => this.rooms.message(link, m),
     outputs: (link, frame) => void this.outputs?.receive(link.key, frame),
   };
@@ -280,24 +310,63 @@ export class Peers {
   private readonly stateDir: string;
 
   /** The workspace's write rules, applied to the commits `y` brings to `x` (gate.ts). */
-  private async gate(x: string, y: string): Promise<GateResult> {
+  private async gate(x: string | null, y: string): Promise<GateResult> {
+    const ctx = await this.gateContext();
+    if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
+    return gate(this.host.git, x, y, { ...ctx, remake: (a, b) => this.host.remakeMergeTree(a, b), mergeVersion: MERGE_VERSION });
+  }
+
+  /** The policy, people and cutoffs work is judged by, worked out once for each set of records (0071); null: no policy. */
+  private async gateContext() {
     const id = this.node.identity;
     const records = await id.records();
-    const policy = await id.policy(records);
-    if (!policy.founded) return { keeps: new Map(), refused: [], waitFor: [] };
-    const people = await id.people();
-    const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
-    const names = new Map(people.map((p) => [p.key, p.name]));
-    const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
-    return gate(this.host.git, x, y, {
-      policy,
-      known,
-      personOf: (k) => byKey.get(k) ?? null,
-      nameOf: (p) => names.get(p) ?? null,
-      cutKeys: await id.cutKeys(),
-      remake: (a, b) => this.host.remakeMergeTree(a, b),
-      mergeVersion: MERGE_VERSION,
-    });
+    const digest = digestOf(records);
+    if (this.gateCache?.digest !== digest) {
+      const ctx = (async () => {
+        const policy = await id.policy(records);
+        if (!policy.founded) return null;
+        const people = await id.people();
+        const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
+        const names = new Map(people.map((p) => [p.key, p.name]));
+        const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
+        return { policy, known, personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? null, cutKeys: await id.cutKeys() };
+      })();
+      this.gateCache = { digest, ctx };
+      ctx.catch(() => {
+        if (this.gateCache?.ctx === ctx) this.gateCache = null;
+      });
+    }
+    return this.gateCache.ctx;
+  }
+
+  /** The policy operations the commits `theirs` brings to `ours` name and this device lacks (gate.ts, policyWaits). */
+  private async policyWaits(ours: string | null, theirs: string): Promise<string[]> {
+    const ctx = await this.gateContext();
+    return ctx ? policyWaits(this.host.git, ours, theirs, ctx.known) : [];
+  }
+
+  /** Try a device's sync again later, backing off (0071). */
+  private retryLater(remote: string): void {
+    if (this.closed || this.retries.has(remote)) return;
+    const ms = Math.min((this.retryMs.get(remote) ?? 1000) * 2, 60_000);
+    this.retryMs.set(remote, ms);
+    const timer = setTimeout(() => {
+      this.retries.delete(remote);
+      const link = this.linkTo.get(remote);
+      if (link && link.accepted && !link.closed) void this.syncFrom(link);
+    }, ms);
+    timer.unref();
+    this.retries.set(remote, timer);
+  }
+
+  /** Try every sync that waits now (records came). */
+  private retryNow(): void {
+    for (const [remote, timer] of [...this.retries]) {
+      clearTimeout(timer);
+      this.retries.delete(remote);
+      const link = this.linkTo.get(remote);
+      if (link && link.accepted && !link.closed) void this.syncFrom(link);
+    }
   }
 
   /** Work held back until the policy it names has come: tried again shortly (gate.ts). */
@@ -395,7 +464,9 @@ export class Peers {
       if (here !== oid && (!here || !(await isAncestor(this.host.git, oid, here)))) return false;
     }
     const tracking = new Map((await this.branchesOf(remote)).map((b) => [b.branch, b.oid]));
-    const moves = Object.entries(theirs).filter(([b, oid]) => tracking.get(b) !== oid).map(([b, oid]) => `update refs/remotes/${remote}/${b} ${oid}\n`);
+    // Each from what it was (0071): a fetch under way meanwhile is not moved back.
+    const zero = '0'.repeat(Object.values(theirs)[0]?.length ?? 40);
+    const moves = Object.entries(theirs).filter(([b, oid]) => tracking.get(b) !== oid).map(([b, oid]) => `update refs/remotes/${remote}/${b} ${oid} ${tracking.get(b) ?? zero}\n`);
     if (moves.length) await this.host.git.run(['update-ref', '--stdin'], { input: moves.join(''), allowFail: true });
     return true;
   }
@@ -404,6 +475,8 @@ export class Peers {
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
     const remote = link.remote!;
+    // The newest link to it counts, whichever started the sync under way.
+    if (!link.closed || !this.linkTo.has(remote)) this.linkTo.set(remote, link);
     const running = this.fetching.get(remote);
     if (running) {
       this.again.add(remote);
@@ -412,15 +485,29 @@ export class Peers {
     const run = (async () => {
       do {
         this.again.delete(remote);
-        if (await this.upToDate(link)) continue;
+        const l = this.linkTo.get(remote) ?? link;
+        if (l.closed) return;
+        if (await this.upToDate(l)) {
+          this.retryMs.delete(remote);
+          continue;
+        }
         const asked = Date.now();
-        if (!(await this.node.fetch(remote))) return;
+        // Not fetched (the network, the device busy): tried again, and anything asked meanwhile still is.
+        if (!(await this.node.fetch(remote))) {
+          this.retryLater(remote);
+          continue;
+        }
         this.outputs?.timing(`fetched branches from ${remote} in ${Date.now() - asked} ms`);
-        if (link.hello?.workspace !== this.node.ws.id) return; // a fork: fetched, never merged on its own
-        await this.rooms.settle(link);
-        await this.bringIn(link);
+        if (l.hello?.workspace !== this.node.ws.id) return; // a fork: fetched, never merged on its own
+        await this.rooms.settle(l);
+        if (this.closed) return;
+        if (await this.bringIn(l)) this.retryLater(remote);
+        else this.retryMs.delete(remote);
       } while (this.again.has(remote) && !this.closed);
-    })().catch((e: Error) => this.host.log(`peers: syncing with ${remote} failed: ${e.message}`)).finally(() => this.fetching.delete(remote));
+    })().catch((e: Error) => {
+      this.host.log(`peers: syncing with ${remote} failed: ${e.message}`);
+      this.retryLater(remote);
+    }).finally(() => this.fetching.delete(remote));
     this.fetching.set(remote, run);
     return run;
   }
@@ -474,60 +561,129 @@ export class Peers {
    * make their own merge of the same work, and their histories would part: the
    * one with the lower key makes the merges, and the other only fast-forwards.
    */
-  private async bringIn(link: PeerLink): Promise<void> {
+  private async bringIn(link: PeerLink): Promise<boolean> {
     const remote = link.remote!;
     const forwardOnly = this.node.mergesDiffer(link.key) && link.key < this.node.myKey;
-    for (const { branch, oid } of await this.branchesOf(remote)) await this.bringBranch(branch, `refs/remotes/${remote}/${branch}`, oid, link, forwardOnly);
-    // Its spaces this person may read (0066): only those come, as it judged (node.ts serves no others), so
-    // a space whose operation has not reached this device yet is not held back.
-    const out = await this.host.git.run(['for-each-ref', '--format=%(refname)', `${PEER_SPACES}${remote}/`], { allowFail: true });
-    for (const ref of out.stdout.split('\n').filter(Boolean)) {
+    let retry = false;
+    // Each on its own (0071): one that fails (a file in the way, the policy not here yet) holds up none of the others.
+    for (const { branch, oid } of await this.branchesOf(remote)) {
+      try {
+        if (await this.bringBranch(branch, oid, link, forwardOnly)) retry = true;
+      } catch (e) {
+        this.host.log(`peers: bringing in ${branch} from ${remote} failed: ${(e as Error).message}`);
+        retry = true;
+      }
+    }
+    // Its spaces this person may read (0066): node.ts serves only those; taken only if this device's person and the
+    // sender's both read the space by the policy here (0071), so no one plants a made-up space in others' folders.
+    const out = await this.host.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', `${PEER_SPACES}${remote}/`], { allowFail: true });
+    for (const line of out.stdout.split('\n').filter(Boolean)) {
+      const [ref, oid] = line.split('\0') as [string, string];
       const m = new RegExp(`^${PEER_SPACES}${remote}/([0-9a-f]{32})/heads/(.+)$`).exec(ref);
       if (!m) continue;
-      const [, id, branch] = m;
-      await this.host.serial(async () => {
-        try {
-          const outcome = await this.host.bringSpace(id!, branch!, ref, this.rooms.override(link));
-          this.waitingForPolicy.delete(`${remote}/${ref}`);
-          if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${remote}${describeOutcome(outcome)}`);
-        } catch (e) {
-          if (!(e instanceof WaitingForPolicy)) throw e;
-          if (!this.waitingForPolicy.has(`${remote}/${ref}`)) this.host.log(`peers: ${remote}'s work in a space is ${e.message}`);
-          this.waitingForPolicy.add(`${remote}/${ref}`);
-          setTimeout(() => void this.syncFrom(link), 2000).unref();
+      const [, id, branch] = m as unknown as [string, string, string];
+      const key = `${remote}/${ref}`;
+      const mineAccess = this.node.spaceAccess(this.node.myKey, id);
+      const theirsAccess = this.node.spaceAccess(link.key, id);
+      // Its operation not here yet: tried again once it may have come.
+      if (mineAccess === 'unknown' || theirsAccess === 'unknown') {
+        retry = true;
+        continue;
+      }
+      if (mineAccess === 'no' || theirsAccess === 'no') continue;
+      try {
+        if (await this.bringSpace(id, branch, oid, link, forwardOnly, key)) retry = true;
+      } catch (e) {
+        if (e instanceof NotBrought) {
+          if (this.notBrought.get(key) !== oid) this.host.log(`peers: ${remote}'s history of a space ${e.message}`);
+          this.notBrought.set(key, oid);
+          continue;
         }
-      });
+        this.host.log(`peers: bringing in a space's ${branch} from ${remote} failed: ${(e as Error).message}`);
+        retry = true;
+      }
     }
+    return retry;
+  }
+
+  /** Whether `mine` holds `theirs` already (nothing to bring in), or the commit is not here. */
+  private async holds(mine: string, theirs: string): Promise<boolean> {
+    return !!mine && (mine === theirs || (await isAncestor(this.host.git, theirs, mine)));
+  }
+
+  /** Bring a device's history of a space in (Host.bringSpace), as a branch is (bringBranch). Whether it waits for the policy. */
+  private async bringSpace(id: string, branch: string, oid: string, link: PeerLink, forwardOnly: boolean, key: string): Promise<boolean> {
+    const own = spaceRef(id, branch);
+    const mineNow = async () => (await this.host.git.run(['rev-parse', '-q', '--verify', `${own}^{commit}`], { allowFail: true })).stdout.trim();
+    if (await this.holds(await mineNow(), oid)) return false;
+    return this.host.serial(async () => {
+      // Closing: brought in no more (the write rules are let go of once syncs have stopped).
+      if (this.closed) return false;
+      const mine = await mineNow();
+      if (await this.holds(mine, oid)) return false;
+      // Merging differently (0071): as for branches, only the other makes the merges.
+      if (forwardOnly && mine && !(await isAncestor(this.host.git, mine, oid))) {
+        if (!this.waiting.has(key)) this.host.log(`peers: ${link.remote} merges differently from this device (another version of kuraa?); its work in a space comes in once it has merged this device's`);
+        this.waiting.add(key);
+        return false;
+      }
+      this.waiting.delete(key);
+      const waits = await this.policyWaits(mine || null, oid);
+      try {
+        if (waits.length) throw new WaitingForPolicy(waits);
+        const current = (await this.host.git.branch()) === branch;
+        const outcome = await this.host.bringSpace(id, branch, oid, current ? this.rooms.override(link, branch, id) : undefined);
+        this.waitingForPolicy.delete(key);
+        this.notBrought.delete(key);
+        if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${link.remote}${describeOutcome(outcome)}`);
+        return false;
+      } catch (e) {
+        if (!(e instanceof WaitingForPolicy)) throw e;
+        if (!this.waitingForPolicy.has(key)) this.host.log(`peers: ${link.remote}'s work in a space is ${e.message}`);
+        this.waitingForPolicy.add(key);
+        return true;
+      }
+    });
   }
 
   /**
    * Bring a device's commit into a branch (Host.bringBranch). `forwardOnly`: only
    * if no merge is needed (the other device will make it, and this one take it then).
+   * The commit as checked, not its ref again (a fetch may move that meanwhile).
+   * Whether it waits for the workspace's policy (tried again).
    */
-  private async bringBranch(branch: string, ref: string, oid: string, link: PeerLink, forwardOnly: boolean): Promise<void> {
-    await this.host.serial(async () => {
+  private async bringBranch(branch: string, oid: string, link: PeerLink, forwardOnly: boolean): Promise<boolean> {
+    const mineNow = async () => (await this.host.git.run(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true })).stdout.trim();
+    // Held already: nothing to do, and nothing waits in the queue for it (0071).
+    if (await this.holds(await mineNow(), oid)) return false;
+    return this.host.serial(async () => {
+      if (this.closed) return false;
       const current = await this.host.git.branch();
-      const mine = (await this.host.git.run(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true })).stdout.trim();
-      const from = link.remote ?? ref;
+      const mine = await mineNow();
+      if (await this.holds(mine, oid)) return false;
+      const from = link.remote ?? branch;
       if (forwardOnly && mine && !(await isAncestor(this.host.git, mine, oid))) {
         if (!this.waiting.has(`${from}/${branch}`)) this.host.log(`peers: ${from} merges differently from this device (another version of kuraa?); its work on ${branch} comes in once it has merged this device's`);
         this.waiting.add(`${from}/${branch}`);
-        return;
+        return false;
       }
       this.waiting.delete(`${from}/${branch}`);
       let outcome;
       try {
-        outcome = await this.host.bringBranch(branch, ref, this.rooms.override(link));
+        // Waiting for the policy is known before the room's edits are committed for it (0071).
+        const waits = await this.policyWaits(mine || null, oid);
+        if (waits.length) throw new WaitingForPolicy(waits);
+        outcome = await this.host.bringBranch(branch, oid, branch === current ? this.rooms.override(link, branch, null) : undefined);
       } catch (e) {
         if (!(e instanceof WaitingForPolicy)) throw e;
-        // The policy travels with the records, which come with every hello: soon.
+        // The policy travels with the records, which come with every hello: soon (retryLater, retryNow).
         if (!this.waitingForPolicy.has(`${from}/${branch}`)) this.host.log(`peers: ${from}'s work on ${branch} is ${e.message}`);
         this.waitingForPolicy.add(`${from}/${branch}`);
-        setTimeout(() => void this.syncFrom(link), 2000).unref();
-        return;
+        return true;
       }
       this.waitingForPolicy.delete(`${from}/${branch}`);
       if (branch === current && outcome.kind !== 'same') this.host.log(`peers: brought in ${branch} from ${from}${describeOutcome(outcome)}`);
+      return false;
     });
   }
 
@@ -1041,8 +1197,9 @@ export class Peers {
 
   async close(): Promise<void> {
     this.closed = true;
-    this.host.gate = null;
     clearTimeout(this.announceTimer);
+    for (const t of this.retries.values()) clearTimeout(t);
+    this.retries.clear();
     this.stopRefs?.();
     this.stopOutputs?.();
     this.outputs?.close();
@@ -1050,6 +1207,8 @@ export class Peers {
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([Promise.allSettled([...this.fetching.values(), ...this.fetchingOutputs.values()]), new Promise((r) => (timer = setTimeout(r, 5000)))]);
     clearTimeout(timer);
+    // Only now (0071): work a sync still brings in is judged by the write rules as ever.
+    this.host.gate = null;
     this.rooms.close();
     await this.node.close();
   }

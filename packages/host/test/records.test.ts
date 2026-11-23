@@ -44,7 +44,10 @@ describe('signed membership records', () => {
     expect(judge(remove, standing())).toBe('take');
     // Bo's device is not an admin's: waiting (the policy that makes him one may come); Cy's is.
     expect(judge(remove, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
-    expect(judge(add, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
+    // Pairing a device (0071): an admin's word, or a member's once the device's person is in the workspace.
+    expect(judge(add, standing({ managers: new Set([hex(cy)]) }))).toBe('wait');
+    expect(judge(add, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
+    expect(judge(add, standing({ managers: new Set([hex(cy)]), inWorkspace: (d) => d === add.subject }))).toBe('take');
     expect(judge(remove, standing({ managers: new Set([hex(bo)]) }))).toBe('take');
     // A person removes their own computer, admin or not (0068): Bo's device removes Cy's only if both are the same person's.
     expect(judge(remove, standing({ managers: new Set(), persons: new Map([[hex(bo), 'p1'], [hex(cy), 'p1']]) }))).toBe('take');
@@ -124,7 +127,8 @@ describe('records a device makes about itself', () => {
     const laptop = crypto.keyPair();
     const desk = crypto.keyPair();
     const thief = crypto.keyPair();
-    await id.takeRecords([...eventRecords(ws.id, bo1), vouchFor(ws.id, laptop, bo1, 'Bo'), vouchFor(ws.id, desk, bo1, 'Bo')]);
+    // Bo's device signs with the laptop's key: what it says of Bo's keys (revocations) is Bo's (0071).
+    await id.takeRecords([...eventRecords(ws.id, bo1), signsWith(ws.id, laptop), vouchFor(ws.id, laptop, bo1, 'Bo'), vouchFor(ws.id, desk, bo1, 'Bo')]);
     expect((await id.people())[0]!.keys.sort()).toEqual([hex(laptop), hex(desk)].sort());
     // Bo's identity key is stolen: the thief vouches for a key of their own, and renames him, dated far ahead.
     await id.takeRecords([vouchFor(ws.id, thief, bo1, 'Bo'), vouchFor(ws.id, laptop, bo1, 'Not Bo', Date.now() + 1e9)]);
@@ -217,7 +221,7 @@ describe('cutoffs for keys no longer a person’s (0066, step 4)', () => {
     const bo1 = identity();
     const laptop = crypto.keyPair();
     const stolen = crypto.keyPair();
-    await id.takeRecords([...eventRecords(ws.id, bo1), vouchFor(ws.id, laptop, bo1, 'Bo'), vouchFor(ws.id, stolen, bo1, 'Bo')]);
+    await id.takeRecords([...eventRecords(ws.id, bo1), signsWith(ws.id, laptop), vouchFor(ws.id, laptop, bo1, 'Bo'), vouchFor(ws.id, stolen, bo1, 'Bo')]);
     // Recovered, keeping only the laptop's key.
     const next = crypto.keyPair();
     const bo2 = { id: bo1.id, key: bo1.recovery, recovery: next, events: [...bo1.events, rotate(bo1.events, bo1.recovery, next, [hex(laptop)])] };
@@ -350,6 +354,10 @@ function vouchFor(ws: string, key: { publicKey: Buffer; secretKey: Buffer }, p: 
   const m = vouchMessage(hex(key), p.id, name);
   return signRecord({ kind: 'vouch', workspace: ws, subject: hex(key), person: p.id, personKey: hex(p.key), name, proof: sign(m, p.key), keyProof: sign(m, key), at }, bo);
 }
+
+/** Bo's device says it signs with this key. */
+const signsWith = (ws: string, key: { publicKey: Buffer; secretKey: Buffer }) =>
+  signRecord({ kind: 'signs', workspace: ws, subject: hex(key), proof: sign(signsMessage(hex(bo)), key) }, bo);
 
 const revokeFor = (ws: string, key: { publicKey: Buffer }, p: TestIdentity) =>
   signRecord({ kind: 'revoke-key', workspace: ws, subject: hex(key), person: p.id, personKey: hex(p.key), proof: sign(revokeKeyMessage(hex(key)), p.key) }, bo);

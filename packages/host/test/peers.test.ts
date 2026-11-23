@@ -381,8 +381,8 @@ describe('joining, and staying connected', () => {
     await until(async () => (await a.host.peers!.status()).devices.find((d) => d.name === 'above')?.through.length === 0, 5000, 'above offline');
   });
 
-  it('look the workspace up again while a device is missing, less and less often, and not while every device is here', async () => {
-    const { a, b } = await joinedPair({ lookupsMs: [50, 100, 200] });
+  it('look the workspace up again while a device is missing, less and less often, then at the last interval, and not while every device is here', async () => {
+    const { a, b } = await joinedPair({ lookupsMs: [50, 100, 200, 1500] });
     const node = a.host.peers!.node;
     // Each lookup looks up every topic it is on as a client: this week's and last week's.
     const topics = [...(node as unknown as { discoveries: Map<string, { d: { refresh(): Promise<void> }; client: boolean }> }).discoveries.values()].filter((t) => t.client);
@@ -400,12 +400,14 @@ describe('joining, and staying connected', () => {
     (node as unknown as { lookAgain(): void }).lookAgain();
     await new Promise((r) => setTimeout(r, 600));
     expect(lookups()).toBe(0);
-    // Bee goes: looked up three times, as the schedule says, and then no more.
+    // Bee goes: looked up three times, as the schedule says; then at the last interval, for as long as it is missing (0071).
     await b.close();
     hosts.splice(hosts.indexOf(b), 1);
     await until(() => lookups() === 3, 5000, 'three lookups');
     await new Promise((r) => setTimeout(r, 600));
     expect(lookups()).toBe(3);
+    await until(() => lookups() === 4, 5000, 'a fourth lookup');
+    await until(() => lookups() === 5, 5000, 'and a fifth, as long after');
   });
 });
 

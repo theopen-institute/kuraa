@@ -13,7 +13,11 @@
 // relays its members offer. Relays run by someone (`kuraa-host relay`) can be
 // named too (`--relay <key>`): a workspace of two devices has no third to
 // relay through.
+//
+// One relay for the process (0071), as there is one DHT node (dht.ts): every
+// workspace's node offers the same one, rather than each running its own.
 import { randomBytes } from 'node:crypto';
+import { useDht } from './dht.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -51,6 +55,54 @@ export class Relay {
     await this.server?.close().catch(() => undefined);
     await this.relay?.close().catch(() => undefined);
   }
+}
+
+const shared = new Map<string, { started: Promise<Relay>; users: number; dht: HyperDHT }>();
+
+/**
+ * The process's relay on the DHT node for these bootstrap servers (useDht),
+ * started on first use and closed when the last user lets go of it. Rejects if
+ * it cannot be started (this network does not allow it); a later call tries again.
+ */
+export async function useRelay(bootstrap: unknown[] | undefined, o: { port?: number; ephemeral?: boolean } = {}): Promise<{ relay: Relay; release(): Promise<void> }> {
+  const id = bootstrap ? JSON.stringify(bootstrap) : 'public';
+  let e = shared.get(id);
+  if (!e) {
+    const dht = await useDht(bootstrap, o);
+    e = shared.get(id);
+    if (e) await dht.destroy();
+    else {
+      const relay = new Relay(dht);
+      const entry = { started: relay.start().then(() => relay), users: 0, dht };
+      shared.set(id, entry);
+      entry.started.catch(() => {
+        if (shared.get(id) === entry) shared.delete(id);
+        void relay.close().then(() => dht.destroy());
+      });
+      e = entry;
+    }
+  }
+  const entry = e;
+  entry.users++;
+  let relay: Relay;
+  try {
+    relay = await entry.started;
+  } catch (err) {
+    entry.users--;
+    throw err;
+  }
+  let released = false;
+  return {
+    relay,
+    release: async () => {
+      if (released) return;
+      released = true;
+      if (--entry.users > 0) return;
+      if (shared.get(id) === entry) shared.delete(id);
+      await relay.close();
+      await entry.dht.destroy();
+    },
+  };
 }
 
 /** Where a relay run on its own keeps its key, so the key people named goes on working. */

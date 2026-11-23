@@ -55,6 +55,8 @@ class LocalNetwork {
   /** The networks the listening socket has joined the group on. */
   private readonly joined = new Set<string>();
   private starting: Promise<void> | null = null;
+  /** When the socket last failed to open: tried again from say, at most every REOPEN_MS (0071: no network yet at login, say). */
+  private failedAt = 0;
   /** When each member last answered someone asking: at most once a second. */
   private readonly answered = new WeakMap<LanMember, number>();
 
@@ -81,6 +83,7 @@ class LocalNetwork {
         this.log(`peers: the local network cannot be used to find devices: ${e.message}`);
         socket.close();
         if (this.socket === socket) this.socket = null;
+        this.failed();
         resolve();
       });
       socket.on('message', (buf, rinfo) => this.heard(buf, rinfo.address));
@@ -96,10 +99,18 @@ class LocalNetwork {
           this.log(`peers: the local network cannot be used to find devices: ${(e as Error).message}`);
           socket.close();
           this.socket = null;
+          this.failed();
         }
         resolve();
       });
     });
+  }
+
+  /** The socket could not be opened, or failed: opened again later (say). */
+  private failed(): void {
+    this.failedAt = Date.now();
+    this.starting = null;
+    this.joined.clear();
   }
 
   /** Hear and say on each network the computer is on now: networks come and go (Wi-Fi, VPN, a cable). */
@@ -140,6 +151,11 @@ class LocalNetwork {
 
   /** Say where a member is, to every device of its workspaces on the network; `ask`: and ask them to say where they are. */
   say(m: LanMember, ask: boolean): void {
+    if (!this.socket && this.members.has(m) && !this.starting && Date.now() - this.failedAt > REOPEN_MS) {
+      this.starting = this.open();
+      void this.starting.then(() => this.socket && this.say(m, ask));
+      return;
+    }
     if (!this.socket || !this.members.has(m) || !m.port()) return;
     const keys = m.keys().slice(0, 32);
     if (!keys.length) return;
@@ -181,6 +197,9 @@ class LocalNetwork {
     this.joined.clear();
   }
 }
+
+/** How long after the socket failed it is opened again, at the soonest. */
+const REOPEN_MS = 30_000;
 
 let shared: LocalNetwork | null = null;
 

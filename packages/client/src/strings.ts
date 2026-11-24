@@ -6,7 +6,7 @@
 //
 // The words: a document is *saved* (written to its file, and kept in its
 // history as a *version*); a workspace has an *online copy* and other
-// *devices*; the app talks to a *server* with an *access code*. Commit ids,
+// *devices*; the app talks to a *host* with an *access code*. Commit ids,
 // branch names and command-line flags stay behind a "Details" disclosure.
 // Spelling is British, as in the docs.
 import { keyLabel } from './keys.js';
@@ -62,7 +62,7 @@ export const S = {
     compare: 'Compare',
   },
 
-  /** The connection to the server: the light beside the workspace's name, and the document's menu. */
+  /** The connection to the host: the light beside the workspace's name, and the document's menu. */
   connection: {
     connecting: 'Connecting…',
     connected: 'Connected',
@@ -80,7 +80,7 @@ export const S = {
     retry: 'Try again now',
     rejectedManaged: 'The app lost its connection to your workspaces.',
     reconnect: 'Reconnect',
-    rejected: 'The server did not accept your access code.',
+    rejected: 'The host did not accept your access code.',
     changeCode: 'Change the access code…',
   },
 
@@ -93,17 +93,17 @@ export const S = {
     chooseWorkspace: 'Choose a workspace',
     noWorkspaces: 'No workspaces yet',
     workspaceIs: 'A workspace is a folder of documents, with every version kept. Make a new one, or join one someone shared with you with their invite link.',
-    noneOpen: 'None of this server’s workspaces can be opened now.',
+    noneOpen: 'None of this host’s workspaces can be opened now.',
     addWorkspace: 'Add a workspace…',
     openFolder: 'Open a folder…',
-    cannotOpenFolder: 'Folders cannot be opened here: this server holds one workspace.',
+    cannotOpenFolder: 'Folders cannot be opened here: this host holds one workspace.',
     emptyTitle: 'Nothing open yet',
     emptyBody: 'Choose a document on the left, or start a new one.',
     newDocument: 'New document…',
     shortcuts: 'Markdown and shortcuts',
     noType: (path: string) => `kuraa cannot open ${path}: no kind of document it knows uses this name.`,
-    versionMismatch: (label: string) => `This app and the server read ${label} documents differently, as one of them is newer. Update the app, or ask whoever runs the server to update it, before editing.`,
-    versionMismatchDetails: (label: string, mine: number, theirs: number) => `${label}: version ${mine} here, ${theirs} on the server.`,
+    versionMismatch: (label: string) => `This app and the host read ${label} documents differently, as one of them is newer. Update the app, or ask whoever runs the host to update it, before editing.`,
+    versionMismatchDetails: (label: string, mine: number, theirs: number) => `${label}: version ${mine} here, ${theirs} on the host.`,
     cannotOpenWorkspace: (name: string, why: string) => `${name} cannot be opened: ${why}`,
     removeBroken: (name: string, why: string) => `${quote(name)} cannot be opened: ${why}. Remove it from this list?`,
     removeWorkspace: (name: string, path: string) => `Remove ${quote(name)} from this list? Its folder stays as it is (${path}).`,
@@ -138,7 +138,7 @@ export const S = {
     date: dateTime,
   },
 
-  /** Saving, as the server reports it (decision 0037). */
+  /** Saving, as the host reports it (decision 0037). */
   saving: {
     paused: 'Saving is paused',
     failing: 'Saving is not working just now',
@@ -180,7 +180,7 @@ export const S = {
     name: 'Your name',
     email: 'Email, for co-author credit',
     colour: 'Cursor colour',
-    server: 'Server address',
+    host: 'Host address',
     code: 'Access code',
     saveConnection: 'Save connection',
     save: 'Save settings',
@@ -213,7 +213,8 @@ export const S = {
     treeRename: 'Rename',
     treeDelete: 'Delete',
     treeMenu: 'More: new files and folders, moving, the header',
-    placeholder: (key: string) => `Type # for a heading, - for a list, @ to cite… Press ${key} for all shortcuts`,
+    /** What an empty document says: little (the cues and keys are in Markdown and shortcuts, ⌘/). */
+    placeholder: 'Start writing…',
   },
 
   editor: {
@@ -506,23 +507,20 @@ export const S = {
     member: 'member',
     you: ' (you)',
     unknown: 'Someone not yet known here',
-    makeAdmin: 'Make admin',
-    makeMember: 'Make member',
-    removeEllipsis: 'Take out…',
+    roleOf: (name: string) => `${name}’s role`,
+    /** The choices in a person's role menu: the owner's hands the role over, so it asks first. */
+    roleChoice: { member: 'Member', admin: 'Admin', owner: 'Owner…' } as Record<'member' | 'admin' | 'owner', string>,
+    removeEllipsis: 'Remove…',
     adminTitle: 'Admins invite people, take members out, and say who can read and change what.',
     owner: 'owner',
     ownerTitle: 'The owner is an admin who also makes and unmakes admins, and can give the role to someone else.',
-    makeOwner: 'Make owner',
+    makeOwner: 'Transfer ownership',
     makeOwnerAsk: (name: string) => `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins.`,
-    removeAsk: (who: string) => `Take ${who} out of this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
-    witness: 'witness',
-    witnessTitle: 'Their devices confirm removals: once theirs hold one, it has reached them (a server that is always on, usually).',
-    makeWitness: 'Make witness',
-    unmakeWitness: 'Not a witness',
+    removeAsk: (who: string) => `Remove ${who} from this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
     removals: 'Recent removals',
     removalsAbout: 'A removal counts at once on each device that has it. Until the others have it too, a device that has not heard of it may still sync with whoever was removed.',
     removal: (kind: 'person' | 'computer', who: string, by: string | null) => (kind === 'person' ? `${who} taken out` : `A computer of ${who}’s removed`) + (by ? ` by ${by}` : ''),
-    confirmed: (names: string[], witnessed: boolean) => (witnessed ? `confirmed by a witness${names.length > 1 ? `, and ${count(names.length - 1, 'other', 'others')}` : ''}` : names.length ? `confirmed by ${list(names)}` : 'not confirmed by anyone else yet'),
+    confirmed: (names: string[]) => (names.length ? `confirmed by ${list(names)}` : 'not confirmed by anyone else yet'),
   },
 
   // A sync's own words (its name, what it does, an example address, how to get one) come from its component.
@@ -534,7 +532,7 @@ export const S = {
     address: (label: string) => `The address for the ${label.toLowerCase()}`,
     add: 'Add',
     none: 'None yet.',
-    setUpThere: 'Added and removed on the computer running this server, with its git sign-in.',
+    setUpThere: 'Added and removed on the computer running this host, with its git sign-in.',
   },
 
   person: {
@@ -586,7 +584,7 @@ export const S = {
 
   components: {
     title: 'Components',
-    setBy: 'What runs code, and which formats are on, are set in Settings on the computer running this server, or with flags when it starts.',
+    setBy: 'What runs code, and which formats are on, are set in Settings on the computer running this host, or with flags when it starts.',
     flags: 'Set with --engine, --env, --format and --component.',
     running: 'Running code',
     where: 'Where code runs',
@@ -607,7 +605,7 @@ export const S = {
     syncNone: 'This workspace: not set up.',
     syncNoWorkspace: 'Open a workspace to set up its copy.',
     toolsAbout: 'Kept once on this computer, for every workspace, and used only where code runs.',
-    toolsOff: 'Downloading tools is turned off in this server’s settings (Let documents install packages and download tools).',
+    toolsOff: 'Downloading tools is turned off in this host’s settings (Let documents install packages and download tools).',
     toolSize: (mb: string) => `About ${mb} to download.`,
     toolReady: (mb: string) => `Downloaded: ${mb} on this computer.`,
     toolParts: (n: number, label: string) => (n ? ` ${n.toLocaleString()} ${label} added since.` : ''),
@@ -625,7 +623,7 @@ export const S = {
     placeholder: 'dplyr, fixest@0.12.1, bioc::limma, owner/repo',
     installing: 'Installing…',
     install: 'Install',
-    off: 'Installing packages is turned off on this server.',
+    off: 'Installing packages is turned off on this host.',
     inWorkspace: 'In this workspace',
     noneYet: 'None installed yet. The environment’s own packages are available too.',
     removeTitle: (name: string) => `Remove ${name} from this workspace`,
@@ -806,14 +804,14 @@ export const S = {
     you: 'You',
     document: 'Document',
     workspace: 'Workspace',
-    server: 'Server',
+    host: 'Host',
     /** Each section's first line: who it applies to, and where it is kept. */
     youScope: 'Only you. Kept in this browser; your name and colour show beside what you type.',
     documentScope: (name: string) => `Everyone who opens ${quote(name)}. Saved in the file.`,
     workspaceScope: (name: string) => `Everyone in ${quote(name)}. Kept in the workspace.`,
-    serverScope: 'Everyone using it, and every workspace on it. Only you, its owner, can change it.',
-    serverElsewhere: 'Everyone using it, and every workspace on it. Only whoever runs it can change its settings.',
-    /** Beneath Server in the list: whose it is. */
+    hostScope: 'Everyone using it, and every workspace on it. Only you, its owner, can change it.',
+    hostElsewhere: 'Everyone using it, and every workspace on it. Only whoever runs it can change its settings.',
+    /** Beneath Host in the list: whose it is. */
     thisComputer: 'This computer',
     elsewhere: 'Shown only',
     noDocument: 'Open a document to change its settings.',
@@ -826,17 +824,17 @@ export const S = {
     packagesAbout: 'The R packages this workspace’s documents use, recorded in the workspace.',
   },
 
-  /** The Settings window (decision 0060): you, then this computer's server. */
+  /** The Settings window (decision 0060): you, then this computer's host. */
   preferences: {
     title: 'Settings',
     you: 'You',
-    connection: 'Server',
-    connectionAbout: 'The server this app works with, and the access code it lets you in with.',
-    server: 'This computer’s server',
+    connection: 'Host',
+    connectionAbout: 'The host this app works with, and the access code it lets you in with.',
+    host: 'This computer’s host',
     network: 'Other computers',
     syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through the online copy where it has one.',
     advanced: 'Advanced',
-    bootstrap: 'Servers to find other computers through, one per line as host:port. Leave empty to use the public ones; a private network names its own.',
+    bootstrap: 'Starting points for finding other computers, one per line as address:port. Leave empty to use the public ones; a private network names its own.',
     relays: 'Relays, one key per line, for computers that cannot connect to each other directly (some office, campus and phone networks). The other computers of a workspace relay for each other already; name one here when a workspace is on only two. Whoever runs one gets its key from kuraa-host relay. A relay passes on what it cannot read.',
     formats: 'Kinds of documents',
     formatsHint: 'A file whose kind is turned off opens as plain text.',
@@ -867,7 +865,7 @@ export const S = {
     versionSeconds: 'Save a version after this many seconds without typing',
     choose: 'Choose…',
     default: 'Default',
-    /** Shown by Done once a server setting is changed. */
+    /** Shown by Done once a host setting is changed. */
     applyOnClose: 'Your changes take effect when you close Settings: your workspaces reopen, saving any edits first, and the page reloads.',
     couldNotSave: (why: string) => `Could not save: ${why}`,
     applying: 'Applying…',
@@ -886,8 +884,8 @@ export const S = {
   },
 
   errors: {
-    unreachable: 'Cannot reach the server. Check your connection; nothing you typed is lost.',
-    accessCode: 'The server did not accept your access code. Check it in Settings.',
+    unreachable: 'Cannot reach the host. Check your connection; nothing you typed is lost.',
+    accessCode: 'The host did not accept your access code. Check it in Settings.',
     gitBusy: 'Another program is using this folder’s history just now. Try again in a moment.',
     gitOperation: 'Saving is paused while a git operation outside the app (a merge or rebase) is under way in this folder. Finish it there, then try again.',
     remoteAuth: 'The online copy did not accept your sign-in. Check your SSH key or git sign-in for it.',

@@ -22,13 +22,13 @@ describe('errors in plain words', () => {
     expect(explain(new Error('ENOSPC: no space left on device')).text).toBe(S.errors.diskFull);
   });
 
-  it('knows a server that cannot be reached, and an access code turned down, by their status', () => {
+  it('knows a host that cannot be reached, and an access code turned down, by their status', () => {
     expect(explain(new ApiError(0, 'Cannot reach the host at http://x: Failed to fetch')).text).toBe(S.errors.unreachable);
     expect(explain(new ApiError(401, 'Unauthorized')).text).toBe(S.errors.accessCode);
   });
 
   it('shows a message that already reads as a sentence as it is', () => {
-    expect(explain(new ApiError(403, 'Making invitations from the app is turned off on this server'))).toEqual({ text: 'Making invitations from the app is turned off on this server', details: null });
+    expect(explain(new ApiError(403, 'Making invitations from the app is turned off on this host'))).toEqual({ text: 'Making invitations from the app is turned off on this host', details: null });
     expect(explain('Give the workspace a name.')).toEqual({ text: 'Give the workspace a name.', details: null });
   });
 

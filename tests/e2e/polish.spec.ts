@@ -47,7 +47,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
 
   await openFile(page, path);
   const placeholder = page.getByTestId('editor').locator('.empty-placeholder');
-  await expect(placeholder).toHaveAttribute('data-placeholder', new RegExp(`Type # for a heading.*Press ${key('⌘/', 'Ctrl\\+/')} for all shortcuts`));
+  await expect(placeholder).toHaveAttribute('data-placeholder', 'Start writing…');
   await placeholder.click();
   await page.keyboard.type('Now there is text.');
   await expect(placeholder).toHaveCount(0);
@@ -101,10 +101,30 @@ test('a file shows at once from disk while its room connects; then it can be typ
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('Read before the room is ready. Typed.');
 });
 
+test('bullets inside a numbered item: Enter, Tab, "- "; ⌘⇧7 makes them numbers', async ({ page }) => {
+  const path = `runs/lists-${Date.now().toString(36)}.md`;
+  await create(path, '---\ntitle: Lists\n---\n\n1. First\n2. Second\n');
+  await openApp(page);
+  await openFile(page, path);
+  await page.getByTestId('editor').getByText('First').click();
+  await page.keyboard.press(key('Meta+ArrowRight', 'End'));
+  // The editor takes the moved cursor from the page's selectionchange, a moment later.
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('- a');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('b');
+  const saved = () => readFileSync(join(E2E.dir, path), 'utf8');
+  await expect.poll(saved, { timeout: 10_000 }).toContain('1. First\n   - a\n   - b\n2. Second\n');
+  await page.keyboard.press(`${MOD}+Shift+7`);
+  await expect.poll(saved, { timeout: 10_000 }).toContain('1. First\n   1. a\n   2. b\n2. Second\n');
+});
+
 test('offline: a banner says what is kept and not yet sent, and Try again reconnects', async ({ page }) => {
   const path = `runs/offline-${Date.now().toString(36)}.md`;
   await create(path, '# Offline\n\nBefore the outage.\n');
-  // The connection to the server's live editing, cut and restored at will.
+  // The connection to the host's live editing, cut and restored at will.
   let offline = false;
   const sockets = new Set<{ close(): Promise<void> }>();
   await page.routeWebSocket(/\/collab/, (ws) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A sync's settings, in its subpanel under Settings › Server's components (decisions 0059, 0064): places this workspace keeps a
+// A sync's settings, in its subpanel under Settings › Host's components (decisions 0059, 0064): places this workspace keeps a
 // copy on and syncs with, beyond its own devices, each from a component the host
 // loads. The online copy (@kuraa/sync-git) is the one that ships: a git server
 // (GitHub, GitLab, any) each save is pushed to, which every few minutes
@@ -14,7 +14,7 @@ import { time } from './labels.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 
-const props = defineProps<{ api: HostApi; /** Only this sync (its subpanel, under Server's components). */ only?: string }>();
+const props = defineProps<{ api: HostApi; /** Only this sync (its subpanel, under Host's components). */ only?: string }>();
 const syncs = shallowRef<SyncInfo[]>([]);
 const canManage = ref(false);
 const target = ref<Record<string, string>>({});

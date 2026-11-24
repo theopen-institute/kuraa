@@ -137,7 +137,7 @@ describe('tools', () => {
     const r = await render(api, 'latex.md');
     expect(r.state).toBe('done');
     expect(r.needs).toBeNull();
-    expect(r.message).toMatch(/Fake PDF is not on this computer, and downloading it is turned off on this server/);
+    expect(r.message).toMatch(/Fake PDF is not on this computer, and downloading it is turned off on this host/);
     expect(calls().some((c) => c.argv[0] === 'fake-install')).toBe(false);
   });
 
@@ -215,7 +215,7 @@ describe('tools', () => {
     const { api } = await host(dir, { dataDir: data, allowInstalls: false });
     const r = await render(api, 'boxes.md');
     expect(r.state).toBe('failed');
-    expect(r.message).toBe('LaTeX failed. It needs fake packages this computer does not have: boxes. Adding them is turned off in this server’s Preferences (Let documents install packages and download tools).');
+    expect(r.message).toBe('LaTeX failed. It needs fake packages this computer does not have: boxes. Adding them is turned off in this host’s Settings (Let documents install packages and download tools).');
     expect(calls().some((c) => c.argv[0] === 'fake-add')).toBe(false);
   });
 

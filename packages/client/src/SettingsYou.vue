@@ -5,7 +5,7 @@
 // subpanels of its own, Sign in from another device and Account recovery (the
 // recovery key alone since 0078: no trustees, escrow or email checks); how
 // each kind of document is edited for you (its editor module, on or off); and,
-// where the shell does not run the server, the server and its access code, used
+// where the shell does not run the host, the host and its access code, used
 // as the window closes (pending): half an address would connect nowhere. The rest
 // of You stays while a subpanel shows (hidden), so nothing typed there is lost.
 import { computed, onMounted, ref, shallowRef, useTemplateRef } from 'vue';
@@ -46,7 +46,7 @@ const sub = ref<'devices' | 'recovery' | null>(null);
 const subTitle = computed(() => (sub.value === 'devices' ? S.person.signInTitle : sub.value === 'recovery' ? S.person.recoveryTitle : ''));
 
 const connection = useTemplateRef<InstanceType<typeof SettingsForm>>('connection');
-/** The server and access code changed here, to use as the window closes (SettingsForm.pending). */
+/** The host and access code changed here, to use as the window closes (SettingsForm.pending). */
 const pending = () => connection.value?.pending() ?? null;
 defineExpose({ pending });
 </script>

@@ -123,7 +123,7 @@ describe('a workspace’s policy', () => {
     expect(evaluate(h.entries.filter((_, i) => i !== 1), h.ctx()).role(cy.id)).toBeNull();
   });
 
-  it('counts no legacy genesis, seal, verifier or email entry (0078): a workspace from before is founded again first', () => {
+  it('counts no legacy genesis, seal, verifier, witness or email entry (0078): a workspace from before is founded again first', () => {
     // Unpinned: nothing counts.
     const old = history(false);
     old.add({ t: 'genesis', admins: [ada.id, bo.id], legacy: true }, ada);
@@ -134,6 +134,7 @@ describe('a workspace’s policy', () => {
     h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
     h.add({ t: 'seal', geneses: [h.entries[0]!.id] }, ada);
     h.add({ t: 'verifier', key: 'ab'.repeat(32), url: 'https://verify.example.org' }, ada);
+    h.add({ t: 'witness', who: bo.id, on: true }, ada);
     h.add({ t: 'grant', group: 'workspace', who: 'email:bo@uni.edu', role: 'member' }, ada);
     h.add({ t: 'rule', path: '', by: ['email:bo@uni.edu'] }, ada);
     // What comes after them still counts.

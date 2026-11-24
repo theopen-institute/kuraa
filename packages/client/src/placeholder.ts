@@ -1,6 +1,7 @@
-// What an empty document says: how to start (type # for a heading, @ to cite…)
-// and where the rest is (⌘/). Shown in the first empty paragraph, or below the
-// header when there is nothing else, and gone at the first character typed.
+// What an empty document says: "Start writing…", no more (0076; the cues and
+// keys are in Markdown and shortcuts, ⌘/). Shown in the first empty paragraph,
+// or below the header when there is nothing else, and gone at the first
+// character typed.
 // Only this view draws it; nothing is added to the document until someone types.
 import type { Node as PMNode } from 'prosemirror-model';
 import { Plugin, TextSelection } from 'prosemirror-state';

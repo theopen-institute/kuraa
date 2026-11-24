@@ -29,7 +29,7 @@ import { dialogOpen } from './focus.js';
 import type { FormatCommands } from '@kuraa/editor-kit';
 import { workspaceFiles } from './workspaceFiles.js';
 import { placeholderPlugin } from './placeholder.js';
-import { APP_KEYS, keyLabel, keyMatches } from './keys.js';
+import { APP_KEYS, keyMatches } from './keys.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 
@@ -289,7 +289,7 @@ function open(carried: Carried | null = null): () => void {
     commands = formatEditor?.commands?.(ctx) ?? {};
     const plugins = layout?.kind === 'lines'
       ? linesPlugins(type.schema, layout, path, history)
-      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap), placeholderPlugin(S.help.placeholder(keyLabel(APP_KEYS.help)), formatEditor?.header?.node)];
+      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap), placeholderPlugin(S.help.placeholder, formatEditor?.header?.node)];
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins, findPlugin()] });
     pmView = new EditorView(mount.value!, {
       state,

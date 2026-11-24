@@ -157,7 +157,7 @@ export interface FolderListing {
 }
 
 /** Why the owner's features are off on a hub listening on the network, in plain words. */
-export const OWNER_OFF = 'This server is open to other computers on the network, so Preferences, opening folders and your identity are not available from the app. Start it without --host (listening only on this computer) to use them.';
+export const OWNER_OFF = 'This host is open to other computers on the network, so Preferences, opening folders and your identity are not available from the app. Start it without --host (listening only on this computer) to use them.';
 
 /** An id and folder name from a name: lowercase letters, digits and hyphens. */
 export function slugOf(name: string): string {
@@ -222,7 +222,7 @@ export class Hub {
   }
 
   private mayAdd(): void {
-    if (!this.canAdd) throw new HttpError(403, 'This server holds one workspace: others cannot be added to it');
+    if (!this.canAdd) throw new HttpError(403, 'This host holds one workspace: others cannot be added to it');
   }
 
   private log(m: string): void {
@@ -546,7 +546,7 @@ export class Hub {
   async settingsView(): Promise<SettingsView> {
     this.mayOwn();
     const store = this.o.settings;
-    if (!store) throw new HttpError(404, 'This server is set up with flags when it starts');
+    if (!store) throw new HttpError(404, 'This host is set up with flags when it starts');
     const run = this.hostOptions().run;
     const loaded = await this.loadComponents();
     const environments: SettingsView['environments'] = await Promise.all([...(loaded?.environments.values() ?? [])].map(async (e) => {
@@ -580,7 +580,7 @@ export class Hub {
     return this.serial(async () => {
       this.mayOwn();
       const store = this.o.settings;
-      if (!store) throw new HttpError(404, 'This server is set up with flags when it starts');
+      if (!store) throw new HttpError(404, 'This host is set up with flags when it starts');
       if (await store.save(v)) await this.reconfigure();
       return this.settingsView();
     });

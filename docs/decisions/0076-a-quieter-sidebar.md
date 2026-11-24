@@ -29,6 +29,27 @@ The owner asked:
   **Workspace settings…** (with no workspace open, **Settings…**); ⌘, still opens Settings at what
   is in front of you, and the desktop app's own menu has Settings too.
 
+## The page
+
+- **An empty document says "Start writing…"**, and nothing more: the cues and keys (# for a heading,
+  @ to cite…) are in **Markdown and shortcuts** (⌘/, and the document's ⋯ menu), where 0044 put them.
+- **Folders in the list have a folder's icon**, closed or open, drawn as files' are, where a
+  triangle was; a folder's **New file** and **New folder** buttons are a page and a folder, each with
+  a plus, where ＋ and ⊞ were.
+- **A person's role is a menu** for whoever may change it (Member, Admin, and Owner…, which hands
+  the role over and asks first), and **Remove…** is the one button, at the row's end. Others see the
+  role, as before.
+- **Bullets inside numbers, and numbers inside bullets** (`packages/format-pandoc/src/editor/lists.ts`).
+  Pandoc reads and writes them, and the file always kept them, but in the page Tab only made a list
+  of the same kind and ⌘⇧8 did nothing inside a numbered list. Now:
+  - ⌘⇧8 or ⌘⇧7 in a list of the other kind turns the innermost list the cursor is in into bullets
+    or numbers;
+  - "- " or "1. " typed in an empty item of the other kind of list turns that item alone, the items
+    around it staying as they were, with numbers after it carrying on from those before. So Enter,
+    Tab, "- " under "1. First" gives bullets inside it.
+  A list turned into the kind of a list beside it is joined to it, as the file would read them back
+  as one.
+
 ## Settings
 
 - **Subpanels.** A section can hold a subpanel: a row with ›, which shows the subpanel in the

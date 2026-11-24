@@ -9,6 +9,13 @@ import { foldersOf, shownName, TREE, type Folder } from './tree.js';
 import { S } from './strings.js';
 import FileIcon from './FileIcon.vue';
 
+/** A folder's icon, drawn as files' are (FileIcon): closed, or open while its contents show. */
+const FOLDER = { paths: ['M1.5 12.5v-9h4.25l1.5 1.5h7.25v7.5z'] };
+const FOLDER_OPEN = { paths: ['M1.5 12.5v-9h4.25l1.5 1.5h5.75v2', 'M1.5 12.5l2.25-5.5h11l-2.25 5.5z'] };
+/** New file and New folder, beside a folder: a page and a folder, each with a plus. */
+const NEW_FILE = { paths: ['M8.5 14.5H3.5v-13h5.5l3 3v4', 'M9 1.5v3h3', 'M12 10.5v4', 'M10 12.5h4'] };
+const NEW_FOLDER = { paths: ['M8.5 12.5h-7v-9h4.25l1.5 1.5h7.25v3.5', 'M12 9.5v5', 'M9.5 12h5'] };
+
 const props = defineProps<{ folder: Folder; depth: number }>();
 const t = inject(TREE)!;
 const { selected, collapsed, dragging, over, tabStop } = t;
@@ -54,15 +61,15 @@ const fileLabel = (f: TreeFile) => (f.conflicts ? `${shownName(f)}, ${S.tree.con
       @click="t.toggle(f.path)"
     >
       <span class="tree-row tree-folder" :style="indent">
-        <span class="tree-icon" aria-hidden="true">{{ collapsed.has(f.path) ? '▸' : '▾' }}</span>{{ f.name }}
+        <FileIcon class="tree-icon" :icon="collapsed.has(f.path) ? FOLDER : FOLDER_OPEN" /><span class="tree-name">{{ f.name }}</span>
         <template v-if="t.folderMarks.value.has(f.path)">
           <svg v-if="markOf(f.path).readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers.title(markOf(f.path).readers ?? '')" :data-testid="`readers:${f.path + '/'}`"><title>{{ S.readers.title(markOf(f.path).readers ?? '') }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
           <svg v-if="markOf(f.path).writers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.permissions.writersTitle(markOf(f.path).writers ?? '')" :data-testid="`writers:${f.path + '/'}`"><title>{{ S.permissions.writersTitle(markOf(f.path).writers ?? '') }}</title><path d="M2 10l.6-2.4L8 2.2 9.8 4 4.4 9.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M2 10.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
         </template>
       </span>
       <span class="tree-actions">
-        <button type="button" tabindex="-1" :title="S.tree.newFileIn(f.name)" :aria-label="S.tree.newFileIn(f.name)" @click.stop="t.create(f.path)">＋</button>
-        <button type="button" tabindex="-1" :title="S.tree.newFolderIn(f.name)" :aria-label="S.tree.newFolderIn(f.name)" @click.stop="t.newFolder(f.path)">⊞</button>
+        <button type="button" tabindex="-1" :title="S.tree.newFileIn(f.name)" :aria-label="S.tree.newFileIn(f.name)" @click.stop="t.create(f.path)"><FileIcon :icon="NEW_FILE" /></button>
+        <button type="button" tabindex="-1" :title="S.tree.newFolderIn(f.name)" :aria-label="S.tree.newFolderIn(f.name)" @click.stop="t.newFolder(f.path)"><FileIcon :icon="NEW_FOLDER" /></button>
       </span>
     </div>
     <ul v-if="!collapsed.has(f.path)" role="group"><TreeFolder :folder="f" :depth="depth + 1" /></ul>

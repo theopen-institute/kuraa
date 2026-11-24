@@ -387,7 +387,7 @@ export class Runner {
 
   /** Where installers run, and the environment's architecture. Throws, saying why, if code cannot run here. */
   private async toolEnv(): Promise<ToolEnv> {
-    if (!this.enabled) throw new Error('Running code is turned off on this server, and tools are used only where code runs.');
+    if (!this.enabled) throw new Error('Running code is turned off on this host, and tools are used only where code runs.');
     const environment = await this.available();
     const { arch } = await this.status(environment);
     return {
@@ -409,7 +409,7 @@ export class Runner {
   /** Start downloading a tool (or join its download). Resolves once it has started; `done` when it has finished. */
   async downloadTool(id: string): Promise<{ ok: boolean; message: string; done: Promise<ToolResult> }> {
     const tool = this.toolOrThrow(id);
-    if (!this.allowInstalls) return refused('Downloading tools is turned off in this server’s Preferences (Let documents install packages and download tools).');
+    if (!this.allowInstalls) return refused('Downloading tools is turned off in this host’s Settings (Let documents install packages and download tools).');
     const env = await this.toolEnv();
     const why = this.tools.cannotInstall(tool, env.arch);
     if (why) return refused(why);
@@ -421,7 +421,7 @@ export class Runner {
 
   async removeTool(id: string): Promise<{ ok: boolean; message: string; done: Promise<ToolResult> }> {
     const tool = this.toolOrThrow(id);
-    if (!this.allowInstalls) return refused('Removing tools is turned off in this server’s Preferences (Let documents install packages and download tools).');
+    if (!this.allowInstalls) return refused('Removing tools is turned off in this host’s Settings (Let documents install packages and download tools).');
     const done = this.tools.remove(tool);
     void done.catch((e: Error) => this.o.log(`tools: could not remove ${tool.id}: ${e.message}`));
     return { ok: true, message: `Removing ${tool.label}…`, done };
@@ -431,7 +431,7 @@ export class Runner {
   async addToolParts(id: string, names: string[], by: PresenceUser | null, status?: (m: string) => void): Promise<ToolResult & { added: string[] }> {
     const tool = this.toolOrThrow(id);
     if (!tool.parts) return { ok: false, message: `${tool.label} has no parts to add.`, log: '', added: [] };
-    if (!this.allowInstalls) return { ok: false, message: `Adding ${tool.parts.label} is turned off in this server’s Preferences (Let documents install packages and download tools).`, log: '', added: [] };
+    if (!this.allowInstalls) return { ok: false, message: `Adding ${tool.parts.label} is turned off in this host’s Settings (Let documents install packages and download tools).`, log: '', added: [] };
     const result = await this.tools.addParts(tool, names, await this.toolEnv(), status);
     if (result.added.length) await this.recordParts(tool, result.added, by).catch((e: Error) => this.o.log(`could not record ${tool.parts!.label}: ${e.message}`));
     return result;
@@ -439,7 +439,7 @@ export class Runner {
 
   private toolOrThrow(id: string): Tool {
     const tool = this.tool(id);
-    if (!tool) throw new Error(`This server has no tool called "${id}".`);
+    if (!tool) throw new Error(`This host has no tool called "${id}".`);
     return tool;
   }
 
@@ -481,7 +481,7 @@ export class Runner {
     return {
       use: async (id: string): Promise<ToolUse> => {
         const tool = this.tool(id);
-        if (!tool) return { ok: false, reason: 'This server does not offer it.', canDownload: false };
+        if (!tool) return { ok: false, reason: 'This host does not offer it.', canDownload: false };
         let env: ToolEnv;
         try {
           env = await this.toolEnv();
@@ -506,7 +506,7 @@ export class Runner {
           const reason = busy === 'downloading' ? `${tool.label} is being downloaded.`
             : busy === 'removing' ? `${tool.label} is being removed from this computer.`
               : this.allowInstalls ? `${tool.label} is not on this computer yet.`
-                : `${tool.label} is not on this computer, and downloading it is turned off on this server.`;
+                : `${tool.label} is not on this computer, and downloading it is turned off on this host.`;
           return { ok: false, reason, canDownload: this.allowInstalls && busy !== 'removing' };
         }
         releases.push(held.release);
@@ -522,7 +522,7 @@ export class Runner {
           const names = parts.missing(log).filter((n) => parts.valid(n) && !tried.has(n) && !have.get(tool.id)?.includes(n));
           if (!names.length) continue;
           if (!this.allowInstalls) {
-            return { ok: false, message: `It needs ${parts.label} this computer does not have: ${names.join(', ')}. Adding them is turned off in this server’s Preferences (Let documents install packages and download tools).`, added: [] };
+            return { ok: false, message: `It needs ${parts.label} this computer does not have: ${names.join(', ')}. Adding them is turned off in this host’s Settings (Let documents install packages and download tools).`, added: [] };
           }
           for (const n of names) tried.add(n);
           status(`Adding ${parts.label}: ${names.join(', ')}…`);
@@ -574,7 +574,7 @@ export class Runner {
   }
 
   async installPackages(engineId: string, refs: string[], by: PresenceUser | null): Promise<PackageResult> {
-    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Installing packages is turned off in this server’s Preferences (Let documents install packages and download tools).', log: '', restart: false };
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Installing packages is turned off in this host’s Settings (Let documents install packages and download tools).', log: '', restart: false };
     const engine = this.packagesOf(engineId);
     const result = await this.queueInstall(async () => engine.packages.install(await this.packageContext(engine, by), refs));
     this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });
@@ -582,7 +582,7 @@ export class Runner {
   }
 
   async removePackages(engineId: string, names: string[], by: PresenceUser | null): Promise<PackageResult> {
-    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Changing packages is turned off in this server’s Preferences (Let documents install packages and download tools).', log: '', restart: false };
+    if (!this.o.options?.allowInstalls) return { ok: false, message: 'Changing packages is turned off in this host’s Settings (Let documents install packages and download tools).', log: '', restart: false };
     const engine = this.packagesOf(engineId);
     const result = await this.queueInstall(async () => engine.packages.remove(await this.packageContext(engine, by), names));
     this.o.broadcastAll({ type: 'packages', engine: engine.id, message: result.message });

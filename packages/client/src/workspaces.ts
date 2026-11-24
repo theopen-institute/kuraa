@@ -1,7 +1,7 @@
-// Which server the client talks to and which of its workspaces is open.
+// Which host the client talks to and which of its workspaces is open.
 //
-// Every server is a hub (see the host's hub.ts): its workspaces at <hub>/w/<id>,
-// with a list of them, and whether people may add more. A server that answers
+// Every host is a hub (see the host's hub.ts): its workspaces at <hub>/w/<id>,
+// with a list of them, and whether people may add more. A host that answers
 // as a host of its own (one started by itself) is shown the
 // same way, as a list of one that nothing is added to, so the app looks the same
 // whatever it talks to.
@@ -14,7 +14,7 @@ import { computed, markRaw, ref, shallowRef, watch, type Ref } from 'vue';
 import { HostApi, HubApi, type HubWorkspace } from './api.js';
 import type { Settings } from './settings.js';
 
-/** The id of the one workspace of a server that is a host itself. */
+/** The id of the one workspace of an address that is a single workspace’s host, not a hub. */
 const DIRECT = '';
 
 export function useWorkspaces(options: {
@@ -30,19 +30,19 @@ export function useWorkspaces(options: {
   const hostUrl = computed(() => settings.value.hostUrl);
   const token = computed(() => settings.value.token);
   const hubApi = computed(() => markRaw(new HubApi(hostUrl.value, token.value)));
-  /** The server's workspaces; null before the address has answered. */
+  /** The host's workspaces; null before the address has answered. */
   const workspaces = shallowRef<HubWorkspace[] | null>(null);
   /** People may add workspaces (and take them off the list). */
   const canAdd = ref(false);
   /** People may invite others to its workspaces. */
   const canInvite = ref(false);
-  /** Any folder on the server's computer may be opened (its owner, decision 0047). */
+  /** Any folder on the host's computer may be opened (its owner, decision 0047). */
   const canOpenFolder = ref(false);
   /** Preferences may be changed here. */
   const canChangeSettings = ref(false);
   /** Why the owner's features are not available here, if they are not. */
   const ownerOff = ref<string | null>(null);
-  /** The address is a host itself, not a hub. */
+  /** The address is a single workspace’s host, not a hub. */
   const direct = ref(false);
   /** The address has answered. */
   const known = ref(false);
@@ -56,7 +56,7 @@ export function useWorkspaces(options: {
       if (asked !== hubApi.value) return; // the address changed meanwhile
       direct.value = !answer;
       if (!answer) {
-        // A host itself: its one workspace, named once it says (the tree's header shows the host's name for it).
+        // A single workspace’s host: its one workspace, named once it says (the tree's header shows the host's name for it).
         workspaces.value = [{ id: DIRECT, name: '', path: '', peers: false }];
         canAdd.value = false;
         canInvite.value = false; // the menu asks the workspace itself

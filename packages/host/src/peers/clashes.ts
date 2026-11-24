@@ -60,7 +60,6 @@ function doing(op: PolicyOp, by: string | null, name: (id: string | null) => str
     case 'drop': return 'removed a computer';
     case 'unlink': return 'revoked an invite link';
     case 'admit': return 'let someone in by an invite link';
-    case 'witness': return `named ${who(op.who)} a witness`;
     default: return 'made a change';
   }
 }
@@ -106,7 +105,7 @@ function mayRedo(policy: Policy, op: PolicyOp, by: string | null, me: string | n
     case 'revoke': return op.who === me || (op.group === WORKSPACE && policy.role(op.who) === 'admin' ? policy.mayAssignAdmins(me) : policy.isAdmin(me, op.group));
     case 'unlink': return policy.isAdmin(me, op.group);
     case 'space': return admin || policy.spaces.get(op.id)?.by === me;
-    case 'drop': case 'rule': case 'perm': case 'witness': return admin;
+    case 'drop': case 'rule': case 'perm': return admin;
     default: return false;
   }
 }

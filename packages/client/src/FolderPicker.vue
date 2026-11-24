@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Choosing a folder on the server's computer, in the page: to open as a
+// Choosing a folder on the host's computer, in the page: to open as a
 // workspace, for new workspaces, or for packages and tools (decision 0047). A
 // shell with a folder dialog of its own (the desktop app) uses that instead.
 // It lists folders only, starting at home, never following links; hidden ones

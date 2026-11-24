@@ -38,8 +38,8 @@ the write gate and live rooms are as they are, among readers.
 
 ## What a holder holds
 
-A **holder** is a device the policy names as holding a space it does not read (an admin's to name,
-as witnesses are, 0072). It never merges a space or judges its commits: it keeps **packs** and
+A **holder** is a device the policy names as holding a space it does not read (an admin's to name;
+0072's witnesses, gone since, were named so too). It never merges a space or judges its commits: it keeps **packs** and
 passes them on.
 
 - A **pack** is a git bundle of a space's commits since the pack before, sealed with the space's key

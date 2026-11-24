@@ -1,6 +1,6 @@
 // You on this computer, through the host: where it listens only on this
 // computer, whoever has its access code is its owner (decision 0047), in a
-// browser as in the desktop app. Null where it does not (a server open to the
+// browser as in the desktop app. Null where it does not (a host open to the
 // network: its key is its owner's).
 import { ApiError, type HostApi } from './api.js';
 import type { PersonShell } from './shell.js';

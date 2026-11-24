@@ -5,7 +5,7 @@
 // - You (SettingsYou): yours alone, in this browser.
 // - Document (SettingsDocument): the open document's, in its file.
 // - Workspace (SettingsWorkspace): the open workspace's, in the workspace.
-// - Server (SettingsServer): the server's, for everyone using it.
+// - Host (SettingsHost): the host's, for everyone using it.
 //
 // Each place that opens it opens it at one (`section`); the list on the left
 // goes to the others. Each section says first who it applies to. A section that
@@ -15,8 +15,8 @@
 //
 // Nothing changed here is lost by closing it (Done, Escape, a click outside, all
 // the same; 0063): you, and the workspace's things, as each is changed; the
-// document's header, written as it closes; the server and access code, used as
-// it closes; and the server's settings, applied as it closes (reopening every
+// document's header, written as it closes; the host and access code, used as
+// it closes; and the host's settings, applied as it closes (reopening every
 // workspace, so said by Done once changed). Refused (a value not valid), it
 // stays open at that section, saying why, with Discard changes.
 import { computed, ref, useTemplateRef } from 'vue';
@@ -30,7 +30,7 @@ import type { Shell } from './shell.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import SettingsDocument from './SettingsDocument.vue';
-import SettingsServer from './SettingsServer.vue';
+import SettingsHost from './SettingsHost.vue';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsYou from './SettingsYou.vue';
 
@@ -41,7 +41,7 @@ const props = defineProps<{
   settings: Settings;
   /** The section to open at. */
   section: SettingsSection;
-  /** The server's settings may be changed here (its owner, decision 0047). */
+  /** The host's settings may be changed here (its owner, decision 0047). */
   canChangeSettings: boolean;
   /** Why they cannot be, if they cannot. */
   ownerOff: string | null;
@@ -61,7 +61,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  /** The server's settings were applied: the page starts again with them. */
+  /** The host's settings were applied: the page starts again with them. */
   saved: [];
   saveSettings: [settings: Settings];
   editorsOff: [ids: string[]];
@@ -77,7 +77,7 @@ const section = ref<SettingsSection>(props.section);
 
 const you = useTemplateRef<InstanceType<typeof SettingsYou>>('you');
 const documentPart = useTemplateRef<InstanceType<typeof SettingsDocument>>('documentPart');
-const server = useTemplateRef<InstanceType<typeof SettingsServer>>('server');
+const host = useTemplateRef<InstanceType<typeof SettingsHost>>('host');
 
 /** What each section is called in the list, with what it is about now beneath. */
 const nav = computed(() => SETTINGS_SECTIONS.map((id) => ({
@@ -97,20 +97,20 @@ const heading = computed(() => {
     case 'you': return { title: S.sections.you, scope: S.sections.youScope };
     case 'document': return { title: props.docName ?? S.sections.document, scope: props.path && props.docName ? S.sections.documentScope(props.docName) : '' };
     case 'workspace': return { title: props.workspace?.name ?? S.sections.workspace, scope: props.workspace ? S.sections.workspaceScope(props.workspace.name) : '' };
-    default: return { title: props.canChangeSettings ? S.preferences.server : S.sections.server, scope: props.canChangeSettings ? S.sections.serverScope : S.sections.serverElsewhere };
+    default: return { title: props.canChangeSettings ? S.preferences.host : S.sections.host, scope: props.canChangeSettings ? S.sections.hostScope : S.sections.hostElsewhere };
   }
 });
 
-/** A server setting was changed: applied as the window closes, and said by Done. */
-const serverChanged = computed(() => !!server.value?.changed);
-const busy = computed(() => !!server.value?.busy);
+/** A host setting was changed: applied as the window closes, and said by Done. */
+const hostChanged = computed(() => !!host.value?.changed);
+const busy = computed(() => !!host.value?.busy);
 
 /** Closing was refused (a value not valid): a way out that keeps nothing not saved yet. */
 const stuck = ref(false);
 
 /**
  * Close the window, keeping what was changed: the document's header (written),
- * the server and access code (if changed, and both given), then the server's
+ * the host and access code (if changed, and both given), then the host's
  * settings (applied: the page reloads). Any refused, it stays open there.
  */
 async function close(then?: () => void): Promise<boolean> {
@@ -125,8 +125,8 @@ async function close(then?: () => void): Promise<boolean> {
     stuck.value = true;
     return false;
   }
-  if (serverChanged.value && !(await server.value!.save())) {
-    section.value = 'server';
+  if (hostChanged.value && !(await host.value!.save())) {
+    section.value = 'host';
     stuck.value = true;
     return false;
   }
@@ -145,7 +145,7 @@ function thenClose(then: () => void) {
 const root = useTemplateRef<HTMLElement>('root');
 useDialog(root, () => {
   if (section.value === 'document' && documentPart.value?.escape()) return;
-  if (server.value?.picking) return;
+  if (host.value?.picking) return;
   void close();
 });
 </script>
@@ -201,9 +201,9 @@ useDialog(root, () => {
             @permissions="(p) => thenClose(() => emit('permissions', p))"
             @packages="(r, engine) => thenClose(() => emit('packages', r, engine))"
           />
-          <SettingsServer
-            v-show="section === 'server'"
-            ref="server"
+          <SettingsHost
+            v-show="section === 'host'"
+            ref="host"
             :hub="hub"
             :api="api"
             :shell="shell"
@@ -218,7 +218,7 @@ useDialog(root, () => {
 
       <div class="modal-actions settings-done">
         <!-- Changed: said once, here by Done, where it happens. -->
-        <p v-if="serverChanged" class="pref-note pending" data-testid="pref-pending">{{ S.preferences.applyOnClose }}</p>
+        <p v-if="hostChanged" class="pref-note pending" data-testid="pref-pending">{{ S.preferences.applyOnClose }}</p>
         <button v-if="stuck && !busy" type="button" data-testid="settings-discard" @click="emit('close')">{{ S.preferences.discard }}</button>
         <button type="button" class="primary" :disabled="busy" data-testid="settings-close" @click="close()">{{ busy ? S.preferences.applying : S.common.done }}</button>
       </div>

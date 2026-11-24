@@ -2,9 +2,9 @@
 // Settings › Workspace (decision 0064): the open workspace's own settings, kept
 // in the workspace, for everyone in it: its packages; its devices, and inviting
 // people (DevicesSection); its groups and permissions (RulesSection); and, where
-// the server allows it, taking it off this server's list (its folder stays). Its
+// the host allows it, taking it off this host's list (its folder stays). Its
 // name is the section's heading, renamed there (SettingsWindow, 0061); its online
-// copy is the online copy component's, under Server's components (SettingsServer). Each of these is done at once, asking first
+// copy is the online copy component's, under Host's components (SettingsHost). Each of these is done at once, asking first
 // where it should, as it always was: none waits for the window to close.
 import { computed, ref, watch } from 'vue';
 import type { HostApi, WorkspaceInfo } from './api.js';
@@ -18,7 +18,7 @@ const props = defineProps<{
   workspace: WorkspaceInfo | null;
   /** The open document's runner, if it runs code: through it, the workspace's packages are listed and changed. */
   runner: ChunkRunner | null;
-  /** The server lets people take this workspace off its list. */
+  /** The host lets people take this workspace off its list. */
   canRemove: boolean;
 }>();
 const emit = defineEmits<{ remove: []; invite: []; permissions: [path: string]; packages: [runner: ChunkRunner, engine: string] }>();

@@ -2,7 +2,7 @@
 // Adding a workspace to a hub: a new one (a folder of its own, made a git
 // repository), named here for everyone who joins it later, or one someone
 // shared, joined with the invite link they gave (kuraa-invite:…), which is
-// called what it calls itself (0061); or, where the server can open folders of
+// called what it calls itself (0061); or, where the host can open folders of
 // its computer, a folder already there (chosen with the folder dialog: App's
 // openFolder).
 import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef } from 'vue';
@@ -13,7 +13,7 @@ import ErrorBanner from './ErrorBanner.vue';
 
 const props = defineProps<{
   hub: HubApi;
-  /** A folder of the server's computer can be opened as a workspace (the desktop app, or a server's owner). */
+  /** A folder of the host's computer can be opened as a workspace (the desktop app, or a host's owner). */
   canOpenFolder?: boolean;
 }>();
 const emit = defineEmits<{ added: [workspace: HubWorkspace]; cancel: []; openFolder: [] }>();

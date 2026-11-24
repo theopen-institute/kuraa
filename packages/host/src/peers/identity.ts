@@ -963,7 +963,7 @@ export class Identity {
    * workspace's): refused here first if this person may not, and checked after.
    * A workspace from before 0066 is founded again first (0078).
    */
-  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' | 'witness' }>, key: KeyPair): Promise<void> {
+  async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' }>, key: KeyPair): Promise<void> {
     const policy = await this.policy();
     const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
     if (!policy.founded) throw new Error('This workspace has no policy yet');
@@ -979,8 +979,8 @@ export class Identity {
     }
     if (op.t === 'owner') {
       // Checked above.
-    } else if (op.t === 'rule' || op.t === 'perm' || op.t === 'witness') {
-      if (!policy.isAdmin(me)) throw new Error(op.t === 'witness' ? 'Only an admin of this workspace names its witnesses' : 'Only an admin of this workspace can say who may change what');
+    } else if (op.t === 'rule' || op.t === 'perm') {
+      if (!policy.isAdmin(me)) throw new Error('Only an admin of this workspace can say who may change what');
     } else if (!policy.isAdmin(me, op.group) && !(op.t === 'revoke' && op.who === me)) {
       throw new Error(op.group === WORKSPACE ? 'Only an admin of this workspace can change who is in it' : `Only an admin of ${op.group} can change who is in it`);
     }
@@ -1033,9 +1033,9 @@ export class Identity {
    * The removals that count (0072: people taken out of the workspace, computers
    * dropped), the latest first, with who confirmed each: the people, but
    * whoever made it and whoever it took out, whose devices' acknowledgements
-   * say they hold it; and whether a witness is among them.
+   * say they hold it.
    */
-  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[]> {
+  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[]> {
     const records = await this.records();
     const policy = await this.policy(records);
     const w = this.who(records);
@@ -1056,7 +1056,7 @@ export class Identity {
       }
       held.set(person, seen);
     }
-    const out: { op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[] = [];
+    const out: { op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[] = [];
     for (const id of [...policy.applied].reverse()) {
       const e = entries.get(id);
       if (!e) continue;
@@ -1064,7 +1064,7 @@ export class Identity {
       if (!who) continue;
       const by = personOfKey(e.signer);
       const confirmedBy = [...held].filter(([p, ops]) => p !== by && p !== who && ops.has(id)).map(([p]) => p).sort();
-      out.push({ op: id, kind: e.op.t === 'drop' ? 'computer' : 'person', who, by, confirmedBy, witnessed: confirmedBy.some((p) => policy.witnesses.has(p)) });
+      out.push({ op: id, kind: e.op.t === 'drop' ? 'computer' : 'person', who, by, confirmedBy });
       if (out.length >= limit) break;
     }
     return out;

@@ -59,7 +59,7 @@ const fail = (e: unknown) => {
   error.value = e;
 };
 
-// The server's workspaces, and the one open (see workspaces.ts).
+// The host's workspaces, and the one open (see workspaces.ts).
 const { hubApi, workspaces: hub, canAdd, canOpenFolder, canChangeSettings, ownerOff, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
   settings,
   active: () => !editingSettings.value,
@@ -104,7 +104,7 @@ const showSource = ref(false);
 const docMenu = shallowRef<{ top: number; right: number } | null>(null);
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
-/** Goes up when the host says a tool changed (downloaded, removed): Settings › Server and the preview ask again. */
+/** Goes up when the host says a tool changed (downloaded, removed): Settings › Host and the preview ask again. */
 const toolsKey = ref(0);
 const addingWorkspace = ref(false);
 /** Inviting people: whether the workspace already syncs with devices. */
@@ -242,7 +242,7 @@ async function switchWorkspace(id: string) {
   if (id === chosen.value) return;
   const w = hub.value?.find((x) => x.id === id);
   if (w?.error) {
-    // It cannot be chosen, so this is the place to take it off the list (where the server allows it).
+    // It cannot be chosen, so this is the place to take it off the list (where the host allows it).
     if (!canAdd.value) {
       error.value = S.app.cannotOpenWorkspace(w.name, w.error);
       return;
@@ -262,7 +262,7 @@ async function switchWorkspace(id: string) {
 
 /**
  * The Settings window (decisions 0060, 0064): you, the open document, the open
- * workspace, and the server, opened at one of them: the one asked for, else
+ * workspace, and the host, opened at one of them: the one asked for, else
  * the one last shown.
  */
 const settingsOpen = ref(false);
@@ -276,8 +276,8 @@ function openSettings(section?: SettingsSection) {
 function openSettingsHere() {
   openSettings(path.value && type.value && !viewing.value ? 'document' : workspace.value ? 'workspace' : 'you');
 }
-/** The server's settings saved: it has reopened every workspace with them; the page starts again with them too. */
-function serverSettingsSaved() {
+/** The host's settings saved: it has reopened every workspace with them; the page starts again with them too. */
+function hostSettingsSaved() {
   location.reload();
 }
 
@@ -294,7 +294,7 @@ function pickFolder(): Promise<string | null> {
 }
 
 /**
- * Open a folder…: any folder on the server's computer, as a workspace. One that
+ * Open a folder…: any folder on the host's computer, as a workspace. One that
  * is not yet a repository is made one once the person agrees, in the words the
  * desktop app always used.
  */
@@ -832,7 +832,7 @@ function useSettings(s: Settings) {
       :editors-off="editorsOff"
       :tools-key="toolsKey"
       @save-settings="useSettings"
-      @saved="serverSettingsSaved"
+      @saved="hostSettingsSaved"
       @editors-off="setEditorsOff"
       @rename-workspace="renameWorkspace"
       @remove-workspace="chosen && removeWorkspace(chosen)"

@@ -110,7 +110,7 @@ describe('rendering documents', () => {
     expect(state.log).toContain('line 3: FAIL');
     // A format the renderer does not make, and a file nothing renders.
     expect((await render('notes.md', 'pdf')).state.message).toBe('This document cannot be rendered to pdf.');
-    expect((await render('code.R')).state.message).toBe('Nothing on this server renders this kind of file.');
+    expect((await render('code.R')).state.message).toBe('Nothing on this host renders this kind of file.');
     expect((await api('/api/renders', { method: 'POST', body: JSON.stringify({ path: 'notes.md', format: 'exe' }) })).status).toBe(400);
   });
 
@@ -133,7 +133,7 @@ describe('rendering documents', () => {
     await running!.close();
     rmSync(dir, { recursive: true, force: true });
     await host(undefined);
-    expect((await render('notes.md')).state.message).toContain('Rendering is turned off on this server');
+    expect((await render('notes.md')).state.message).toContain('Rendering is turned off on this host');
     expect(existsSync(join(dir, 'notes.html'))).toBe(false);
     expect(readFileSync(join(dir, 'notes.md'), 'utf8')).toBe('# Notes\n\nThe tide was out.\n');
   });

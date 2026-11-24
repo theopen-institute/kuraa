@@ -576,7 +576,7 @@ describe('a device and its records', () => {
     expect([...(await joiner.devicesIn(records, ws.id))]).toEqual([]);
   });
 
-  it('confirms a removal by the people whose devices acknowledge holding it; a witness among them (0072)', async () => {
+  it('confirms a removal by the people whose devices acknowledge holding it (0072)', async () => {
     const { id } = repo();
     const { ws, myKey } = await founded(id);
     const b = inRecords(ws.id, bo, 'Bo');
@@ -589,15 +589,12 @@ describe('a device and its records', () => {
     expect(await id.acknowledge()).toBe(false);
     // Ada takes Bo out: no one but Ada holds it yet.
     await id.adminOp({ t: 'revoke', group: 'workspace', who: b.person.id }, myKey);
-    expect(await id.confirmations()).toEqual([expect.objectContaining({ kind: 'person', who: b.person.id, confirmedBy: [], witnessed: false })]);
+    expect(await id.confirmations()).toEqual([expect.objectContaining({ kind: 'person', who: b.person.id, confirmedBy: [] })]);
     // Cy's device acknowledges a policy that holds it: Cy confirms it.
     const ack = (heads: string[]) => signRecord({ kind: 'ack', workspace: ws.id, subject: 'ab'.repeat(32), policyHeads: heads }, cy);
     expect(readRecord(JSON.parse(JSON.stringify(ack((await id.policy()).heads))))).not.toBeNull();
     await id.takeRecords([ack((await id.policy()).heads)]);
-    expect((await id.confirmations())[0]).toMatchObject({ confirmedBy: [c.person.id], witnessed: false });
-    // Cy named a witness: the removal has reached a witness.
-    await id.adminOp({ t: 'witness', who: c.person.id, on: true }, myKey);
-    expect((await id.confirmations())[0]).toMatchObject({ confirmedBy: [c.person.id], witnessed: true });
+    expect((await id.confirmations())[0]).toMatchObject({ confirmedBy: [c.person.id] });
     // An acknowledgement from a device not in the workspace (Bo's, out now) is not taken.
     expect(await id.takeRecords([signRecord({ kind: 'ack', workspace: ws.id, subject: 'cd'.repeat(32), policyHeads: (await id.policy()).heads }, bo)])).toEqual([]);
   });

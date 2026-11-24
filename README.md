@@ -40,7 +40,7 @@ settings are kept with the app's data (`settings.json` and `host-workspaces.json
 `--settings` names), so choosing another folder for new workspaces keeps the list. `--workspaces
 <folder>` names that folder instead (its list kept in it), and wins over Settings. `--dir` serves
 exactly one folder, a git working tree (`--init` makes it one), and nothing can be added from the
-app. Either way it is the same kind of server, a hub
+app. Either way it is the same kind of host, a hub
 ([decision 0030](docs/decisions/0030-one-kind-of-server.md)).
 
 The host prints its URL, the access token, a link that opens the client with the token filled
@@ -55,7 +55,7 @@ in the page), their identity and the online copy. That is the default (`--host 1
 for the workspace's admins ([0066](docs/decisions/0066-permissions-without-a-centre.md)). A server
 for many people will need a design of its own.
 
-Every setting below is in **Settings** (This computer’s server), in a browser and in the desktop app alike, so nobody
+Every setting below is in **Settings** (This computer’s host), in a browser and in the desktop app alike, so nobody
 needs a flag; a flag given at start wins over its setting for as long as the host runs, and
 Settings says so. The last column says where. What stays on the command line, and why, is in
 [decision 0047](docs/decisions/0047-browser-equals-desktop.md).
@@ -94,7 +94,7 @@ online copy and your identity follow from where the host listens.
 
 Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
-section changes them. In the app the URL and token are the **server address** and **access code**.
+section changes them. In the app the URL and token are the **host address** and **access code**.
 
 ## Settings
 
@@ -102,11 +102,11 @@ section changes them. In the app the URL and token are the **server address** an
 one window in a browser and in the desktop app (where it is also in the app menu on a Mac, and
 in File elsewhere), in two parts ([0060](docs/decisions/0060-one-settings-window.md)). **You**:
 your name, email and cursor colour, kept in this browser and saved as each is changed; your key
-on this computer; and, where the app does not run the server itself, the server address and access
-code. **This computer’s server**, wherever the host listens only on this computer: in view, the kinds of
+on this computer; and, where the app does not run the host itself, the host address and access
+code. **This computer’s host**, wherever the host listens only on this computer: in view, the kinds of
 documents that are on, running R code (and whether Podman is ready for it),
 whether documents may install packages and download tools, and where new workspaces go. Under
-**Advanced**: the servers used to find other computers on a private network, the limits on each
+**Advanced**: the starting points for finding other computers on a private network, the limits on each
 document's code (memory, CPUs, disk), what a workspace may ask for (writing to its own folder, the
 network), base images R may use, where packages and tools are kept, and how soon edits are written
 and versions saved. A value that is wrong is refused, saying what. Saving reopens every workspace
@@ -166,7 +166,7 @@ Settings are in one window of four sections, each saying who it applies to and w
 colour, your key, and how each kind of document is edited for you; in this browser), **Document**
 (the open document's header; in its file), **Workspace** (its name, as its heading, with **Rename
 workspace…**; packages, people and computers, its groups and permissions, and removing it from the
-list; in the workspace) and **Server** (its settings, only its owner changes them; and every component
+list; in the workspace) and **Host** (its settings, only its owner changes them; and every component
 it has, the online copy among them, with its settings for the open workspace). **Workspace settings…**,
 in the menu of the workspace's name, opens it at the workspace; ⌘, (Ctrl+,) at the open document
 (else the workspace); **Document settings…** and right-clicking a file at the document; ⌥⌘, where you
@@ -203,7 +203,7 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
 component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Settings › Server**, under its components, the online copy's **Settings…** (for the open workspace;
+In **Settings › Host**, under its components, the online copy's **Settings…** (for the open workspace;
 wherever the host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
@@ -313,8 +313,7 @@ change past the rules. How every device works the policy out is in [docs/policy.
 **Devices are in as their people are** (0072): a computer is in the workspace where its key is
 vouched for by someone the workspace has in it; taking someone out takes their computers out, and
 **Lost or no longer used…** drops one computer's key (its own person, or an admin). Workspace
-settings list recent removals and who has confirmed each so far; admins may name *witnesses*
-(usually an always-on server) whose devices confirm them.
+settings list recent removals and who has confirmed each so far.
 
 **Permissions** are on files and folders ([0069](docs/decisions/0069-permissions-on-files-and-folders.md)):
 a file's or folder's **Permissions…** (its right-click menu, or a document's ⋯ menu) say who can
@@ -438,9 +437,9 @@ What runs and which formats are on are the host's Settings (or its flags); loadi
 turning off the sandbox and naming the Podman program are flags only (`--component`,
 `--allow-unsandboxed`, `--podman`), as they choose code that runs with your rights. The desktop app
 takes `--engine` (`--engine none` for none), `--env`, `--format`, `--component`,
-`--allow-unsandboxed` and `--podman` too. Settings' **Server** section shows what is on, read-only, and its **You** section lets each person turn their own
+`--allow-unsandboxed` and `--podman` too. Settings' **Host** section shows what is on, read-only, and its **You** section lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
-browser. The Server section also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and
+browser. The Host section also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and
 where installs are allowed offers **Download** and **Remove**: tools are kept once per computer in
 the data folder and used only where code runs ([decision 0045](docs/decisions/0045-tools.md)). A
 file whose format is off opens as a Text file
@@ -500,7 +499,7 @@ changes to the host, session, kernel or format packages restart the host, and op
 reconnect without losing anything typed. Ctrl+C writes and commits pending edits before exiting.
 
 To point the dev client at some other host instead, run `pnpm web:dev` and enter that host's
-URL and token in the welcome, or later in the menu's **Server and access code…**.
+URL and token in the welcome, or later in **Settings…** (You).
 
 ## Run the desktop app
 
@@ -522,8 +521,8 @@ Joining a shared host or hub runs none of the app's own; the launcher leads back
 
 **Settings…** is the client's dialog, as in a browser ([above](#settings)). What stays the
 desktop app's own: its native menus, the spelling suggestions in its right-click menu, the git it
-ships, the launcher and joining another server, native save dialogs (a browser downloads instead), and
-leaving out the server address and access code, which it manages itself.
+ships, the launcher and joining another host, native save dialogs (a browser downloads instead), and
+leaving out the host address and access code, which it manages itself.
 
 ## Package the desktop app
 

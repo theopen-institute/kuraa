@@ -19,6 +19,7 @@ import { conflictViews, nextConflict } from './conflicts.js';
 import { citationPlugins, citationRules, citationViews } from './citations.js';
 import { imagePlugins, imageRules, imageViews } from './images.js';
 import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
+import { listRules, switchList } from './lists.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
@@ -26,6 +27,7 @@ export { conflictPositions, nextConflict, versionDateLabel, versionLabel } from 
 export { Bibliography, citationLabel, describeEntry } from './citations.js';
 export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable } from './tables.js';
 export { workspacePath } from './paths.js';
+export { listRules, switchList } from './lists.js';
 export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
 
 export interface PandocEditorExtension {
@@ -140,6 +142,8 @@ function markdownRules(schema: Schema, ext: PandocEditorExtension): InputRule[] 
   const rules: (InputRule | null)[] = [
     textblockTypeInputRule(/^(#{1,6})\s$/, n.heading!, (x) => ({ level: x[1]!.length })),
     wrappingInputRule(/^\s*>\s$/, n.blockquote!),
+    // In an empty item of the other kind of list: that item, as this kind (./lists.ts).
+    ...listRules(schema),
     wrappingInputRule(/^\s*([-+*])\s$/, n.bullet_list!, (x) => ({ bullet: x[1] === '*' ? '*' : x[1] })),
     wrappingInputRule(/^(\d+)\.\s$/, n.ordered_list!, (x) => ({ order: Number(x[1]) }), (x, node) => node.childCount + node.attrs.order === Number(x[1])),
     // ```{…} then a space: whatever the extension makes of it (Pandoc alone waits for Enter).
@@ -194,8 +198,8 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
     'Mod-Alt-1': setBlockType(n.heading!, { level: 1 }),
     'Mod-Alt-2': setBlockType(n.heading!, { level: 2 }),
     'Mod-Alt-3': setBlockType(n.heading!, { level: 3 }),
-    'Mod-Shift-8': wrapInList(n.bullet_list!),
-    'Mod-Shift-7': wrapInList(n.ordered_list!),
+    'Mod-Shift-8': chainCommands(switchList(n.bullet_list!), wrapInList(n.bullet_list!)),
+    'Mod-Shift-7': chainCommands(switchList(n.ordered_list!), wrapInList(n.ordered_list!)),
     'Mod-Shift-.': wrapIn(n.blockquote!),
     'Mod-[': lift,
     'Mod-Alt-c': setBlockType(n.code_block!),
@@ -228,6 +232,7 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: TYPING, type: '> ', does: 'Block quote' },
   { group: TYPING, type: '- ', does: 'Bullet list (or * or +)' },
   { group: TYPING, type: '1. ', does: 'Numbered list' },
+  { group: TYPING, keys: ['Tab', 'Shift-Tab'], does: 'In a list: the item in a level, or out (then - or 1. for the other kind)' },
   { group: TYPING, type: '**bold**', does: 'Bold (or __bold__)' },
   { group: TYPING, type: '*italic*', does: 'Italic (or _italic_)' },
   { group: TYPING, type: '~~gone~~', does: 'Struck through' },
@@ -254,8 +259,8 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: KEYS, keys: ['Mod-Shift-k'], does: 'Link the selected text' },
   { group: KEYS, keys: ['Mod-Alt-1', 'Mod-Alt-2', 'Mod-Alt-3'], does: 'Heading 1, 2, 3' },
   { group: KEYS, keys: ['Mod-Alt-0'], does: 'Plain paragraph' },
-  { group: KEYS, keys: ['Mod-Shift-8'], does: 'Bullet list' },
-  { group: KEYS, keys: ['Mod-Shift-7'], does: 'Numbered list' },
+  { group: KEYS, keys: ['Mod-Shift-8'], does: 'Bullet list (in a numbered list: bullets instead)' },
+  { group: KEYS, keys: ['Mod-Shift-7'], does: 'Numbered list (in a bullet list: numbers instead)' },
   { group: KEYS, keys: ['Mod-Shift-.'], does: 'Block quote' },
   { group: KEYS, keys: ['Mod-['], does: 'Out of a list or quote' },
   { group: KEYS, keys: ['Mod-Alt-c'], does: 'Code block' },

@@ -14,13 +14,13 @@ import { HttpError } from './errors.js';
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
 
 function idOf(c: Context, v: unknown): string {
-  if (typeof v !== 'string' || !c.host.runner.tool(v)) throw new HttpError(404, 'This server has no such tool.');
+  if (typeof v !== 'string' || !c.host.runner.tool(v)) throw new HttpError(404, 'This host has no such tool.');
   return v;
 }
 
 function allowed(c: Context): void {
-  if (!c.host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this server, and tools are used only where code runs.');
-  if (!c.host.runner.allowInstalls) throw new HttpError(403, 'Downloading tools is turned off in this server’s Preferences (Let documents install packages and download tools).');
+  if (!c.host.runner.enabled) throw new HttpError(403, 'Running code is turned off on this host, and tools are used only where code runs.');
+  if (!c.host.runner.allowInstalls) throw new HttpError(403, 'Downloading tools is turned off in this host’s Settings (Let documents install packages and download tools).');
 }
 
 export const toolRoutes: Route[] = [

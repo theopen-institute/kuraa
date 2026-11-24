@@ -1,5 +1,7 @@
 # 0064 · Four kinds of settings, in one window
 
+*Since [0079](0079-host-not-server.md): the Server section is called **Host**.*
+
 *Since [0065](0065-no-menu.md): there is no menu. ⚙ (and ⌘,) open Settings at the open document, else the workspace; the document's commands are in its ⋯ menu; Search and Sync beside + in the sidebar.*
 
 > Changes where settings are shown: Settings ([0060](0060-one-settings-window.md)), Document

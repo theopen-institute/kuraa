@@ -112,7 +112,7 @@ describe('run components', () => {
     await running!.close();
     await expect(startHost({ dir, port: 0, run: { engines: ['r'] } })).rejects.toThrow('Unknown engine "r". Known: none.');
     running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents } });
-    expect(await echo()).toEqual({ status: 400, text: 'Nothing on this server runs echo chunks.' });
+    expect(await echo()).toEqual({ status: 400, text: 'Nothing on this host runs echo chunks.' });
   });
 
   it('refuses components for another version of the API, unknown ids, and environments that do not say if they are sandboxed', async () => {

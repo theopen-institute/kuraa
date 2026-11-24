@@ -152,6 +152,8 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .tree-file.untitled .tree-name { color: var(--muted); font-style: italic; }
 .tree-actions { position: absolute; right: 4px; top: 1px; display: none; gap: 2px; }
 .tree-actions button { padding: 0 5px; font-size: 12px; background: var(--panel); }
+.tree-actions button { display: inline-flex; align-items: center; padding: 1px 4px; }
+.tree-actions .file-icon { margin: 0; color: var(--text); }
 .tree-dir-row { position: relative; }
 /* Dragging to move: the folder it would land in, and the thing being moved. */
 .tree-dir.drop-target > .tree-dir-row { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
@@ -700,7 +702,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* Code that cannot run here now: why, beside a Run that cannot be pressed. */
 .run-unavailable { color: var(--warn); }
 
-/* Choosing a folder on the server's computer (FolderPicker.vue). */
+/* Choosing a folder on the host's computer (FolderPicker.vue). */
 .modal.folder-picker { width: min(520px, 94vw); }
 .folder-picker-bar { display: flex; gap: 6px; align-items: center; }
 .folder-picker-path { flex: 1; min-width: 0; }
@@ -712,7 +714,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 
 /* Preferences (PreferencesDialog.vue). */
 .modal.preferences { width: min(600px, 94vw); max-height: 90vh; overflow: auto; }
-/* The Settings window's two parts (decision 0060): you, then this computer's server. */
+/* The Settings window's two parts (decision 0060): you, then this computer's host. */
 .settings-part { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); }
 .settings-part > h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .pref-group { border: 0; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: grid; gap: 6px; min-width: 0; }
@@ -813,3 +815,11 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .person-key .person-advanced { padding-top: 10px; border-top: 1px solid var(--border); }
 .component-state { flex: none; min-width: 28px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
 .component-state.on { color: #30a46c; }
+/* A person's role, as a menu for whoever may change it (DevicesSection): the size of the tag it replaces, not a form's field. */
+.preferences .person-line .role-menu, .role-menu {
+  width: auto; flex: none; box-sizing: border-box; font: 12px var(--font); color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1px 4px; cursor: pointer;
+}
+.role-menu:hover { border-color: var(--muted); }
+/* Removing someone: apart, at the row's end, as removing a computer is. */
+.person-line button.danger { margin-left: auto; color: var(--warn); }

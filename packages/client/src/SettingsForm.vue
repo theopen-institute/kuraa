@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// Your settings: name, email, cursor colour, and the server and its access code
+// Your settings: name, email, cursor colour, and the host and its access code
 // (unless the shell runs it). `part` shows some of them: the menu keeps the
-// server and access code in a panel of their own, apart from the rest.
+// host and access code in a panel of their own, apart from the rest.
 // With `autosave` (the menu's name, email and colour), each field is saved as
 // it is changed (on leaving it, or Enter; the colour as it is picked), and what
 // is still being typed when the form goes away (the menu closed), with no
 // button. A name left empty goes back to the saved one; an email that is not
-// one is not saved. With `deferred` (the server and access code, in Settings),
+// one is not saved. With `deferred` (the host and access code, in Settings),
 // there is no button either: the window asks what changed as it closes
 // (pending), and uses it then.
 import { onBeforeUnmount, reactive, useTemplateRef } from 'vue';
@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
     </template>
     <template v-if="part !== 'profile' && !shell.managesHost">
       <label class="field">
-        <span>{{ S.settings.server }}</span>
+        <span>{{ S.settings.host }}</span>
         <input v-model="s.hostUrl" name="hostUrl" type="url" required>
       </label>
       <label class="field">

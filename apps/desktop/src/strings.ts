@@ -1,6 +1,6 @@
 // The words the desktop app's own parts show (its menus, its dialogs, what it
-// says when joining a server), apart from the client's (packages/client/src/
-// strings.ts) and in the same plain words: a *server* and its *access code*, a
+// says when joining a host), apart from the client's (packages/client/src/
+// strings.ts) and in the same plain words: a *host* and its *access code*, a
 // folder whose every version is kept. British spelling.
 
 export const D = {
@@ -48,8 +48,8 @@ export const D = {
     notAllowed: 'Not allowed.',
   },
   join: {
-    rejected: 'The server did not accept the access code.',
-    answered: (status: number) => `The server could not be joined (it answered ${status}).`,
+    rejected: 'The host did not accept the access code.',
+    answered: (status: number) => `The host could not be joined (it answered ${status}).`,
     unreachable: (url: string, why: string) => `Cannot reach ${url}: ${why}`,
   },
   lookUp: (text: string) => `Look Up “${text}”`,

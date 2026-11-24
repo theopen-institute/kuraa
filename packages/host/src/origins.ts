@@ -92,5 +92,5 @@ export function upgradeAllowed(req: IncomingMessage, gate: RequestGate): boolean
 /** The answer to a request whose Host header names somewhere else. */
 export function refuseHost(res: ServerResponse): void {
   res.writeHead(421, { 'content-type': 'text/plain' });
-  res.end('This server answers only at localhost (or 127.0.0.1).');
+  res.end('This host answers only at localhost (or 127.0.0.1).');
 }

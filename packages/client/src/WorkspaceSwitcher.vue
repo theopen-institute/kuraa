@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// The workspace's name in the sidebar's header: a menu of the server's
-// workspaces to switch between and, apart below them where the server allows
+// The workspace's name in the sidebar's header: a menu of the host's
+// workspaces to switch between and, apart below them where the host allows
 // it, Add a workspace… (a new one, one joined from an invite link, or a folder
 // opened); and Workspace settings… (where inviting people and removing the
-// workspace are), or Settings… with none open. A server of one folder shows
+// workspace are), or Settings… with none open. A host of one folder shows
 // just that one.
 import { ref } from 'vue';
 import type { HubWorkspace } from './api.js';
@@ -15,7 +15,7 @@ const props = defineProps<{
   current: string | null;
   /** What the open workspace is called (from the host), else the hub's name for it. */
   name: string;
-  /** The server lets people add workspaces. */
+  /** The host lets people add workspaces. */
   canAdd: boolean;
 }>();
 const emit = defineEmits<{ switch: [id: string]; add: []; settings: [] }>();

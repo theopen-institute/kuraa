@@ -133,7 +133,7 @@ export interface Route {
 const route = (method: Route['method'], path: Route['path'], handle: Route['handle']): Route => ({ method, path, handle });
 
 function requireRunning(host: Host, hint = ''): void {
-  if (!host.runner.enabled) throw new HttpError(403, `Running code is turned off on this server.${hint}`);
+  if (!host.runner.enabled) throw new HttpError(403, `Running code is turned off on this host.${hint}`);
 }
 
 const workspaceRoutes: Route[] = [
@@ -203,11 +203,11 @@ const runRoutes: Route[] = [
   }),
 
   route('POST', '/api/runs', async ({ host, req, res }) => {
-    requireRunning(host, ' Whoever runs the server can turn it on.');
+    requireRunning(host, ' Whoever runs the host can turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     const engine = host.runner.engineFor(String(body.engine ?? ''));
-    if (!engine) throw new HttpError(400, `Nothing on this server runs ${String(body.engine)} chunks.`);
+    if (!engine) throw new HttpError(400, `Nothing on this host runs ${String(body.engine)} chunks.`);
     const { environment } = await host.runner.describe();
     if (!environment?.available) throw new HttpError(503, environment?.message ?? 'No environment to run code in.');
     const chunk = body.chunk as { label?: unknown; index?: unknown; codeHash?: unknown; partial?: unknown } | undefined;
@@ -224,7 +224,7 @@ const runRoutes: Route[] = [
 
   ...(['interrupt', 'restart', 'clear'] as const).map((op) => route('POST', `/api/runs/${op}`, async ({ host, req, res }) => {
     // Clearing outputs runs nothing: those another device published can be cleared on a device that runs no code.
-    if (op !== 'clear') requireRunning(host, ' Whoever runs the server can turn it on.');
+    if (op !== 'clear') requireRunning(host, ' Whoever runs the host can turn it on.');
     const body = await readBody(req);
     const path = host.relPath(str(body.path, 'path'));
     if (op === 'interrupt') host.runner.interrupt(path);
@@ -433,7 +433,7 @@ const historyRoutes: Route[] = [
 // the workspace knows of.
 const personKeys = () => import('./peers/person.js');
 const hostPerson = async (host: Host) => {
-  if (!host.options.managePerson) throw new HttpError(404, 'Your identity is managed only on the computer running this server, while it is not open to the network');
+  if (!host.options.managePerson) throw new HttpError(404, 'Your identity is managed only on the computer running this host, while it is not open to the network');
   const keys = await personKeys();
   const p = await keys.readPerson();
   return keys.personInfo(p ? await knownKeys(host, p.id) : []);
@@ -528,11 +528,11 @@ const personRoutes: Route[] = [
 // syncs with. Everyone sees them (Sync syncs with them); adding and removing targets is for the one running
 // the host (manageOnline), whose git credentials they use.
 const mayManageOnline = (host: Host) => {
-  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy is set up only on the computer running this server, while it is not open to the network');
+  if (!host.options.manageOnline) throw new HttpError(403, 'The online copy is set up only on the computer running this host, while it is not open to the network');
 };
 const syncOf = (host: Host, id: string) => {
   const s = host.syncs.get(id);
-  if (!s) throw new HttpError(404, `No component for ${id} is loaded on this server`);
+  if (!s) throw new HttpError(404, `No component for ${id} is loaded on this host`);
   return s;
 };
 const syncInfo = async (host: Host, id: string) => {
@@ -581,7 +581,7 @@ const peerRoutes: Route[] = [
   }),
 
   route('GET', '/api/peers/links', async ({ host, res }) => {
-    if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this server');
+    if (!host.options.invites) throw new HttpError(403, 'Making invitations from the app is turned off on this host');
     send(res, 200, { links: host.peers ? await host.peers.links() : [] });
   }),
 
@@ -629,14 +629,6 @@ const peerRoutes: Route[] = [
   route('POST', /^\/api\/peers\/owner\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
     const peers = await host.peersForInvites();
     await allowed(() => peers.makeOwner(params[0]!));
-    send(res, 200, await peers.people());
-  }),
-  // A witness (0072): an admin names a person whose devices' acknowledgements confirm removals, or stops.
-  route('POST', /^\/api\/peers\/witness\/([0-9a-f]{64})$/, async ({ host, req, res, params }) => {
-    const peers = await host.peersForInvites();
-    const on = (await readBody(req)).on;
-    if (typeof on !== 'boolean') throw new HttpError(400, 'Say whether they are a witness: on, true or false');
-    await allowed(() => peers.setWitness(params[0]!, on));
     send(res, 200, await peers.people());
   }),
   route('DELETE', /^\/api\/peers\/people\/([0-9a-f]{64})$/, async ({ host, res, params }) => {

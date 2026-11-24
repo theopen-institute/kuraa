@@ -1,4 +1,4 @@
-// Errors as people read them. What the server or git says is often technical
+// Errors as people read them. What the host or git says is often technical
 // ("fatal: unable to access …: Could not resolve host", "EACCES"): the common
 // ones are said in plain words with what to do next, and the original is kept
 // for the Details disclosure (ErrorBanner.vue). A message that already reads as

@@ -196,13 +196,11 @@ export interface PeopleInfo {
   /** Whether this person makes, unmakes and takes out admins: the owner. */
   assignsAdmins: boolean;
   people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean }[];
-  /** People whose devices' acknowledgements confirm removals (0072): their IDs. */
-  witnesses: string[];
   /**
    * The latest removals (0072: people taken out, computers dropped), each with
-   * the names of those whose devices hold it so far, and whether a witness does.
+   * the names of those whose devices hold it so far.
    */
-  removals: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[];
+  removals: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -845,15 +843,10 @@ export class Peers {
       owner: policy.owner,
       assignsAdmins: policy.founded ? policy.mayAssignAdmins(me) : true,
       people: policy.people().map((p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
-      witnesses: [...policy.witnesses],
-      removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: known.get(r.who)?.name ?? `${r.who.slice(0, 8)}…`, by: r.by ? known.get(r.by)?.name ?? `${r.by.slice(0, 8)}…` : null, confirmedBy: r.confirmedBy.map((p) => known.get(p)?.name ?? `${p.slice(0, 8)}…`), witnessed: r.witnessed })),
+      removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: known.get(r.who)?.name ?? `${r.who.slice(0, 8)}…`, by: r.by ? known.get(r.by)?.name ?? `${r.by.slice(0, 8)}…` : null, confirmedBy: r.confirmedBy.map((p) => known.get(p)?.name ?? `${p.slice(0, 8)}…`) })),
     };
   }
 
-  /** Name a person a witness, or not (0072: an admin's to do): their devices' acknowledgements confirm removals. */
-  async setWitness(person: string, on: boolean): Promise<void> {
-    await this.adminOp({ t: 'witness', who: person, on });
-  }
 
   /** Give the owner's role to someone in the workspace (the owner's to do, 0070): they stay an admin. */
   async makeOwner(person: string): Promise<void> {
@@ -1237,7 +1230,7 @@ export class Peers {
     await this.node.membersChanged();
   }
 
-  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' | 'witness' }>): Promise<void> {
+  private async adminOp(op: Extract<PolicyOp, { t: 'grant' | 'revoke' | 'rule' | 'perm' | 'owner' }>): Promise<void> {
     if (!(await this.node.person())) throw new NotAllowed('This computer has no identity');
     try {
       await this.node.identity.adminOp(op, await this.node.signingKeyNow());

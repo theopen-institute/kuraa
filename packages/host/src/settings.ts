@@ -137,7 +137,7 @@ export function settingsFrom(v: unknown, strict = false): Settings {
   };
   const bootstrap = (strings(o.bootstrap) ?? d.bootstrap).filter((b) => {
     if (isHostPort(b)) return true;
-    problem(`“${b}” is not a server address; write it as host:port, such as node.example.org:49737.`);
+    problem(`“${b}” is not an address; write it as host:port, such as node.example.org:49737.`);
     return false;
   });
   const relays = (strings(o.relays) ?? d.relays).map((k) => k.toLowerCase()).filter((k) => {

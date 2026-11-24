@@ -53,8 +53,8 @@ if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
 
 // Flags that are gone (decision 0047): what they turned on now follows from where the server listens.
 const GONE: Record<string, string> = {
-  '--manage-person': 'your identity is managed from the app whenever the server listens only on this computer',
-  '--manage-online': 'the online copy is managed from the app whenever the server listens only on this computer',
+  '--manage-person': 'your identity is managed from the app whenever the host listens only on this computer',
+  '--manage-online': 'the online copy is managed from the app whenever the host listens only on this computer',
   '--allow-invites': 'people may always invite others from the app',
 };
 for (const arg of process.argv.slice(2)) {
@@ -215,7 +215,7 @@ const stop = (signal: string) => {
 // A released server updating itself (selfupdate.ts): it stops, saving everything, for its service to start the new version.
 const released = (globalThis as { kuraaServer?: { here: string; build: import('./selfupdate.js').ServerBuild } }).kuraaServer;
 if (values['auto-update']) {
-  if (!released) console.log('[kuraa] --auto-update: this server runs from the repository; update it with git pull');
+  if (!released) console.log('[kuraa] --auto-update: this host runs from the repository; update it with git pull');
   else {
     const { autoUpdate } = await import('./selfupdate.js');
     const { onNewerVersion } = await import('./index.js');

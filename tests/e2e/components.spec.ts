@@ -1,4 +1,4 @@
-// Settings › Server shows what the host's flags turned on (engines, where code
+// Settings › Host shows what the host's flags turned on (engines, where code
 // runs, formats) and changes none of it; Settings › You has each person's editing
 // behaviour, theirs to turn on and off (decision 0064). Documents cannot put script in the page.
 import { expect, test, type Page } from '@playwright/test';
@@ -35,7 +35,7 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
 }
 
 /** Settings, at a section. */
-async function openSettingsAt(page: Page, section: 'you' | 'server'): Promise<void> {
+async function openSettingsAt(page: Page, section: 'you' | 'host'): Promise<void> {
   await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
   await page.getByTestId(`settings-tab-${section}`).click();
@@ -53,11 +53,11 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await expect(page.getByTestId('editor')).toContainText('```{r}');
 
-    await openSettingsAt(page, 'server');
+    await openSettingsAt(page, 'host');
     await expect(page.getByTestId('components')).toContainText('--format');
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R')).toBeDisabled();
-    // Formats: shown, and not changed here (this page is not the server's owner).
+    // Formats: shown, and not changed here (this page is not the host's owner).
     await expect(box(page, 'R Markdown')).not.toBeChecked();
     await expect(box(page, 'Pandoc markdown')).toBeChecked();
     for (const name of ['R Markdown', 'Pandoc markdown', 'Text file']) await expect(box(page, name)).toBeDisabled();
@@ -72,7 +72,7 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await page.getByTestId('sync-settings:online').click();
     await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
     const online = page.getByTestId('subpanel-sync:online').getByTestId('sync:online');
-    await expect(online).toContainText('Added and removed on the computer running this server');
+    await expect(online).toContainText('Added and removed on the computer running this host');
     await expect(online.getByTestId('sync-address')).toHaveCount(0);
   } finally {
     await host.close();
@@ -132,7 +132,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
 test('on the shared host too, only your editing behaviour can change', async ({ page }) => {
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
-  await openSettingsAt(page, 'server');
+  await openSettingsAt(page, 'host');
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();

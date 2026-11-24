@@ -23,12 +23,11 @@ Each operation is signed by a person's signing key, and names the operations its
 | `owner` | someone in the workspace is the owner now | the owner |
 | `rule`, `perm` | who may change a path; who reads what is made in a folder | the workspace's admins |
 | `space` | a space's audience | anyone in the workspace who is in that audience (to make it); whoever made it, or an admin (to change it) |
-| `witness` | someone whose devices' acknowledgements confirm removals | the workspace's admins |
 | `drop` | a signing key (one computer) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer). For good |
 
 Made before [0078](decisions/0078-restrictive-wins.md) and read only so a history that has them stays
-whole (what came after names them as parents), counting for nothing: `seal`, `verifier`, a legacy
-genesis, and any operation naming someone by email (`email:`). Records that are not operations of
+whole (what came after names them as parents), counting for nothing: `seal`, `verifier`, `witness`
+(retired after 0078: it decided nothing), a legacy genesis, and any operation naming someone by email (`email:`). Records that are not operations of
 the policy and are no longer taken: attestations (`attest`) and trustee rotations (`trot`).
 
 ## Working it out

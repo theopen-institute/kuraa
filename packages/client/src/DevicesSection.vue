@@ -93,14 +93,37 @@ async function setRole(p: Someone, role: 'admin' | 'member') {
 /** Whether you may change this person's role, or take them out: admins are the owner's to make and unmake (0070); the owner is no one's. */
 const mayManagePerson = (i: Info, p: Someone) => admin.value && i.canInvite && !i.removed && !p.you && p.role !== 'owner' && (p.role === 'member' || !!i.people?.assignsAdmins);
 
-/** Name a person a witness, or not (0072): their devices' acknowledgements confirm removals. */
-async function setWitness(p: Someone, on: boolean) {
-  await act(() => props.api.setWitness(p.id, on));
-}
 
-async function makeOwner(p: Someone) {
+async function makeOwner(p: Someone): Promise<boolean> {
   const ok = await askConfirm(S.people.makeOwnerAsk(nameOf(p)), S.people.makeOwner, true);
   if (ok) await act(() => props.api.makeOwner(p.id));
+  return ok;
+}
+
+type RoleChoice = 'member' | 'admin' | 'owner';
+/**
+ * The roles you may choose for this person from their role's menu: admins are
+ * the owner's to make and unmake (0070), and the owner hands over theirs. None:
+ * their role is shown, not offered.
+ */
+function rolesFor(i: Info, p: Someone): RoleChoice[] {
+  if (p.you || p.role === 'owner' || i.removed || !i.canInvite) return [];
+  const mine = i.people?.owner && i.people.owner === i.people.people.find((x) => x.you)?.id;
+  const out: RoleChoice[] = [];
+  if (admin.value && i.people?.assignsAdmins) out.push('member', 'admin');
+  if (mine) out.push('owner');
+  return out;
+}
+
+/** A role chosen from the menu: made at once, but the owner's, which asks first (handing it over). */
+async function chooseRole(p: Someone, e: Event) {
+  const menu = e.target as HTMLSelectElement;
+  const role = menu.value as RoleChoice;
+  if (role === 'owner') {
+    if (!(await makeOwner(p))) menu.value = p.role;
+  } else if (role !== p.role) {
+    await setRole(p, role);
+  }
 }
 
 async function removePerson(p: Someone) {
@@ -150,14 +173,21 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
       <li v-for="p in info.people.people" :key="p.id" class="person-block" :data-testid="`person:${nameOf(p)}`">
         <div class="person-line">
           <span class="device-who">{{ nameOf(p) }}<template v-if="p.you">{{ S.people.you }}</template></span>
-          <span class="device-tag" :title="p.role === 'owner' ? S.people.ownerTitle : p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'owner' ? S.people.owner : p.role === 'admin' ? S.people.admin : S.people.member }}</span>
-          <span v-if="info.people?.witnesses?.includes(p.id)" class="device-tag" :title="S.people.witnessTitle" :data-testid="`witness:${nameOf(p)}`">{{ S.people.witness }}</span>
-          <button v-if="admin && info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`witness-toggle:${nameOf(p)}`" @click="setWitness(p, !info.people?.witnesses?.includes(p.id))">{{ info.people?.witnesses?.includes(p.id) ? S.people.unmakeWitness : S.people.makeWitness }}</button>
-          <template v-if="mayManagePerson(info, p)">
-            <button v-if="info.people?.assignsAdmins" type="button" :disabled="busy" :data-testid="`make-${p.role === 'admin' ? 'member' : 'admin'}:${nameOf(p)}`" @click="setRole(p, p.role === 'admin' ? 'member' : 'admin')">{{ p.role === 'admin' ? S.people.makeMember : S.people.makeAdmin }}</button>
-            <button type="button" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.people.removeEllipsis }}</button>
-          </template>
-          <button v-if="info.people?.owner && info.people.owner === info.people.people.find((x) => x.you)?.id && !p.you && info.canInvite && !info.removed" type="button" :disabled="busy" :data-testid="`make-owner:${nameOf(p)}`" @click="makeOwner(p)">{{ S.people.makeOwner }}…</button>
+          <!-- Their role: a menu for whoever may change it, else said (0070). -->
+          <select
+            v-if="rolesFor(info, p).length"
+            class="role-menu"
+            :value="p.role"
+            :disabled="busy"
+            :aria-label="S.people.roleOf(nameOf(p))"
+            :title="S.people.roleOf(nameOf(p))"
+            :data-testid="`role:${nameOf(p)}`"
+            @change="chooseRole(p, $event)"
+          >
+            <option v-for="r in rolesFor(info, p)" :key="r" :value="r">{{ S.people.roleChoice[r] }}</option>
+          </select>
+          <span v-else class="device-tag" :title="p.role === 'owner' ? S.people.ownerTitle : p.role === 'admin' ? S.people.adminTitle : undefined" :data-testid="`role:${nameOf(p)}`">{{ p.role === 'owner' ? S.people.owner : p.role === 'admin' ? S.people.admin : S.people.member }}</span>
+          <button v-if="mayManagePerson(info, p)" type="button" class="danger" :disabled="busy" :data-testid="`remove-person:${nameOf(p)}`" @click="removePerson(p)">{{ S.people.removeEllipsis }}</button>
         </div>
         <ul class="menu-devices person-devices">
           <li v-if="p.you" data-testid="device-self">
@@ -204,7 +234,7 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
       <ul class="menu-devices" data-testid="removals">
         <li v-for="(r, i) in info.people.removals" :key="i" :data-testid="`removal:${i}`">
           <span class="device-who">{{ S.people.removal(r.kind, r.who, r.by) }}</span>
-          <span :class="['device-state', { warn: !r.confirmedBy.length }]">{{ S.people.confirmed(r.confirmedBy, r.witnessed) }}</span>
+          <span :class="['device-state', { warn: !r.confirmedBy.length }]">{{ S.people.confirmed(r.confirmedBy) }}</span>
         </li>
       </ul>
     </template>

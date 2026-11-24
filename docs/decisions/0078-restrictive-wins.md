@@ -86,6 +86,11 @@ one founding it at once, apart, stay apart, as two seals made apart did (0075).
   `/api/person/email/…`.
 - **Email invites**: an invite link's email.
 
+Later, on the owner's word ("remove it to streamline the current core build, then add it back
+incrementally with everything else (especially server architecture)"): **witnesses** (0072) too. A
+`witness` operation is read and counts for nothing; removals are still listed with who has confirmed
+them, which needs no witness.
+
 Settings › You › Account recovery holds the recovery key alone (`PersonMore.vue` is gone). Kept: a
 person's identity with its recovery key (committed in advance, recovering with it), device keys,
 owner, admins and members, groups, write rules by path, permissions and spaces for reading, invite

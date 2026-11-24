@@ -53,10 +53,6 @@
 //   but gives the role to someone in the workspace (`owner`), staying an admin.
 //   The genesis's admin is the first owner.
 //
-// - witness (0072): a person (a server's identity, usually) whose devices'
-//   acknowledgements confirm removals, in the app's words; an admin's to name or
-//   unname. It decides nothing: removals count without it.
-//
 // - drop (0072): a person's signing key (one computer of theirs) no longer counts
 //   here, with the commits the dropper had (`cutoff`): its devices stop syncing,
 //   and what it signs from then on counts for nothing. Its own person's to make,
@@ -84,11 +80,12 @@ export type PolicyOp =
   | { t: 'perm'; path: string; write?: string[]; read?: string[]; space?: string }
   | { t: 'owner'; who: string }
   | { t: 'drop'; key: string; cutoff?: string[] }
-  | { t: 'witness'; who: string; on: boolean }
   | { t: 'unlink'; link: string; group: string }
   | { t: 'admit'; link: string; key: string }
   // Made before 0078, and read only so a history that has them stays whole (what came after names them as
-  // parents): a seal of a workspace's legacy geneses, a verifier of email checks. They count for nothing.
+  // parents): a seal of a workspace's legacy geneses, a verifier of email checks, a witness of removals
+  // (0072, gone since: it decided nothing). They count for nothing.
+  | { t: 'witness'; who: string; on: boolean }
   | { t: 'seal'; geneses: string[] }
   | { t: 'verifier'; key: string; url: string };
 
@@ -213,11 +210,11 @@ const entryTest = /^(?:[0-9a-f]{64}|group:[a-z0-9][a-z0-9-]{0,39}|admins)$/;
 /** Whether a string names someone in a group, rule or audience: an identity, a group, or the admins. */
 export const isWriter = (w: string) => entryTest.test(w);
 
-/** Whether an operation is one made before 0078 that counts for nothing now: a seal, a verifier, a legacy genesis, or one naming someone by email. */
+/** Whether an operation is one made before that counts for nothing now: a seal, a verifier, a witness, a legacy genesis, or one naming someone by email. */
 export function retired(op: PolicyOp): boolean {
   const email = (list: string[] | undefined) => !!list?.some((w) => w.startsWith('email:'));
   switch (op.t) {
-    case 'seal': case 'verifier': return true;
+    case 'seal': case 'verifier': case 'witness': return true;
     case 'genesis': return op.legacy;
     case 'grant': case 'revoke': return op.who.startsWith('email:');
     case 'rule': return email(op.by);
@@ -375,8 +372,6 @@ export interface PolicyParts {
   owner?: string | null;
   /** Signing keys dropped here (0072): key → the commits they signed that still count (their cutoff, gate.ts). */
   dropped?: Map<string, string[]>;
-  /** People whose devices' acknowledgements confirm removals (0072). */
-  witnesses?: Set<string>;
   /** Operations allowed in their own past, whether or not they counted (in the one order). */
   judged?: string[];
   /** Operations that counted (changing something or not). */
@@ -399,7 +394,6 @@ export class Policy {
   readonly spaces: Map<string, { audience: string[]; by: string }>;
   readonly owner: string | null;
   readonly dropped: Map<string, string[]>;
-  readonly witnesses: Set<string>;
   readonly judged: string[];
   readonly counted: Set<string>;
   readonly unlinked: Set<string>;
@@ -417,7 +411,6 @@ export class Policy {
     this.spaces = p.spaces ?? new Map();
     this.owner = p.owner ?? null;
     this.dropped = p.dropped ?? new Map();
-    this.witnesses = p.witnesses ?? new Set();
     this.judged = p.judged ?? [];
     this.counted = p.counted ?? new Set(p.applied);
     this.unlinked = p.unlinked ?? new Set();
@@ -636,7 +629,6 @@ interface State {
   applied: string[];
   /** Signing keys dropped (0072), and their cutoffs. */
   dropped: Map<string, string[]>;
-  witnesses: Set<string>;
   /** Invite links unlinked, as `<link> <group>`. */
   unlinked: Set<string>;
   /** Whom a device in the workspace let in by a link, as `<link> <signing key>`. */
@@ -659,7 +651,7 @@ function freshState(genesis: PolicyEntry): State {
   for (const id of admins) groups.get(WORKSPACE)!.set(id, 'admin');
   // The genesis names its first admin, the owner (0070).
   return {
-    groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(), witnesses: new Set(),
+    groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(),
     unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [],
   };
 }
@@ -751,7 +743,6 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       return !!now.role(by);
     case 'rule':
     case 'perm':
-    case 'witness':
       return now.isAdmin(by);
     case 'space': {
       // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
@@ -763,6 +754,7 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'genesis':
     case 'seal':
     case 'verifier':
+    case 'witness':
       return false;
   }
 }
@@ -850,10 +842,6 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
     case 'drop':
       s.dropped.set(op.key, op.cutoff ?? []);
       return true;
-    case 'witness':
-      if (op.on) s.witnesses.add(op.who);
-      else s.witnesses.delete(op.who);
-      return true;
     case 'unlink':
       s.unlinked.add(`${op.link} ${op.group}`);
       return true;
@@ -863,6 +851,7 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
     case 'genesis':
     case 'seal':
     case 'verifier':
+    case 'witness':
       return false;
   }
 }
@@ -1147,7 +1136,7 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   }
   return new Policy({
     groups: state.groups, geneses: [genesis.id], applied: state.applied, heads, usedLinks: new Set(state.usedLinks.keys()), perms: state.perms, clashes, cutoffs,
-    spaces: state.spaces, owner: state.owner, dropped: state.dropped, witnesses: state.witnesses, judged: ok.map((e) => e.id), counted: new Set([genesis.id, ...counted]),
+    spaces: state.spaces, owner: state.owner, dropped: state.dropped, judged: ok.map((e) => e.id), counted: new Set([genesis.id, ...counted]),
     unlinked: new Set([...state.unlinked].map((u) => u.split(' ')[0]!)), workspace: ctx.workspace,
   });
 }

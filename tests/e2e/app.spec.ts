@@ -29,8 +29,8 @@ test('the first run welcomes you and asks your name; the menu changes it', async
   await expect(page.getByRole('dialog', { name: 'Welcome to kuraa' })).toBeVisible();
   await expect(page.getByText('What should we call you?')).toBeVisible();
   await expect(page.getByLabel('Your name')).toBeFocused();
-  // No link brought the server's address and access code, so they are asked for too.
-  await expect(page.getByLabel('Server address')).toHaveValue(E2E.url);
+  // No link brought the host's address and access code, so they are asked for too.
+  await expect(page.getByLabel('Host address')).toHaveValue(E2E.url);
   await expect(page.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
   await page.getByLabel('Your name').fill('First Run');
   await page.getByLabel('Access code').fill(E2E.token);
@@ -45,8 +45,8 @@ test('the first run welcomes you and asks your name; the menu changes it', async
   await expect(page.getByTestId('settings-tab-document')).toHaveAttribute('aria-current', 'page');
   await page.getByTestId('settings-tab-you').click();
   const settings = page.getByTestId('settings-window');
-  // The server and its access code are there too, with a button of their own.
-  await expect(settings.getByTestId('settings-connection').getByLabel('Server address')).toHaveValue(E2E.url);
+  // The host and its access code are there too, with a button of their own.
+  await expect(settings.getByTestId('settings-connection').getByLabel('Host address')).toHaveValue(E2E.url);
   await expect(settings.getByTestId('settings-connection').getByLabel('Access code')).toHaveValue(E2E.token);
   await expect(settings.getByTestId('settings-you').getByLabel('Your name')).toHaveValue('First Run');
   // Saved as it is changed: there is no save button, and the window stays open.

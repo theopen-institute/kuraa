@@ -60,7 +60,7 @@ async function render(ctx: RenderContext, req: RenderRequest): Promise<RenderRes
   let withoutLatex: string | null = null;
   const latex = req.format === 'pdf' ? await latexWanted(req.input) : null;
   if (latex) {
-    const use = ctx.tools ? await ctx.tools.use(LATEX_TOOL) : { ok: false as const, reason: 'This server offers no LaTeX.', canDownload: false };
+    const use = ctx.tools ? await ctx.tools.use(LATEX_TOOL) : { ok: false as const, reason: 'This host offers no LaTeX.', canDownload: false };
     if (use.ok) {
       mounts.push(...use.mounts);
       Object.assign(env, use.env);

@@ -136,9 +136,8 @@ export interface PeopleInfo {
   assignsAdmins?: boolean;
   people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean }[];
   /** People whose devices' acknowledgements confirm removals (0072). */
-  witnesses?: string[];
   /** The latest removals (0072): people taken out, computers dropped; who has confirmed each so far. */
-  removals?: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[]; witnessed: boolean }[];
+  removals?: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
@@ -310,8 +309,6 @@ export class HostApi {
   setRole(id: string, role: 'admin' | 'member') { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'POST', body: JSON.stringify({ role }) }); }
   /** Give the owner's role to someone in the workspace (the owner's to do, 0070). */
   makeOwner(id: string) { return this.json<PeopleInfo>(`/api/peers/owner/${id}`, { method: 'POST' }); }
-  /** Name a person a witness, or not (0072: an admin's to do). */
-  setWitness(id: string, on: boolean) { return this.json<PeopleInfo>(`/api/peers/witness/${id}`, { method: 'POST', body: JSON.stringify({ on }) }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
   removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
   createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member' }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
@@ -362,7 +359,7 @@ export class HostApi {
   clearRuns(path: string, chunk?: ChunkRef) { return this.json('/api/runs/clear', { method: 'POST', body: JSON.stringify({ path, chunk }) }); }
 }
 
-/** A workspace of a hub (a server holding many; see the host's hub.ts). */
+/** A workspace of a hub (a host holding many; see the host's hub.ts). */
 export interface HubWorkspace {
   id: string;
   name: string;
@@ -393,7 +390,7 @@ export interface HubList {
   canAdd: boolean;
   /** People may invite others to its workspaces. */
   canInvite: boolean;
-  /** Any folder on the server's computer may be opened as a workspace. */
+  /** Any folder on the host's computer may be opened as a workspace. */
   canOpenFolder?: boolean;
   /** The Preferences may be changed here. */
   canChangeSettings?: boolean;
@@ -436,7 +433,7 @@ export interface SettingsView {
   canAdd: boolean;
 }
 
-/** The folders in one of the server's computer's folders, to choose one. */
+/** The folders in one of the host's computer's folders, to choose one. */
 export interface FolderListing {
   path: string;
   parent: string | null;
@@ -487,7 +484,7 @@ export class HubApi extends HostApi {
   }
 
   /**
-   * Open a folder of the server's computer as a workspace. One that is not yet a
+   * Open a folder of the host's computer as a workspace. One that is not yet a
    * repository is made one only with `init`; without, the answer is what to ask first.
    */
   async openFolder(path: string, init = false): Promise<{ workspace: HubWorkspace } | { notRepository: NotRepository }> {
@@ -500,7 +497,7 @@ export class HubApi extends HostApi {
     }
   }
 
-  /** The folders in a folder of the server's computer (from home, if none is given). */
+  /** The folders in a folder of the host's computer (from home, if none is given). */
   folders(path: string | null, hidden = false) {
     return this.json<FolderListing>(`/hub/api/folders?${new URLSearchParams({ ...(path ? { path } : {}), ...(hidden ? { hidden: '1' } : {}) })}`);
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Settings › Server (decision 0064): the server this app works with, for
+// Settings › Host (decision 0064): the host this app works with, for
 // everyone using it and every workspace on it.
 //
 // - Its settings (the host's settings.ts), the same in a browser and in the
@@ -197,10 +197,10 @@ defineExpose({ changed, save, busy, picking });
 </script>
 
 <template>
-  <div class="settings-server">
+  <div class="settings-host">
     <template v-if="sub">
       <div class="subpanel-head">
-        <button type="button" class="subpanel-back" data-testid="subpanel-back" @click="sub = null">{{ S.person.back(S.sections.server) }}</button>
+        <button type="button" class="subpanel-back" data-testid="subpanel-back" @click="sub = null">{{ S.person.back(S.sections.host) }}</button>
         <h4 data-testid="subpanel-title">{{ subSync?.label ?? '' }}</h4>
       </div>
       <section class="settings-part" :data-testid="`subpanel-sync:${sub}`">

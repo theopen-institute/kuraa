@@ -163,10 +163,14 @@ async function pair(first: Parameters<typeof start>[1] = {}, second: Parameters<
 const api = (h: RunningHost, path: string, init: RequestInit = {}) =>
   fetch(h.url + path, { ...init, headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' } });
 
+/** The room each client was given. */
+const roomOf = new WeakMap<HeadlessClient, string>();
+
 async function connect(h: RunningHost, user = ADA): Promise<HeadlessClient> {
   const { room } = (await (await api(h, '/api/rooms?path=notes.md')).json()) as { room: string };
   const c = connectHeadless({ url: h.url.replace(/^http/, 'ws') + '/collab', room, token: h.token, user, schema: pandocMarkdown.schema });
   clients.push(c);
+  roomOf.set(c, room);
   await c.ready;
   return c;
 }
@@ -176,6 +180,21 @@ async function follow(c: HeadlessClient, h: RunningHost, user: typeof ADA): Prom
   if (!c.messages.some((m) => m.type === 'reseeded')) return c;
   c.destroy();
   return connect(h, user);
+}
+
+/**
+ * People on two devices in one session of the document, before they type. Two devices that open it at
+ * once can each start a session, not yet knowing of the other's (on a slow computer, often); when they
+ * meet, one gives way (0077) and its clients are told to follow, as the app does. Returns the clients,
+ * each in the session its device has now.
+ */
+async function together(...people: { c: HeadlessClient; h: RunningHost; user: typeof ADA }[]): Promise<HeadlessClient[]> {
+  await until(async () => {
+    for (const p of people) p.c = await follow(p.c, p.h, p.user);
+    const rooms = people.map((p) => p.h.host.liveRooms()[0]);
+    return rooms.every((r) => r && r.session === rooms[0]!.session) && people.every((p, i) => roomOf.get(p.c) === rooms[i]!.name);
+  }, 20_000, 'one session on both devices');
+  return people.map((p) => p.c);
 }
 
 function insertAt(doc: PMNode, anchor: string, text: string): PMNode {
@@ -268,8 +287,7 @@ describe('devices of one workspace', () => {
 
   it('let people on two devices edit one document live, with one device committing', async () => {
     const { a, b, dirA, dirB } = await pair();
-    const ada = await connect(a, ADA);
-    const bo = await connect(b, BO);
+    const [ada, bo] = await together({ c: await connect(a, ADA), h: a, user: ADA }, { c: await connect(b, BO), h: b, user: BO }) as [HeadlessClient, HeadlessClient];
     ada.write(insertAt(ada.read(), 'The tide', 'Ada: '));
     bo.write(insertAt(bo.read(), 'It rained', 'Bo: '));
     await until(() => ada.read().textContent.includes('Bo: ') && bo.read().textContent.includes('Ada: '), 15_000, 'each sees the other’s edit');
@@ -577,8 +595,7 @@ describe('equal members, and forks', () => {
     await until(async () => (await a.host.peers!.people()).people.some((p) => p.id === boP.id), 15_000, 'Bo in the workspace');
     await a.host.peers!.setRule('notes.md', [adaP.id]);
     await until(async () => !(await b.host.peers!.access('notes.md')).canWrite, 15_000, 'the rule on Bo’s device');
-    const ada = await connect(a, ADA);
-    const bo = await connect(b, BO);
+    const [ada, bo] = await together({ c: await connect(a, ADA), h: a, user: ADA }, { c: await connect(b, BO), h: b, user: BO }) as [HeadlessClient, HeadlessClient];
     ada.write(insertAt(ada.read(), 'The tide', 'Ada: '));
     await until(() => bo.read().textContent.includes('Ada: '), 15_000, 'Ada’s edit on Bo’s device');
     // Bo types anyway (as an app that let him would): his room has it, Ada's does not take it.

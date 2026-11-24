@@ -1555,7 +1555,11 @@ export class PeerNode {
     }
     for (const k of before) {
       if (!removed.has(k)) continue;
-      this.links.get(k)?.close();
+      // Told first, as the device that removed it does (Peers.removeDevice): one reached only through this
+      // device would otherwise never hear it is out. Then let go of.
+      const l = this.links.get(k);
+      if (l?.accepted) l.send({ type: 'records', records: forDevice(taken, k, removed) });
+      if (l) setTimeout(() => l.close(), 1000).unref();
       this.o.log(`peers: ${k.slice(0, 8)}… is out of the workspace`);
     }
     for (const r of taken) {

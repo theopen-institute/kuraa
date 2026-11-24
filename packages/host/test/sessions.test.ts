@@ -365,6 +365,8 @@ describe('one leader per session (0077)', () => {
     const [a, b] = devices as [Device, Device];
     const one = await person(a, ADA);
     const two = await person(b, BO);
+    // Opened at once, the two may have started apart: one session first (0077), as in the app.
+    await settled(devices, [one, two]);
     one.type('The tide', 'Last: ');
     await until(() => two.text().includes('Last: '), 10_000, 'in the session');
     const first = session(a);

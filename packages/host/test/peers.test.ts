@@ -28,6 +28,8 @@ import { Git } from '../src/git.js';
 import { Identity, decodeLink, topicsFor } from '../src/peers/identity.js';
 import type { PeerNode } from '../src/peers/node.js';
 import type { JoinProgress } from '../src/peers/join.js';
+import type { HostFeature } from '@kuraa/feature-kit/host';
+import { marksFeature, readMarks } from '@kuraa/feature-example';
 
 const NOTES = '---\ntitle: Field notes\n---\n\n# Day one\n\nThe tide was out.\n\nWe counted crabs.\n\n# Day two\n\nIt rained.\n';
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
@@ -134,7 +136,7 @@ async function joinWorkspace(o: Parameters<typeof joinWorkspaceAs>[0]) {
 
 type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | 'peerPort' | 'publicAddress' | 'dhtPort' | 'outputsPublishMs'>;
 
-async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net; timings?: Partial<HostTimings> } = {}): Promise<RunningHost> {
+async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net; timings?: Partial<HostTimings>; features?: HostFeature[] } = {}): Promise<RunningHost> {
   const { person, node, dialMs, lookupsMs, bootstrap, net, timings, ...rest } = extra;
   const h = await startHost({ ...rest, dir, timings: { ...FAST, ...timings }, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
   hosts.push(h);
@@ -319,6 +321,43 @@ describe('devices of one workspace', () => {
     expect(body).toContain(`Co-authored-by: ${committer} <${committer.toLowerCase()}@example.org>`);
     expect(body).not.toContain(`Co-authored-by: ${other} <`);
     expect(body).toContain('Kuraa-Kind: autosave');
+  });
+});
+
+describe('annotations are their authors’ own (0082)', () => {
+  it('someone who may not change a document marks it: live on the other device, committed as theirs, taken there despite the rule', async () => {
+    const { a, b, dirA, dirB } = await pair({ features: [marksFeature] }, { features: [marksFeature] });
+    const adaId = (await personFor(dirA)).id;
+    const boId = (await personFor(dirB)).id;
+    // Only Ada may change the document; marks on for the workspace.
+    await a.host.peers!.setRule('notes.md', [adaId]);
+    expect((await api(a, '/api/features/marks', { method: 'PATCH', body: JSON.stringify({ on: true, by: ADA }) })).status).toBe(200);
+    await until(() => existsSync(join(dirB, '.kuraa/features.json')), 20_000, 'marks on, on Bo’s device too');
+    await until(async () => ((await (await api(b, '/api/access?path=notes.md')).json()) as { canWrite: boolean }).canWrite === false, 20_000, 'the rule on Bo’s device');
+    const [ada, bo] = await together({ c: await connect(a, ADA), h: a, user: ADA }, { c: await connect(b, BO), h: b, user: BO }) as [HeadlessClient, HeadlessClient];
+    await until(() => bo.feature('marks', boId).people().includes(boId) || Object.keys(bo.feature('marks', boId).entries()).length === 0, 10_000, 'Bo’s map');
+    // Bo marks a passage.
+    const doc = bo.read();
+    let at = -1;
+    doc.descendants((n, pos) => {
+      if (at < 0 && n.isText && n.text!.includes('tide')) at = pos + n.text!.indexOf('tide');
+      return at < 0;
+    });
+    const f = bo.feature('marks', boId);
+    await until(() => (bo.read().textContent.length > 0), 5000, 'the document');
+    f.update({ set: { b1: { from: f.anchorAt(at, 1), to: f.anchorAt(at + 4, -1), quote: 'tide', by: 'Bo', color: '#33d' } } });
+    // Ada sees it live: Bo's own map, from his device.
+    await until(() => Object.keys(ada.feature('marks', boId).entries()).length === 1, 15_000, 'Bo’s mark live on Ada’s device');
+    // Bo's device writes his own file, signed as his; Ada's device takes it, the rule on the document notwithstanding.
+    const own = `notes.md.marks/@${boId}.json`;
+    await until(() => existsSync(join(dirB, own)) && git(dirB, 'status', '--porcelain') === '', 20_000, 'Bo’s file committed on his device');
+    await until(() => existsSync(join(dirA, own)), 30_000, 'Bo’s file on Ada’s device');
+    expect(readMarks(readFileSync(join(dirA, own), 'utf8')).map((m) => m.quote)).toEqual(['tide']);
+    expect(git(dirA, 'log', '--format=%B', '-n', '20')).not.toContain('Kuraa-Refused');
+    // Bo's edit to the document itself is not taken on Ada's device.
+    bo.write(insertAt(bo.read(), 'The tide', 'Bo was here: '));
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(ada.read().textContent).not.toContain('Bo was here');
   });
 });
 

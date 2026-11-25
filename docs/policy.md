@@ -123,6 +123,22 @@ holds, and on all of them together:
 - **Clashes on record.** Every operation allowed in its own past that did not count is on record as
   having lost; and each that lost (but narrowed, or by a used link) did not count, to one that did.
 
+## A person's own files
+
+A file whose name is `@` and an identity ID, with any extension (`@7f3a…e1.jsonld`), in any folder, is
+that person's own ([0082](decisions/0082-annotations.md): annotations are their authors'). The
+policy needs no operation for it, and knows no feature: `mayWrite` says that only its owner may
+change it, wherever they read it (in the workspace's own files: anyone in the workspace; in a
+space's history, its audience), and that no one else may, whatever the rules say, admins and the
+owner included. Where there is no policy (one computer), anyone may, as with every file.
+
+The gate judges a commit touching anyone's own file even where there are no rules, with one more
+thing it takes: a move of someone's own file, unchanged (the file taken away and the same content
+put under the same name elsewhere in the same commit), from anyone, so a document renamed carries
+everyone's files beside it. A change to one, or a move that changes it, by anyone but its owner is
+refused, and their version kept. Live rooms keep to the same: a change to a person's feature
+state is taken only as theirs (rooms.ts, `takes`).
+
 ## Making one again
 
 A clash's losing operation is made again on purpose by someone who may make it now (an admin, as the

@@ -1,7 +1,10 @@
 # 0082 · Annotations: coding and comments, kept beside the documents, as a feature (proposed)
 
-**Status: proposed. Nothing here is built.** It adds a kind of component (a **feature**) and the
-hooks the core gives it, and the first feature: **annotations**, which does two things on one base:
+**Status: step 1 of the build order is built: features and the hooks the core gives them, with an
+example feature (*Built: step 1*, at the end), as revised by *Who owns an annotation*. Annotations
+themselves (steps 2 to 5) are not; nor is an author's choice of a narrower audience.** It
+adds a kind of component (a **feature**) and the hooks the core gives it, and the first feature:
+**annotations**, which does two things on one base:
 **coding** passages, as qualitative data analysis tools (NVivo, ATLAS.ti, MAXQDA) do, and
 **comments** on passages and documents.
 
@@ -43,7 +46,8 @@ suggestions) is added to one without touching the base.
 
 A document's annotations are in a file beside it, named after it: `interviews/p01.md` has
 `interviews/p01.md.annotations.jsonld`. The file is a W3C **AnnotationPage**, valid JSON-LD, one
-annotation to a line, everyone's in one file:
+annotation to a line, everyone's in one file (*revised*: a file per person, in a folder beside the
+document; see *Who owns an annotation*):
 
 ```json
 {
@@ -182,6 +186,54 @@ The same for codings and comments.
   its quote, for whoever made the annotation to place it again or remove it. A comment on a passage
   that is gone keeps its thread.
 
+## Who owns an annotation (revision)
+
+*The owner, after step 1 was built: comments are for anyone who can read a document, that being much
+of the point of keeping them in files of their own; and any finer permissions on annotations follow
+the ownership of one's own data that everything else follows: **who can see an annotation is its
+author's to say; whether one they can see is shown is its reader's.** This revises "one companion
+for coding and comments, and for everyone" above, and "A companion beside each document" in the
+format. Built in step 1 (*Built*, below), but the narrower audiences.*
+
+- **Each person's annotations on a document are a file of their own**, written only by their own
+  devices, in a folder beside the document: `interviews/p01.md.annotations/@<identity ID>.jsonld`
+  (an AnnotationPage as above). No one else changes it, however open the document's rules: a
+  reader comments, and owns the comment, without being able to touch anyone else's.
+- **Who may read it is the author's choice, within the document's readers.** By default the file
+  is in the document's space, read by whoever reads the document. An author may keep some of
+  their annotations for fewer (themselves, a group): a second file of theirs, in a space with that
+  audience (`@<identity ID>.<space>.jsonld`). Never for more: an annotation quotes its passage, so
+  its readers must all read the document; the host refuses an audience that is not within it.
+- **Whether it is shown is the reader's choice:** by author, by kind (codings, comments), by code;
+  kept as theirs (Settings › You, and the Comments and Codes panels' filters).
+- **The policy says so, without knowing any feature.** A file whose name is `@<identity ID>` and an
+  extension, in any folder, is that person's own: they may change it wherever they read it, and
+  no one else may, whatever the rules say, but to move it unchanged (the gate takes a commit that
+  takes someone's own file away and puts the same content, under the same name, elsewhere): a
+  document renamed or moved carries the folder beside it, files and all. This is a new kind of
+  permission, judged alike everywhere: `PROTOCOL` goes up.
+- **A document deleted leaves others' annotations on it as theirs** (the owner's choice): its
+  folder keeps their files, the deleter's own going with the document, and the file list shows
+  them on their own, for their authors to remove (or to keep).
+- **Live, in a room**, each person's annotations are a map of their own (`feature:<id>:<person>`),
+  seeded from their file by their own device, never by another's: a map anyone else could fill is
+  one its owner's device could be made to sign. A change to a room's feature maps is taken only
+  from a device of the person whose map it is; a change to the document, as now, only from one
+  who may change it. Each device writes its own person's file from the room, signed by them, not
+  the leader (who still writes the document). The annotations of people with no device in the
+  room are shown from their files, found again by their quotes. Annotations for a
+  narrower audience are not put in the room, which everyone reading the document shares: they are
+  kept through the feature's routes, in their own space, and reach their readers by git.
+- **Merging** is simpler: two people never write one file. A person's two devices still can, and
+  merge by id as above.
+
+What it changed in step 1: companions are a folder per document of files per person (the core's
+naming, moved with documents, kept in spaces); a room's feature state is a map per person, seeded
+and written by that person's device; the ownership rule in the policy and the gate; rooms take
+changes to feature state as their makers'; the editor gives features their state in documents
+opened read only. A document moved to another space takes only its mover's own files with it:
+others' stay where they were, theirs to move.
+
 ## Features: a kind of component with two halves
 
 A **feature** adds something people do (annotations first) that touches documents, the host and the
@@ -228,8 +280,8 @@ this proposal adds it.
 | --- | --- | --- |
 | **open(ctx)** per workspace | As `Sync.open`: the feature gets a context for one workspace and returns a session the host closes | new |
 | **File types** | `DocumentType`s the feature brings, with their own `merge` | exists |
-| **Companion files** | A feature declares a suffix (`.annotations.jsonld`). The core moves a companion with its document on a rename or move, in the same commit; deletes it with it; keeps it in its document's space, and moves it when the document changes space; folds it under its document in the file tree; leaves it out of search. The suffixes are recorded in `.kuraa/companions.json`, so every host keeps companions with their documents, whether or not it has the feature | new |
-| **Room state** | A named shared map in each room (`feature:annotations`), seeded by the feature from its companion when the room starts, and written by the feature to its companion at each flush, by the leader only. The room says which features its leader runs; a client offers annotations only where the leader can write them | new |
+| **Companion files** | A feature declares a folder suffix (`.annotations`): beside each document, a folder of each person's own file. The core moves the folder with its document on a rename or move, in the same commit; a deletion takes only the deleter's own; keeps them in their document's space; folds them under their document in the file tree; leaves them out of search. The suffixes are recorded in `.kuraa/companions.json`, so every host keeps companions with their documents, whether or not it has the feature | new |
+| **Room state** | A map per feature and person in each room (`feature:annotations:<person>`), seeded from their file by their own device, and written to it by their device: the leader with the document, others on their own. A client offers annotations only where its person's map was seeded | new |
 | **Events** | After a save, commit, merge, rename or delete, with the paths. The kernel's `HookBus` already names these events and nothing calls it: the host fires it, and a feature's handlers are **after only** (a feature cannot hold up or refuse a save) | exists, unused |
 | **Files** | Read any file the workspace's person may read; write only the feature's own files (its companions and the paths it declared, such as the codebook), through the host: whole or not at all, checked against who may change them, committed with the next commit and credited to the person | new |
 | **Routes** | `/api/features/<id>/…`, added to the host's table with its access check, the person, and its path checks (`relPath`) | new |
@@ -245,7 +297,8 @@ this proposal adds it.
 | **Editor plugins, every type** | ProseMirror plugins and decorations for any document, given the `EditorContext`, the room's feature state and the source map. Read-only views (past versions) get them too, with the companion as it was then | new; `FormatEditor` does this for one type |
 | **Margin** | A column beside the document's text that features put marks and cards in, at a passage's height, kept clear of each other | new |
 | **Panels** | A panel beside the document (as Preview and Search), or of the workspace, with its key and its place in the ⋯ menu. `mount(element, ctx)` returning how to unmount it, so a feature does not depend on the client's Vue ([0016](0016-vue-client.md)) | new; `sidePanel` is a fixed list |
-| **Menu items** | In the document's ⋯ menu ([0074](0074-the-document-menu-is-a-menu.md)), the editor's right-click menu (on a selection), and a file's | new |
+| **Menu items** | In the document's ⋯ menu ([0074](0074-the-document-menu-is-a-menu.md)) and a file's | new |
+| **Selection actions** | What can be done with the selected text, offered in a small bar beside it. Not the editor's right-click menu: that is the browser's, with its spelling suggestions, and stays so | new |
 | **Settings subpanels** | In Workspace and You, as the online copy's is in Host ([0076](0076-a-quieter-sidebar.md)) | new |
 | **Keys and help** | Key bindings, listed in the Markdown and shortcuts sheet as `HelpItem`s | exists for formats |
 | **Strings** | Its own catalogue, in the client's voice ([0044](0044-polish.md)) | new |
@@ -266,8 +319,8 @@ this proposal adds it.
 
 **Shared:**
 
-- **In the document**: select text and code it or comment on it (right-click, a key, or a button
-  beside the selection). Coded passages are underlined in their codes' colours; commented passages
+- **In the document**: select text and code it or comment on it (a key, or a button beside the
+  selection). Coded passages are underlined in their codes' colours; commented passages
   are tinted; both are marked in the margin, by who made them. A filter for whose annotations, and
   which kinds, show.
 - **No longer found**: the annotations whose passages are gone, with their quotes, to place again or
@@ -308,9 +361,8 @@ this proposal adds it.
 - **The name.** "Feature" for the kind, beside engines, environments, tools, syncs and formats
   ([0020](0020-components.md)); in the interface these are all components, in Settings › Host's
   full list.
-- **Resolving relative positions on the host.** y-prosemirror maps Yjs positions to ProseMirror
-  positions through an editor view; the leader has none, so it needs a walk of the fragment beside
-  the document it builds from it. Small, but not there.
+- **Annotating what you may not change**: settled by *Who owns an annotation* (anyone who reads a
+  document annotates it, in files of their own).
 - **Media.** Annotating parts of images, audio or video (a region, a time span) fits the same format
   (`FragmentSelector`, media fragments) and is left for later.
 
@@ -319,3 +371,68 @@ this proposal adds it.
 Resolving comments, mentioning people, and suggested changes; codes on code chunks' outputs;
 annotations in rendered documents (a coded report, comments in Word); a codebook per folder rather
 than per workspace.
+
+## Built: step 1
+
+Features and the hooks above, with the changes building them made. Annotations are not built.
+
+- **`@kuraa/feature-kit`** is the contract: `.` (what both halves share: `FEATURE_API_VERSION`,
+  `FeatureStatus`, the companion helpers), `./host` (`HostFeature`, `defineFeature`, the room's
+  `seed`/`write`, `FeatureContext`, events, routes) and `./client` (`ClientFeature`,
+  `defineClientFeature`, `FeatureState`, the editor's, panels', menus' and settings' parts).
+- **`@kuraa/features`** is the standard list, empty for now: `standardFeatures` for the programs
+  that start a host (the command line, the desktop app, `pnpm dev`), `standardFeatureClients` for
+  the web shell. The host and client import neither, kept so by lint, which lets the core import
+  only the contract.
+- **On and off.** `HostOptions.features` and `featuresOn`; the setting `features` in Settings ›
+  Host and `--feature <id>` (as `--format`); `GET /api/features`, and `PATCH /api/features/<id>`
+  (`on`, `settings`), which writes `.kuraa/features.json` (and `.kuraa/companions.json`, once on)
+  as a commit, refused (403) to whoever may not change that file. Settings › Workspace has a
+  switch for each feature and its settings as a subpanel; Settings › You hides one for you. A
+  feature's file types are registered, and in the merge signature, whether it is on or off.
+- **Rooms' state** is a map per feature and person in the room's Yjs document
+  (`feature:<id>:<person>`), with a record of whose were seeded, by their own devices, from their
+  files: only those are written back, so a session started without a feature (or without a
+  person's device) never empties a file, and the client offers nothing to do in it. A feature
+  turned on while rooms are open, or a device joining a session, seeds its person's at once.
+  Anchors are Yjs relative positions, resolved by walking the fragment with node sizes from the
+  schema: the same on the host as in a browser, with no editor view. Each device writes its own
+  person's files from a copy of the room taken with the document (the leader with the document,
+  in its commit; others on their own, and as they leave); edits not written when the host stops
+  keep them too. The annotations of people with no device in the room are shown from their files.
+- **Companions** are each person's own files in a folder beside each document
+  (`<document><suffix>/@<identity ID><extension>`). The folder moves with its document (a rename
+  or move), everyone's files in it, in the same commit; a deletion takes only the deleter's own,
+  others' staying, shown on their own; a new one beside a document in a space is committed into
+  that space; folders of documents a merge renamed (by another app, or a host without the
+  feature) follow them as this device's commit. The file list leaves out companions whose document
+  it shows (`of`), and search leaves them out. `GET /api/companions` gives everyone's beside a
+  document, as they are or at a commit.
+- **Own files** are their owners' alone (docs/policy.md, *A person's own files*): the policy's
+  `mayWrite`, the gate (which takes moves of them unchanged, and judges which space's history it
+  judges), and rooms (`takes`: a person's feature state only as theirs, readers' changes to their
+  own). `PROTOCOL` is 8. A host without an identity writes nothing of anyone's.
+- **A feature's writes** (`FeatureContext.write`) are to this host's person's own files and the
+  files it declares, checked against who may change them, and refused (409) for one beside a
+  document whose room is open: that is the room's to write.
+- **Events** are the kernel's `HookBus`, fired by the host at last: `open`, `save`, `commit`,
+  `merge`, `rename`, `delete`, and `settings` (a feature's own settings changed); a bus per
+  feature, after only.
+- **Commit messages** name what features changed beside a document ("Field notes: 1 mark added
+  (Alice Ng)"), from each feature's `describe`.
+- **`DocumentType.sourceMap`** maps between document positions and the file's text, with a bias for
+  a range's ends; without it, `sourceMapOf` aligns each block's text with its source.
+- **The client** passes features to the editor (plugins after the format's, marks in the margin,
+  actions beside a selection, each reopening the document when a feature comes or goes), draws
+  their panels beside the document (their keys open and close them), their items in the ⋯ menu
+  and a file's menu, their lines on the shortcuts sheet, and their plugins on past versions,
+  given the companion as it was at that commit.
+- **`@kuraa/feature-example`** (marks: a passage marked, each person's kept beside the document in
+  `<file>.marks/@<identity ID>.json`) uses every hook. It is not in the standard list: the host's tests
+  (`packages/host/test/features.test.ts`) and the browser's (`tests/e2e/features.spec.ts`, whose
+  build alone has it: `vite build --mode e2e`) drive it, and it is a model for writing a feature.
+
+**Not yet:** a room for a branch no longer checked out is committed onto that branch without its
+companions; a feature cannot yet change the state of a room open on another device but through
+its people (`FeatureContext` has no way into rooms).
+

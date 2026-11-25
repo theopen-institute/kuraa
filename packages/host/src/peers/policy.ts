@@ -67,6 +67,7 @@
 import { createHash } from 'node:crypto';
 import crypto from 'hypercore-crypto';
 import type { KeyPair } from '../keys.js';
+import { ownerOf } from '@kuraa/feature-kit';
 
 export type Role = 'admin' | 'member';
 
@@ -498,8 +499,15 @@ export class Policy {
     return [...this.perms.values()].some((p) => p.space === space);
   }
 
-  /** Whether a person (null: no one's, as an unsigned commit) may change a file: by its rule, or anyone if it has none. */
-  mayWrite(id: string | null, path: string): boolean {
+  /**
+   * Whether a person (null: no one's, as an unsigned commit) may change a file:
+   * by its rule, or anyone if it has none. A person's own file (named
+   * `@<identity ID>`, 0082) is theirs alone, wherever they read it (`space`: the
+   * history it is in; null, the workspace's own), whatever the rules say.
+   */
+  mayWrite(id: string | null, path: string, space: string | null = null): boolean {
+    const owner = ownerOf(path);
+    if (owner) return !this.founded || (id === owner && this.mayRead(id, space));
     const rule = this.ruleFor(path);
     if (!rule) return true;
     if (!id) return false;

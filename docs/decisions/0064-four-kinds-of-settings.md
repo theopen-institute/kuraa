@@ -1,5 +1,7 @@
 # 0064 · Four kinds of settings, in one window
 
+*Since [0084](0084-components-under-host.md): the host's components are a section of their own, **Components**, listed under Host as part of it.*
+
 *Since [0083](0083-host-components-by-kind.md): Host is in two parts, its components by kind (each kind's switches with it) and its own settings.*
 
 *Since [0079](0079-host-not-server.md): the Server section is called **Host**.*

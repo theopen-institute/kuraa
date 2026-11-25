@@ -263,9 +263,9 @@ test('flags set what runs and which formats are on; the window shows only the ap
     await page.getByTestId('document-menu-button').click();
     await expect(page.getByTestId('r-state')).toHaveCount(0);
     await page.keyboard.press('Escape');
-    // Settings › Host says what runs (decision 0064).
+    // Settings › Components says what runs (decisions 0064, 0084).
     await openSettings(page);
-    await page.getByTestId('settings-tab-host').click();
+    await page.getByTestId('settings-tab-components').click();
     const components = page.getByTestId('settings-window');
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).not.toBeChecked();
     await expect(components.getByRole('checkbox', { name: 'R', exact: true })).toBeDisabled();
@@ -341,7 +341,7 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
   const rOn = async (page: Page) => {
     await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
-    await page.getByTestId('settings-tab-host').click();
+    await page.getByTestId('settings-tab-components').click();
     const on = await page.getByTestId('components-run').getByRole('checkbox', { name: 'R', exact: true }).isChecked();
     await page.keyboard.press('Escape');
     return on;
@@ -351,9 +351,12 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(true);
     const prefs = await openPreferences(app, page);
-    // Whether code can run here is said up front (Podman installed and running, or not).
-    await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
-    await prefs.getByTestId('pref-run').uncheck();
+    // Running code is switched with the languages, in Components (0084); whether it can run here is said up front (Podman installed and running, or not).
+    const switches = page.getByTestId('preferences-components');
+    await page.getByTestId('settings-tab-components').click();
+    await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();
+    await switches.getByTestId('pref-run').uncheck();
+    await page.getByTestId('settings-tab-host').click();
     // Syncing is not a setting: the dialog says which workspaces sync (0048).
     await expect(prefs.getByTestId('pref-sync')).toContainText('invite link');
     // What a host takes as flags is here too (decision 0046): a value that is wrong is refused, saying what.
@@ -362,7 +365,8 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     await page.getByTestId('settings-close').click();
     await expect(prefs.getByTestId('pref-error')).toContainText('memory limit should be a size');
     await prefs.getByTestId('pref-memory').fill('3g');
-    await prefs.getByTestId('pref-format-rmarkdown').uncheck();
+    await page.getByTestId('settings-tab-components').click();
+    await switches.getByTestId('pref-format-rmarkdown').uncheck();
     // The hub reopens the workspaces with them (writing and committing first), and the page reloads.
     const reloaded = page.waitForEvent('load', { timeout: 15_000 });
     await page.getByTestId('settings-close').click();
@@ -372,10 +376,10 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     expect(JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8'))).toMatchObject({
       runCode: false, memory: '3g', formats: ['pandoc-markdown', 'text'],
     });
-    // R Markdown is off now: Settings › Host says so.
+    // R Markdown is off now: Settings › Components says so.
     await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
-    await page.getByTestId('settings-tab-host').click();
+    await page.getByTestId('settings-tab-components').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
@@ -399,14 +403,17 @@ test('preferences set what runs, apply at once, and are kept; a shared workspace
     await expect(page.getByTestId('file:notes.md')).toBeVisible();
     expect(await rOn(page)).toBe(false);
     const prefs = await openPreferences(app, page);
-    await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
     await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');
-    await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
+    const switches = page.getByTestId('preferences-components');
+    await page.getByTestId('settings-tab-components').click();
+    await expect(switches.getByTestId('pref-run')).not.toBeChecked();
+    await expect(switches.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     // The page's own ⌥⌘, opens it too (as in a browser), and Escape closes it.
     await page.keyboard.press('Escape');
     await expect(prefs).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+Alt+Comma');
-    await expect(prefs.getByTestId('pref-run')).not.toBeChecked();
+    await page.getByTestId('settings-tab-components').click();
+    await expect(switches.getByTestId('pref-run')).not.toBeChecked();
   } finally {
     await app.close();
   }

@@ -110,7 +110,7 @@ const showSource = ref(false);
 const docMenu = shallowRef<{ top: number; right: number } | null>(null);
 const helpOpen = ref(false);
 const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
-/** Goes up when the host says a tool changed (downloaded, removed): Settings › Host and the preview ask again. */
+/** Goes up when the host says a tool changed (downloaded, removed): Settings › Components and the preview ask again. */
 const toolsKey = ref(0);
 const addingWorkspace = ref(false);
 /** Inviting people: whether the workspace already syncs with devices. */

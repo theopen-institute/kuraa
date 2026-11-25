@@ -35,15 +35,15 @@ async function fakeHost(): Promise<RunningHost> {
   });
 }
 
-/** Settings › Host, where the tools are (decision 0064). */
+/** Settings › Components, where the tools are (decisions 0064, 0084). */
 async function openComponents(page: Page): Promise<void> {
   await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
-  await page.getByTestId('settings-tab-host').click();
+  await page.getByTestId('settings-tab-components').click();
   await expect(page.getByTestId('components')).toBeVisible();
 }
 
-test('Settings › Host lists TinyTeX, with its size, to download', async ({ page }) => {
+test('Settings › Components lists TinyTeX, with its size, to download', async ({ page }) => {
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
   await openComponents(page);
@@ -55,7 +55,7 @@ test('Settings › Host lists TinyTeX, with its size, to download', async ({ pag
   await expect(page.getByTestId('tool-download:tinytex')).toBeEnabled();
 });
 
-test('a tool is downloaded and removed in Settings › Host', async ({ page }) => {
+test('a tool is downloaded and removed in Settings › Components', async ({ page }) => {
   const host = await fakeHost();
   try {
     await page.goto(`${host.url}/?token=${host.token}&name=Owner`);

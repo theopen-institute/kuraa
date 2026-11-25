@@ -44,12 +44,16 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(page.getByTestId('settings-scope')).toContainText('Only you, its owner, can change it');
     const prefs = page.getByTestId('preferences');
     await expect(prefs.getByTestId('pref-workspaces')).toHaveValue(/workspaces$/);
-    await expect(prefs.getByTestId('pref-format-rmarkdown')).toBeChecked();
-    await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
-    // Its owner's switches are with the components they switch; how the host itself works, apart (0083).
-    await expect(prefs.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeVisible();
-    await expect(prefs.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
-    await expect(prefs.getByTestId('host-settings').getByTestId('pref-run-advanced')).toBeVisible();
+    // Its components, a section beneath Host (0084): its owner's switches with the components they switch (0083).
+    const switches = page.getByTestId('preferences-components');
+    await expect(switches).toBeHidden();
+    await expect(page.getByTestId('settings-tab-components')).toHaveClass(/\bsub\b/);
+    await page.getByTestId('settings-tab-components').click();
+    await expect(page.getByTestId('settings-scope')).toContainText('Only you, its owner, switch them');
+    await expect(switches.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeChecked();
+    await expect(switches.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
+    await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();
+    await page.getByTestId('settings-tab-host').click();
 
     // No Save button: changes take effect on closing, as said by Done once something is changed.
     await expect(page.getByTestId('pref-save')).toHaveCount(0);
@@ -65,7 +69,10 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     expect(existsSync(join(app, 'settings.json'))).toBe(false);
 
     await prefs.getByTestId('pref-memory').fill('3g');
-    await prefs.getByTestId('pref-format-rmarkdown').uncheck();
+    // A component switched in Components, applied with Host's settings, together, as the window closes.
+    await page.getByTestId('settings-tab-components').click();
+    await switches.getByTestId('pref-format-rmarkdown').uncheck();
+    await page.getByTestId('settings-tab-host').click();
     // A relay to connect through, named by its key (kuraa-host relay prints it).
     await prefs.getByTestId('pref-network-advanced').locator('summary').click();
     await prefs.getByTestId('pref-relays').fill('ab'.repeat(32));
@@ -79,15 +86,16 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     // R Markdown is off now, and the file opens as plain text.
     await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
-    await page.getByTestId('settings-tab-host').click();
+    await page.getByTestId('settings-tab-components').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
 
     // Kept: the dialog opens with them, from the keyboard too (⌥⌘, as in the desktop app).
     await page.keyboard.press('ControlOrMeta+Alt+Comma');
+    await page.getByTestId('settings-tab-components').click();
+    await expect(switches.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await page.getByTestId('settings-tab-host').click();
-    await expect(prefs.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();
     await expect(prefs.getByTestId('pref-memory')).toHaveValue('3g');
     await page.keyboard.press('Escape');

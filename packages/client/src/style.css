@@ -785,13 +785,13 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
   .settings-nav h2, .settings-tab-about { display: none; }
 }
 .settings-done { align-items: center; }
-/* Settings › Host (decision 0083): two parts, its components by kind and its own settings, each with a heading of its own. */
-.settings-host > form { display: grid; gap: 4px; min-width: 0; }
-.settings-content .settings-host > form > .settings-part:first-of-type { border-top: 0; padding-top: 4px; }
-.host-part { gap: 10px; }
-.host-part + .host-part { margin-top: 12px; }
-.host-part-head { display: grid; gap: 2px; }
-.host-part-head h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+/* Settings › Host and › Components (decisions 0083, 0084): each a form of the host's settings, its first part drawing no line. */
+.settings-host > form, .settings-components > form { display: grid; gap: 4px; min-width: 0; }
+.settings-content .settings-host > form > .settings-part:first-of-type, .settings-content .settings-components > form > .settings-part:first-of-type { border-top: 0; padding-top: 4px; }
+.components-part { gap: 10px; }
+/* Components in the list: under Host, as part of it. */
+.settings-tab.sub { margin-left: 14px; padding-left: 10px; border-left: 2px solid var(--border); border-radius: 0 6px 6px 0; }
+@media (max-width: 640px) { .settings-tab.sub { margin-left: 0; border-left: 0; border-radius: 6px; } }
 /* The kinds it has, with how many of each: a way to each. */
 .component-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
 .component-kind-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
@@ -806,7 +806,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-kind .flag { color: var(--warn); }
 .component-switches { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--bg); }
 .component-list { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-.settings-host .components-note { display: grid; gap: 4px; }
+.settings-components .components-note { display: grid; gap: 4px; }
 /* The document's ⋯ menu (decision 0065): its button in the document's top-right corner, and the menu under it. */
 .centre-stack { position: relative; }
 .document-menu-button { position: absolute; top: 8px; right: 12px; z-index: 15; border: 1px solid transparent; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 8px 6px; border-radius: 6px; }

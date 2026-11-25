@@ -595,28 +595,45 @@ export const S = {
   },
 
   components: {
+    /** Settings › Host, first part (decision 0083): every component the host has, by kind. */
     title: 'Components',
-    setBy: 'What runs code, and which formats are on, are set in Settings on the computer running this host, or with flags when it starts.',
-    flags: 'Set with --engine, --env, --format and --component.',
-    running: 'Running code',
-    where: 'Where code runs',
+    about: 'The parts that give this host what it can do, loaded as it starts. Each is of one kind; the kinds below are all there are.',
+    kindsLabel: 'Kinds of component',
+    /** Each kind: its name, and one line saying what a component of that kind is. */
+    kinds: {
+      formats: 'Document formats',
+      features: 'Features',
+      engines: 'Languages',
+      environments: 'Environments',
+      tools: 'Tools',
+      syncs: 'Syncs',
+    },
+    kindAbout: {
+      formats: 'The kinds of document the app opens and edits. A file whose format is off opens as a Text file, while that is on.',
+      features: 'What workspaces can do beyond writing. On here, each workspace still turns on the ones it uses.',
+      engines: 'The languages code in documents is written in.',
+      environments: 'Where code runs, kept apart from the rest of this computer unless it says not.',
+      tools: 'Downloaded when needed: kept once on this computer, for every workspace, and used only where code runs.',
+      syncs: 'Places beyond your devices where a workspace keeps a copy of itself, and syncs with it.',
+    },
+    onOf: (on: number, all: number) => `${on} of ${all} on`,
+    inUse: (label: string | null) => (label ? `${label} in use` : 'None in use'),
+    downloadedOf: (n: number, all: number) => `${n} of ${all} downloaded`,
+    /** Shown to whoever may not change the host's settings. */
+    setBy: 'Which components are on is set in Settings on the computer running this host, or with flags when it starts.',
+    /** Shown to its owner. */
+    ownerSets: 'Which components the host has is decided as it starts. The switches here turn them on and off.',
+    flags: 'Set with --engine, --env, --format, --feature and --component.',
     notSandboxed: ' · not sandboxed',
     unavailable: (why: string) => `Not available: ${why}`,
     noEnvironment: 'No environment is loaded, so no code runs here.',
-    formats: 'Document formats',
     files: (ext: string) => `${ext} files`,
-    formatOff: 'A file whose format is off opens as a Text file, while that is on.',
     editing: 'Editing · just you',
-    tools: 'Downloaded when needed',
-    syncs: 'Copies beyond your devices',
-    on: 'On',
-    off: 'Off',
     syncSettings: 'Settings…',
     syncFor: (workspace: string) => `For ${workspace}: each workspace has its own.`,
     syncTargets: (urls: string[]) => `This workspace: ${urls.join(', ')}`,
     syncNone: 'This workspace: not set up.',
     syncNoWorkspace: 'Open a workspace to set up its copy.',
-    toolsAbout: 'Kept once on this computer, for every workspace, and used only where code runs.',
     toolsOff: 'Downloading tools is turned off in this host’s settings (Let documents install packages and download tools).',
     toolSize: (mb: string) => `About ${mb} to download.`,
     toolReady: (mb: string) => `Downloaded: ${mb} on this computer.`,
@@ -641,9 +658,6 @@ export const S = {
     /** Settings › You. */
     shown: 'Features · just you',
     shownAbout: 'Hide a feature for yourself: it stays on for everyone else, and nothing it made changes.',
-    /** Settings › Host. */
-    host: 'Features',
-    hostHint: 'A workspace turns on the features it uses for itself.',
     /** Beside a selection. */
     selection: 'What to do with the selection',
     closePanel: (label: string) => `Close ${label}`,
@@ -871,8 +885,11 @@ export const S = {
     advanced: 'Advanced',
     bootstrap: 'Starting points for finding other computers, one per line as address:port. Leave empty to use the public ones; a private network names its own.',
     relays: 'Relays, one key per line, for computers that cannot connect to each other directly (some office, campus and phone networks). The other computers of a workspace relay for each other already; name one here when a workspace is on only two. Whoever runs one gets its key from kuraa-host relay. A relay passes on what it cannot read.',
-    formats: 'Kinds of documents',
-    formatsHint: 'A file whose kind is turned off opens as plain text.',
+    /** Settings › Host, second part (decision 0083): how the host program itself works. */
+    hostSettings: 'Host settings',
+    hostSettingsAbout: 'How the host itself works, for every workspace on it.',
+    /** Where its settings are not this page's to change, and the hub gives no reason. */
+    notYours: 'Other computers, limits on running code, new workspaces and saving: set by whoever runs this host.',
     running: 'Running code',
     run: 'Run R code in documents',
     where: 'Where code runs',

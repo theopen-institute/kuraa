@@ -46,6 +46,10 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(prefs.getByTestId('pref-workspaces')).toHaveValue(/workspaces$/);
     await expect(prefs.getByTestId('pref-format-rmarkdown')).toBeChecked();
     await expect(prefs.getByTestId('pref-environments')).not.toBeEmpty();
+    // Its owner's switches are with the components they switch; how the host itself works, apart (0083).
+    await expect(prefs.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeVisible();
+    await expect(prefs.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
+    await expect(prefs.getByTestId('host-settings').getByTestId('pref-run-advanced')).toBeVisible();
 
     // No Save button: changes take effect on closing, as said by Done once something is changed.
     await expect(page.getByTestId('pref-save')).toHaveCount(0);

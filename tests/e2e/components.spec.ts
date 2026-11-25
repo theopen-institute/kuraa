@@ -55,6 +55,12 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
 
     await openSettingsAt(page, 'host');
     await expect(page.getByTestId('components')).toContainText('--format');
+    // Each component once, under its kind (0083); the host's own settings apart, beneath, and not this page's to change.
+    for (const kind of ['Document formats', 'Languages', 'Environments', 'Syncs']) await expect(page.getByTestId('component-kinds')).toContainText(kind);
+    await expect(page.getByTestId('components-formats')).toContainText('R Markdown');
+    await expect(page.getByTestId('components-environments').getByTestId('environment:podman')).toBeVisible();
+    await expect(page.getByTestId('host-settings').getByTestId('settings-owner-off')).toBeVisible();
+    await expect(page.getByTestId('preferences')).toHaveCount(0);
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R')).toBeDisabled();
     // Formats: shown, and not changed here (this page is not the host's owner).

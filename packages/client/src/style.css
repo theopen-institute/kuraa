@@ -126,11 +126,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .pane-header-actions button { padding: 1px 7px; font-size: 14px; line-height: 1.2; border-color: transparent; background: none; color: var(--muted); }
 .pane-header-actions button:hover { color: var(--text); background: var(--selected); }
 .pane-header-actions button svg { display: block; margin: 2px 0; }
-/* The sidebar's foot: ⚙, Settings, in its lower right corner. */
-.pane-footer { display: flex; justify-content: flex-end; padding: 4px 12px 8px; flex: none; }
-.pane-footer button { padding: 3px 7px; border-color: transparent; background: none; color: var(--muted); }
-.pane-footer button:hover { color: var(--text); background: var(--selected); }
-.pane-footer button svg { display: block; }
 
 .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree li { position: relative; }
@@ -417,6 +412,14 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button.danger { color: var(--warn); }
 .menu-actions button.danger { color: var(--warn); }
 .context-menu .context-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+/* An item with icons at the right of its row (the open workspace's sync and ⚙). */
+.context-menu .context-row { display: flex; align-items: center; gap: 2px; }
+.context-menu .context-row > button:first-child { flex: 1; }
+.context-menu .context-icon { display: inline-flex; align-items: center; gap: 3px; padding: 5px 6px; color: var(--muted); }
+.context-menu .context-icon:hover, .context-menu .context-icon:focus-visible { color: var(--text); }
+.context-menu .context-icon svg { display: block; }
+.context-menu .context-icon.spinning svg { animation: spin 1s linear infinite; }
+.context-count { font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* The document's title, from its header: the page's top heading, typed in to change it (the rest of the header is in Document settings). */
 .doc-title-block { cursor: default; }
@@ -823,9 +826,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .document-menu .menu-divider { height: 1px; margin: 4px 6px; background: var(--border); }
 .document-menu .menu-note { margin: 2px 0; padding: 2px 10px 2px calc(1em + 12px); color: var(--muted); font-size: 12px; }
 .document-menu .menu-footer { margin: 4px 0 0; padding: 6px 10px 2px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.pane-header-actions button.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .pane-header-actions button.spinning { animation: none; opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .context-menu .context-icon.spinning svg { animation: none; opacity: 0.5; } }
 .settings-done .pending { flex: 1; margin: 0; color: var(--text); }
 .pref-row { display: flex; gap: 6px; align-items: center; }
 .pref-row input { flex: 1; min-width: 0; }

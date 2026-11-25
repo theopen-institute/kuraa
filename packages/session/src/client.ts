@@ -7,8 +7,9 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { redo, undo, yCursorPlugin, ySyncPlugin, ySyncPluginKey, yUndoPlugin, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import type { Command, Plugin, Transaction } from 'prosemirror-state';
-import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
+import { FRAGMENT, type FeatureJson, type PresenceUser, type RoomMessage } from './model.js';
 import { applyDocument, trackAcknowledged } from './acked.js';
+import { anchorIn, entriesIn, observeFeature, onSeeded, peopleIn, positionIn, seededIn, updateIn } from './features.js';
 
 
 /**
@@ -29,7 +30,27 @@ function cursorBuilder(user: { name?: string; color?: string }): HTMLElement {
   return cursor;
 }
 
-export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState, FeatureJson } from './model.js';
+
+/**
+ * A feature's state in a room (0082), as one person has it: their own entries,
+ * which they change, everyone else's in the room, which they see; anchors that
+ * move with everyone's typing.
+ */
+export interface RoomFeature {
+  /** Whose: the person this host is. */
+  readonly me: string;
+  /** Whether this person's map was seeded from their file: only then is what is changed here written back. */
+  seeded(): boolean;
+  /** This person's entries. */
+  entries(): { [key: string]: FeatureJson };
+  /** Everyone else's in the room, by person. */
+  others(): { [person: string]: { [key: string]: FeatureJson } };
+  update(changes: { set?: { [key: string]: FeatureJson }; remove?: string[] }): void;
+  observe(fn: () => void): () => void;
+  anchorAt(pos: number, assoc?: -1 | 1): FeatureJson;
+  positionOf(anchor: FeatureJson): number | null;
+}
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'unauthorized';
 
@@ -79,6 +100,10 @@ export interface RoomConnection {
   settled(ms: number): Promise<boolean>;
   /** Make a document the room's, as a minimal difference: an edit of this client's (before the editor is made). */
   apply(doc: PMNode): void;
+  /** A feature's state in the room (0082) for a person (this host's), for a document of this schema. */
+  feature(id: string, schema: Schema, person: string): RoomFeature;
+  /** Be told when the room is seeded for a feature after it opened (one turned on meanwhile). Returns how to stop. */
+  onSeeded(fn: () => void): () => void;
   /** Close, and forget this room's cache here (the room was replaced: nothing will open it again). */
   forget(): void;
   destroy(): void;
@@ -198,6 +223,17 @@ export function connectRoom(options: RoomOptions): RoomConnection {
       waiting.add(done);
     }),
     apply: (doc) => applyDocument(ydoc, doc),
+    feature: (id, schema, person) => ({
+      me: person,
+      seeded: () => seededIn(ydoc, id, person),
+      entries: () => entriesIn(ydoc, id, person),
+      others: () => Object.fromEntries(peopleIn(ydoc, id).filter((p) => p !== person).map((p) => [p, entriesIn(ydoc, id, p)])),
+      update: (changes) => updateIn(ydoc, id, person, changes),
+      observe: (fn) => observeFeature(ydoc, id, fn),
+      anchorAt: (pos, assoc) => anchorIn(ydoc, schema, pos, assoc),
+      positionOf: (anchor) => positionIn(ydoc, schema, anchor),
+    }),
+    onSeeded: (fn) => onSeeded(ydoc, fn),
     forget: () => {
       destroy();
       try {

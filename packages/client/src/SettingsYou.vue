@@ -18,6 +18,9 @@ import { S } from './strings.js';
 import PersonKey from './PersonKey.vue';
 import SettingsForm from './SettingsForm.vue';
 import SubpanelLink from './SubpanelLink.vue';
+import FeatureMount from './FeatureMount.vue';
+import type { FeatureStatus } from '@kuraa/feature-kit/client';
+import type { ActiveFeature } from './features.js';
 
 const props = defineProps<{
   api: HostApi;
@@ -26,8 +29,26 @@ const props = defineProps<{
   /** Every editor module, by type id, and the ones this person has turned off. */
   editors: Record<string, FormatEditor>;
   editorsOff: string[];
+  /** Features (0082): how each stands, the client halves on for the workspace, and those this person hid. */
+  features: FeatureStatus[];
+  featureParts: ActiveFeature[];
+  hiddenFeatures: string[];
 }>();
-const emit = defineEmits<{ saveSettings: [settings: Settings]; editorsOff: [ids: string[]] }>();
+const emit = defineEmits<{ saveSettings: [settings: Settings]; editorsOff: [ids: string[]]; hiddenFeatures: [ids: string[]] }>();
+
+/** The features on for the workspace, which each person may hide for themselves. */
+const shownFeatures = computed(() => props.featureParts.map((p) => p.status));
+function toggleFeature(id: string, shown: boolean) {
+  emit('hiddenFeatures', shown ? props.hiddenFeatures.filter((x) => x !== id) : [...props.hiddenFeatures, id]);
+}
+/** A feature's own part of You, open as a subpanel. */
+const featureSub = ref<string | null>(null);
+const subPart = computed(() => props.featureParts.find((f) => f.feature.id === featureSub.value && f.feature.settings?.you) ?? null);
+const subMount = computed(() => {
+  const part = subPart.value;
+  const panel = part?.feature.settings?.you;
+  return part && panel ? (el: HTMLElement) => panel.mount(el, part.ctx) : null;
+});
 
 // You on this computer: through the host, where it listens only on this computer (0047).
 const personShell = shallowRef<PersonShell | null>(null);
@@ -78,6 +99,29 @@ defineExpose({ pending });
           </span>
         </label>
       </fieldset>
+    </section>
+    <section v-if="shownFeatures.length && !subPart" v-show="!sub" class="settings-part" data-testid="features-shown">
+      <fieldset class="pref-group">
+        <legend>{{ S.features.shown }}</legend>
+        <p class="pref-note">{{ S.features.shownAbout }}</p>
+        <label v-for="f in shownFeatures" :key="f.id" class="component">
+          <input type="checkbox" :checked="!hiddenFeatures.includes(f.id)" :aria-label="f.label" :data-testid="`feature-shown-${f.id}`" @change="toggleFeature(f.id, checked($event))">
+          <span class="component-text">
+            <span class="component-name">{{ f.label }}</span>
+            <span class="component-about">{{ f.description }}</span>
+          </span>
+        </label>
+      </fieldset>
+      <template v-for="p in featureParts" :key="p.feature.id">
+        <SubpanelLink v-if="p.feature.settings?.you" :title="p.feature.settings.you.label" :about="p.status.description" :testid="`open-feature-you-${p.feature.id}`" @open="featureSub = p.feature.id" />
+      </template>
+    </section>
+    <section v-if="subPart && subMount" class="settings-part" :data-testid="`feature-you-${subPart.feature.id}`">
+      <div class="subpanel-head">
+        <button type="button" class="subpanel-back" @click="featureSub = null">{{ S.person.back(S.sections.you) }}</button>
+        <h4>{{ subPart.feature.settings!.you!.label }}</h4>
+      </div>
+      <FeatureMount :mount="subMount" />
     </section>
     <section v-if="!shell.managesHost" v-show="!sub" class="settings-part" data-testid="settings-connection">
       <fieldset class="pref-group">

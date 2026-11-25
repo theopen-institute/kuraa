@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'vitest';
+import { defineClientFeature, type FeatureStatus } from '@kuraa/feature-kit/client';
+import { activeFeatures, FeatureMessages, marginLayout, type FeatureApp } from '../src/features.js';
+
+const status = (id: string, on: boolean): FeatureStatus => ({ id, label: id, description: '', on, host: true, workspace: on, settings: {}, mayChange: true, companions: [], me: null });
+const app = { api: () => { throw new Error('no host'); }, person: () => ({ name: 'Ada', email: '', color: '#000' }), notify: () => undefined, ui: {} as FeatureApp['ui'], openPanel: () => undefined, openFile: () => undefined, changed: () => undefined } as FeatureApp;
+
+describe('features in the client', () => {
+  it('are used where the host has them on, the workspace too, and the person has not hidden them', () => {
+    const a = defineClientFeature({ id: 'a' });
+    const b = defineClientFeature({ id: 'b' });
+    const old = { ...defineClientFeature({ id: 'c' }), apiVersion: 0 };
+    const list = activeFeatures({ a, b, c: old }, [status('a', true), status('b', true), status('c', true), status('d', true), status('e', false)], ['b'], app, new FeatureMessages());
+    expect(list.map((f) => f.feature.id)).toEqual(['a']);
+    // What they are told of how they stand is as it is now.
+    let now = [status('a', true)];
+    const [f] = activeFeatures({ a }, now, [], app, new FeatureMessages(), () => now);
+    now = [{ ...status('a', true), settings: { label: 'x' } }];
+    expect(f!.ctx.status().settings).toEqual({ label: 'x' });
+  });
+
+  it('hear what their host halves tell them, each its own', () => {
+    const bus = new FeatureMessages();
+    const heard: unknown[] = [];
+    const off = bus.on('a', (m, p) => heard.push([m, p]));
+    bus.emit('a', { n: 1 }, 'x.md');
+    bus.emit('b', { n: 2 }, null);
+    off();
+    bus.emit('a', { n: 3 }, null);
+    expect(heard).toEqual([[{ n: 1 }, 'x.md']]);
+  });
+
+  it('keep margin marks clear of each other, in order down the page', () => {
+    const laid = marginLayout([{ top: 100 }, { top: 10 }, { top: 15 }, { top: 300 }], 22);
+    expect(laid.map((m) => m.at)).toEqual([10, 32, 100, 300]);
+  });
+});

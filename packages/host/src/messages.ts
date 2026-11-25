@@ -39,13 +39,16 @@ export function changedParts(type: DocumentType, before: string, after: string):
 }
 
 /** A commit message for an edit to one file. */
-export function describeEdit(type: DocumentType | undefined, path: string, before: string | null, after: string, people: string[]): string {
+export function describeEdit(type: DocumentType | undefined, path: string, before: string | null, after: string, people: string[], beside: string[] = []): string {
   const file = path.slice(path.lastIndexOf('/') + 1);
   const name = type?.title?.read(after)?.trim() || file;
+  const who = [...new Set(people.filter(Boolean))];
+  const by = who.length ? ` (${who.join(', ')})` : '';
+  // Only what features keep beside it changed (0082): what they say of it, for the document.
+  if (beside.length && before === after) return `${name}: ${beside.join(', ')}${by}`;
   const verb = before === null ? 'Create' : 'Edit';
   // Parts are headings: types without them (source files) have none.
   const parts = type?.schema.nodes.heading && before !== null ? changedParts(type, before, after) : [];
   const shown = parts.length > MAX_PARTS ? `${parts.slice(0, MAX_PARTS).join(', ')} and ${parts.length - MAX_PARTS} more` : parts.join(', ');
-  const who = [...new Set(people.filter(Boolean))];
-  return `${verb} ${name}${shown ? `: ${shown}` : ''}${who.length ? ` (${who.join(', ')})` : ''}`;
+  return `${verb} ${name}${shown ? `: ${shown}` : ''}${beside.length ? `; ${beside.join(', ')}` : ''}${by}`;
 }

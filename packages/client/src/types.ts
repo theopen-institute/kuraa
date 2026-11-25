@@ -1,6 +1,7 @@
 // Types shared by the client's components.
 import type { DocumentType } from '@kuraa/kernel';
 import type { FormatEditor } from '@kuraa/editor-kit';
+import type { ClientFeature } from '@kuraa/feature-kit/client';
 import type { ConnectionStatus, Peer } from '@kuraa/session/client';
 import type { RoomInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
@@ -18,6 +19,8 @@ export interface AppProps {
   shell?: Shell;
   /** Each type's editor module, by type id: what the type does in the editor. */
   editors?: Record<string, FormatEditor>;
+  /** Features' client halves, by id (0082): used where the host has the feature on for the workspace. */
+  features?: Record<string, ClientFeature>;
 }
 
 export interface Notice {

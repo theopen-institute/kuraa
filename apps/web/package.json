@@ -10,9 +10,12 @@
   },
   "dependencies": {
     "@kuraa/client": "workspace:*",
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/features": "workspace:*",
     "@kuraa/formats": "workspace:*"
   },
   "devDependencies": {
+    "@kuraa/feature-example": "workspace:*",
     "@vitejs/plugin-vue": "^6.0.11",
     "vite": "^8.3.8"
   }

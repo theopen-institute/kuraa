@@ -2,7 +2,9 @@
 // The client: a file tree, one live editor, and a history sidebar that starts
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
-import { TypeRegistry } from '@kuraa/kernel';
+import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
+import type { FeatureStatus } from '@kuraa/feature-kit/client';
+import type { Node as PMNode } from 'prosemirror-model';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
@@ -38,8 +40,11 @@ import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
 import RenderPanel from './RenderPanel.vue';
 import SearchPanel from './SearchPanel.vue';
 import type { MatchTarget } from './docActions.js';
+import type { ContextItem } from './ContextMenu.vue';
+import { activeFeatures, FeatureMessages, loadHiddenFeatures, saveHiddenFeatures, type ActiveFeature, type FeatureApp } from './features.js';
+import FeaturePanel from './FeaturePanel.vue';
 
-const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}) });
+const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}), features: () => ({}) });
 
 const OPEN_KEY = 'kuraa:open-file';
 
@@ -114,12 +119,13 @@ const inviting = shallowRef<{ syncing: boolean } | null>(null);
 const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
 /** The open document's conflicts as it is being edited, likewise. */
 const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
-/** The files, with the open document's live title and conflicts. */
+/** The files, with the open document's live title and conflicts; what features keep beside a document is shown with it, not apart (0082). */
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;
-  if (!live && !c) return files.value;
-  return files.value.map((f) => {
+  const listed = files.value.some((f) => f.of) ? files.value.filter((f) => !f.of) : files.value;
+  if (!live && !c) return listed;
+  return listed.map((f) => {
     let out = f;
     if (live && f.path === live.path && 'title' in f && f.title !== live.title) out = { ...out, title: live.title };
     if (c && f.path === c.path && (f.conflicts ?? 0) !== c.count) out = { ...out, conflicts: c.count || undefined };
@@ -133,13 +139,143 @@ const searchAsked = ref(0);
 
 function preview() {
   if (!path.value || !type.value) return;
+  featurePanel.value = null;
   sidePanel.value = 'preview';
   renderAsked.value++;
 }
 function openSearch() {
+  featurePanel.value = null;
   sidePanel.value = 'search';
   searchAsked.value++;
 }
+
+// Features (0082): how each the host has stands for the open workspace, which
+// this person hid (in this browser), and the client halves in use, each with
+// what the app gives it. Their panels, menu items, settings and help are drawn
+// here; what they do in the document, in the editor.
+const featureStatus = shallowRef<FeatureStatus[]>([]);
+const hiddenFeatures = ref(loadHiddenFeatures());
+const featureMessages = new FeatureMessages();
+let featuresAsked = 0;
+async function loadFeatures() {
+  const asked = api.value;
+  const n = ++featuresAsked;
+  let list: FeatureStatus[];
+  try {
+    list = await asked.features();
+  } catch {
+    list = [];
+  }
+  // Only a change is taken: the same answer keeps what is drawn from it.
+  if (asked === api.value && n === featuresAsked && JSON.stringify(list) !== JSON.stringify(featureStatus.value)) featureStatus.value = list;
+}
+watch([api, ready], () => {
+  featureStatus.value = [];
+  if (ready.value) void loadFeatures();
+}, { immediate: true });
+const featureNotice = (text: string, kind: 'info' | 'warn' = 'info') => {
+  notice.value = { kind, text };
+};
+const featureApp: FeatureApp = {
+  api: () => api.value,
+  person: () => ({ name: settings.value.name, email: settings.value.email, color: settings.value.color }),
+  notify: featureNotice,
+  ui: { askText, askConfirm, notify: featureNotice },
+  openPanel: (feature, panel) => openFeaturePanel(feature, panel),
+  openFile: (p, at) => void openAtText(p, at),
+  changed: () => void loadFeatures(),
+};
+/** The client halves in use: on for the workspace, and not hidden by this person. */
+const features = computed(() => activeFeatures(props.features, featureStatus.value, hiddenFeatures.value, featureApp, featureMessages, () => featureStatus.value));
+/** Every client half on for the workspace, hidden or not: for their parts of Settings. */
+const featuresForSettings = computed(() => activeFeatures(props.features, featureStatus.value, [], featureApp, featureMessages, () => featureStatus.value));
+/** Turn a feature on or off for the workspace (Settings › Workspace), and follow it once it is. */
+async function turnFeature(id: string, on: boolean) {
+  const asked = api.value;
+  const status = await asked.setFeature(id, { on }, featureApp.person());
+  if (asked !== api.value) return;
+  notice.value = { kind: 'info', text: on ? S.features.turnedOn(status.label) : S.features.turnedOff(status.label) };
+  await loadFeatures();
+}
+function setHiddenFeatures(ids: string[]) {
+  hiddenFeatures.value = ids;
+  saveHiddenFeatures(ids);
+}
+/** A feature's panel, if one is open beside the document. */
+const featurePanel = shallowRef<{ feature: string; panel: string } | null>(null);
+const shownFeaturePanel = computed(() => {
+  const fp = featurePanel.value;
+  if (!fp) return null;
+  const active = features.value.find((f) => f.feature.id === fp.feature);
+  const panel = active?.feature.panels?.find((p) => p.id === fp.panel);
+  if (!active || !panel || (panel.about === 'document' && !(path.value && type.value && !viewing.value))) return null;
+  return { active, panel };
+});
+function openFeaturePanel(feature: string, panel: string) {
+  docMenu.value = null;
+  sidePanel.value = null;
+  featurePanel.value = { feature, panel };
+}
+/** Open a file at a range of its text (a feature asked). */
+async function openAtText(p: string, at?: { from: number; to: number }) {
+  if (p !== path.value) select(p);
+  else view(null);
+  if (!at) return;
+  await nextTick();
+  editor.value?.revealText(at);
+}
+/** Items features add to the open document's ⋯ menu. */
+const featureMenu = computed(() => {
+  const p = path.value;
+  const t = type.value;
+  if (!p || !t) return [];
+  return features.value.flatMap((f) => {
+    try {
+      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t }) ?? [];
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
+      return [];
+    }
+  });
+});
+/** Items features add to a file's right-click menu. */
+function featureFileMenu(p: string): ContextItem[] {
+  return features.value.flatMap((f) => {
+    try {
+      return (f.feature.fileMenu?.(p, f.ctx) ?? []).map((i) => ({ label: i.label, run: i.run, testid: i.testid }));
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.feature.id} could not add to a file's menu`, e);
+      return [];
+    }
+  });
+}
+/** What features show on a past version, with what was kept beside the document then. */
+const pastFeatures = computed(() => {
+  const v = viewing.value;
+  const p = path.value;
+  const t = type.value;
+  const list: ActiveFeature[] = features.value.filter((f) => f.feature.editor);
+  if (!v?.commit || !p || !t || !list.length) return undefined;
+  const commit = v.commit;
+  const at = commit.path || p;
+  const asked = api.value;
+  return (_doc: PMNode) => {
+    const made = list.flatMap((f) => {
+      try {
+        return [f.feature.editor!({
+          ...f.ctx, path: at, type: t, schema: t.schema, readOnly: true, state: null,
+          companions: async (suffix) => (await asked.companions(at, suffix, commit.hash).catch(() => [])).map((c) => ({ person: c.person, text: c.text })),
+          sourceMap: (d) => sourceMapOf(t, d, t.parse(t.serialize(d))),
+          redraw: () => undefined,
+        })];
+      } catch (e) {
+        console.error(`[kuraa] the feature ${f.feature.id} could not show a past version`, e);
+        return [];
+      }
+    });
+    return { plugins: made.flatMap((e) => e.plugins?.() ?? []), destroy: () => made.forEach((e) => e.destroy?.()) };
+  };
+});
 function openDocMenu(e: MouseEvent) {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
   docMenu.value = { top: r.bottom + 4, right: window.innerWidth - r.right };
@@ -356,6 +492,11 @@ const header = computed(() => {
 });
 /** The editor modules that are on: their cues and keys are on the Markdown and shortcuts sheet. */
 const editorsOn = computed(() => Object.fromEntries(Object.entries(props.editors).filter(([id]) => !editorsOff.value.includes(id))));
+/** The sheet's lines: the editor modules', and those of the features in use (0082). */
+const helpEditors = computed(() => ({
+  ...editorsOn.value,
+  ...Object.fromEntries(features.value.filter((f) => f.feature.help?.length).map((f) => [`feature:${f.feature.id}`, { help: f.feature.help }])),
+}));
 function setEditorsOff(ids: string[]) {
   editorsOff.value = ids;
   saveEditorsOff(ids);
@@ -388,6 +529,17 @@ const onKey = (e: KeyboardEvent) => {
   } else if (k(APP_KEYS.preview)) {
     e.preventDefault();
     preview();
+  } else {
+    // A feature's panel, by its keys (0082): opened, or closed if it is open.
+    for (const f of features.value) {
+      const panel = f.feature.panels?.find((p) => p.keys && k(p.keys));
+      if (!panel) continue;
+      e.preventDefault();
+      const open = featurePanel.value?.feature === f.feature.id && featurePanel.value.panel === panel.id && !!shownFeaturePanel.value;
+      if (open) featurePanel.value = null;
+      else openFeaturePanel(f.feature.id, panel.id);
+      return;
+    }
   }
 };
 onMounted(() => {
@@ -442,6 +594,8 @@ async function refreshTree(selectPath?: string | null) {
       files.value = tree.files;
       folderMarks.value = tree.folders ?? [];
       error.value = null;
+      // Which features are on may have come with the files (a merge): asked again.
+      void loadFeatures();
     }
     if (selectPath !== undefined) select(selectPath);
   } catch (e) {
@@ -702,7 +856,7 @@ function useSettings(s: Settings) {
     </div>
     <ErrorBanner v-if="error" :error="error"><button type="button" @click="error = null">{{ S.common.dismiss }}</button></ErrorBanner>
 
-    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!sidePanel }]">
+    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!sidePanel || !!shownFeaturePanel }]">
       <FileTree
         v-if="ready"
         ref="fileTree"
@@ -713,6 +867,7 @@ function useSettings(s: Settings) {
         :selected="path"
         :registry="hostRegistry"
         :workspace-name="workspace?.name ?? S.app.files"
+        :feature-items="featureFileMenu"
         @select="select"
         @document-settings="openDocumentSettings"
         @created="(p) => (titleFocus = p)"
@@ -814,6 +969,7 @@ function useSettings(s: Settings) {
               :run="workspace?.run ?? null"
               :format-editor="editorFor(type.id)"
               :read-only="access?.canWrite === false"
+              :features="features"
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
               :focus-title="titleFocus === path"
@@ -827,6 +983,7 @@ function useSettings(s: Settings) {
               @tools-changed="toolsKey++"
               @committed="historyKey++"
               @outside-conflict="outsideConflict"
+              @feature-message="(f, m, p) => featureMessages.emit(f, m, p)"
             />
           </div>
           <PastVersion
@@ -841,6 +998,7 @@ function useSettings(s: Settings) {
             :format-editor="editorFor(type.id)"
             :now="() => editor?.text() ?? null"
             :can-restore="access?.canWrite !== false"
+            :extend="pastFeatures"
             @back="view(null)"
             @restore="restoreVersion"
           />
@@ -867,6 +1025,17 @@ function useSettings(s: Settings) {
         @close="sidePanel = null"
       />
       <SearchPanel v-else-if="sidePanel === 'search'" :api="api" :focus-key="searchAsked" @open="openMatch" @close="sidePanel = null" />
+      <FeaturePanel
+        v-else-if="shownFeaturePanel"
+        :key="`${shownFeaturePanel.active.feature.id}:${shownFeaturePanel.panel.id}`"
+        :active="shownFeaturePanel.active"
+        :panel="shownFeaturePanel.panel"
+        :path="path && type && !viewing ? path : null"
+        :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
+        :view="() => editor?.view ?? null"
+        :state="() => editor?.featureState(shownFeaturePanel!.active.feature.id) ?? null"
+        @close="featurePanel = null"
+      />
     </div>
 
     <NoticeToast :notice="shownNotice" @dismiss="notice = null" />
@@ -881,6 +1050,7 @@ function useSettings(s: Settings) {
       :show-source="showSource"
       :history-open="historyOpen"
       :conflicts="file?.conflicts ?? 0"
+      :feature-items="featureMenu"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
@@ -895,7 +1065,7 @@ function useSettings(s: Settings) {
       @permissions="openPermissions(path!)"
       @close="docMenu = null"
     />
-    <HelpSheet v-if="helpOpen" :editors="editorsOn" @close="helpOpen = false" />
+    <HelpSheet v-if="helpOpen" :editors="helpEditors" @close="helpOpen = false" />
     <PermissionsDialog v-if="permissionsFor" :api="api" :path="permissionsFor.path" :name="permissionsFor.name" @close="permissionsFor = null" @saved="(what) => { permissionsFor = null; notice = { kind: 'info', text: what }; void refreshTree(); void loadAccess(); }" />
     <InviteDialog v-if="inviting" :api="api" :workspace="workspace?.name ?? S.app.thisWorkspace" :syncing="inviting.syncing" @close="inviting = null; void loadHub(); void checkShared()" />
     <AddWorkspaceDialog
@@ -925,6 +1095,10 @@ function useSettings(s: Settings) {
       :editors="editors"
       :editors-off="editorsOff"
       :tools-key="toolsKey"
+      :features="featureStatus"
+      :feature-parts="featuresForSettings"
+      :hidden-features="hiddenFeatures"
+      :turn-feature="turnFeature"
       @save-settings="useSettings"
       @saved="hostSettingsSaved"
       @editors-off="setEditorsOff"
@@ -933,7 +1107,8 @@ function useSettings(s: Settings) {
       @invite="invite"
       @permissions="openPermissions"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @close="settingsOpen = false; void checkShared()"
+      @hidden-features="setHiddenFeatures"
+      @close="settingsOpen = false; void checkShared(); void loadFeatures()"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />

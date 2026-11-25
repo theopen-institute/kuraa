@@ -314,7 +314,8 @@ export class Hub {
     if (!this.o.settings) return { ...base, run: base.run ? { engines: [], ...base.run } : undefined };
     const types = base.types ?? standardTypes;
     const s = fromSettings(this.o.settings.current, { run: base.run, timings: base.timings, formats: types.map((t) => t.id), engines: this.loaded?.engines, environments: this.loaded?.environments });
-    return { ...base, run: s.run, formats: s.formats, timings: s.timings };
+    // Flags naming features (--feature) win over the settings, as they do for formats.
+    return { ...base, run: s.run, formats: s.formats, timings: s.timings, featuresOn: base.featuresOn ?? s.features };
   }
 
   /** The engines and environments loaded: a setting naming another is passed over. */
@@ -567,6 +568,7 @@ export class Hub {
       defaultDataDir: store.defaultDataDir,
       environments,
       formats: (this.o.hosts?.types ?? standardTypes).map((t) => ({ id: t.id, label: t.label })),
+      features: (this.o.hosts?.features ?? []).map((f) => ({ id: f.id, label: f.label, description: f.description ?? '' })),
       canAdd: this.canAdd,
     };
   }

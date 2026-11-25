@@ -19,6 +19,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@kuraa/editor-kit": "workspace:*",
+    "@kuraa/feature-kit": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "@kuraa/session": "workspace:*",
     "@lezer/common": "^1.5.5",

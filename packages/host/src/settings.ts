@@ -44,6 +44,8 @@ export interface Settings {
   dataDir: string | null;
   /** Document types that are on, by id (--format); null for all. */
   formats: string[] | null;
+  /** Features that are on, by id (--feature; 0082); null for all. Each workspace turns them on for itself too. */
+  features: string[] | null;
   /** Seconds of quiet before edits are written to the file (--flush-ms); null for the default. */
   saveSeconds: number | null;
   /** Seconds of quiet before a version is saved (--commit-ms); null for the default. */
@@ -67,6 +69,8 @@ export interface SettingsView {
   environments: { id: string; label: string; available: boolean; message: string }[];
   /** The document types the app has. */
   formats: { id: string; label: string }[];
+  /** The features the host has loaded (0082). */
+  features: { id: string; label: string; description: string }[];
   /** New workspaces can be added here (not a server of one folder): where they go is a setting. */
   canAdd: boolean;
 }
@@ -76,7 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   relays: [],
   runCode: true, environment: null, rImages: [], memory: null, cpus: null, disk: null,
   allowWrite: false, allowNetwork: false, allowInstalls: true, dataDir: null,
-  formats: null, saveSeconds: null, versionSeconds: null, workspaces: null,
+  formats: null, features: null, saveSeconds: null, versionSeconds: null, workspaces: null,
 };
 
 /** What packages and tools put in the data folder (runner.ts, tools.ts): a folder holding only these is one. */
@@ -162,6 +166,8 @@ export function settingsFrom(v: unknown, strict = false): Settings {
     allowInstalls: flag('allowInstalls'),
     dataDir: folder('dataDir', 'The folder for packages and tools'),
     formats,
+    // None on is a choice (unlike formats: a document always opens as something).
+    features: Array.isArray(o.features) ? strings(o.features) : null,
     saveSeconds: seconds('saveSeconds', 'Writing edits to the file', 0.2),
     versionSeconds: seconds('versionSeconds', 'Saving a version', 1),
     workspaces: folder('workspaces', 'The folder for new workspaces'),
@@ -260,6 +266,8 @@ export class SettingsStore {
 export interface FromSettings {
   run: RunOptions;
   formats: string[] | undefined;
+  /** Features on, by id (0082): undefined for all. */
+  features: string[] | undefined;
   timings: Partial<HostTimings>;
   peers: { bootstrap?: string[]; relays?: string[] };
 }
@@ -292,6 +300,7 @@ export function fromSettings(
       options: { ...r.options, r: { ...(r.options?.r as object | undefined), images: s.rImages } },
     },
     formats: formats?.length ? formats : undefined,
+    features: s.features ?? undefined,
     timings: {
       ...(s.saveSeconds !== null ? { flushMs: Math.round(s.saveSeconds * 1000) } : {}),
       ...(s.versionSeconds !== null ? { idleCommitMs: Math.round(s.versionSeconds * 1000) } : {}),

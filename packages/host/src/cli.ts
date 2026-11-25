@@ -14,6 +14,7 @@
 // The owner's settings (settings.ts; Preferences in the app) can also be given as
 // flags, which win over them for as long as the host runs:
 //   formats:      [--format pandoc-markdown --format text ...]   (default: all)
+//   features:     [--feature <id> ...]   features on here (default: all loaded); each workspace turns them on too (0082)
 //   running code: [--engine r | --engine none] [--env podman]
 //                 [--allow-write] [--allow-network] [--no-allow-installs] [--data-dir path]
 //                 [--memory 4g] [--cpus 2] [--disk 2g]
@@ -35,6 +36,7 @@
 //   --podman <path>                    the Podman program (also KURAA_PODMAN)
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
+import { standardFeatures } from '@kuraa/features';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, type Settings } from './index.js';
@@ -72,6 +74,7 @@ const { values } = parseArgs({
     workspaces: { type: 'string' },
     init: { type: 'boolean', default: false },
     format: { type: 'string', multiple: true },
+    feature: { type: 'string', multiple: true },
     engine: { type: 'string', multiple: true },
     env: { type: 'string' },
     component: { type: 'string', multiple: true },
@@ -133,6 +136,7 @@ const flags: Partial<Settings> = Object.fromEntries(Object.entries({
   allowInstalls: values['allow-installs'],
   dataDir: values['data-dir'] ? resolve(values['data-dir']) : undefined,
   formats: values.format,
+  features: values.feature,
   saveSeconds: flushMs !== undefined ? flushMs / 1000 : undefined,
   versionSeconds: commitMs !== undefined ? commitMs / 1000 : undefined,
   workspaces: values.workspaces ? resolve(values.workspaces) : undefined,
@@ -158,6 +162,7 @@ const hub = await startHub({
   allowOrigins: values['allow-origin'],
   // What only flags set: more components, the sandbox, the Podman program, engines named.
   hosts: {
+    features: standardFeatures,
     run: {
       ...(values.engine ? { engines: values.engine } : {}),
       components: [...standardRunComponents, ...(values.component ?? [])],

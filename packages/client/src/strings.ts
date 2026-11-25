@@ -627,6 +627,26 @@ export const S = {
     failed: (why: string) => `Did not work: ${why}`,
   },
 
+  features: {
+    /** Settings › Workspace: which features this workspace uses (0082). */
+    title: 'Features',
+    about: 'What this workspace does beyond writing, for everyone in it: turning one on or off is saved in the workspace, and each one keeps what it makes in files of its own, beside the documents.',
+    offHere: 'Off on this computer’s host: turn it on in Settings › Host.',
+    mayNotChange: 'Only someone who may change the workspace’s settings turns features on and off.',
+    turnedOn: (label: string) => `${label} is on for this workspace.`,
+    turnedOff: (label: string) => `${label} is off for this workspace. What it made is kept.`,
+    settings: 'Settings…',
+    /** Settings › You. */
+    shown: 'Features · just you',
+    shownAbout: 'Hide a feature for yourself: it stays on for everyone else, and nothing it made changes.',
+    /** Settings › Host. */
+    host: 'Features',
+    hostHint: 'A workspace turns on the features it uses for itself.',
+    /** Beside a selection. */
+    selection: 'What to do with the selection',
+    closePanel: (label: string) => `Close ${label}`,
+    failed: (label: string, why: string) => `${label}: ${why}`,
+  },
   packages: {
     title: (label: string) => `${label} packages`,
     toInstall: 'Packages to install',

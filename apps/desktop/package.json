@@ -21,6 +21,7 @@
   "devDependencies": {
     "@electron/fuses": "1.8.0",
     "@kuraa/client": "workspace:*",
+    "@kuraa/features": "workspace:*",
     "@kuraa/formats": "workspace:*",
     "@kuraa/host": "workspace:*",
     "@kuraa/run-components": "workspace:*",

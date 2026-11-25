@@ -12,6 +12,8 @@ const merge = (...rules) => {
   return { 'no-restricted-imports': ['error', { patterns }] };
 };
 const noYjs = restrict(yjsFamily, 'Only @kuraa/session may import Yjs, y-prosemirror or Hocuspocus.');
+// The core imports no feature (decision 0082): whoever starts it passes them, as run components.
+const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: '^@kuraa/(feature-(?!kit(/|$))[^/]+|features)(/.*)?$', message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, it may.' }] }] };
 
 export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', '.dev-workspaces/**'] },
@@ -74,6 +76,23 @@ export default tseslint.config(
     ),
   },
   {
+    // Features (docs/decisions/0082-annotations.md) and their contract: a host half and a client half that
+    // meet the core only through @kuraa/feature-kit. No Yjs (the session gives rooms' state as JSON and
+    // anchors), no host, client or session; the client half and the shared entry use no Node.
+    files: ['packages/feature-kit/src/**', 'packages/feature-*/src/**', 'packages/features/src/**'],
+    rules: merge(
+      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*'], 'Features reach the core only through @kuraa/feature-kit (and the kernel, editor-kit and formats).'),
+      noYjs,
+    ),
+  },
+  {
+    files: ['packages/feature-kit/src/index.ts', 'packages/feature-kit/src/client.ts', 'packages/feature-*/src/client.ts', 'packages/feature-*/src/client/**', 'packages/features/src/client.ts'],
+    rules: merge(
+      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*', 'node:*'], 'A feature’s client half runs in the browser, and reaches the client only through @kuraa/feature-kit/client.'),
+      noYjs,
+    ),
+  },
+  {
     files: ['packages/editor-kit/src/**'],
     rules: merge(restrict(['@kuraa/*', 'vue', 'node:*', '@codemirror/*'], 'editor-kit is types for the format editor contract only.'), noYjs),
   },
@@ -85,6 +104,7 @@ export default tseslint.config(
     rules: merge(
       restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'),
       restrict(['@kuraa/engine-*', '@kuraa/env-*', '@kuraa/tool-*', '@kuraa/sync-*', '@kuraa/run-components'], 'The host imports no run component; the program that starts it passes them.'),
+      noFeatures,
       noYjs,
     ),
   },
@@ -93,7 +113,12 @@ export default tseslint.config(
     rules: merge(restrict(['@kuraa/client*'], 'host never imports client; they meet over HTTP and WebSocket.'), noYjs),
   },
   {
-    files: ['packages/client/src/**', 'apps/web/src/**'],
+    files: ['packages/client/src/**'],
+    rules: merge(restrict(['@kuraa/host*', 'node:*'], 'client never imports host; they meet over HTTP and WebSocket.'), noFeatures, noYjs),
+  },
+  {
+    // The web shell: the client with the standard types, editor modules and features.
+    files: ['apps/web/src/**'],
     rules: merge(restrict(['@kuraa/host*', 'node:*'], 'client never imports host; they meet over HTTP and WebSocket.'), noYjs),
   },
   {
@@ -102,6 +127,6 @@ export default tseslint.config(
   },
   {
     files: ['packages/session/src/client.ts'],
-    rules: restrict(['@hocuspocus/server', 'node:*'], 'The session client entry runs in the browser.'),
+    rules: merge(restrict(['@hocuspocus/server', 'node:*'], 'The session client entry runs in the browser.'), noFeatures),
   },
 );

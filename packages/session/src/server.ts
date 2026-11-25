@@ -8,12 +8,18 @@ import * as Y from 'yjs';
 import { applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import { prosemirrorToYXmlFragment, updateYFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
-import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
+import { FRAGMENT, type FeatureJson, type PresenceUser, type RoomMessage } from './model.js';
+import { seedIn, updateIn, viewOf, whatChanged, type FeatureSeed, type FeatureView } from './features.js';
 
-export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState, FeatureJson } from './model.js';
+export type { Anchors, FeatureSeed, FeatureView } from './features.js';
 
-/** What a room starts from: a ProseMirror document, or a state (a session's, from another device). */
-export type RoomSeed = { doc: PMNode } | { state: Uint8Array };
+/**
+ * What a room starts from: a ProseMirror document (and what features keep in
+ * the room for this host's person, from their files, seeded once it is there:
+ * 0082), or a state (a session's, from another device, features and all).
+ */
+export type RoomSeed = { doc: PMNode; features?: { person: string; seed: FeatureSeed } } | { state: Uint8Array };
 
 export interface RelayHooks {
   /** Throw to reject. Returns the user recorded for the connection. */
@@ -96,7 +102,10 @@ export class Relay {
         const seed = await this.hooks.load(documentName);
         if (!seed) throw new Error(`Unknown or stale room: ${documentName}`);
         if ('state' in seed) Y.applyUpdate(document, seed.state, HOST_ORIGIN);
-        else document.transact(() => prosemirrorToYXmlFragment(seed.doc, document.getXmlFragment(FRAGMENT)), HOST_ORIGIN);
+        else {
+          document.transact(() => prosemirrorToYXmlFragment(seed.doc, document.getXmlFragment(FRAGMENT)), HOST_ORIGIN);
+          if (seed.features) seedIn(document, seed.doc.type.schema, seed.features.person, seed.features.seed, HOST_ORIGIN);
+        }
         return document;
       },
       onChange: async ({ documentName, context, transactionOrigin, update }) => {
@@ -179,6 +188,34 @@ export class Relay {
   state(room: string): Uint8Array | null {
     const d = this.doc(room);
     return d ? Y.encodeStateAsUpdate(d) : null;
+  }
+
+  /** What features keep in the room, and where its anchors are (0082); null if it is not loaded. */
+  features(room: string, schema: Schema): FeatureView | null {
+    const d = this.doc(room);
+    return d ? viewOf(d, schema) : null;
+  }
+
+  /** Seed this host's person's maps in a room already open (a feature turned on, or this device joined, while it was). False if it is not loaded. */
+  seedFeatures(room: string, schema: Schema, person: string, seed: FeatureSeed): boolean {
+    const d = this.doc(room);
+    if (!d) return false;
+    seedIn(d, schema, person, seed, HOST_ORIGIN);
+    return true;
+  }
+
+  /** Change this host's person's entries for a feature in the room, as the host. False if it is not loaded. */
+  updateFeature(room: string, id: string, person: string, changes: { set?: { [key: string]: FeatureJson }; remove?: string[] }): boolean {
+    const d = this.doc(room);
+    if (!d) return false;
+    updateIn(d, id, person, changes, HOST_ORIGIN);
+    return true;
+  }
+
+  /** What a change from another device would change in the room (0082): the document, whose feature maps, anything else. Null if it is not loaded. */
+  whatChanged(room: string, update: Uint8Array): { doc: boolean; people: Set<string>; other: boolean } | null {
+    const d = this.doc(room);
+    return d ? whatChanged(d, update) : null;
   }
 
   // Rooms across devices -------------------------------------------------
@@ -274,10 +311,18 @@ export function covers(at: Uint8Array, vector: Uint8Array): boolean {
  * Y.Doc has. Two states made apart from one text are two histories: combined,
  * the text would be there twice. So a session is never combined with another.
  */
-export function encodeDoc(doc: PMNode): Uint8Array {
+export function encodeDoc(doc: PMNode, features?: { person: string; seed: FeatureSeed }): Uint8Array {
   const ydoc = new Y.Doc();
   ydoc.transact(() => prosemirrorToYXmlFragment(doc, ydoc.getXmlFragment(FRAGMENT)));
+  if (features) seedIn(ydoc, doc.type.schema, features.person, features.seed);
   return Y.encodeStateAsUpdate(ydoc);
+}
+
+/** What features keep in a room's state (one not loaded: kept to open, or unwritten), and where its anchors are (0082). */
+export function featuresOfState(state: Uint8Array, schema: Schema): FeatureView {
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, state);
+  return viewOf(ydoc, schema);
 }
 
 /** Apply a document to a saved room state as a minimal difference; returns the new state. */

@@ -40,7 +40,7 @@ const emit = defineEmits<{ saved: [] }>();
 
 /** The flag that sets each setting, said where a flag overrides it. */
 const FLAGS: Partial<Record<keyof HubSettings, string>> = {
-  bootstrap: '--bootstrap', relays: '--relay', formats: '--format', runCode: '--engine', environment: '--env',
+  bootstrap: '--bootstrap', relays: '--relay', formats: '--format', features: '--feature', runCode: '--engine', environment: '--env',
   allowInstalls: '--allow-installs', memory: '--memory', cpus: '--cpus', disk: '--disk', allowWrite: '--allow-write',
   allowNetwork: '--allow-network', rImages: '--r-image', dataDir: '--data-dir', workspaces: '--workspaces',
   saveSeconds: '--flush-ms', versionSeconds: '--commit-ms',
@@ -67,6 +67,7 @@ const f = reactive({
   memory: '', cpus: '', disk: '', allowWrite: false, allowNetwork: false, rImages: '',
   dataDir: null as string | null, workspaces: null as string | null, saveSeconds: '', versionSeconds: '',
   formats: [] as string[],
+  features: [] as string[],
 });
 /** The settings as loaded: changed since, they are applied as the window closes. */
 let loaded = '';
@@ -80,6 +81,8 @@ if (props.canChangeSettings) props.hub.settings().then((v) => {
     saveSeconds: p.saveSeconds === null ? '' : String(p.saveSeconds), versionSeconds: p.versionSeconds === null ? '' : String(p.versionSeconds),
     // Kinds of documents: each one the app has, on unless the settings name others.
     formats: v.formats.filter((x) => !p.formats || p.formats.includes(x.id)).map((x) => x.id),
+    // Features (0082): each one the host has, on unless the settings name others.
+    features: (v.features ?? []).filter((x) => !p.features || p.features.includes(x.id)).map((x) => x.id),
   });
   loaded = JSON.stringify(f);
   view.value = v;
@@ -137,6 +140,7 @@ async function save(): Promise<boolean> {
       dataDir: f.dataDir,
       // All on is the default: kept as such, so kinds added later are on too.
       formats: f.formats.length === view.value.formats.length ? null : view.value.formats.filter((x) => f.formats.includes(x.id)).map((x) => x.id),
+      features: f.features.length === (view.value.features ?? []).length ? null : (view.value.features ?? []).filter((x) => f.features.includes(x.id)).map((x) => x.id),
       saveSeconds: empty(f.saveSeconds) as unknown as number | null,
       versionSeconds: empty(f.versionSeconds) as unknown as number | null,
       workspaces: f.workspaces,
@@ -241,6 +245,17 @@ defineExpose({ changed, save, busy, picking });
             </div>
             <span class="pref-note">{{ S.preferences.formatsHint }}</span>
             <span v-if="flagged('formats')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.formats!) }}</span>
+          </fieldset>
+
+          <fieldset v-if="view.features?.length" class="pref-group">
+            <legend>{{ S.features.host }}</legend>
+            <div data-testid="pref-features">
+              <label v-for="x in view.features" :key="x.id" class="pref-check" :title="x.description">
+                <input v-model="f.features" type="checkbox" :value="x.id" :data-testid="`pref-feature-${x.id}`"> {{ x.label }}
+              </label>
+            </div>
+            <span class="pref-note">{{ S.features.hostHint }}</span>
+            <span v-if="flagged('features')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.features!) }}</span>
           </fieldset>
 
           <fieldset class="pref-group">

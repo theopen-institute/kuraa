@@ -87,13 +87,16 @@ export async function searchWorkspace(host: Host, query: string, caseSensitive: 
     const st = await lstat(join(host.dir, p)).catch(() => null);
     if (st && st.isFile() && st.size > MAX_FILE) large.push(p);
   }
+  const companions = host.features.suffixes();
   const args = (scope: string[], more: string[] = []) => [
     '-c', 'grep.lineNumber=false', 'grep', '--untracked', ...more, '-I', '-n', '-z', '--no-color', '--fixed-strings',
     ...(caseSensitive ? [] : ['-i']), '-e', query, '--', ...scope, ...large.map((p) => `:(exclude,literal)${p}`),
+    // What features keep beside documents (0082) is theirs to search, not the workspace's.
+    ...companions.map((s) => `:(exclude,glob)**/*${s}/**`),
   ];
   const grep = await host.git.run(args(['.']), { allowFail: true, timeoutMs: 30_000 });
   // The files of the spaces this device holds, which plain git is kept off (spaces.ts): searched by name.
-  const spaced = host.spaces.entries().map(([p]) => p);
+  const spaced = host.spaces.entries().map(([p]) => p).filter((p) => !host.features.documentOf(p));
   if (spaced.length) {
     const more = await host.git.run(args(spaced.map((p) => `:(literal)${p}`), ['--no-exclude-standard']), { allowFail: true, timeoutMs: 30_000 });
     grep.stdout = `${grep.stdout}${grep.stdout && !grep.stdout.endsWith('\n') ? '\n' : ''}${more.stdout}`;

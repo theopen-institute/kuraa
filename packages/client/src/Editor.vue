@@ -4,7 +4,8 @@
 // header (for formats with one) is edited in Document settings, through the view
 // this exposes.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
-import type { DocumentType } from '@kuraa/kernel';
+import { sourceMapOf, type DocumentType } from '@kuraa/kernel';
+import type { FeatureEditor, FeatureMenuItem, FeatureState, Json, MarginItem } from '@kuraa/feature-kit/client';
 import { connectRoom, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
 import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
@@ -32,6 +33,7 @@ import { placeholderPlugin } from './placeholder.js';
 import { APP_KEYS, isMac, keyMatches } from './keys.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
+import { marginLayout, type ActiveFeature } from './features.js';
 
 const props = defineProps<{
   api: HostApi;
@@ -50,6 +52,8 @@ const props = defineProps<{
   focusTitle?: boolean;
   /** This person may not change the document (0066): shown, not editable (others' edits still arrive live). */
   readOnly?: boolean;
+  /** Features on (0082): what each adds to the document (plugins, the margin, actions on a selection). */
+  features?: ActiveFeature[];
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -72,6 +76,8 @@ const emit = defineEmits<{
   titleFocused: [];
   /** Someone changed the file outside the app as it was edited here: their version is kept beside it, at this path. */
   outsideConflict: [savedAs: string];
+  /** A feature's host half told its client halves something (0082). */
+  featureMessage: [feature: string, message: Json, path: string | null];
 }>();
 
 const mount = useTemplateRef<HTMLDivElement>('mount');
@@ -91,6 +97,12 @@ const docVersion = ref(0);
 /** Goes up with every transaction: the find bar and the outline follow the document by it. */
 const tick = ref(0);
 let source: SourceEditor | null = null;
+/** What features do in this document (0082), with each one's state in the room (null where the room keeps none for it). */
+let featureEditors: { id: string; editor: FeatureEditor; state: FeatureState | null }[] = [];
+/** Goes up when a feature asks to be drawn again, or its state in the room changes. */
+const featureTick = ref(0);
+/** The features at work in the open document, with their state in the room (said on the page, for tests and for reading it). */
+const featuresHere = ref('');
 /** Commands the format offers by name (insert a table, the next conflict). */
 let commands: FormatCommands = {};
 let connection: RoomConnection | null = null;
@@ -235,6 +247,7 @@ function open(carried: Carried | null = null): () => void {
   let cancelled = false;
   let pmView: EditorView | null = null;
   let disposeFiles = () => {};
+  let disposeFeatures = () => {};
   loading.value = true;
   error.value = null;
   view.value = null;
@@ -296,6 +309,7 @@ function open(carried: Carried | null = null): () => void {
         // Closed for good: the app opens where it went, if anywhere (which lets go of this room).
         else if (m.type === 'gone') emit('gone', m.to);
         else if (m.type === 'tools') emit('toolsChanged');
+        else if (m.type === 'feature') emit('featureMessage', m.feature, m.message, m.path);
         else if (m.type === 'save-status') {
           // Paused or failing stays in a banner until it is over (App.vue); then a note says so.
           savePaused = m.state === 'paused' ? m.message : null;
@@ -340,9 +354,59 @@ function open(carried: Carried | null = null): () => void {
     const notify = (text: string, kind: 'info' | 'warn' = 'info') => report({ notice: { kind, text } });
     const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify });
     commands = formatEditor?.commands?.(ctx) ?? {};
+    // Features (0082): each given the room's state for it, where the room was started with it (else nothing it does here would be kept).
+    const stops: (() => void)[] = [];
+    featureEditors = (props.features ?? []).flatMap(({ feature, ctx: fctx }) => {
+      if (!feature.editor) return [];
+      // Yours: your own map in the room, where your device seeded it from your file (0082). A document you may not change
+      // is still yours to annotate.
+      const me = fctx.status().me;
+      const room = me ? conn.feature(feature.id, type.schema, me) : null;
+      const state: FeatureState | null = room?.seeded() ? room : null;
+      try {
+        const editor = feature.editor({
+          ...fctx, path, type, schema: type.schema, readOnly: !!props.readOnly, state,
+          companions: async (suffix) => (await api.companions(path, suffix).catch(() => [])).map((c) => ({ person: c.person, text: c.text })),
+          sourceMap: (doc) => sourceMapOf(type, doc, type.parse(type.serialize(doc))),
+          redraw: () => featureTick.value++,
+        });
+        if (state) stops.push(state.observe(() => featureTick.value++));
+        // Seeded later (turned on, or your device came, while the room was open): opened again, with its state.
+        else if (room) {
+          const off = conn.onSeeded(() => {
+            if (!room.seeded() || cancelled) return;
+            off();
+            setTimeout(() => {
+              if (!cancelled) reopen();
+            }, 0);
+          });
+          stops.push(off);
+        }
+        return [{ id: feature.id, editor, state }];
+      } catch (e) {
+        console.error(`[kuraa] the feature ${feature.id} could not open ${path}`, e);
+        return [];
+      }
+    });
+    featuresHere.value = featureEditors.filter((f) => f.state).map((f) => f.id).join(' ');
+    disposeFeatures = () => {
+      featuresHere.value = '';
+      for (const stop of stops) stop();
+      for (const f of featureEditors) f.editor.destroy?.();
+      featureEditors = [];
+    };
+    const featurePlugins = featureEditors.flatMap((f) => {
+      try {
+        return f.editor.plugins?.() ?? [];
+      } catch (e) {
+        console.error(`[kuraa] the feature ${f.id} has no plugins for ${path}`, e);
+        return [];
+      }
+    });
+    // A feature's plugins come after the format's, before the client's generic ones.
     const plugins = layout?.kind === 'lines'
-      ? linesPlugins(type.schema, layout, path, history)
-      : [...(formatEditor?.plugins?.(ctx) ?? []), historyKeys(history), keymap(baseKeymap), placeholderPlugin(S.help.placeholder, formatEditor?.header?.node)];
+      ? [...featurePlugins, ...linesPlugins(type.schema, layout, path, history)]
+      : [...(formatEditor?.plugins?.(ctx) ?? []), ...featurePlugins, historyKeys(history), keymap(baseKeymap), placeholderPlugin(S.help.placeholder, formatEditor?.header?.node)];
     const state = EditorState.create({ schema: type.schema, plugins: [...conn.plugins(), ...plugins, findPlugin()] });
     pmView = new EditorView(mount.value!, {
       state,
@@ -412,6 +476,9 @@ function open(carried: Carried | null = null): () => void {
 
   return () => {
     disposeFiles();
+    disposeFeatures();
+    margin.value = [];
+    selectionBar.value = null;
     cancelled = true;
     clearTimeout(slowTimer);
     clearTimeout(chunkTimer);
@@ -430,7 +497,9 @@ function reopen(carried: Carried | null = null) {
 onMounted(() => {
   close = open();
 });
-watch([() => props.api, () => props.path, () => props.type, () => props.settings.token, runKey, () => props.formatEditor], () => {
+// The features on, by id: a feature turned on or off opens the document again, with it or without it.
+const featureKey = computed(() => (props.features ?? []).map((f) => f.feature.id).join(' '));
+watch([() => props.api, () => props.path, () => props.type, () => props.settings.token, runKey, () => props.formatEditor, featureKey], () => {
   close?.();
   close = open();
 });
@@ -454,10 +523,30 @@ function applyReveal() {
   v.dispatch(v.state.tr.setSelection(selectionFor(v.state.doc, range)).scrollIntoView());
 }
 watch(view, applyReveal, { flush: 'post' });
+// A range of the file's text to show selected, once the document is open (a feature's openFile: 0082).
+let pendingRange: { from: number; to: number } | null = null;
+function applyRange() {
+  const v = view.value;
+  if (!v || v.isDestroyed || !pendingRange) return;
+  const at = pendingRange;
+  pendingRange = null;
+  const { doc } = v.state;
+  const map = sourceMapOf(props.type, doc, props.type.parse(props.type.serialize(doc)));
+  const from = Math.min(map.toDoc(at.from), doc.content.size);
+  const to = Math.max(from, Math.min(map.toDoc(at.to, -1), doc.content.size));
+  v.focus();
+  v.dispatch(v.state.tr.setSelection(TextSelection.between(doc.resolve(from), doc.resolve(to))).scrollIntoView());
+}
+watch(view, applyRange, { flush: 'post' });
 const documentActions = {
   reveal(target: MatchTarget) {
     pendingReveal = target;
     applyReveal();
+  },
+  /** Show a range of the file's text selected (offsets in its text), once the document is open. */
+  revealText(at: { from: number; to: number }) {
+    pendingRange = at;
+    applyRange();
   },
   /** Make the document read as `text`, as this person's edit (undoable). False if it is not open. */
   replaceText(text: string): boolean {
@@ -475,6 +564,69 @@ const documentActions = {
 };
 
 watch(user, (u) => connection?.setUser(u));
+
+// What features put beside the text (0082): marks in the margin, at their lines,
+// kept clear of each other, and what can be done with the selection, beside it.
+const scroller = useTemplateRef<HTMLDivElement>('scroller');
+const margin = shallowRef<(MarginItem & { at: number; left: number })[]>([]);
+const selectionBar = shallowRef<{ top: number; left: number; items: FeatureMenuItem[] } | null>(null);
+function drawFeatures() {
+  const v = view.value;
+  const box = scroller.value;
+  if (!v || v.isDestroyed || !box || !featureEditors.length || props.showSource) {
+    // (Only when there was something: most documents have no feature at work, and type on undisturbed.)
+    if (margin.value.length) margin.value = [];
+    if (selectionBar.value) selectionBar.value = null;
+    return;
+  }
+  const outer = box.getBoundingClientRect();
+  const at = (y: number) => y - outer.top + box.scrollTop;
+  const mountEl = mount.value!;
+  const inner = mountEl.getBoundingClientRect();
+  const left = inner.right - outer.left + box.scrollLeft - parseFloat(getComputedStyle(mountEl).paddingRight || '0') + 6;
+  const items: (MarginItem & { top: number })[] = [];
+  for (const f of featureEditors) {
+    let list: MarginItem[] = [];
+    try {
+      list = f.editor.margin?.(v) ?? [];
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.id} could not draw its margin`, e);
+    }
+    for (const item of list) {
+      if (item.pos < 0 || item.pos > v.state.doc.content.size) continue;
+      items.push({ ...item, top: at(v.coordsAtPos(item.pos).top) });
+    }
+  }
+  margin.value = marginLayout(items).map((m) => ({ ...m, left }));
+  const sel = v.state.selection;
+  // (A document you may not change, too: what is yours to say about it, features offer where they have your state.)
+  const actions = sel.empty ? [] : featureEditors.flatMap((f) => {
+    try {
+      return f.editor.selectionActions?.(v) ?? [];
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.id} could not say what to do with the selection`, e);
+      return [];
+    }
+  });
+  if (!actions.length) {
+    selectionBar.value = null;
+    return;
+  }
+  const end = v.coordsAtPos(sel.to);
+  selectionBar.value = { top: at(end.bottom) + 6, left: Math.max(8, end.left - outer.left + box.scrollLeft - 12), items: actions };
+}
+watch([tick, featureTick, view, () => props.showSource], drawFeatures, { flush: 'post' });
+// How the features stand changed (their settings, say): drawn again with it.
+watch(() => props.features, () => featureTick.value++);
+let resizeObserver: ResizeObserver | null = null;
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !scroller.value) return;
+  resizeObserver = new ResizeObserver(() => featureTick.value++);
+  resizeObserver.observe(scroller.value);
+});
+onBeforeUnmount(() => resizeObserver?.disconnect());
+/** A feature's state in the open document's room, for its panels (null if it keeps none here). */
+const featureState = (id: string): FeatureState | null => featureEditors.find((f) => f.id === id)?.state ?? null;
 
 // Find (⌘F) and the outline (⌥⌘O), over the rich view; the Source view finds with its own bar.
 const find = ref<{ initial: string; focus: number } | null>(null);
@@ -535,7 +687,7 @@ watch([() => props.focusTitle, view], async ([want, v]) => {
   emit('titleFocused');
 }, { immediate: true });
 
-defineExpose({ openFind, toggleOutline, command, view, docVersion, ...documentActions });
+defineExpose({ openFind, toggleOutline, command, view, docVersion, featureState, featureTick, tick, ...documentActions });
 
 // Becoming read-only, or editable again (the workspace's rules changed): the view asks `editable` again.
 watch(() => props.readOnly, () => view.value?.setProps({}));
@@ -569,8 +721,23 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
     </div>
     <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
     <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
-    <div v-show="!showSource && !(loading && preview !== null)" class="editor-scroll" @mousedown="onBlankMouseDown">
+    <div v-show="!showSource && !(loading && preview !== null)" ref="scroller" class="editor-scroll" :data-features="featuresHere || undefined" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
+      <button
+        v-for="m in margin"
+        :key="m.key"
+        type="button"
+        class="feature-mark"
+        :style="{ top: `${m.at}px`, left: `${m.left}px`, color: m.color }"
+        :title="m.title"
+        :aria-label="m.title ?? m.label"
+        data-testid="feature-mark"
+        @mousedown.stop.prevent
+        @click="m.run?.()"
+      >{{ m.label }}</button>
+      <div v-if="selectionBar" class="selection-actions" role="toolbar" :aria-label="S.features.selection" :style="{ top: `${selectionBar.top}px`, left: `${selectionBar.left}px` }" data-testid="selection-actions" @mousedown.stop.prevent>
+        <button v-for="a in selectionBar.items" :key="a.label" type="button" :data-testid="a.testid" @click="a.run()">{{ a.label }}</button>
+      </div>
     </div>
     <div v-if="showSource && view" ref="sourceMount" class="source-view" />
   </div>

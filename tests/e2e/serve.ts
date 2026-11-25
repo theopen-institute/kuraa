@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost } from '../../packages/host/src/index.js';
 import { standardRunComponents } from '../../packages/run-components/src/index.js';
+import { marksFeature } from '../../packages/feature-example/src/index.js';
+import { createPerson, readPerson } from '../../packages/host/src/peers/person.js';
 import { E2E, NOTES } from './env.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: E2E.dir, encoding: 'utf8' });
@@ -20,12 +22,17 @@ writeFileSync(join(E2E.dir, 'other.md'), '# Other\n');
 git('add', '-A');
 git('commit', '-q', '-m', 'Initial');
 
+// The host's person has an identity, as the app makes one where it may (0038): what you annotate is your own (0082).
+if (!(await readPerson())) await createPerson('E2E');
+
 const running = await startHost({
   dir: E2E.dir,
   port: E2E.port,
   host: '127.0.0.1',
   token: E2E.token,
   run: { engines: ['r'], components: standardRunComponents, allowInstalls: true, dataDir: join(E2E.dir, '..', 'kuraa-e2e-rdata') },
+  // The example feature (0082), off until a test turns it on for the workspace: features.spec.ts.
+  features: [marksFeature],
   staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
   timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   log: (m) => console.log(`[host] ${m}`),

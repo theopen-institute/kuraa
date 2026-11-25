@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants, existsSync, lstatSync, statSync, createReadStream } from 'node:fs';
-import { mkdir, open, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import type { ChunkRef, PresenceUser } from '@kuraa/session/server';
 import type { Host } from './host.js';
@@ -19,6 +19,7 @@ import { renderRoutes, searchRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 import { corsHeaders, hostAllowed, refuseHost } from './origins.js';
+import { ownerOf } from '@kuraa/feature-kit/host';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -236,13 +237,17 @@ const runRoutes: Route[] = [
 
 const fileRoutes: Route[] = [
   route('GET', '/api/tree', async ({ host, res }) => {
-    const out = await host.git.out(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
     const branch = await host.git.branch();
     // With the files of the spaces this device holds (plain git is kept off them: spaces.ts).
-    const spaced = host.spaces.entries().map(([p]) => p).filter((p) => existsSync(join(host.dir, p)));
-    const paths = [...new Set([...out.split('\0').filter(Boolean), ...spaced])].sort();
+    const paths = await host.listFiles();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
     const files = await host.treeEntries(paths, branch);
+    // Companions say which document they are kept beside (0082), when it is there: the list shows them with it.
+    const listed = new Set(paths);
+    for (const f of files) {
+      const doc = host.features.documentOf(f.path);
+      if (doc && listed.has(doc)) f.of = doc;
+    }
     // Who reads, and who may change, each file (where not everyone may), and folders with permissions of their own, in words (0066, 0069).
     const marks = host.peers ? await host.peers.marks(paths) : { files: new Map<string, object>(), folders: [] };
     for (const f of files) {
@@ -349,10 +354,14 @@ const fileRoutes: Route[] = [
     // Its permissions go with it (0069): refused, rather than left behind, where this person cannot carry them.
     const why = host.peers ? await host.peers.whyNotMove(from, isFolder) : null;
     if (why) throw new HttpError(403, why);
+    // What is kept beside a file goes with it (0082): its companion folders, everyone's files in them, unchanged; a folder's go with it anyway.
+    const companions = isFolder ? [] : host.features.foldersOf(from).filter((c) => lexists(host.resolvePath(c, { link: 'self' }))).map((c) => [c, `${to}${c.slice(from.length)}`] as const);
+    for (const [, c] of companions) if (lexists(host.resolvePath(c, { link: 'self' })) && !caseOnly) throw new HttpError(409, `${c} already exists`);
     const commit = await host.serial(async () => {
       await host.requireWritable();
       if (isFolder) await host.dropRoomsUnder(from, to);
       else await host.dropRoom(from, to);
+      for (const [c] of companions) await host.dropRoomsUnder(c);
       await mkdir(dirname(absTo), { recursive: true });
       if (caseOnly) {
         // Through a name of its own, so every file system takes the new case (git.stage and
@@ -361,12 +370,21 @@ const fileRoutes: Route[] = [
         await renameOver(absFrom, aside);
         await renameOver(aside, absTo);
       } else await renameOver(absFrom, absTo);
+      for (const [c, next] of companions) {
+        if (caseOnly) {
+          const aside = `${host.resolvePath(c)}.kuraa-rename-${randomBytes(4).toString('hex')}`;
+          await renameOver(host.resolvePath(c), aside);
+          await renameOver(aside, host.resolvePath(next));
+        } else await renameOver(host.resolvePath(c), host.resolvePath(next));
+      }
       if (title !== undefined && !isFolder) await host.setTitle(to, title);
       // Files of spaces stay in their spaces, at their new paths (0069).
       await host.carrySpaces(from, to, isFolder);
-      return host.commitPaths([from, to], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
+      for (const [c, next] of companions) await host.carrySpaces(c, next, true);
+      return host.commitPaths([from, to, ...companions.flat()], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
     if (host.peers) await host.peers.moved(from, to, isFolder);
+    void host.features.emit('rename', { from, to, folder: isFolder });
     send(res, 200, { from, to, commit });
   }),
 
@@ -376,6 +394,8 @@ const fileRoutes: Route[] = [
     const abs = host.resolvePath(path, { link: 'self' });
     if (!lexists(abs)) throw new HttpError(404, 'No such file');
     const isFolder = lstatSync(abs).isDirectory();
+    // What is kept beside a file: only the deleter's own goes with it; others' stay, theirs (0082).
+    const companions = isFolder ? [] : await host.features.ownFilesOf(path);
     const commit = await host.serial(async () => {
       await host.requireWritable();
       // A folder's open rooms go with it.
@@ -383,8 +403,10 @@ const fileRoutes: Route[] = [
       else await host.dropRoom(path);
       // Retried while Windows says busy (another program has a file open, for a moment).
       await rm(abs, { recursive: true, maxRetries: 5 });
-      return host.commitPaths([path], `Delete ${path}`);
+      for (const c of companions) await host.features.removeOwn(c);
+      return host.commitPaths([path, ...companions], `Delete ${path}`);
     });
+    void host.features.emit('delete', { path, folder: isFolder });
     send(res, 200, { path, commit });
   }),
 ];
@@ -736,7 +758,55 @@ const peerRoutes: Route[] = [
   }),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes];
+// Features (0082): how each stands for the workspace, turning one on or off for it (and its settings), and its own routes.
+const FEATURE_ROUTE = /^\/api\/features\/([a-z][a-z0-9-]{0,40})\/(.+)$/;
+const featureRoutes: Route[] = [
+  route('GET', '/api/features', async ({ host, res }) => send(res, 200, { features: await host.features.status() })),
+  // Everyone's own files beside a document by a companion suffix, with their text: as they are, or at a commit (a past version).
+  route('GET', '/api/companions', async ({ host, res, q }) => {
+    const doc = host.relPath(str(q.get('path'), 'path'));
+    const suffix = str(q.get('suffix'), 'suffix');
+    if (!host.features.suffixes().includes(suffix)) throw new HttpError(400, 'Not a companion suffix');
+    const folder = `${doc}${suffix}`;
+    const commit = q.get('commit');
+    const out: { person: string; path: string; text: string }[] = [];
+    if (commit) {
+      if (!/^[0-9a-f]{4,40}$/.test(commit)) throw new HttpError(400, 'Not a commit');
+      const listed = (await host.git.run(['ls-tree', '-z', '--name-only', `${commit}:${folder}`], { allowFail: true })).stdout.split('\0').filter(Boolean);
+      for (const name of listed) {
+        const person = ownerOf(name);
+        if (!person) continue;
+        const blob = await host.git.run(['show', `${commit}:${folder}/${name}`], { allowFail: true });
+        if (blob.code === 0) out.push({ person, path: `${folder}/${name}`, text: blob.stdout });
+      }
+    } else {
+      for (const p of await host.features.filesOf(doc)) {
+        if (!p.startsWith(`${folder}/`)) continue;
+        const text = await readFile(host.resolvePath(p), 'utf8').catch(() => null);
+        if (text !== null) out.push({ person: ownerOf(p)!, path: p, text });
+      }
+    }
+    send(res, 200, { companions: out });
+  }),
+  route('PATCH', /^\/api\/features\/([a-z][a-z0-9-]{0,40})$/, async ({ host, req, res, params }) => {
+    const body = await readBody(req);
+    if (body.on !== undefined && typeof body.on !== 'boolean') throw new HttpError(400, '“on” is true or false');
+    const settings = body.settings;
+    if (settings !== undefined && (typeof settings !== 'object' || settings === null || Array.isArray(settings))) throw new HttpError(400, 'Settings are an object');
+    const status = await host.features.setWorkspace(params[0]!, { on: body.on as boolean | undefined, settings: settings as Record<string, never> | undefined }, personOf(body.by));
+    // Rooms open now keep its state from here on, before anyone is told it is on.
+    await host.seedOpenRooms();
+    send(res, 200, status);
+  }),
+  ...(['GET', 'POST', 'PATCH', 'DELETE'] as const).map((method) => route(method, FEATURE_ROUTE, async ({ host, req, res, q, params }) => {
+    const body = method === 'GET' ? undefined : await readBody(req);
+    const { by, ...rest } = (body ?? {}) as Record<string, unknown>;
+    const r = await host.features.route(params[0]!, method, params[1]!, q, body === undefined ? undefined : (rest.body as never), personOf(by));
+    send(res, r.status ?? 200, r.body ?? null);
+  })),
+];
+
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes, ...featureRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

@@ -1,6 +1,7 @@
 // The host's HTTP API. Client and host meet only over HTTP and WebSocket.
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
+import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -65,6 +66,8 @@ export interface TreeFile {
   readers?: string;
   /** Who may change it, in words, if not anyone (a rule, 0069). */
   writers?: string;
+  /** A companion (0082): the document it is kept beside, which the file list shows it with. */
+  of?: string;
 }
 /** The workspace's devices, as the host reports them: every member has the same say. */
 export type PeersInfo =
@@ -363,6 +366,21 @@ export class HostApi {
   }
   /** Search the workspace's text files, and open documents as they are now. */
   search(query: string, caseSensitive: boolean) { return this.json<SearchResult>(`/api/search?q=${encodeURIComponent(query)}${caseSensitive ? '&case=1' : ''}`); }
+  /** Features (0082): how each the host has stands for this workspace. */
+  features() { return this.json<{ features: FeatureStatus[] }>('/api/features').then((r) => r.features); }
+  /** Turn a feature on or off for this workspace, or change its settings there: committed, for everyone in it. */
+  setFeature(id: string, change: { on?: boolean; settings?: FeatureSettings }, by: { name: string; email: string; color: string }) {
+    return this.json<FeatureStatus>(`/api/features/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ ...change, by }) });
+  }
+  /** Everyone's own files beside a document by a companion suffix (0082), as they are or at a commit. */
+  companions(path: string, suffix: string, commit?: string) {
+    return this.json<{ companions: { person: string; path: string; text: string }[] }>(`/api/companions?path=${encodeURIComponent(path)}&suffix=${encodeURIComponent(suffix)}${commit ? `&commit=${commit}` : ''}`).then((r) => r.companions);
+  }
+  /** One of a feature's own routes (/api/features/<id>/<path>), as the person asking. */
+  featureRequest(id: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body: Json | undefined, by: { name: string; email: string; color: string }) {
+    const url = `/api/features/${encodeURIComponent(id)}/${path.replace(/^\/+/, '')}`;
+    return this.json<Json>(url, method === 'GET' ? {} : { method, body: JSON.stringify({ body, by }) });
+  }
   clearRuns(path: string, chunk?: ChunkRef) { return this.json('/api/runs/clear', { method: 'POST', body: JSON.stringify({ path, chunk }) }); }
 }
 
@@ -421,6 +439,8 @@ export interface HubSettings {
   allowInstalls: boolean;
   dataDir: string | null;
   formats: string[] | null;
+  /** Features on, by id (0082); null for all. */
+  features: string[] | null;
   saveSeconds: number | null;
   versionSeconds: number | null;
   workspaces: string | null;
@@ -436,6 +456,8 @@ export interface SettingsView {
   defaultDataDir: string;
   environments: { id: string; label: string; available: boolean; message: string }[];
   formats: { id: string; label: string }[];
+  /** The features the host has loaded (0082). */
+  features: { id: string; label: string; description: string }[];
   /** New workspaces can be added (where they go is a setting). */
   canAdd: boolean;
 }

@@ -82,6 +82,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Settings: Running code › Advanced |
 | `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Settings: Running code › Advanced |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Settings: Kinds of documents |
+| `--feature` | all | The features that are on here ([decision 0082](docs/decisions/0082-annotations.md)); each workspace turns on those it uses, in Settings › Workspace | Settings: Features |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Settings: Running code › Advanced |
 | `--allow-installs` | on | Let people install packages and download tools such as TeX (`--no-allow-installs` to refuse) | Settings: Running code |
 | `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Settings: Running code › Advanced |
@@ -436,7 +437,7 @@ that is not sandboxed only when started with `--allow-unsandboxed`.
 What runs and which formats are on are the host's Settings (or its flags); loading a component,
 turning off the sandbox and naming the Podman program are flags only (`--component`,
 `--allow-unsandboxed`, `--podman`), as they choose code that runs with your rights. The desktop app
-takes `--engine` (`--engine none` for none), `--env`, `--format`, `--component`,
+takes `--engine` (`--engine none` for none), `--env`, `--format`, `--feature`, `--component`,
 `--allow-unsandboxed` and `--podman` too. Settings' **Host** section shows what is on, read-only, and its **You** section lets each person turn their own
 editing behaviour on and off (markdown cues and footnote ordering, chunk fences), kept in their
 browser. The Host section also lists the **tools** the host knows (TeX, as TinyTeX), what each downloads, and

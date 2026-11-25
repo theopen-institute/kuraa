@@ -48,7 +48,8 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await expect(dialog).toHaveCount(0);
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
     expect(existsSync(join(root, 'field-notes', '.git'))).toBe(true);
-    await page.getByRole('button', { name: 'New file', exact: true }).click();
+    await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
+    await page.getByTestId('context:new-file').click();
     await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
     await page.keyboard.type('Day one');
     await expect(page.locator('[data-testid^="file:untitled-"]')).toContainText('Day one');

@@ -261,7 +261,7 @@ function drop(e: DragEvent, folder: string) {
 // The right-click menu (also Shift+F10 or the menu key on a row). A file has
 // what is done to that file (opening it is a click); a folder or the top level,
 // what goes in it.
-const menu = shallowRef<{ x: number; y: number; items: ContextItem[] } | null>(null);
+const menu = shallowRef<{ x: number; y: number; items: ContextItem[]; plus?: boolean } | null>(null);
 
 function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[] {
   const name = path.slice(path.lastIndexOf('/') + 1);
@@ -284,6 +284,18 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
       { label: S.common.renameEllipsis, run: () => void renameFolder(path), testid: 'context:rename-folder' },
     ] : []),
   ];
+}
+
+/** ＋ (decision 0086): the top level's menu, a new file or folder, under the button. */
+let plusWasOpen = false;
+function plusMenu(e: MouseEvent) {
+  // A second click on ＋ closes the menu it opened (its mousedown already closed it).
+  if (plusWasOpen) {
+    plusWasOpen = false;
+    return;
+  }
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  menu.value = { x: box.left, y: box.bottom + 2, items: menuItems('', 'top'), plus: true };
 }
 
 function contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top') {
@@ -420,7 +432,16 @@ provide(TREE, {
       <slot name="title"><span class="workspace-name" :title="workspaceName" data-testid="workspace-name">{{ workspaceName }}</span></slot>
       <span class="pane-header-actions">
         <slot name="actions" />
-        <button type="button" :title="S.tree.newFile" :aria-label="S.tree.newFile" @click="create()">＋</button>
+        <button
+          type="button"
+          :title="S.tree.newMenu"
+          :aria-label="S.tree.newMenu"
+          aria-haspopup="menu"
+          :aria-expanded="!!menu?.plus"
+          data-testid="new-menu"
+          @pointerdown="plusWasOpen = !!menu?.plus"
+          @click="plusMenu"
+        >＋</button>
       </span>
     </div>
     <div

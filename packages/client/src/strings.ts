@@ -70,6 +70,15 @@ export const S = {
     unauthorized: 'Access code not accepted',
     none: 'No document open',
     here: (n: number) => `${n.toLocaleString()} here`,
+    /** With no document open: the host, and how the workspace syncs. */
+    host: 'Connected to the host',
+    noHost: 'Cannot reach the host',
+    devices: (online: number, total: number) => (total === 1 ? (online ? 'Syncing with your other device' : 'Your other device is not connected') : `Syncing with ${online.toLocaleString()} of ${total.toLocaleString()} devices`),
+    alone: 'Not shared with other devices',
+    onlineSyncing: 'Online copy: syncing…',
+    onlineFailed: 'Online copy: the last sync did not go through',
+    onlinePending: (n: number) => `Online copy: ${count(n, 'save', 'saves')} not there yet`,
+    onlineUpToDate: 'Online copy: up to date',
   },
 
   /** The banners at the top of the page while the connection is lost. */
@@ -87,8 +96,8 @@ export const S = {
   session: { none: 'not started', starting: 'starting…', ready: 'ready', busy: 'running', stopped: 'stopped', failed: 'failed' } as Record<string, string>,
 
   app: {
-    title: 'kuraa',
-    updateReady: (version: string) => `kuraa ${version} is ready. It is put in place when kuraa next starts.`,
+    title: 'Kuraa',
+    updateReady: (version: string) => `Kuraa ${version} is ready. It is put in place when Kuraa next starts.`,
     restartToUpdate: 'Restart now',
     chooseWorkspace: 'Choose a workspace',
     noWorkspaces: 'No workspaces yet',
@@ -101,7 +110,7 @@ export const S = {
     emptyBody: 'Choose a document on the left, or start a new one.',
     newDocument: 'New document…',
     shortcuts: 'Markdown and shortcuts',
-    noType: (path: string) => `kuraa cannot open ${path}: no kind of document it knows uses this name.`,
+    noType: (path: string) => `Kuraa cannot open ${path}: no kind of document it knows uses this name.`,
     versionMismatch: (label: string) => `This app and the host read ${label} documents differently, as one of them is newer. Update the app, or ask whoever runs the host to update it, before editing.`,
     versionMismatchDetails: (label: string, mine: number, theirs: number) => `${label}: version ${mine} here, ${theirs} on the host.`,
     cannotOpenWorkspace: (name: string, why: string) => `${name} cannot be opened: ${why}`,
@@ -143,7 +152,7 @@ export const S = {
     paused: 'Saving is paused',
     failing: 'Saving is not working just now',
     ok: 'Saving again: everything is saved.',
-    retrying: 'kuraa keeps trying. Your edits are kept in the meantime.',
+    retrying: 'Kuraa keeps trying. Your edits are kept in the meantime.',
   },
 
   menu: {
@@ -174,7 +183,7 @@ export const S = {
 
   settings: {
     title: 'Settings',
-    welcome: 'Welcome to kuraa',
+    welcome: 'Welcome to Kuraa',
     welcomeQuestion: 'What should we call you?',
     welcomeAbout: 'Your name and colour show beside what you type; your email credits you as a co-author of what you save.',
     name: 'Your name',
@@ -218,6 +227,7 @@ export const S = {
   },
 
   editor: {
+    noLinkTarget: (href: string) => `${href} is not a file in this workspace, so there is nothing here to open.`,
     opening: (name: string) => `Opening ${name}…`,
     couldNotOpen: (name: string) => `Could not open ${name}.`,
     outsideMerged: 'A change made outside the app was combined with this document.',
@@ -288,7 +298,7 @@ export const S = {
     deleteAsk: (name: string) => `Delete ${quote(name)}? It goes for everyone, and stays in the workspace’s history.`,
     conflicts: (n: number) => count(n, 'conflict', 'conflicts'),
     conflictsTitle: (n: number) => `${count(n, 'passage was', 'passages were')} changed both here and elsewhere: both versions are in the document, to choose between. Click to go to the first`,
-    noType: (path: string) => `${path}: kuraa does not open this kind of file. You can rename, move or delete it.`,
+    noType: (path: string) => `${path}: Kuraa does not open this kind of file. You can rename, move or delete it.`,
     untitled: (path: string) => `${path}: no title yet (Rename… or Document settings… gives it one)`,
   },
 
@@ -325,7 +335,7 @@ export const S = {
       copying: (from?: string) => (from ? `Copying the workspace from ${from}…` : 'Copying the workspace…'),
       opening: 'Opening it…',
     },
-    stillLooking: 'Still looking. The computer that made the link, or another the workspace is on, needs to have kuraa open.',
+    stillLooking: 'Still looking. The computer that made the link, or another the workspace is on, needs to have Kuraa open.',
     slowNetwork: 'This network makes direct connections take a few tries, so this can take a minute or two.',
     needsName: 'Give the workspace a name.',
     needsLink: 'Paste the invite link someone gave you (it starts with kuraa-invite:).',
@@ -381,13 +391,13 @@ export const S = {
     separate: 'separate copy',
     separateTitle: 'A separate copy made from this workspace: its work does not come in on its own.',
     otherVersion: 'other version',
-    otherVersionTitle: 'It runs another version of kuraa, which combines work differently. Work done apart still comes together: one of the two combines it, and the other takes the result.',
+    otherVersionTitle: 'It runs another version of Kuraa, which combines work differently. Work done apart still comes together: one of the two combines it, and the other takes the result.',
     isOnline: 'online',
     isOffline: 'offline',
-    newer: 'newer kuraa',
-    newerTitle: 'It runs a newer version of kuraa, and the two do not sync until this one is updated. The desktop app updates itself: restart it when it says an update is ready.',
-    older: 'older kuraa',
-    olderTitle: 'It runs an older version of kuraa, and the two do not sync until it is updated. Restarting kuraa there updates it.',
+    newer: 'newer Kuraa',
+    newerTitle: 'It runs a newer version of Kuraa, and the two do not sync until this one is updated. The desktop app updates itself: restart it when it says an update is ready.',
+    older: 'older Kuraa',
+    olderTitle: 'It runs an older version of Kuraa, and the two do not sync until it is updated. Restarting Kuraa there updates it.',
     through: (via: string) => `online, through ${via}`,
     throughTitle: (via: string) => `Online, but not connected to this computer yet. Its saved work reaches you through ${via}; if the two computers cannot connect directly, they connect through ${via} in a few seconds.`,
     viaLan: 'online, on this network',
@@ -402,7 +412,7 @@ export const S = {
       open: '',
       router: '',
       hard: 'This computer’s network makes direct connections slow (a phone hotspot, or an office or campus network): connecting may take a minute, or go through another device.',
-      unreachable: 'This computer cannot reach other computers over the internet now (no network, or one that blocks how kuraa connects). Devices on the same network, and servers that take connections at an address, still sync.',
+      unreachable: 'This computer cannot reach other computers over the internet now (no network, or one that blocks how Kuraa connects). Devices on the same network, and servers that take connections at an address, still sync.',
     },
     removeAsk: (who: string) => `Remove ${who} from this workspace? This is permanent: it will no longer sync with anyone here, and cannot join again with an old link. Whoever uses it keeps their copy of everything up to now.`,
     removed: 'This device was removed from the workspace, so it no longer syncs with the others. Everything here up to then is still here. To work with them again, ask someone there for a new invite link.',
@@ -546,7 +556,7 @@ export const S = {
     thisComputer: 'this computer',
     revoke: 'Revoke',
     signInTitle: 'Sign in from another device',
-    signInAbout: 'Use kuraa as yourself on more than one computer.',
+    signInAbout: 'Use Kuraa as yourself on more than one computer.',
     recoveryTitle: 'Account recovery',
     recoveryAbout: 'Your recovery key: with it you get your identity back if its key is lost.',
     back: (to: string) => `‹ ${to}`,
@@ -759,7 +769,7 @@ export const S = {
     own: 'A field of your own.',
     removeField: (label: string) => `Remove ${label}`,
     yamlLabel: 'Header as YAML',
-    addField: '＋ Add field',
+    addField: '＋ Add a field…',
     overwriteAsk: 'Someone changed the header while you were editing it. Save yours over theirs?',
     saveMine: 'Save mine',
     needs: (labels: string[]) => `A document needs a ${labels.join(' and a ')}.`,
@@ -775,7 +785,7 @@ export const S = {
     // The same words as the desktop app's dialog (apps/desktop/src/strings.ts).
     useAsk: (name: string) => `Use ${quote(name)} as a workspace?`,
     useDetail: (items: number) =>
-      `kuraa keeps every version of the files in it${items ? `, starting with the ${items === 1 ? 'item' : `${items} items`} already there` : ''}. The history is kept inside the folder (as git does), and the folder stays usable by other programs.`,
+      `Kuraa keeps every version of the files in it${items ? `, starting with the ${items === 1 ? 'item' : `${items} items`} already there` : ''}. The history is kept inside the folder (as git does), and the folder stays usable by other programs.`,
     use: 'Use this folder',
     opened: (name: string) => `Opened ${quote(name)}.`,
   },
@@ -881,6 +891,9 @@ export const S = {
     add: 'Add a workspace…',
     settings: 'Workspace settings…',
     allSettings: 'Settings…',
+    syncNow: 'Sync now',
+    syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
+    syncing: 'Syncing…',
   },
 
   errors: {

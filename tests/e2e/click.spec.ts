@@ -19,7 +19,7 @@ async function openNew(page: Page, path: string, content: string): Promise<void>
 
 /** Click the editor's scroll area at a fraction of its width, `fromBottom` px above its bottom edge. */
 async function clickBlank(page: Page, xFraction: number, fromBottom: number): Promise<void> {
-  const box = (await page.locator('.editor-scroll').boundingBox())!;
+  const box = (await page.locator('.editor-scroll:not(.editor-preview)').boundingBox())!;
   await page.mouse.click(box.x + box.width * xFraction, box.y + box.height - fromBottom);
 }
 
@@ -34,7 +34,7 @@ test('a click below the text puts the cursor at the end; beside a line, on that 
 
   // The left margin, level with the heading: the start of that line.
   const h1 = (await editor.locator('h1:not(.doc-title)').boundingBox())!;
-  const scroll = (await page.locator('.editor-scroll').boundingBox())!;
+  const scroll = (await page.locator('.editor-scroll:not(.editor-preview)').boundingBox())!;
   await page.mouse.click(scroll.x + 8, h1.y + h1.height / 2);
   await page.keyboard.type('Just ');
   await expect(editor.locator('h1:not(.doc-title)')).toHaveText('Just One line and more');
@@ -93,4 +93,28 @@ test('below the footnotes, a click goes to the end of the last note and adds not
   await expect(editor.locator('aside.note .note-body')).toHaveText('The note. More.');
   await expect(editor.locator('p')).toHaveCount(2); // the main paragraph and the note's
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toBe('Main text.[^a]\n\n[^a]: The note. More.\n');
+});
+
+test('a drag that starts in the empty space selects, as in the text; so does Shift-click there', async ({ page }) => {
+  const path = `runs/drag-${Date.now().toString(36)}.md`;
+  await openNew(page, path, 'First line.\n\nSecond line.\n\nThird line.\n');
+  const editor = page.getByTestId('editor');
+  const scroll = (await page.locator('.editor-scroll:not(.editor-preview)').boundingBox())!;
+  const first = (await editor.locator('p').nth(0).boundingBox())!;
+  const second = (await editor.locator('p').nth(1).boundingBox())!;
+
+  // From the left margin level with the first line, to the right margin level with the second.
+  await page.mouse.move(scroll.x + 8, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(scroll.x + scroll.width - 8, second.y + second.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString().replace(/\s+/g, ' ').trim())).toBe('First line. Second line.');
+
+  // Shift-click below the text: from the cursor to the end.
+  await editor.locator('p').nth(1).click();
+  await page.keyboard.press('Home');
+  await page.keyboard.down('Shift');
+  await page.mouse.click(scroll.x + scroll.width / 2, scroll.y + scroll.height - 40);
+  await page.keyboard.up('Shift');
+  expect(await page.evaluate(() => window.getSelection()?.toString().replace(/\s+/g, ' ').trim())).toBe('Second line. Third line.');
 });

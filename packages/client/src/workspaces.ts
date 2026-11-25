@@ -47,7 +47,7 @@ export function useWorkspaces(options: {
   /** The address has answered. */
   const known = ref(false);
   const chosen = ref<string | null>(null);
-  const chosenKey = () => `kuraa:workspace:${hostUrl.value}`;
+  const chosenKey = () => `kuraa:workspace:${keptAs(hostUrl.value)}`;
 
   async function load(prefer?: string | null) {
     const asked = hubApi.value;
@@ -103,4 +103,18 @@ export function useWorkspaces(options: {
   const api = computed(() => markRaw(direct.value || chosen.value === null ? new HostApi(hostUrl.value, token.value) : hubApi.value.workspaceApi(chosen.value)));
 
   return { hubApi, workspaces, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, known, chosen, ready, api, load };
+}
+
+/**
+ * The address the workspace last open is kept by: a host on this computer by
+ * its name alone, not its port, as the desktop app's host takes another port
+ * each time it starts (and the last workspace would otherwise be forgotten).
+ * Pages served by different hosts on this computer have storage of their own anyway.
+ */
+export function keptAs(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '[::1]') return `${u.protocol}//${u.hostname}`;
+  } catch { /* not an address: kept as it is */ }
+  return url;
 }

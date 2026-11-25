@@ -11,7 +11,8 @@
 // Two lists of one kind side by side are read back from the file as one, so a
 // list next to one of the kind it becomes is made one with it now.
 import type { Attrs, Node, NodeType, Schema } from 'prosemirror-model';
-import type { Command, EditorState, Transaction } from 'prosemirror-state';
+import { TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
+import { liftListItem } from 'prosemirror-schema-list';
 import { InputRule } from 'prosemirror-inputrules';
 
 const isList = (node: Node) => node.type.name === 'bullet_list' || node.type.name === 'ordered_list';
@@ -100,3 +101,17 @@ export function listRules(schema: Schema): InputRule[] {
     itemRule(/^(\d+)\.\s$/, n.ordered_list, (x) => ({ order: Number(x[1]) })),
   ];
 }
+
+/**
+ * Backspace at the very start of a list item: the item a level out (out of the
+ * list, at the top level), as Enter in an empty item does. Not joined to the
+ * item before it, which would put what comes next inside that item (a heading
+ * typed after it, say) where nothing shows it is.
+ */
+export const liftAtItemStart = (item: NodeType): Command => (state, dispatch) => {
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const $at = selection.$from;
+  if ($at.parentOffset > 0 || $at.depth < 2 || $at.node(-1).type !== item || $at.index(-1) !== 0) return false;
+  return liftListItem(item)(state, dispatch);
+};

@@ -20,7 +20,7 @@ export interface RunComponents {
 
 function check(component: unknown, from: string): RunComponent {
   const p = component as Partial<RunComponent> | null;
-  if (!p || typeof p !== 'object' || typeof p.apiVersion !== 'number') throw new Error(`${from} is not a kuraa run component: it should export one made with defineRunComponent().`);
+  if (!p || typeof p !== 'object' || typeof p.apiVersion !== 'number') throw new Error(`${from} is not a Kuraa run component: it should export one made with defineRunComponent().`);
   if (p.apiVersion !== RUN_API_VERSION) throw new Error(`${from} was written for version ${p.apiVersion} of the run component API; this host speaks version ${RUN_API_VERSION}.`);
   for (const e of p.engines ?? []) {
     if (typeof e?.id !== 'string' || !Array.isArray(e.handles) || typeof e.open !== 'function') throw new Error(`${from}: an engine needs an id, handles and open().`);

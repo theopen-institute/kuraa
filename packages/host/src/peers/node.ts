@@ -380,16 +380,15 @@ export class PeerNode {
       relayThrough: (force) => this.relayFor(force),
     });
     if (this.o.offerRelay !== false) {
-      try {
-        const r = await useRelay(this.o.bootstrap?.map(bootstrapNode), dhtOptions);
+      // Offered once it is up, never waited for: on a network that blocks the DHT (a school's, say) it takes
+      // minutes to give up, and the workspace (and the app's window) would wait as long to open.
+      void useRelay(this.o.bootstrap?.map(bootstrapNode), dhtOptions).then(async (r) => {
         if (this.closing) await r.release();
         else {
           this.relay = r.relay;
           this.releaseRelay = r.release;
         }
-      } catch (e) {
-        this.o.log(`peers: no relay offered: ${(e as Error).message}`);
-      }
+      }, (e: Error) => this.o.log(`peers: no relay offered: ${e.message}`));
     }
     if (this.closing) return;
     this.swarm.on('connection', (conn) => this.connected(conn));

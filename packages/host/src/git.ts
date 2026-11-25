@@ -1,8 +1,8 @@
 // Git, called as a child process: the one on PATH, or one a shell bundles (useGit).
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 
 export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
@@ -142,18 +142,12 @@ export class Git {
    * (a file moved away that the index had already let go of) is no error.
    */
   async stage(paths: string[], opts: { env?: Record<string, string> } = {}): Promise<void> {
-    const there = (p: string) => {
-      try {
-        lstatSync(resolve(this.dir, p));
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    const present = paths.filter(there);
-    const gone = paths.filter((p) => !there(p));
-    if (present.length) await this.run(['add', '-A', '--', ...present], opts);
+    const present = paths.filter((p) => existsExactly(resolve(this.dir, p)));
+    const gone = paths.filter((p) => !present.includes(p));
+    // Taken out first: after a rename in case alone (drama to Drama), git, ignoring case as the file
+    // system does, would take the new name's entries out with the old one's.
     if (gone.length) await this.run(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...gone], opts);
+    if (present.length) await this.run(['add', '-A', '--', ...present], opts);
   }
 
   /**
@@ -274,5 +268,27 @@ export class Git {
   /** Spawn a git subcommand with streaming IO (for http-backend). */
   spawn(args: string[], env: Record<string, string>) {
     return spawnGit(args, { cwd: this.dir, env: gitEnv(this.env, env) });
+  }
+}
+
+/**
+ * Whether a path is there with its name in exactly this case. On a file system
+ * that ignores case (macOS, Windows) `drama` is there when `Drama` is; after a
+ * rename in case alone, the old name is gone.
+ */
+export function existsExactly(abs: string): boolean {
+  try {
+    lstatSync(abs);
+  } catch {
+    return false;
+  }
+  // Gone only if the folder has it in another case and not in this one (names compared as NFC, as
+  // macOS may hand back either form of an accented name).
+  const name = basename(abs).normalize('NFC');
+  try {
+    const names = readdirSync(dirname(abs)).map((n) => n.normalize('NFC'));
+    return names.includes(name) || !names.some((n) => n.toLowerCase() === name.toLowerCase());
+  } catch {
+    return true;
   }
 }

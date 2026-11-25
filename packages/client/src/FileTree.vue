@@ -86,12 +86,21 @@ const NEW_TYPE = 'pandoc-markdown';
 /** Documents New file made here, by path: their title as last seen while open, and the workspace they are in. */
 const fresh = new Map<string, { title: string | null; api: HostApi }>();
 
-/** A new document: in `folder` ('' for the top level), or beside the open file. */
-async function create(folder?: string) {
-  const dir = folder !== undefined ? (folder ? `${folder}/` : '') : here();
+/** Five letters or digits, by chance (getRandomValues: there in pages served over plain http too). */
+const freshLetters = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => (b % 36).toString(36)).join('');
+
+/**
+ * A new document: in `folder`, or at the top level (never beside the open file
+ * unasked: a folder's own New file is for that). Named `untitled-` and a few
+ * letters no file had before, never plain `untitled.md` again and again: a name
+ * given back to a new file could meet the session another device still has of
+ * the file that had it last.
+ */
+async function create(folder = '') {
+  const dir = folder ? `${folder}/` : '';
   const type = typeChoices.value.find((t) => t.id === NEW_TYPE) ?? typeChoices.value.find((t) => t.titled) ?? typeChoices.value[0];
   if (!type) return;
-  const path = pathForTitle(S.tree.untitledName, type.extension, dir, paths.value);
+  const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   if (dir) expand(dir.replace(/\/$/, ''));
   if (type.titled) fresh.set(path, { title: null, api: props.api });
   emit('created', path);

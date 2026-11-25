@@ -6,7 +6,7 @@ import { EditorState, TextSelection, type Command, type Transaction } from 'pros
 import { sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import { chainCommands } from 'prosemirror-commands';
 import { pandocMarkdown as md } from '../src/index.js';
-import { listRules, switchList } from '../src/editor/index.js';
+import { liftAtItemStart, listRules, switchList } from '../src/editor/index.js';
 
 const n = md.schema.nodes;
 
@@ -126,5 +126,26 @@ describe('⌘⇧8 and ⌘⇧7 in a list', () => {
     expect(s.doc.childCount).toBe(1);
     expect(out(s)).toBe('- x\n- y\n');
     roundTrips(s);
+  });
+});
+
+describe('Backspace at the start of a list item', () => {
+  const back = liftAtItemStart(n.list_item!);
+
+  it('ends the list there: Enter, Backspace, then a heading is after the list, not inside its last item', () => {
+    let s = run(stateAt('1. First\n2. Second\n', 'Second'), splitListItem(n.list_item!), back);
+    s = type(s, 'Major');
+    expect(out(s)).toBe('1. First\n2. Second\n\nMajor\n');
+    roundTrips(s);
+  });
+
+  it('takes a nested item a level out, keeping its text', () => {
+    const s = run(stateAt('- One\n  - Two\n', 'Two', 0), back);
+    expect(out(s)).toBe('- One\n- Two\n');
+  });
+
+  it('does nothing in the middle of an item, or in a paragraph', () => {
+    expect(back(stateAt('- One\n', 'One', 1))).toBe(false);
+    expect(back(stateAt('Plain\n', 'Plain', 0))).toBe(false);
   });
 });

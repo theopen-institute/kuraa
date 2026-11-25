@@ -77,7 +77,41 @@ export class OnlineCopies implements SyncSession {
 
   async list(): Promise<OnlineCopyStatus[]> {
     const remotes = await this.remotes();
-    return (await this.names()).map((name) => ({ name, url: shownUrl(remotes.get(name) ?? ''), ...(this.status.get(name) ?? { lastSync: null, error: null, busy: false }) }));
+    return Promise.all((await this.names()).map(async (name) => ({
+      name,
+      url: shownUrl(remotes.get(name) ?? ''),
+      ...(this.status.get(name) ?? { lastSync: null, error: null, busy: false }),
+      pending: await this.pending(name),
+    })));
+  }
+
+  /**
+   * Commits on this device's branches the copy does not have, as far as its
+   * remote-tracking branches say (each fetch and push moves them); null if git cannot tell.
+   */
+  async pending(name: string): Promise<number | null> {
+    const r = await this.git.run(['rev-list', '--count', '--branches', '--not', `--remotes=${name}`], { allowFail: true });
+    const n = Number.parseInt(r.stdout.trim(), 10);
+    return r.code === 0 && Number.isFinite(n) ? n : null;
+  }
+
+  /** Push to every copy that lacks commits made here, waiting at most `ms`: what is left over is pushed at the next start. */
+  async pushPending(ms: number): Promise<void> {
+    if (this.closed) return;
+    const names = await this.names();
+    const pushes = names.map(async (name) => ((await this.pending(name)) !== 0 ? this.sync(name, false) : null));
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        this.o.log(`online copies: not pushed within ${Math.round(ms / 1000)} s while stopping; pushed at the next start`);
+        resolve();
+      }, ms);
+    });
+    try {
+      await Promise.race([Promise.allSettled(pushes), late]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

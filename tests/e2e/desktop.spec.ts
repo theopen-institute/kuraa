@@ -90,7 +90,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
   const { app, page } = await launch(['--open', dir], { flushMs: 1500, idleCommitMs: 2500, maxCommitMs: 20_000, dropMs: 1000 });
   try {
     await openNotes(page);
-    await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · kuraa`);
+    await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · Kuraa`);
 
     // The connection comes through the preload bridge, so a reload keeps it.
     await page.reload();
@@ -116,7 +116,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.getByRole('button', { name: 'New file', exact: true }).click();
     await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
     await page.keyboard.type('Day one');
-    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
+    await expect(page.locator('[data-testid^="file:untitled-"]')).toContainText('Day one');
     // Left: its filename is made from its title.
     await page.getByTestId('file:notes.md').click();
     await expect(page.getByTestId('file:day-one.md')).toContainText('Day one');
@@ -184,7 +184,7 @@ test('joins a shared host without starting one', async () => {
     const { app, page } = await launch(['--join', host.url, '--token', host.token], {});
     try {
       await openNotes(page);
-      await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · kuraa`);
+      await expect(page).toHaveTitle(`Field notes · ${basename(dir)} · Kuraa`);
       await typeAtEnd(page, 'Light rain', ' Joined from the desktop.');
       await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Light rain all morning. Joined from the desktop.');
       await expect.poll(() => git(dir, 'log', '-1', '--format=%s'), { timeout: 15_000 }).not.toBe('Initial');
@@ -302,14 +302,14 @@ test('updates: says when one is ready, with Restart now; run from the repository
       items.find((i) => i.label === 'Check for Updates…')!.click();
     });
     const updates = await opened;
-    await expect(updates.locator('#message')).toHaveText('This copy of kuraa does not update itself (run from the repository).');
+    await expect(updates.locator('#message')).toHaveText('This copy of Kuraa does not update itself (run from the repository).');
     await expect(updates.locator('#bar')).toBeHidden();
     // OK closes it.
     await updates.getByRole('button', { name: 'OK' }).click();
     await expect.poll(() => app.windows().length).toBe(1);
     // An update downloaded (as updates.ts tells the page): the page says so, with Restart now.
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.send('kuraa:update-ready', '9.9.9'));
-    await expect(page.getByTestId('notice')).toContainText('kuraa 9.9.9 is ready');
+    await expect(page.getByTestId('notice')).toContainText('Kuraa 9.9.9 is ready');
     await expect(page.getByTestId('update-restart')).toHaveText('Restart now');
   } finally {
     await app.close();

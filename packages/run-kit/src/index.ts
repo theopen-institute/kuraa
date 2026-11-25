@@ -524,6 +524,8 @@ export interface SyncTargetStatus {
   error: string | null;
   /** Syncing with it now. */
   busy: boolean;
+  /** Commits here it does not have yet, as far as this device knows (from its last fetch or push); null if unknown. */
+  pending?: number | null;
 }
 
 /** A sync opened for one workspace. */
@@ -543,6 +545,8 @@ export interface SyncSession {
   syncAll(): Promise<{ ok: boolean; messages: string[] }>;
   /** Sync with one target: fetching first unless `fetchFirst` is false (only pushing). What it said, or null if it did not go through. */
   sync(name: string, fetchFirst?: boolean): Promise<string | null>;
+  /** Push what the targets lack, waiting at most `ms` (the host is stopping, its last saves just made). */
+  pushPending?(ms: number): Promise<void>;
   close(): void;
 }
 

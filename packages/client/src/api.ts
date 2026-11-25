@@ -148,6 +148,8 @@ export interface SyncTargetInfo {
   lastSync: string | null;
   error: string | null;
   busy: boolean;
+  /** Saves here it does not have yet (as far as this device knows); null if unknown. */
+  pending?: number | null;
 }
 /** A sync the host's components bring (the online copy, @kuraa/sync-git), and its targets. */
 export interface SyncInfo {

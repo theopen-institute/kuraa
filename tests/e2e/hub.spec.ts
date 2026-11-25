@@ -2,7 +2,7 @@
 // joined from an invite link; switching between them.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,8 +51,8 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await page.getByRole('button', { name: 'New file', exact: true }).click();
     await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
     await page.keyboard.type('Day one');
-    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
-    expect(existsSync(join(root, 'field-notes', 'untitled.md'))).toBe(true);
+    await expect(page.locator('[data-testid^="file:untitled-"]')).toContainText('Day one');
+    expect(readdirSync(join(root, 'field-notes')).some((f) => /^untitled-[a-z0-9]{5}\.md$/.test(f))).toBe(true);
 
     // Another, joined from Bo's link.
     await page.getByTestId('workspace-switcher').click();
@@ -97,7 +97,7 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await page.getByTestId('workspace:field-notes').click();
     await expect(page.getByTestId('workspace-name')).toHaveText('Field notes');
     // The new document kept its name: it was left for another workspace, not for a file beside it.
-    await expect(page.getByTestId('file:untitled.md')).toContainText('Day one');
+    await expect(page.locator('[data-testid^="file:untitled-"]')).toContainText('Day one');
     await expect(page.getByTestId('file:plan.md')).toHaveCount(0);
     // A reload stays in it.
     await page.reload();

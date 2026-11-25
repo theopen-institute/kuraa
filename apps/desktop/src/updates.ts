@@ -179,7 +179,7 @@ export function startUpdates(o: { log(m: string): void; ready(version: string): 
         } finally {
           autoUpdater.off('error', onError);
         }
-        if (failed) throw new Error(`kuraa ${ready} was not installed (the password was not given, or the package could not be installed): ${(failed as Error).message}`);
+        if (failed) throw new Error(`Kuraa ${ready} was not installed (the password was not given, or the package could not be installed): ${(failed as Error).message}`);
         return;
       }
       await before();

@@ -26,6 +26,9 @@ import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './pe
 import { Spaces, spaceRef } from './spaces.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
+/** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
+const FINAL_PUSH_MS = 8_000;
+
 export interface HostTimings {
   /** Serialize this long after the last update. */
   flushMs: number;
@@ -438,7 +441,6 @@ export class Host {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    for (const { session } of this.syncs.values()) session.close();
     this.renders?.close();
     this.watcher?.close();
     clearInterval(this.gitPoll);
@@ -458,6 +460,9 @@ export class Host {
         if (this.leads(rec)) await this.saveUnsaved(rec).catch(() => undefined);
       }
     });
+    // The saves just made, and any still waiting to be pushed, go to the online copies before they stop (a while at most).
+    await Promise.all([...this.syncs.values()].map(({ session }) => session.pushPending?.(FINAL_PUSH_MS).catch(() => undefined)));
+    for (const { session } of this.syncs.values()) session.close();
     await this.peers?.close();
     await this.runner.close();
     await this.relay.close();
@@ -1249,6 +1254,7 @@ export class Host {
     // Syncing with other devices: signed, so they can tell whose it is (signing.ts).
     // Signed with this host's person's key if it keeps one, else its device's (0034).
     if (this.peers) await commitSigned(this.git, paths, full, await this.peers.node.signingKey(), this.tmpDir);
+    else if (caseRename(paths)) await this.commitFromIndex(paths, full);
     else {
       // `git commit -- <paths>` refuses a path git knows nothing of (gone, and now in neither the index nor HEAD).
       const staged = await listed(['ls-files', '-z']);
@@ -1258,6 +1264,28 @@ export class Host {
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
     return head;
+  }
+
+  /**
+   * Commit these paths as they are in the working tree, from an index of their
+   * own (as commitSigned, unsigned). For a rename in case alone, which
+   * `git commit -- <paths>` cannot make on a file system that ignores case.
+   */
+  private async commitFromIndex(paths: string[], message: string): Promise<void> {
+    const head = await this.git.head();
+    await mkdir(this.tmpDir, { recursive: true });
+    const env = { GIT_INDEX_FILE: join(this.tmpDir, `case-index-${process.pid}-${randomBytes(4).toString('hex')}`) };
+    try {
+      await this.git.run(head ? ['read-tree', head] : ['read-tree', '--empty'], { env });
+      await this.git.stage(paths, { env });
+      const tree = await this.git.out(['write-tree'], { env });
+      const text = `${message.trimEnd()}\n`;
+      const commit = await this.git.out(['commit-tree', tree, ...(head ? ['-p', head] : []), '-F', '-'], { input: text });
+      await this.git.run(['update-ref', '-m', `commit: ${text.split('\n')[0]}`, 'HEAD', commit, head ?? '']);
+      await this.git.stage(paths);
+    } finally {
+      await rm(env.GIT_INDEX_FILE, { force: true });
+    }
   }
 
   /**
@@ -1491,7 +1519,16 @@ export class Host {
     const st = await this.readGitState();
     if (pausedBecause(st) || st.branch !== rec.branch) return;
     const abs = this.resolvePath(rec.path);
-    if (!existsSync(abs)) return;
+    if (!existsSync(abs)) {
+      // Renamed or deleted by a commit (another device's, a push, git outside the app): the room closes, so
+      // it never writes the old path again. One with edits not yet in a commit keeps them, and its file.
+      if (rec.uncommitted || (rec.dirty && this.leads(rec))) return;
+      const to = await this.takenByCommit(rec.path);
+      if (to === undefined) return;
+      this.log(`${rec.path} was ${to ? `renamed to ${to}` : 'deleted'} by a commit: its room is closed`);
+      this.closeGone(rec, to);
+      return;
+    }
     const bytes = await readNoFollow(abs);
     if (!isUtf8(bytes)) {
       if (!this.leads(rec)) return;
@@ -1794,6 +1831,23 @@ export class Host {
 
   /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */
   gate: ((x: string | null, y: string) => Promise<GateResult>) | null = null;
+
+  /**
+   * Where a commit took a room's file, if one did (it is in no file now, and the
+   * commit that took it away is in the history): its new path if renamed, else null.
+   * Undefined if no commit did (deleted outside git, say).
+   */
+  private async takenByCommit(path: string): Promise<string | null | undefined> {
+    if ((await this.git.run(['cat-file', '-e', `HEAD:${path}`], { allowFail: true })).code === 0) return undefined;
+    const commit = (await this.git.run(['log', '-1', '--format=%H', '--diff-filter=D', 'HEAD', '--', path], { allowFail: true })).stdout.trim();
+    if (!commit) return undefined;
+    const out = await this.git.run(['diff', '--name-status', '-z', '-M', '--diff-filter=R', `${commit}^`, commit], { allowFail: true });
+    const parts = out.code === 0 ? out.stdout.split('\0') : [];
+    for (let i = 0; i + 2 < parts.length; i += 3) {
+      if (parts[i + 1] === path) return parts[i + 2] ?? null;
+    }
+    return null;
+  }
 
   /**
    * Bring a commit into the current branch: a fast-forward, or a merge made as
@@ -2385,31 +2439,45 @@ export class Host {
     if (rec) await this.applyOutside(rec, next, true);
   }
 
-  /** Close a file's room and forget its cache (after rename or delete). */
-  async dropRoom(path: string): Promise<void> {
+  /**
+   * Close a file's room and forget its cache (before a rename or delete): saved
+   * first, and whoever has it open is told where it went (`to`, null if deleted).
+   */
+  async dropRoom(path: string, to: string | null = null): Promise<void> {
     const branch = await this.git.branch();
     const key = `${branch}:${path}`;
     const rec = this.records.get(key);
     if (rec) {
       await this.flushNow(rec);
       await this.commitNow(rec);
-      this.clearTimers(rec);
-      // Its session left here: the other devices are told.
-      if (rec.session) this.peers?.rooms.left(this.roomKey(rec), rec.baseCommit);
-      this.relay.closeRoom(rec.room);
-      this.records.delete(key);
-      this.byRoom.delete(rec.room);
-      this.relay.release(rec.room);
+      this.closeGone(rec, to);
     }
     this.unsaved.add(key);
     await this.removeUnsaved(key);
   }
 
-  /** Close the rooms of every open file under a folder (before the folder moves). */
-  async dropRoomsUnder(folder: string): Promise<void> {
+  /** Close the rooms of every open file under a folder (before the folder moves to `to`, or is deleted). */
+  async dropRoomsUnder(folder: string, to: string | null = null): Promise<void> {
     const prefix = `${folder.replace(/\/+$/, '')}/`;
     const paths = [...new Set([...this.records.values()].map((r) => r.path).filter((p) => p.startsWith(prefix)))];
-    for (const p of paths) await this.dropRoom(p);
+    for (const p of paths) await this.dropRoom(p, to === null ? null : `${to.replace(/\/+$/, '')}/${p.slice(prefix.length)}`);
+  }
+
+  /**
+   * A room whose file is gone (renamed to `to`, or deleted): its people told,
+   * its session left, and the room closed, never written again. Its file must
+   * not come back from it: a room left open would write the old path again on
+   * its next save, and a new file given the old name would join its session.
+   */
+  private closeGone(rec: RoomRecord, to: string | null): void {
+    this.broadcast(rec, { type: 'gone', at: new Date().toISOString(), to });
+    this.clearTimers(rec);
+    // Its session left here: the other devices are told.
+    if (rec.session) this.peers?.rooms.left(this.roomKey(rec), rec.baseCommit);
+    this.relay.closeRoom(rec.room);
+    this.records.delete(rec.key);
+    this.byRoom.delete(rec.room);
+    this.relay.release(rec.room);
   }
 
   /** Public view of a room for the HTTP API. */
@@ -2514,4 +2582,14 @@ export interface TreeEntry {
   cannotOpen?: string;
   /** How many conflicts it keeps, when it keeps any. */
   conflicts?: number;
+}
+
+/** Two of these paths differ in case alone: a rename in case (drama to Drama). */
+function caseRename(paths: string[]): boolean {
+  const seen = new Set<string>();
+  for (const p of new Set(paths)) {
+    if (seen.has(p.toLowerCase())) return true;
+    seen.add(p.toLowerCase());
+  }
+  return false;
 }

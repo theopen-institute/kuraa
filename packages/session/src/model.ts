@@ -25,6 +25,11 @@ export type RoomMessage =
   | { type: 'save-status'; at: string; state: 'paused' | 'failing' | 'ok'; message: string }
   /** Files changed under everyone (a merge from another device): reload the list. */
   | { type: 'files-changed'; at: string }
+  /**
+   * The room's file was renamed (`to`) or deleted (`to` null), here or on another
+   * device, and the room is closed: open `to` instead, or nothing.
+   */
+  | { type: 'gone'; at: string; to: string | null }
   | { type: 'run'; run: RunRecord }
   /** These runs are gone: cleared here, or on another device of the workspace. */
   | { type: 'runs-removed'; path: string; ids: string[] }

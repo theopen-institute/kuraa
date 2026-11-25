@@ -80,7 +80,7 @@ jobs:
         run: |
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "kuraa ${TAG#v}" $pre
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "Kuraa ${TAG#v}" $pre
 
   build:
     needs: [tag, draft]

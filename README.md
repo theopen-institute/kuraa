@@ -1,4 +1,4 @@
-# kuraa
+# Kuraa
 
 A git-backed editor for collections of Pandoc markdown and R Markdown files, and the source files
 around them (R, Python, YAML, BibTeX, LaTeX and more), with live co-editing.

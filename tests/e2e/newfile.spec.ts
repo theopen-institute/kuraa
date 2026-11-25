@@ -27,7 +27,7 @@ test('New file makes an untitled document at once: its title is typed in the pag
   // No dialog: an untitled Markdown document, open, with the cursor in its title.
   await page.getByRole('button', { name: 'New file', exact: true }).click();
   const current = page.locator('[role="treeitem"][aria-current="page"]');
-  await expect(current).toHaveAttribute('data-path', /^untitled(-\d+)?\.md$/);
+  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
   const untitled = (await current.getAttribute('data-path'))!;
   expect(readFileSync(join(E2E.dir, untitled), 'utf8')).toBe('');
   const title = page.getByTestId('editor').locator('h1.doc-title');
@@ -151,7 +151,7 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.locator('[data-testid$="/.gitkeep"]')).toHaveCount(0);
   await row.hover();
   await row.getByRole('button', { name: /^New file in/ }).click();
-  await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', `${folder}/untitled.md`);
+  await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', new RegExp(`^${folder}/untitled-[a-z0-9]{5}\\.md$`));
 
   // ⌘, (Ctrl+, elsewhere) opens Settings, at the open document (decision 0065); Escape closes it.
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');
@@ -182,7 +182,7 @@ test('dragging moves files into folders, and folders to the top level', async ({
   await expect(page.getByTestId(`file:${moved}`)).toBeVisible();
   await expect(page.getByTestId(`file:${file}`)).toHaveCount(0);
   expect(existsSync(join(E2E.dir, moved))).toBe(true);
-  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Move ${file} to ${folder}/`);
+  await expect.poll(() => execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Move ${file} to ${folder}/`);
   await expect(page.locator('.tree-file.selected')).toContainText(`drag-${stamp}.md`);
   await expect(page.getByTestId('editor')).toContainText('Dragged');
 

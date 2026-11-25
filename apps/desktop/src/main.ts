@@ -35,7 +35,7 @@
 // The window shows only the app's own pages: it does not navigate elsewhere or
 // open other windows (web links open in the browser), and the bridge answers
 // only the app's own pages.
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type ContextMenuParams, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, type ContextMenuParams, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -50,8 +50,10 @@ import { keepLog, logFile } from './log.js';
 
 const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
+/** Shown at once while the hub starts, so the window is never blank. */
+const STARTING = join(__dirname, 'static', 'starting.html');
 /** The only pages the windows may show. */
-const OWN_PAGES = [WEB_INDEX, LAUNCHER, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
+const OWN_PAGES = [WEB_INDEX, LAUNCHER, STARTING, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
 const isOwnPage = (url: string) => OWN_PAGES.includes(url.split(/[?#]/)[0]!);
 
 const { values: flags } = parseArgs({
@@ -93,8 +95,11 @@ function useBundledGit(): void {
 }
 useBundledGit();
 
-// Tests keep the app's own data (preferences, the list of workspaces) apart from the person's.
+// Tests keep the app's own data (preferences, the list of workspaces) apart from the person's. A release keeps
+// it in the folder it always had, named in lowercase: the app is called Kuraa now, and on Linux (whose file
+// names keep their case) another folder would leave everything there behind.
 if (process.env.KURAA_USER_DATA) app.setPath('userData', process.env.KURAA_USER_DATA);
+else if (app.isPackaged) app.setPath('userData', join(app.getPath('appData'), 'kuraa'));
 // The log, in a file: with its data when that is given (tests), else where the system keeps apps' logs.
 keepLog(process.env.KURAA_USER_DATA ? join(app.getPath('userData'), 'logs') : undefined);
 // Tests run the app out of sight: its windows are never shown, and on a Mac it stays out of the
@@ -130,6 +135,8 @@ const defaultWorkspaces = () => join(app.getPath('documents'), 'kuraa');
 
 let window: BrowserWindow | null = null;
 let hub: RunningHub | null = null;
+/** The hub while it starts: anything asking for it meanwhile waits for this one, never starting another. */
+let hubStarting: Promise<RunningHub> | null = null;
 let quitting = false;
 let updates: Updates | null = null;
 /** What the page gets from kuraa:config; null while the launcher shows. */
@@ -145,24 +152,50 @@ function testTimings(): Partial<HostTimings> {
 }
 
 async function stopHub(): Promise<void> {
-  const h = hub;
+  // One still starting is stopped once it has.
+  const h = hub ?? (await hubStarting?.catch(() => null)) ?? null;
   hub = null;
   if (h) await h.close(); // flushes and commits open rooms
+}
+
+/** The window's page loads, one after another: a load started while another is under way would cut it short. */
+let loads: Promise<void> = Promise.resolve();
+
+/**
+ * Show one of the app's pages, once any load before it is done. One cut short
+ * all the same (a reload while it loaded: ERR_ABORTED) is no error: the other shows.
+ */
+function loadPage(file: string): Promise<void> {
+  const next = loads.catch(() => undefined).then(async () => {
+    if (!window) return;
+    try {
+      await window.loadFile(file);
+    } catch (e) {
+      if ((e as { code?: string }).code !== 'ERR_ABORTED') throw e;
+    }
+  });
+  loads = next;
+  return next;
 }
 
 /** The client sets the window title itself, from the workspace and open file. */
 function loadClient(next: ShellConfig): Promise<void> {
   config = next;
-  return window!.loadFile(WEB_INDEX);
+  return loadPage(WEB_INDEX);
 }
 
-/** This app's hub, started if it is not running. */
+/** This app's hub, started if it is not running (or the one starting). */
 async function ensureHub(): Promise<RunningHub> {
   if (hub) return hub;
+  hubStarting ??= startOwnHub().finally(() => (hubStarting = null));
+  return hubStarting;
+}
+
+async function startOwnHub(): Promise<RunningHub> {
   // --workspaces keeps the list in that folder; otherwise it lives with the app's own data, so it survives choosing another folder.
   const custom = typeof flags.workspaces === 'string';
   const engines = list(flags.engine);
-  hub = await startHub({
+  const started = await startHub({
     ...(custom ? { root: flags.workspaces as string } : { registry: join(app.getPath('userData'), 'workspaces.json') }),
     defaultRoot: defaultWorkspaces(),
     // Loopback: the person using the app is its owner (Preferences, Open a folder…, identity, online copy).
@@ -181,8 +214,9 @@ async function ensureHub(): Promise<RunningHub> {
     },
     log: (m) => console.log(`[hub] ${m}`),
   });
-  console.log(`[desktop] hub ${hub.url} on ${hub.hub.root}`);
-  return hub;
+  hub = started;
+  console.log(`[desktop] hub ${started.url} on ${started.hub.root}`);
+  return started;
 }
 
 /**
@@ -248,8 +282,8 @@ async function pickFolder(): Promise<void> {
 
 function showLauncher(): Promise<void> {
   config = null;
-  window!.setTitle('kuraa');
-  return window!.loadFile(LAUNCHER);
+  window!.setTitle('Kuraa');
+  return loadPage(LAUNCHER);
 }
 
 /** Preferences: the client's dialog, in the page (this app's own workspaces opened first, from the launcher). */
@@ -306,11 +340,12 @@ function buildMenu(): void {
     },
     // Edit's standard items (undo, cut, copy, paste, select all…). Find (⌘F) is the page's own, so no item takes its key.
     { role: 'editMenu' },
-    // The standard View menu, less Force Reload, whose ⇧⌘R renders the document in the page.
+    // The standard View menu, less Force Reload, whose ⇧⌘R renders the document in the page. Developer Tools takes
+    // ⌥⌘J, not its usual ⌥⌘I, which is the page's own (a new R chunk).
     {
       label: 'View',
       submenu: [
-        { role: 'reload' as const }, { role: 'toggleDevTools' as const }, { type: 'separator' as const },
+        { role: 'reload' as const }, { role: 'toggleDevTools' as const, accelerator: 'Alt+CmdOrCtrl+J' }, { type: 'separator' as const },
         { role: 'resetZoom' as const }, { role: 'zoomIn' as const }, { role: 'zoomOut' as const }, { type: 'separator' as const },
         { role: 'togglefullscreen' as const },
       ],
@@ -458,10 +493,14 @@ app.whenReady().then(async () => {
   window = new BrowserWindow({
     width: 1280,
     height: 820,
-    title: 'kuraa',
+    title: 'Kuraa',
+    // The pages' own background, so nothing flashes white before the first one shows.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#171716' : '#fbfaf8',
     ...windowOptions(),
   });
   window.on('closed', () => (window = null));
+  // At once, while this app's hub starts: never a blank window, however slow the network makes starting.
+  void loadPage(STARTING).catch(() => undefined);
 
   const values = flags;
   try {
@@ -473,7 +512,7 @@ app.whenReady().then(async () => {
       await showWorkspaces();
     }
   } catch (e) {
-    dialog.showErrorBox('kuraa', (e as Error).message);
+    dialog.showErrorBox('Kuraa', (e as Error).message);
     await showLauncher();
   }
 });
@@ -484,7 +523,7 @@ lastResort({ log: (m) => console.error(`[kuraa] ${m}`), save: async () => hub?.h
 
 // Flush and commit before quitting.
 app.on('before-quit', (event) => {
-  if (quitting || !hub) return;
+  if (quitting || (!hub && !hubStarting)) return;
   event.preventDefault();
   quitting = true;
   void stopHub().catch((e: Error) => console.error(`[desktop] stopping the hub: ${e.message}`)).finally(() => app.quit());

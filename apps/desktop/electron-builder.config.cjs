@@ -53,11 +53,13 @@ function updates() {
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'org.kuraa.desktop',
-  productName: 'kuraa',
-  copyright: 'kuraa',
-  // What Electron calls the app (and so where it keeps its data); the repo's own runs stay apart.
+  // The name people see (the app's menu, its window, Kuraa.app). Its data stays in the folder it always had
+  // (main.ts keeps userData at .../kuraa), and the package and program names stay lowercase.
+  productName: 'Kuraa',
+  copyright: 'Kuraa',
+  // What Electron calls the app; the repo's own runs stay apart.
   // desktopName lets Linux desktops match the running window to its launcher.
-  extraMetadata: { name: 'kuraa', productName: 'kuraa', desktopName: 'kuraa.desktop' },
+  extraMetadata: { name: 'kuraa', productName: 'Kuraa', desktopName: 'kuraa.desktop' },
   directories: { output: 'dist', buildResources: 'build-resources' },
   publish: updates(),
   // Each platform adds its own native addons (below): ${platform} here would be the one building.
@@ -101,7 +103,9 @@ module.exports = {
     syncDesktopName: true,
     files: ['build/native/linux-${arch}/**'],
     artifactName: '${productName}-${version}-linux-${arch}.${ext}',
-    maintainer: 'kuraa',
+    // The program stays `kuraa` (its path in /opt, the menu's launcher, scripts that run it).
+    executableName: 'kuraa',
+    maintainer: 'Kuraa',
   },
   deb: {
     packageCategory: 'editors',

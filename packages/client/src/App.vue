@@ -3,7 +3,8 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry } from '@kuraa/kernel';
-import type { CommitInfo, FileAccess, HubWorkspace, NotRepository, TreeFile, WorkspaceInfo } from './api.js';
+import { workspacePath } from '@kuraa/editor-kit';
+import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { askConfirm, askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
@@ -14,7 +15,7 @@ import { ensureIdentity, personShellFor } from './hostPerson.js';
 import { dialogOpen } from './focus.js';
 import { APP_KEYS, keyLabel, keyMatches } from './keys.js';
 import { S } from './strings.js';
-import type { AppProps, EditorStatus, Notice } from './types.js';
+import type { AppProps, EditorStatus, Notice, WorkspaceLink } from './types.js';
 import Editor from './Editor.vue';
 import ErrorBanner from './ErrorBanner.vue';
 import FileTree from './FileTree.vue';
@@ -452,6 +453,95 @@ watch([api, editingSettings, ready], () => {
   if (!editingSettings.value && ready.value) void refreshTree();
 }, { immediate: true });
 
+/**
+ * How the open workspace syncs, apart from any document: its devices and its
+ * online copies, for the light beside its name and Sync now in its menu. Asked
+ * every few seconds (less often while the window is hidden).
+ */
+const link = shallowRef<WorkspaceLink | null>(null);
+let linkTimer: ReturnType<typeof setTimeout> | undefined;
+async function loadLink() {
+  clearTimeout(linkTimer);
+  const asked = api.value;
+  let next: WorkspaceLink;
+  try {
+    const [peers, syncs] = await Promise.all([asked.peers(), asked.syncs().catch(() => null)]);
+    const devices = peers.enabled ? peers.devices.filter((d) => !d.related) : [];
+    const targets = syncs?.syncs.flatMap((s) => s.targets) ?? [];
+    next = {
+      reachable: true,
+      devices: devices.length ? { online: devices.filter((d) => d.online).length, total: devices.length } : null,
+      online: targets.length ? { pending: targets.reduce((n, t) => n + (t.pending ?? 0), 0), busy: targets.some((t) => t.busy), failed: targets.some((t) => !!t.error) } : null,
+    };
+  } catch (e) {
+    // Answered, but refused (not allowed here, say): reachable all the same.
+    next = { reachable: e instanceof ApiError && e.status > 0, devices: null, online: null };
+  }
+  if (asked !== api.value) return;
+  link.value = next;
+  linkTimer = setTimeout(() => void loadLink(), document.hidden ? 30_000 : 5_000);
+}
+watch([api, ready], () => {
+  link.value = null;
+  clearTimeout(linkTimer);
+  if (ready.value) void loadLink();
+}, { immediate: true });
+onBeforeUnmount(() => clearTimeout(linkTimer));
+
+/**
+ * The open file was renamed (to `to`) or deleted (null), here or on another
+ * device, and its room closed: open it where it went, once the file list has it
+ * there (a rename made on this host is said as it starts), else nothing.
+ */
+async function followGone(to: string | null) {
+  const asked = api.value;
+  const from = path.value;
+  for (let i = 0; i < 20; i++) {
+    await refreshTree();
+    if (asked !== api.value || path.value !== from) return; // something else was opened meanwhile
+    if (!to || files.value.some((f) => f.path === to)) break;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  select(to && files.value.some((f) => f.path === to) ? to : null);
+}
+
+/**
+ * A link ⌘-clicked in the document: a web address (or an email's) where the
+ * system opens it (the desktop app hands those to the browser); a file of the
+ * workspace, written relative to this document, opened here.
+ */
+function openLink(href: string) {
+  if (/^(https?|mailto):/i.test(href)) {
+    window.open(href, '_blank', 'noopener');
+    return;
+  }
+  // A place in this document (#a-heading): it is open already.
+  if (href.startsWith('#')) return;
+  const target = path.value ? workspacePath(path.value, href) : null;
+  if (target && files.value.some((f) => f.path === target)) select(target);
+  else notice.value = { kind: 'warn', text: S.editor.noLinkTarget(href) };
+}
+
+/** Sync now (the workspace's menu): with the other devices and the online copies, saying how it went. */
+const syncing = ref(false);
+async function syncNow() {
+  if (syncing.value) return;
+  syncing.value = true;
+  const asked = api.value;
+  try {
+    const r = await asked.sync();
+    if (asked === api.value) notice.value = { kind: r.ok ? 'info' : 'warn', text: r.message };
+    await refreshTree();
+  } catch (e) {
+    // Refused (409): it says why, as a sync that did not go through.
+    const said = e instanceof ApiError && (e.body as { message?: string } | undefined)?.message;
+    if (asked === api.value) notice.value = { kind: 'warn', text: said || (e as Error).message };
+  } finally {
+    syncing.value = false;
+    if (asked === api.value) void loadLink();
+  }
+}
+
 // Whether it syncs with other devices: asked of each workspace as it opens.
 watch([api, ready], () => {
   sharedWithDevices.value = false;
@@ -633,12 +723,14 @@ function useSettings(s: Settings) {
       >
         <template v-if="hub" #title>
           <span class="workspace-title">
-            <ConnectionLight :status="status" :has-document="!!path && !!type" />
+            <ConnectionLight :status="status" :has-document="!!path && !!type" :link="link" />
             <WorkspaceSwitcher
               :workspaces="hub"
               :current="chosen"
               :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
               :can-add="canAdd"
+              :sync="link && (link.devices || link.online) ? { pending: link.online?.pending ?? 0, busy: syncing } : null"
+              @sync="syncNow"
               @switch="switchWorkspace"
               @add="addingWorkspace = true"
               @settings="openSettings('workspace')"
@@ -730,6 +822,8 @@ function useSettings(s: Settings) {
               @title="(t) => (liveTitle = { path: path!, title: t })"
               @conflicts="(n) => (liveConflicts = { path: path!, count: n })"
               @files-changed="refreshTree()"
+              @gone="followGone"
+              @open-link="openLink"
               @tools-changed="toolsKey++"
               @committed="historyKey++"
               @outside-conflict="outsideConflict"

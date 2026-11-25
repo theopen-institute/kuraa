@@ -29,7 +29,7 @@ import { dialogOpen } from './focus.js';
 import type { FormatCommands } from '@kuraa/editor-kit';
 import { workspaceFiles } from './workspaceFiles.js';
 import { placeholderPlugin } from './placeholder.js';
-import { APP_KEYS, keyMatches } from './keys.js';
+import { APP_KEYS, isMac, keyMatches } from './keys.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
 
@@ -60,6 +60,10 @@ const emit = defineEmits<{
   conflicts: [count: number];
   /** Files changed under everyone (work from another device came in). */
   filesChanged: [];
+  /** The file was renamed (to this path) or deleted (null), here or on another device: its room is closed. */
+  gone: [to: string | null];
+  /** A link ⌘-clicked: its address as written (a web address, or a path relative to this file). */
+  openLink: [href: string];
   /** A tool (TeX) is being downloaded, changed or removed: whoever shows tools asks again. */
   toolsChanged: [];
   /** It went to the first conflict, as asked. */
@@ -105,41 +109,88 @@ const user = computed(() => ({ name: props.settings.name, email: props.settings.
 const runKey = computed(() => (props.run?.enabled ? JSON.stringify(props.run) : ''));
 
 /**
- * A click in the editor's empty space (the padding below or above the text,
- * or the margins beside it) lands outside ProseMirror's element. Put the
- * cursor where it would be expected: the end of the document below the text
- * (in a new paragraph if the document ends with a code block or the like),
- * the start above it, and the nearest point on the line beside it.
+ * Where a point in the editor's empty space (the padding below or above the
+ * text, or the margins beside it) is in the document: the end of the text below
+ * it, the start above it, and the nearest point on the line beside it.
+ */
+function blankPos(v: EditorView, x: number, y: number): number {
+  const { doc } = v.state;
+  const box = v.dom.getBoundingClientRect();
+  if (y >= box.bottom) return Selection.atEnd(doc).head;
+  if (y <= box.top) return Selection.atStart(doc).head;
+  const hit = v.posAtCoords({ left: Math.min(Math.max(x, box.left + 1), box.right - 1), top: y });
+  return hit ? TextSelection.near(doc.resolve(hit.pos)).head : Selection.atEnd(doc).head;
+}
+
+/**
+ * A click in the editor's empty space lands outside ProseMirror's element. Put
+ * the cursor where it would be expected (blankPos; in a new paragraph if the
+ * document ends with a code block or the like and the click is below it), and,
+ * as in the text, a drag from there selects up to wherever it goes, and
+ * Shift-click selects from the cursor to there.
  */
 function onBlankMouseDown(e: MouseEvent) {
   const v = view.value;
-  if (!v || e.button !== 0 || e.shiftKey || v.dom.contains(e.target as Node)) return;
+  if (!v || e.button !== 0 || v.dom.contains(e.target as Node)) return;
   e.preventDefault();
   const { doc } = v.state;
-  const box = v.dom.getBoundingClientRect();
-  let selection: Selection;
+  if (e.shiftKey) {
+    // From the cursor as the page has it: a move just made (Home, a click) may not be in the editor's state yet.
+    let { anchor } = v.state.selection;
+    const live = document.getSelection();
+    if (live?.anchorNode && v.dom.contains(live.anchorNode)) {
+      try {
+        anchor = v.posAtDOM(live.anchorNode, live.anchorOffset);
+      } catch { /* not a place in the document: the state's */ }
+    }
+    v.focus();
+    v.dispatch(v.state.tr.setSelection(TextSelection.between(doc.resolve(anchor), doc.resolve(blankPos(v, e.clientX, e.clientY)))));
+    followDrag(v, e.currentTarget as HTMLElement, anchor);
+    return;
+  }
   const block = defaultBlock(v.state.schema);
-  if (e.clientY >= box.bottom) {
+  if (e.clientY >= v.dom.getBoundingClientRect().bottom) {
     // The end of the document's text, wherever it is (the last paragraph, or the
     // last footnote). Only if that is not somewhere to type (inside a code block,
     // or after a rule) is an empty paragraph added; left empty, it writes nothing.
-    selection = Selection.atEnd(doc);
-    const textEnd = selection instanceof TextSelection && selection.$head.parent.inlineContent && !selection.$head.parent.type.spec.code;
+    const end = Selection.atEnd(doc);
+    const textEnd = end instanceof TextSelection && end.$head.parent.inlineContent && !end.$head.parent.type.spec.code;
     if (!textEnd && block && !props.type.editor?.layout) {
       v.focus();
       const tr = v.state.tr.insert(doc.content.size, block.create());
       v.dispatch(tr.setSelection(TextSelection.create(tr.doc, doc.content.size + 1)).scrollIntoView());
       return;
     }
-  } else if (e.clientY <= box.top) selection = Selection.atStart(doc);
-  else {
-    const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
-    const hit = v.posAtCoords({ left, top: e.clientY });
-    selection = hit ? TextSelection.near(doc.resolve(hit.pos)) : Selection.atEnd(doc);
   }
+  const at = blankPos(v, e.clientX, e.clientY);
   // Focus first, so a cursor inside a code block can hand focus on to its CodeMirror.
   v.focus();
-  v.dispatch(v.state.tr.setSelection(selection).scrollIntoView());
+  v.dispatch(v.state.tr.setSelection(TextSelection.near(doc.resolve(at))).scrollIntoView());
+  followDrag(v, e.currentTarget as HTMLElement, v.state.selection.anchor);
+}
+
+/**
+ * Until the button is let go: select from `anchor` to wherever the pointer is,
+ * in the text or its empty space, scrolling when it goes above or below the
+ * editor's scroll area.
+ */
+function followDrag(v: EditorView, scroller: HTMLElement, anchor: number) {
+  const move = (m: MouseEvent) => {
+    if (v.isDestroyed || !(m.buttons & 1)) return up();
+    const r = scroller.getBoundingClientRect();
+    if (m.clientY < r.top) scroller.scrollTop -= r.top - m.clientY;
+    else if (m.clientY > r.bottom) scroller.scrollTop += m.clientY - r.bottom;
+    const { doc } = v.state;
+    const head = blankPos(v, m.clientX, Math.min(Math.max(m.clientY, r.top + 1), r.bottom - 1));
+    const from = doc.resolve(Math.min(anchor, doc.content.size));
+    v.dispatch(v.state.tr.setSelection(TextSelection.between(from, doc.resolve(head))));
+  };
+  const up = () => {
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', up);
+  };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
 }
 
 let lastTitle: string | null | undefined;
@@ -242,6 +293,8 @@ function open(carried: Carried | null = null): () => void {
           update({ notice: { kind: 'info', text: m.why ?? S.editor.joinedOther } });
           setTimeout(() => void replaced(m.why ?? null), 50);
         } else if (m.type === 'files-changed') emit('filesChanged');
+        // Closed for good: the app opens where it went, if anywhere (which lets go of this room).
+        else if (m.type === 'gone') emit('gone', m.to);
         else if (m.type === 'tools') emit('toolsChanged');
         else if (m.type === 'save-status') {
           // Paused or failing stays in a banner until it is over (App.vue); then a note says so.
@@ -298,6 +351,18 @@ function open(carried: Carried | null = null): () => void {
       attributes: layout
         ? { class: 'lines-doc', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off', 'data-testid': 'editor' }
         : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
+      // ⌘-click (Ctrl-click elsewhere) on a link opens it; a plain click puts the cursor in it, to edit it.
+      handleDOMEvents: {
+        click: (_v, e) => {
+          if (!(isMac() ? e.metaKey : e.ctrlKey) || e.button !== 0) return false;
+          const a = (e.target as Element | null)?.closest?.('a[href]');
+          const href = a?.getAttribute('href');
+          if (!href) return false;
+          e.preventDefault();
+          emit('openLink', href);
+          return true;
+        },
+      },
       // y-prosemirror dispatches while the view is still being constructed, so use `this`, not `pmView`.
       dispatchTransaction(this: EditorView, tr) {
         this.updateState(this.state.apply(tr));

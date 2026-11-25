@@ -1,5 +1,7 @@
 # 0056 · New file makes a document at once; Rename… chooses the kind
 
+*Since [0080](0080-tester-fixes.md):* the sidebar's ＋ makes it at the top level, not beside the open file, and names it `untitled-` and five chance letters, not `untitled.md`.
+
 The New file dialog asked for a kind of file and a title before there was anything to type in.
 Now that the title is typed in the page ([0055](0055-title-in-the-page.md)), New file asks nothing.
 

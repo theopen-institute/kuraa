@@ -5,8 +5,8 @@ import { bytes, updateView } from '../src/update-view.js';
 
 describe('the updates window', () => {
   it('shows a bar that goes while it looks, and while a download has not said its size', () => {
-    expect(updateView({ kind: 'checking' }, '0.1.6')).toMatchObject({ message: 'Looking for a newer version of kuraa…', progress: null, buttons: [{ choice: 'hide' }] });
-    expect(updateView({ kind: 'downloading', version: '0.1.7', progress: null }, '0.1.6')).toMatchObject({ message: 'Downloading kuraa 0.1.7…', detail: 'Starting the download…', progress: null });
+    expect(updateView({ kind: 'checking' }, '0.1.6')).toMatchObject({ message: 'Looking for a newer version of Kuraa…', progress: null, buttons: [{ choice: 'hide' }] });
+    expect(updateView({ kind: 'downloading', version: '0.1.7', progress: null }, '0.1.6')).toMatchObject({ message: 'Downloading Kuraa 0.1.7…', detail: 'Starting the download…', progress: null });
   });
 
   it('shows how far a download has come, how much of how much, and how fast, staying open with Hide', () => {
@@ -19,11 +19,11 @@ describe('the updates window', () => {
   });
 
   it('offers Restart Now, then Later, once ready; says the latest, failures and a copy that does not update', () => {
-    expect(updateView({ kind: 'ready', version: '0.1.7' }, '0.1.6')).toMatchObject({ message: 'kuraa 0.1.7 is ready.', progress: 1, buttons: [{ choice: 'restart', label: 'Restart Now' }, { choice: 'later', label: 'Later' }] });
-    expect(updateView({ kind: 'none' }, '0.1.6')).toMatchObject({ message: 'kuraa 0.1.6 is the latest version.', buttons: [{ choice: 'ok' }] });
+    expect(updateView({ kind: 'ready', version: '0.1.7' }, '0.1.6')).toMatchObject({ message: 'Kuraa 0.1.7 is ready.', progress: 1, buttons: [{ choice: 'restart', label: 'Restart Now' }, { choice: 'later', label: 'Later' }] });
+    expect(updateView({ kind: 'none' }, '0.1.6')).toMatchObject({ message: 'Kuraa 0.1.6 is the latest version.', buttons: [{ choice: 'ok' }] });
     expect(updateView({ kind: 'none' }, '0.1.6').progress).toBeUndefined();
     expect(updateView({ kind: 'failed', message: 'net::ERR_INTERNET_DISCONNECTED' }, '0.1.6')).toMatchObject({ tone: 'warning', detail: 'net::ERR_INTERNET_DISCONNECTED', buttons: [{ choice: 'ok' }] });
-    expect(updateView({ kind: 'off', why: 'run from the repository' }, '0.1.6').message).toBe('This copy of kuraa does not update itself (run from the repository).');
+    expect(updateView({ kind: 'off', why: 'run from the repository' }, '0.1.6').message).toBe('This copy of Kuraa does not update itself (run from the repository).');
   });
 
   it('says sizes as people read them', () => {

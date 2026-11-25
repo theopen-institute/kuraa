@@ -33,6 +33,16 @@ export interface SaveTrouble {
   message: string;
 }
 
+/** How the open workspace syncs, apart from any document: asked of its host every few seconds. */
+export interface WorkspaceLink {
+  /** The host answered when last asked. */
+  reachable: boolean;
+  /** Other devices, if it syncs with any: how many there are, and how many are connected now. */
+  devices: { online: number; total: number } | null;
+  /** Its online copies, if it has any: the saves they lack, whether one is syncing, and whether the last sync failed. */
+  online: { pending: number; busy: boolean; failed: boolean } | null;
+}
+
 export interface EditorStatus {
   connection: ConnectionStatus;
   peers: Peer[];

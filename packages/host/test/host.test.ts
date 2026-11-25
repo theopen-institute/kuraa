@@ -391,6 +391,53 @@ describe('host', () => {
     expect((await api('/api/files', { method: 'POST', body: JSON.stringify({ path: '../escape.md' }) })).status).toBe(400);
   });
 
+  it('renames a folder or a file in case alone, and git keeps the new case', async () => {
+    expect((await api('/api/files', { method: 'POST', body: JSON.stringify({ path: 'drama/play.md', content: '# Play\n' }) })).status).toBe(201);
+    let res = await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'drama', to: 'Drama' }) });
+    expect(res.status).toBe(200);
+    expect(readdirSync(dir)).toContain('Drama');
+    expect(readdirSync(dir)).not.toContain('drama');
+    res = await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'Drama/play.md', to: 'Drama/Play.md' }) });
+    expect(res.status).toBe(200);
+    expect(readdirSync(join(dir, 'Drama'))).toEqual(['Play.md']);
+    expect(git(dir, 'ls-files', 'Drama')).toBe('Drama/Play.md');
+    expect(git(dir, 'ls-tree', '-r', '--name-only', 'HEAD')).not.toMatch(/drama\//);
+    expect(git(dir, 'status', '--porcelain')).toBe('');
+    // Another file of that name is still a clash.
+    expect((await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'notes.md', to: 'other.md' }) })).status).toBe(409);
+  });
+
+  it('closes a file’s room when it is renamed, here or on another device, and never writes the old path again', async () => {
+    const gone = (c: HeadlessClient) => c.messages.find((m) => m.type === 'gone') as { to: string | null } | undefined;
+    // Here: whoever has it open is told where it went.
+    const a = await connect('notes.md');
+    expect((await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'notes.md', to: 'field-notes.md' }) })).status).toBe(200);
+    await until(() => !!gone(a), 5000, 'told of the rename');
+    expect(gone(a)!.to).toBe('field-notes.md');
+
+    // On another device: its commit comes in while the file is open here.
+    const b = await connect('other.md');
+    const clone = mkdtempSync(join(tmpdir(), 'kuraa-clone-'));
+    try {
+      await gitAsync(tmpdir(), 'clone', '-q', running.url.replace('://', `://kuraa:${running.token}@`) + '/git', clone);
+      git(clone, 'config', 'user.name', 'Elsewhere');
+      git(clone, 'config', 'user.email', 'elsewhere@example.org');
+      git(clone, 'mv', 'other.md', 'moved.md');
+      git(clone, 'commit', '-q', '-m', 'Rename other.md to moved.md');
+      await gitAsync(clone, 'push', '-q', 'origin', 'main');
+      await until(() => !!gone(b), 15_000, 'told of the rename from elsewhere');
+      expect(gone(b)!.to).toBe('moved.md');
+      // An edit still on its way from the old room writes nothing back.
+      b.write(insertAt(b.read(), 'Other', 'Late: '));
+      await new Promise((r) => setTimeout(r, FAST.flushMs + FAST.idleCommitMs + 400));
+      expect(existsSync(join(dir, 'other.md'))).toBe(false);
+      expect(file('moved.md')).toBe('# Other\n');
+      expect(git(dir, 'log', '--format=%s')).not.toMatch(/Create other\.md/);
+    } finally {
+      rmSync(clone, { recursive: true, force: true });
+    }
+  });
+
   it('refuses .git however it is written, and new names Windows could not hold', async () => {
     for (const path of ['.GIT/config', '.git./config', '.Git']) {
       expect((await api(`/api/files?path=${encodeURIComponent(path)}`)).status).toBe(400);
@@ -472,6 +519,38 @@ describe('this computer’s person’s key, through the host', () => {
 });
 
 describe('the online copy: a git server each save is pushed to, and work is fetched and merged from', () => {
+  it('says how many saves it lacks, and gets the last ones as the host stops', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'kuraa-online-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare });
+    const dir = mkdtempSync(join(tmpdir(), 'kuraa-copied-'));
+    // Pushes wait a minute after a save: none goes before the host stops, unless stopping sends it.
+    const own = await startHost({ dir, init: true, manageOnline: true, run: ONLINE, timings: { flushMs: 100, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000, onlineMs: 60_000 } });
+    let closed = false;
+    try {
+      const call = (path: string, init: RequestInit = {}) => fetch(own.url + path, { ...init, headers: { authorization: `Bearer ${own.token}`, 'content-type': 'application/json' } });
+      const list = async () => ((await (await call('/api/syncs')).json()) as { syncs: { id: string; targets: { lastSync: string | null; pending: number | null }[] }[] }).syncs.find((s) => s.id === 'online')!.targets;
+      const branch = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+      const there = () => execFileSync('git', ['log', '--format=%s', branch], { cwd: bare, encoding: 'utf8' }).trim();
+      expect((await call('/api/syncs/online', { method: 'POST', body: JSON.stringify({ target: bare }) })).status).toBe(201);
+      await until(async () => (await list())[0]?.lastSync !== null, 10_000, 'the first push');
+      expect((await list())[0]!.pending).toBe(0);
+      expect((await call('/api/files', { method: 'POST', body: JSON.stringify({ path: 'notes.md', content: '# Notes\n' }) })).status).toBe(201);
+      expect((await list())[0]!.pending).toBe(1);
+      // An edit written but not yet committed: committed as the host stops, then pushed with the rest.
+      const { room } = (await (await call('/api/rooms?path=notes.md')).json()) as { room: string };
+      const c = connectHeadless({ url: own.url.replace(/^http/, 'ws') + '/collab', room, token: own.token, user: ALICE, schema });
+      await c.ready;
+      c.write(insertAt(c.read(), 'Notes', 'Last '));
+      await until(() => readFileSync(join(dir, 'notes.md'), 'utf8').includes('Last Notes'), 5000, 'the edit written');
+      c.destroy();
+      await own.close();
+      closed = true;
+      expect(there()).toMatch(/^Edit notes\.md[^\n]*\nCreate notes\.md/);
+    } finally {
+      if (!closed) await own.close();
+    }
+  });
+
   it('push each save, and when another device pushed first, fetch, merge and push, never forcing', async () => {
     const bare = mkdtempSync(join(tmpdir(), 'kuraa-online-'));
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare });

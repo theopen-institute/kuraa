@@ -7,7 +7,7 @@
 // `createPandocEditor` is the extension point, as `createPandocType` is for the
 // format: R Markdown adds its chunks through it.
 import type { EditorContext, FormatEditor, HeaderField, HelpItem } from '@kuraa/editor-kit';
-import type { Attrs, MarkType, NodeType, Schema } from 'prosemirror-model';
+import type { Attrs, Mark, MarkType, NodeType, Schema } from 'prosemirror-model';
 import { TextSelection, type Command, type EditorState, type Plugin } from 'prosemirror-state';
 import { chainCommands, createParagraphNear, exitCode, lift, liftEmptyBlock, newlineInCode, setBlockType, splitBlock, toggleMark, wrapIn } from 'prosemirror-commands';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
@@ -19,7 +19,7 @@ import { conflictViews, nextConflict } from './conflicts.js';
 import { citationPlugins, citationRules, citationViews } from './citations.js';
 import { imagePlugins, imageRules, imageViews } from './images.js';
 import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
-import { listRules, switchList } from './lists.js';
+import { liftAtItemStart, listRules, switchList } from './lists.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
@@ -27,7 +27,7 @@ export { conflictPositions, nextConflict, versionDateLabel, versionLabel } from 
 export { Bibliography, citationLabel, describeEntry } from './citations.js';
 export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable } from './tables.js';
 export { workspacePath } from './paths.js';
-export { listRules, switchList } from './lists.js';
+export { liftAtItemStart, listRules, switchList } from './lists.js';
 export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
 
 export interface PandocEditorExtension {
@@ -60,23 +60,49 @@ export const insertNode = (type: NodeType | undefined, attrs?: Attrs): Command =
   return true;
 };
 
-const markActive = (state: EditorState, type: MarkType): boolean => {
-  const { from, $from, to, empty } = state.selection;
-  if (empty) return !!type.isInSet(state.storedMarks || $from.marks());
-  return state.doc.rangeHasMark(from, to, type);
-};
+/**
+ * The link the selection is in or on (all of it in one link), as its range in the
+ * document; null if none. A cursor just after a link's last letter is in it.
+ */
+export function linkAt(state: EditorState, type: MarkType): { from: number; to: number; href: string } | null {
+  const { $from, $to, from, to } = state.selection;
+  if (!$from.parent.inlineContent || !$from.sameParent($to)) return null;
+  // The paragraph's links, each as one run of text however its other marks change along it.
+  const runs: { from: number; to: number; mark: Mark }[] = [];
+  const start = $from.start();
+  $from.parent.forEach((child, offset) => {
+    const mark = type.isInSet(child.marks);
+    if (!mark) return;
+    const a = start + offset;
+    const last = runs[runs.length - 1];
+    if (last && last.to === a && mark.eq(last.mark)) last.to = a + child.nodeSize;
+    else runs.push({ from: a, to: a + child.nodeSize, mark });
+  });
+  const run = runs.find((r) => r.from <= from && to <= r.to);
+  return run ? { from: run.from, to: run.to, href: String(run.mark.attrs.href ?? '') } : null;
+}
 
-const toggleLink = (schema: Schema, ctx: EditorContext): Command => (state, dispatch, view) => {
+/**
+ * ⌘K (and ⌘⇧K): link the selected text, asking for the address; in a link,
+ * change its address, or take the link away (the address emptied).
+ */
+const editLink = (schema: Schema, ctx: EditorContext): Command => (state, dispatch, view) => {
   const link = schema.marks.link!;
-  if (markActive(state, link)) return toggleMark(link)(state, dispatch);
-  if (state.selection.empty || !view) return false;
+  const at = linkAt(state, link);
+  if ((!at && state.selection.empty) || !view) return false;
   if (dispatch) {
-    void ctx.ui.askText('Link address', 'https://', 'Add link').then((href) => {
-      href = href?.trim() ?? '';
-      if (!href || view.isDestroyed) return;
-      // The selection as it is now: remote edits made while the dialog was open have moved it.
+    void ctx.ui.askText('Link address', at?.href || 'https://', at ? 'Change link' : 'Add link').then((answer) => {
+      if (answer === null || view.isDestroyed) return;
+      const href = answer.trim();
+      // Where it is now: remote edits made while the dialog was open have moved it.
+      const now = linkAt(view.state, link);
       const { from, to, empty } = view.state.selection;
-      if (!empty) view.dispatch(view.state.tr.addMark(from, to, link.create({ href })));
+      const range = now ?? (empty ? null : { from, to });
+      if (!range) return;
+      const tr = view.state.tr.removeMark(range.from, range.to, link);
+      if (href) tr.addMark(range.from, range.to, link.create({ href }));
+      else if (!now) return;
+      view.dispatch(tr);
       view.focus();
     });
   }
@@ -193,7 +219,8 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
     'Mod-i': toggleMark(m.em!),
     'Mod-e': toggleMark(m.code!),
     'Mod-Shift-x': toggleMark(m.strike!),
-    'Mod-Shift-k': toggleLink(schema, ctx),
+    'Mod-k': editLink(schema, ctx),
+    'Mod-Shift-k': editLink(schema, ctx),
     'Mod-Alt-0': setBlockType(n.paragraph!),
     'Mod-Alt-1': setBlockType(n.heading!, { level: 1 }),
     'Mod-Alt-2': setBlockType(n.heading!, { level: 2 }),
@@ -213,7 +240,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
         return true;
       },
     ),
-    Backspace: undoInputRule,
+    Backspace: chainCommands(undoInputRule, liftAtItemStart(n.list_item!)),
     ...tableKeys(),
     Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
     'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
@@ -243,7 +270,7 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: TYPING, type: '``` then Enter', does: 'Code block (```python for a language)' },
   { group: TYPING, type: '[^label]', does: 'Footnote: a new one is added at the end' },
   { group: TYPING, type: '^[text]', does: 'Inline note' },
-  { group: TYPING, keys: ['Backspace'], does: 'Straight after a cue: back to what you typed' },
+  { group: TYPING, keys: ['Backspace'], does: 'Straight after a cue: back to what you typed. At the start of a list item: the item a level out' },
   { group: WRITING, type: '@', does: 'Cite: choose from the bibliography the header names' },
   { group: WRITING, type: '[@smith2020, p. 3]', does: 'A citation as Pandoc writes it (@smith2020 alone cites in the text)' },
   { group: WRITING, type: '![caption](plot.png)', does: 'Image; or paste or drop an image file' },
@@ -256,7 +283,7 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: KEYS, keys: ['Mod-i'], does: 'Italic' },
   { group: KEYS, keys: ['Mod-e'], does: 'Code' },
   { group: KEYS, keys: ['Mod-Shift-x'], does: 'Struck through' },
-  { group: KEYS, keys: ['Mod-Shift-k'], does: 'Link the selected text' },
+  { group: KEYS, keys: ['Mod-k', 'Mod-Shift-k'], does: 'Link the selected text; in a link, change its address (empty: no link). ⌘-click a link to open it' },
   { group: KEYS, keys: ['Mod-Alt-1', 'Mod-Alt-2', 'Mod-Alt-3'], does: 'Heading 1, 2, 3' },
   { group: KEYS, keys: ['Mod-Alt-0'], does: 'Plain paragraph' },
   { group: KEYS, keys: ['Mod-Shift-8'], does: 'Bullet list (in a numbered list: bullets instead)' },

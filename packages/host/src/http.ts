@@ -337,7 +337,10 @@ const fileRoutes: Route[] = [
       return send(res, 200, { from, to, commit });
     }
     checkPortable(to);
-    if (existsSync(absTo)) throw new HttpError(409, `${to} already exists`);
+    // Only the case changed (drama to Drama): on a file system that ignores case (macOS, Windows) the new
+    // name is there already, as this same file, and is no clash.
+    const caseOnly = from.toLowerCase() === to.toLowerCase() && sameFile(absFrom, absTo);
+    if (existsSync(absTo) && !caseOnly) throw new HttpError(409, `${to} already exists`);
     // A folder moves with everything in it, but never into itself.
     const isFolder = lstatSync(absFrom).isDirectory();
     if (isFolder && to.startsWith(`${from}/`)) throw new HttpError(400, 'A folder cannot move into itself');
@@ -348,10 +351,16 @@ const fileRoutes: Route[] = [
     if (why) throw new HttpError(403, why);
     const commit = await host.serial(async () => {
       await host.requireWritable();
-      if (isFolder) await host.dropRoomsUnder(from);
-      else await host.dropRoom(from);
+      if (isFolder) await host.dropRoomsUnder(from, to);
+      else await host.dropRoom(from, to);
       await mkdir(dirname(absTo), { recursive: true });
-      await renameOver(absFrom, absTo);
+      if (caseOnly) {
+        // Through a name of its own, so every file system takes the new case (git.stage and
+        // commitPaths then record it, the old name as gone).
+        const aside = `${absFrom}.kuraa-rename-${randomBytes(4).toString('hex')}`;
+        await renameOver(absFrom, aside);
+        await renameOver(aside, absTo);
+      } else await renameOver(absFrom, absTo);
       if (title !== undefined && !isFolder) await host.setTitle(to, title);
       // Files of spaces stay in their spaces, at their new paths (0069).
       await host.carrySpaces(from, to, isFolder);
@@ -379,6 +388,17 @@ const fileRoutes: Route[] = [
     send(res, 200, { path, commit });
   }),
 ];
+
+/** Whether two paths name one file (or folder): the same one on disk, as on a file system that ignores case. */
+function sameFile(a: string, b: string): boolean {
+  try {
+    const x = lstatSync(a);
+    const y = lstatSync(b);
+    return x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
+}
 
 const historyRoutes: Route[] = [
   route('GET', '/api/history', async ({ host, res, q }) => {
@@ -887,7 +907,7 @@ async function gitBackend(host: Host, req: IncomingMessage, res: ServerResponse,
 export function serveStaticFrom(root: string | undefined, path: string, res: ServerResponse): boolean {
   if (!root) {
     res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('kuraa host. Open the web client and point it at this URL.');
+    res.end('Kuraa host. Open the web client and point it at this URL.');
     return true;
   }
   const base = resolve(root);

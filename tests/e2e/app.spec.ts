@@ -26,7 +26,7 @@ async function openFile(page: Page, path: string): Promise<void> {
 test('the first run welcomes you and asks your name; the menu changes it', async ({ page }) => {
   const path = await createNotes();
   await page.goto('/');
-  await expect(page.getByRole('dialog', { name: 'Welcome to kuraa' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Welcome to Kuraa' })).toBeVisible();
   await expect(page.getByText('What should we call you?')).toBeVisible();
   await expect(page.getByLabel('Your name')).toBeFocused();
   // No link brought the host's address and access code, so they are asked for too.

@@ -1,5 +1,7 @@
 # 0076 · A quieter sidebar, and Settings in subpanels
 
+*Since [0080](0080-tester-fixes.md):* **Sync now** is back, in the workspace's menu; with no document open, the light is the host's (green while it answers), not grey.
+
 *Since [0078](0078-restrictive-wins.md):* Account recovery holds the recovery key alone: trustees, escrow and checked email addresses are gone.
 
 > Changes [0065](0065-no-menu.md) (⚙ at the foot of the sidebar; Search and Sync beside **+**),

@@ -81,7 +81,7 @@ if (dry) {
 }
 writeFileSync(APP, text.replace(/("version":\s*")[^"]+(")/, `$1${version}$2`));
 git('commit', '-q', '-m', `Release ${tag}`, '--', 'apps/desktop/package.json');
-git('tag', '-a', tag, '-m', `kuraa ${version}`);
+git('tag', '-a', tag, '-m', `Kuraa ${version}`);
 // Both or neither: a tag without its commit on main, or the other way round, is no release.
 git('push', '--atomic', 'origin', 'main', tag);
 console.log(`release: pushed ${tag}. Check tests it, then the Release workflow builds and publishes it (Actions on GitHub shows how it is going).`);

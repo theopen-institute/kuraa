@@ -207,7 +207,15 @@ function insertAt(doc: PMNode, anchor: string, text: string): PMNode {
 }
 
 const head = (dir: string) => git(dir, 'rev-parse', 'HEAD');
-const file = (dir: string) => readFileSync(join(dir, 'notes.md'), 'utf8');
+/** The file as it is now; none while git replaces it (it takes a file away before writing the new one). */
+const file = (dir: string) => {
+  try {
+    return readFileSync(join(dir, 'notes.md'), 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw e;
+  }
+};
 
 describe('devices of one workspace', () => {
   it('pair by invite link, and bring each other’s commits in', async () => {

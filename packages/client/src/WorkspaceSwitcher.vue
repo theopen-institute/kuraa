@@ -3,9 +3,8 @@
 // workspaces to switch between and, apart below them where the host allows
 // it, Add a workspace… (a new one, one joined from an invite link, or a folder
 // opened); Sync now, where the workspace syncs with other devices or an online
-// copy (saying how many saves the online copy lacks); and Workspace settings…
-// (where inviting people and removing the workspace are), or Settings… with
-// none open. A host of one folder shows just that one.
+// copy (saying how many saves the online copy lacks). Settings are the ⚙ at
+// the foot of the sidebar. A host of one folder shows just that one.
 import { ref } from 'vue';
 import type { HubWorkspace } from './api.js';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
@@ -21,7 +20,7 @@ const props = defineProps<{
   /** It syncs with something (devices, an online copy): the saves its online copy lacks, and whether a sync is going on now. */
   sync?: { pending: number; busy: boolean } | null;
 }>();
-const emit = defineEmits<{ switch: [id: string]; add: []; settings: []; sync: [] }>();
+const emit = defineEmits<{ switch: [id: string]; add: []; sync: [] }>();
 
 const menu = ref<{ x: number; y: number; items: ContextItem[] } | null>(null);
 
@@ -41,10 +40,12 @@ function open(e: MouseEvent) {
       testid: 'workspace-sync',
       divided: props.workspaces.length > 0,
     }] : []),
-    props.current !== null
-      ? { label: S.workspaceSwitcher.settings, run: () => emit('settings'), testid: 'workspace-settings', divided: props.workspaces.length > 0 && !props.sync }
-      : { label: S.workspaceSwitcher.allSettings, run: () => emit('settings'), testid: 'workspace-settings', divided: props.workspaces.length > 0 },
-    ...(props.canAdd ? [{ label: S.workspaceSwitcher.add, run: () => emit('add'), testid: 'workspace-add' }] : []),
+    ...(props.canAdd ? [{
+      label: S.workspaceSwitcher.add,
+      run: () => emit('add'),
+      testid: 'workspace-add',
+      divided: props.workspaces.length > 0 && !(props.current !== null && props.sync),
+    }] : []),
   ];
   menu.value = { x: box.left, y: box.bottom + 4, items };
 }

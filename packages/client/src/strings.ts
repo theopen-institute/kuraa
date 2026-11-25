@@ -175,6 +175,8 @@ export const S = {
     renameWorkspaceTitle: 'Rename this workspace for everyone in it',
     removeWorkspace: 'Remove from this list…',
     removeWorkspaceTitle: 'Take this workspace off this list; its folder stays as it is',
+    workspaceSettings: 'Workspace settings',
+    settings: 'Settings',
     search: 'Search…',
     searchTitle: (key: string) => `Search every file (${key})`,
     help: 'Markdown and shortcuts',
@@ -892,8 +894,6 @@ export const S = {
   workspaceSwitcher: {
     cannotOpen: ' (cannot open)',
     add: 'Add a workspace…',
-    settings: 'Workspace settings…',
-    allSettings: 'Settings…',
     syncNow: 'Sync now',
     syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
     syncing: 'Syncing…',

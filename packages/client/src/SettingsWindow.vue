@@ -228,6 +228,7 @@ useDialog(root, () => {
             :owner-off="ownerOff"
             :tools-key="toolsKey"
             :workspace-name="workspace?.name ?? null"
+            :features="features"
             @saved="emit('saved')"
           />
         </div>

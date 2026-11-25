@@ -1,5 +1,7 @@
 # 0064 · Four kinds of settings, in one window
 
+*Since [0083](0083-host-components-by-kind.md): Host is in two parts, its components by kind (each kind's switches with it) and its own settings.*
+
 *Since [0079](0079-host-not-server.md): the Server section is called **Host**.*
 
 *Since [0065](0065-no-menu.md): there is no menu. ⚙ (and ⌘,) open Settings at the open document, else the workspace; the document's commands are in its ⋯ menu; Search and Sync beside + in the sidebar.*

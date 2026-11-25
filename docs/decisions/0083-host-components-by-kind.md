@@ -1,5 +1,7 @@
 # 0083 · Settings › Host: its components by kind, its own settings apart
 
+*Since [0084](0084-components-under-host.md): the components are a section of their own, **Components**, listed under Host; Host keeps its own settings.*
+
 > Changes how Settings › Host ([0064](0064-four-kinds-of-settings.md), [0076](0076-a-quieter-sidebar.md))
 > is laid out. What each setting is, who may change it, and how it is saved and applied are as
 > before ([0047](0047-browser-equals-desktop.md), [0063](0063-settings-keep-what-you-change.md)).

@@ -595,9 +595,9 @@ export const S = {
   },
 
   components: {
-    /** Settings › Host, first part (decision 0083): every component the host has, by kind. */
+    /** Settings › Components (decisions 0083, 0084): every component the host has, by kind. */
     title: 'Components',
-    about: 'The parts that give this host what it can do, loaded as it starts. Each is of one kind; the kinds below are all there are.',
+    about: 'Loaded as the host starts, each of one kind:',
     kindsLabel: 'Kinds of component',
     /** Each kind: its name, and one line saying what a component of that kind is. */
     kinds: {
@@ -650,7 +650,7 @@ export const S = {
     /** Settings › Workspace: which features this workspace uses (0082). */
     title: 'Features',
     about: 'What this workspace does beyond writing, for everyone in it: turning one on or off is saved in the workspace, and each one keeps what it makes in files of its own, beside the documents.',
-    offHere: 'Off on this computer’s host: turn it on in Settings › Host.',
+    offHere: 'Off on this computer’s host: turn it on in Settings › Components.',
     mayNotChange: 'Only someone who may change the workspace’s settings turns features on and off.',
     turnedOn: (label: string) => `${label} is on for this workspace.`,
     turnedOff: (label: string) => `${label} is off for this workspace. What it made is kept.`,
@@ -860,6 +860,9 @@ export const S = {
     workspaceScope: (name: string) => `Everyone in ${quote(name)}. Kept in the workspace.`,
     hostScope: 'Everyone using it, and every workspace on it. Only you, its owner, can change it.',
     hostElsewhere: 'Everyone using it, and every workspace on it. Only whoever runs it can change its settings.',
+    /** Settings › Components (0084): the host's, beneath it in the list. */
+    componentsScope: 'What this host can do, for everyone using it and every workspace on it. Only you, its owner, switch them.',
+    componentsElsewhere: 'What this host can do, for everyone using it and every workspace on it. Only whoever runs it switches them.',
     /** Beneath Host in the list: whose it is. */
     thisComputer: 'This computer',
     elsewhere: 'Shown only',
@@ -885,9 +888,6 @@ export const S = {
     advanced: 'Advanced',
     bootstrap: 'Starting points for finding other computers, one per line as address:port. Leave empty to use the public ones; a private network names its own.',
     relays: 'Relays, one key per line, for computers that cannot connect to each other directly (some office, campus and phone networks). The other computers of a workspace relay for each other already; name one here when a workspace is on only two. Whoever runs one gets its key from kuraa-host relay. A relay passes on what it cannot read.',
-    /** Settings › Host, second part (decision 0083): how the host program itself works. */
-    hostSettings: 'Host settings',
-    hostSettingsAbout: 'How the host itself works, for every workspace on it.',
     /** Where its settings are not this page's to change, and the hub gives no reason. */
     notYours: 'Other computers, limits on running code, new workspaces and saving: set by whoever runs this host.',
     running: 'Running code',

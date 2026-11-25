@@ -25,11 +25,13 @@ import type { EditorView } from 'prosemirror-view';
 import type { HostApi, HubApi, WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
-import { SETTINGS_SECTIONS, type SettingsSection } from './settingsSections.js';
+import { SETTINGS_SECTIONS, SUB_SECTIONS, type SettingsSection } from './settingsSections.js';
+import { useHostSettings } from './hostSettings.js';
 import type { Shell } from './shell.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import SettingsDocument from './SettingsDocument.vue';
+import SettingsComponents from './SettingsComponents.vue';
 import SettingsHost from './SettingsHost.vue';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsYou from './SettingsYou.vue';
@@ -88,17 +90,21 @@ const section = ref<SettingsSection>(props.section);
 const you = useTemplateRef<InstanceType<typeof SettingsYou>>('you');
 const documentPart = useTemplateRef<InstanceType<typeof SettingsDocument>>('documentPart');
 const host = useTemplateRef<InstanceType<typeof SettingsHost>>('host');
+/** The host's settings as its owner changes them: one form for Host and Components, applied as the window closes. */
+const hostForm = useHostSettings(props.hub, props.canChangeSettings, () => emit('saved'));
 
-/** What each section is called in the list, with what it is about now beneath. */
+/** What each section is called in the list, with what it is about now beneath; Components under Host, as part of it. */
 const nav = computed(() => SETTINGS_SECTIONS.map((id) => ({
   id,
   label: S.sections[id],
   about: id === 'you' ? props.settings.name
     : id === 'document' ? props.docName ?? ''
     : id === 'workspace' ? props.workspace?.name ?? ''
-    : props.canChangeSettings ? S.sections.thisComputer : S.sections.elsewhere,
+    : id === 'host' ? (props.canChangeSettings ? S.sections.thisComputer : S.sections.elsewhere)
+    : '',
   /** Nothing here to change now: shown, but quieter. */
-  idle: (id === 'document' && !props.path) || (id === 'workspace' && !props.workspace),
+  idle: (id === 'document' && !props.path) || (id === 'workspace' && !props.workspace) || (id === 'host' && !props.canChangeSettings),
+  sub: !!SUB_SECTIONS[id],
 })));
 
 /** The section's heading, and who it applies to. */
@@ -107,13 +113,14 @@ const heading = computed(() => {
     case 'you': return { title: S.sections.you, scope: S.sections.youScope };
     case 'document': return { title: props.docName ?? S.sections.document, scope: props.path && props.docName ? S.sections.documentScope(props.docName) : '' };
     case 'workspace': return { title: props.workspace?.name ?? S.sections.workspace, scope: props.workspace ? S.sections.workspaceScope(props.workspace.name) : '' };
+    case 'components': return { title: S.sections.components, scope: props.canChangeSettings ? S.sections.componentsScope : S.sections.componentsElsewhere };
     default: return { title: props.canChangeSettings ? S.preferences.host : S.sections.host, scope: props.canChangeSettings ? S.sections.hostScope : S.sections.hostElsewhere };
   }
 });
 
 /** A host setting was changed: applied as the window closes, and said by Done. */
-const hostChanged = computed(() => !!host.value?.changed);
-const busy = computed(() => !!host.value?.busy);
+const hostChanged = computed(() => hostForm.changed.value);
+const busy = computed(() => hostForm.busy.value);
 
 /** Closing was refused (a value not valid): a way out that keeps nothing not saved yet. */
 const stuck = ref(false);
@@ -135,7 +142,7 @@ async function close(then?: () => void): Promise<boolean> {
     stuck.value = true;
     return false;
   }
-  if (hostChanged.value && !(await host.value!.save())) {
+  if (hostChanged.value && !(await hostForm.save())) {
     section.value = 'host';
     stuck.value = true;
     return false;
@@ -170,7 +177,7 @@ useDialog(root, () => {
             v-for="n in nav"
             :key="n.id"
             type="button"
-            :class="['settings-tab', { active: section === n.id, idle: n.idle }]"
+            :class="['settings-tab', { active: section === n.id, idle: n.idle, sub: n.sub }]"
             :aria-current="section === n.id ? 'page' : undefined"
             :data-testid="`settings-tab-${n.id}`"
             @click="section = n.id"
@@ -222,14 +229,19 @@ useDialog(root, () => {
             v-show="section === 'host'"
             ref="host"
             :hub="hub"
-            :api="api"
             :shell="shell"
+            :form="hostForm"
             :can-change-settings="canChangeSettings"
             :owner-off="ownerOff"
+          />
+          <SettingsComponents
+            v-show="section === 'components'"
+            :api="api"
+            :form="hostForm"
+            :can-change-settings="canChangeSettings"
             :tools-key="toolsKey"
             :workspace-name="workspace?.name ?? null"
             :features="features"
-            @saved="emit('saved')"
           />
         </div>
       </div>

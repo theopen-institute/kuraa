@@ -202,9 +202,16 @@ export function findPassage(text: string, p: Extract<About, { kind: 'passage' }>
   return best ? { from: best.from, to: best.from + p.exact.length } : null;
 }
 
-/** An annotation's kind, from its motivation: a comment, a reply, or one this version does not show. */
-export function kindOf(item: Item): 'comment' | 'reply' | 'other' {
-  return item.motivation === 'commenting' ? 'comment' : item.motivation === 'replying' ? 'reply' : 'other';
+/** An annotation's kind, from its motivation: a comment, a reply, a coding, or one this version does not show. */
+export function kindOf(item: Item): 'comment' | 'reply' | 'coding' | 'other' {
+  return item.motivation === 'commenting' ? 'comment' : item.motivation === 'replying' ? 'reply' : item.motivation === 'classifying' ? 'coding' : 'other';
+}
+
+/** The code a coding names (its body's source, purpose classifying); null if it names none. */
+export function codeOf(item: Item): string | null {
+  const bodies = Array.isArray(item.body) ? item.body : [item.body];
+  for (const b of bodies) if (isObject(b) && typeof b.source === 'string' && (b.purpose === undefined || b.purpose === 'classifying')) return b.source;
+  return null;
 }
 
 /** What an annotation says: its textual body's text. */
@@ -224,16 +231,16 @@ export function creatorOf(item: Item): string {
 export function describePages(before: string | null, after: string | null): string | null {
   const was = new Map(readPage(before).map((i) => [String(i.id), i]));
   const now = new Map(readPage(after).map((i) => [String(i.id), i]));
-  const count = { comment: [0, 0, 0], reply: [0, 0, 0], other: [0, 0, 0] } as Record<'comment' | 'reply' | 'other', number[]>;
+  const count = { comment: [0, 0, 0], reply: [0, 0, 0], coding: [0, 0, 0], other: [0, 0, 0] } as Record<'comment' | 'reply' | 'coding' | 'other', number[]>;
   for (const [id, i] of now) {
     const w = was.get(id);
     if (!w) count[kindOf(i)]![0]!++;
     else if (JSON.stringify(canonical(w, true)) !== JSON.stringify(canonical(i, true))) count[kindOf(i)]![2]!++;
   }
   for (const [id, i] of was) if (!now.has(id)) count[kindOf(i)]![1]!++;
-  const words = { comment: ['comment', 'comments'], reply: ['reply', 'replies'], other: ['annotation', 'annotations'] } as const;
+  const words = { comment: ['comment', 'comments'], reply: ['reply', 'replies'], coding: ['coding', 'codings'], other: ['annotation', 'annotations'] } as const;
   const parts: string[] = [];
-  for (const k of ['comment', 'reply', 'other'] as const) {
+  for (const k of ['coding', 'comment', 'reply', 'other'] as const) {
     const [added, removed, changed] = count[k];
     const say = (n: number, what: string) => n && parts.push(`${n} ${words[k][n === 1 ? 0 : 1]} ${what}`);
     say(added!, 'added');

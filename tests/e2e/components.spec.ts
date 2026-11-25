@@ -1,5 +1,5 @@
-// Settings › Host shows what the host's flags turned on (engines, where code
-// runs, formats) and changes none of it; Settings › You has each person's editing
+// Settings › Components shows what the host's flags turned on (engines, where code
+// runs, formats) and changes none of it (decision 0084: beneath Host, its own section); Settings › You has each person's editing
 // behaviour, theirs to turn on and off (decision 0064). Documents cannot put script in the page.
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -35,7 +35,7 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
 }
 
 /** Settings, at a section. */
-async function openSettingsAt(page: Page, section: 'you' | 'host'): Promise<void> {
+async function openSettingsAt(page: Page, section: 'you' | 'host' | 'components'): Promise<void> {
   await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
   await page.getByTestId(`settings-tab-${section}`).click();
@@ -53,14 +53,19 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await expect(page.getByTestId('editor')).toContainText('```{r}');
 
+    // Host: how the host itself works, not this page's to change; its components a section of their own, beneath it (0084).
     await openSettingsAt(page, 'host');
+    await expect(page.getByTestId('host-settings').getByTestId('settings-owner-off')).toBeVisible();
+    await expect(page.getByTestId('components')).toBeHidden();
+    await page.getByTestId('settings-tab-components').click();
+    await expect(page.getByTestId('settings-title')).toHaveText('Components');
+    await expect(page.getByTestId('settings-scope')).toContainText('Only whoever runs it switches them');
     await expect(page.getByTestId('components')).toContainText('--format');
-    // Each component once, under its kind (0083); the host's own settings apart, beneath, and not this page's to change.
+    // Each component once, under its kind (0083).
     for (const kind of ['Document formats', 'Languages', 'Environments', 'Syncs']) await expect(page.getByTestId('component-kinds')).toContainText(kind);
     await expect(page.getByTestId('components-formats')).toContainText('R Markdown');
     await expect(page.getByTestId('components-environments').getByTestId('environment:podman')).toBeVisible();
-    await expect(page.getByTestId('host-settings').getByTestId('settings-owner-off')).toBeVisible();
-    await expect(page.getByTestId('preferences')).toHaveCount(0);
+    await expect(page.getByTestId('preferences-components')).toHaveCount(0);
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R')).toBeDisabled();
     // Formats: shown, and not changed here (this page is not the host's owner).
@@ -138,7 +143,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
 test('on the shared host too, only your editing behaviour can change', async ({ page }) => {
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
-  await openSettingsAt(page, 'host');
+  await openSettingsAt(page, 'components');
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();

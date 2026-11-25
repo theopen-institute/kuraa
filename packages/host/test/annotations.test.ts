@@ -199,6 +199,8 @@ describe('comments', () => {
     expect(under.map((r) => r.id)).toEqual(['urn:uuid:k1']);
     expect(NOTES.slice(under[0]!.at.from, under[0]!.at.to)).toBe('the council');
     expect(await json(`/api/features/annotations/retrieve?code=${encodeURIComponent(institutions)}&below=0`)).toEqual([]);
+    // Codings are not comments: the newest comments leave them out.
+    expect(await json('/api/features/annotations/recent')).toEqual([]);
 
     // Govt merged into Council: its codings count as Council's, and nobody's file is rewritten.
     const before = file(OWN);
@@ -206,12 +208,12 @@ describe('comments', () => {
     expect(await json('/api/features/annotations/counts')).toEqual({ [council]: 2 });
     expect(file(OWN)).toBe(before);
     expect(codeOf(readPage(file(OWN)).find((i) => i.id === 'urn:uuid:k2')!)).toBe(govt);
-    // Deleting a code in use keeps it, marked deleted; one not in use goes.
+    // Deleting a code keeps it, marked deleted (OWL's deprecated): a coding of it, someone's own, still says what it was.
     expect((await post({ op: 'delete', id: council })).status).toBe(200);
     expect((await post({ op: 'delete', id: spare })).status).toBe(200);
     book = readCodebook(file('codebook.jsonld'));
     expect(book.codes.find((c) => c.id === council)).toMatchObject({ deleted: true });
-    expect(book.codes.find((c) => c.id === spare)).toBeUndefined();
+    expect(book.codes.find((c) => c.id === spare)).toMatchObject({ label: 'Spare', deleted: true });
     expect(textOf(k1)).toBe('');
   });
 });

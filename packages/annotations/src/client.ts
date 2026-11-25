@@ -116,10 +116,11 @@ function codesOf(ctx: FeatureClientContext): Codes {
 
 /** Whether the workspace codes. */
 const coding = (ctx: FeatureClientContext) => ctx.status().settings.coding === true;
-/** A coding's code, as it is now (merged codes followed), or null. */
+/** A coding's code, as it is now (merged codes followed), or null: none, or one deleted (shown as no longer in the codebook). */
 const codeFor = (codes: Codes, item: Item): Code | null => {
   const id = codeOf(item);
-  return id ? resolveCode(codes.book, id) : null;
+  const code = id ? resolveCode(codes.book, id) : null;
+  return code && !code.deleted ? code : null;
 };
 
 /** The live document's store, by path, for its panel. */
@@ -667,6 +668,22 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   let store: Store | null = null;
   /** The passage the find box was last given the focus for: given it once, as it appears, never taken back on a redraw. */
   let focusedFor: object | null = null;
+  /**
+   * What is typed or chosen in the panel's boxes, by box (`label:<code>`, `new`…): drawing the panel again (someone else
+   * codes, the counts change) keeps it, and the focus where it was, until it is saved or given up.
+   */
+  const drafts = new Map<string, string>();
+  const kept = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(box: T, key: string, initial: string): T => {
+    box.dataset.key = key;
+    box.value = drafts.get(key) ?? initial;
+    const keep = () => drafts.set(key, box.value);
+    if (box instanceof HTMLSelectElement || (box instanceof HTMLInputElement && box.type === 'color')) box.addEventListener('change', keep);
+    box.addEventListener('input', keep);
+    return box;
+  };
+  const forget = (prefix: string) => {
+    for (const k of [...drafts.keys()]) if (k === prefix || k.endsWith(`:${prefix}`)) drafts.delete(k);
+  };
   const loadCounts = async () => {
     try {
       const got = (await pctx.request('GET', 'counts')) as unknown as { [id: string]: number };
@@ -716,10 +733,26 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       store = now;
       store?.listeners.add(draw);
     }
+    // Where the focus is, to put it back once drawn again.
+    const active = document.activeElement as (HTMLElement & { selectionStart?: number | null; selectionEnd?: number | null }) | null;
+    const focusKey = active && body.contains(active) ? active.dataset.key ?? null : null;
+    const caret = focusKey ? [active!.selectionStart ?? null, active!.selectionEnd ?? null] as const : null;
     body.replaceChildren();
     if (!coding(pctx)) {
       body.append(el('p', { cls: 'kuraa-note', text: 'Coding is off for this workspace. Turn it on in Settings › Workspace, under Annotations.' }));
       return;
+    }
+    if (focusKey) {
+      queueMicrotask(() => {
+        const again = body.querySelector<HTMLElement & { setSelectionRange?: (a: number, b: number) => void }>(`[data-key="${CSS.escape(focusKey)}"]`);
+        if (!again) return;
+        again.focus();
+        if (caret && caret[0] !== null && caret[1] !== null && again.setSelectionRange) {
+          try {
+            again.setSelectionRange(caret[0], caret[1]);
+          } catch { /* a box with no caret */ }
+        }
+      });
     }
     if (error) body.append(el('p', { cls: 'kuraa-note kuraa-error', text: error }));
     const tree = codeTree(codes.book);
@@ -731,6 +764,7 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       const box = el('div', { cls: 'kuraa-thread kuraa-new', testid: 'codes-apply-box' });
       box.append(el('blockquote', { text: s.coding.quote }));
       const find = el('input', { testid: 'codes-filter' }) as HTMLInputElement;
+      find.dataset.key = 'find';
       find.placeholder = 'Find a code, or name a new one';
       find.value = filter;
       find.oninput = () => {
@@ -819,10 +853,15 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       list.append(row);
     }
     body.append(list);
-    const name = el('input', { testid: 'codes-new-name' }) as HTMLInputElement;
+    const name = kept(el('input', { testid: 'codes-new-name' }) as HTMLInputElement, 'new', '');
     name.placeholder = 'A new code';
     const add = () => {
-      if (name.value.trim()) void change({ op: 'add', label: name.value.trim() });
+      if (!name.value.trim()) return;
+      void change({ op: 'add', label: name.value.trim() }).then((id) => {
+        if (id === null) return;
+        forget('new');
+        draw();
+      });
     };
     name.onkeydown = (e) => {
       if (e.key === 'Enter') add();
@@ -834,14 +873,12 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   function codeEditor(code: Code) {
     const others = codeTree(codes.book).filter(({ code: c }) => c.id !== code.id);
     const box = el('div', { cls: 'kuraa-composer', testid: 'codes-editor' });
-    const label = el('input', { testid: 'codes-label' }) as HTMLInputElement;
-    label.value = code.label;
-    const definition = el('textarea', { testid: 'codes-definition' }) as HTMLTextAreaElement;
+    const label = kept(el('input', { testid: 'codes-label' }) as HTMLInputElement, `label:${code.id}`, code.label);
+    const definition = kept(el('textarea', { testid: 'codes-definition' }) as HTMLTextAreaElement, `definition:${code.id}`, code.definition ?? '');
     definition.placeholder = 'What it means, and when to use it';
-    definition.value = code.definition ?? '';
     const colour = el('input', { testid: 'codes-colour' }) as HTMLInputElement;
     colour.type = 'color';
-    colour.value = code.color ?? '#888888';
+    kept(colour, `colour:${code.id}`, code.color ?? '#888888');
     const parent = el('select', { testid: 'codes-parent' }) as HTMLSelectElement;
     const top = el('option', { text: '(at the top)' });
     top.value = '';
@@ -851,16 +888,21 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       o.value = c.id;
       parent.append(o);
     }
-    parent.value = code.broader ?? '';
+    kept(parent, `parent:${code.id}`, code.broader ?? '');
+    // Done only once saved: refused (a name left empty, a parent under itself), it stays open as typed, saying why.
+    const done = (id: string | null) => {
+      if (id === null) return false;
+      editing = null;
+      forget(code.id);
+      draw();
+      return true;
+    };
     box.append(
       el('label', { text: 'Name ' }, label),
       el('label', { text: 'Means ' }, definition),
       el('label', { text: 'Colour ' }, colour),
       el('label', { text: 'Under ' }, parent),
-      el('div', { cls: 'kuraa-actions' }, button('Save', () => void change({ op: 'change', id: code.id, label: label.value, definition: definition.value, color: colour.value, broader: parent.value || null }).then(() => {
-        editing = null;
-        draw();
-      }), 'codes-save')),
+      el('div', { cls: 'kuraa-actions' }, button('Save', () => void change({ op: 'change', id: code.id, label: label.value, definition: definition.value, color: colour.value, broader: parent.value || null }).then(done), 'codes-save')),
     );
     const into = el('select', { testid: 'codes-merge-into' }) as HTMLSelectElement;
     for (const { code: c, depth } of others) {
@@ -869,19 +911,18 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       into.append(o);
     }
     if (others.length) {
+      kept(into, `into:${code.id}`, others[0]!.code.id);
       box.append(el('div', { cls: 'kuraa-actions' }, el('label', { text: 'Merge into ' }, into), button('Merge', () => void pctx.ui.askConfirm(`Merge “${code.label}” into the code chosen? Passages coded with it count as that code’s, everyone’s.`, 'Merge').then((ok) => {
         if (!ok) return;
-        void change({ op: 'merge', id: code.id, into: into.value }).then(() => {
-          editing = null;
-          void loadCounts();
+        void change({ op: 'merge', id: code.id, into: into.value }).then((id) => {
+          if (done(id)) void loadCounts();
         });
       }), 'codes-merge')));
     }
-    box.append(el('div', { cls: 'kuraa-actions' }, button('Delete…', () => void pctx.ui.askConfirm(`Delete the code “${code.label}”? Codes under it move up. Where passages are coded with it, it is kept, marked deleted: the codings are their makers’.`, 'Delete', true).then((ok) => {
+    box.append(el('div', { cls: 'kuraa-actions' }, button('Delete…', () => void pctx.ui.askConfirm(`Delete the code “${code.label}”? Codes under it move up. It is kept in the codebook, marked deleted, so passages coded with it (everyone’s own) still say what they were.`, 'Delete', true).then((ok) => {
       if (!ok) return;
-      void change({ op: 'delete', id: code.id }).then(() => {
-        editing = null;
-        void loadCounts();
+      void change({ op: 'delete', id: code.id }).then((id) => {
+        if (done(id)) void loadCounts();
       });
     }), 'codes-delete', 'danger')));
     return box;

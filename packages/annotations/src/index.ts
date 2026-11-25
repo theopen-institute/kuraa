@@ -9,9 +9,10 @@
 // passage's ends ({ from, to }) while it is found, or `lost` once its passage
 // is gone (kept, never dropped).
 import { createTextType } from '@kuraa/format-text';
+import { mergeLines } from '@kuraa/kernel';
 import { OWN_NAME, defineFeature, type FeatureResponse, type Json } from '@kuraa/feature-kit/host';
 import { EXTENSION, SUFFIX, aboutOf, codeOf, creatorOf, describePages, findPassage, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
-import { CODEBOOK, COLOURS, codeAndBelow, mergeCodebooks, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
+import { CODEBOOK, COLOURS, codeAndBelow, mergeCodebooks, parseCodebook, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
 import type { FeatureContext, FeatureSettings } from '@kuraa/feature-kit/host';
 
 export * from './format.js';
@@ -19,8 +20,11 @@ export * from './codebook.js';
 
 /** Whether a workspace codes (a setting of its own: comments are for any workspace, coding a method a project chooses). */
 export const codingOn = (settings: FeatureSettings) => settings.coding === true;
-/** Where a workspace keeps its codebook: its setting, else codebook.jsonld at its top. */
-export const codebookPath = (settings: FeatureSettings) => (typeof settings.codebook === 'string' && /^[^/.][^\0]*\.jsonld$/.test(settings.codebook) && !settings.codebook.includes('..') ? settings.codebook : CODEBOOK);
+/**
+ * Where a workspace keeps its codebook: its setting (named codebook.jsonld at the top, or ending .codebook.jsonld, so that
+ * the codebook type knows it by its name and merges it as one), else codebook.jsonld at its top.
+ */
+export const codebookPath = (settings: FeatureSettings) => (typeof settings.codebook === 'string' && (settings.codebook === CODEBOOK || /^(?:[^/.\0][^\0]*\/)?[^/\0]+\.codebook\.jsonld$/.test(settings.codebook)) && !settings.codebook.split('/').includes('..') ? settings.codebook : CODEBOOK);
 
 /** An annotation in a room: the annotation, and while its passage is found, anchors at its ends. */
 export interface RoomAnnotation {
@@ -38,12 +42,19 @@ const pageType = {
   conflicts: () => 0,
 };
 
-/** The codebook: shown as JSON-LD text, merged by code (everyone's, changed at once on several devices). */
+/**
+ * The codebook: shown as JSON-LD text, merged by code (everyone's, changed at once on several devices). Known by its name
+ * (codebook.jsonld at the top, or a name ending .codebook.jsonld, as codebookPath allows): never a file elsewhere that
+ * happens to be called codebook.jsonld. Where a side is not a codebook (a hand edit gone wrong), merged line by line instead,
+ * a conflict kept for people to settle, never its codes taken for removed.
+ */
 const codebookType = {
-  ...createTextType({ id: 'codebook', label: 'Codebook', description: 'A workspace’s codes, for coding passages', files: [{ extensions: ['.jsonld'], language: 'json' }], priority: 4 }),
-  match: (path: string) => path === CODEBOOK || path.endsWith(`/${CODEBOOK}`) || path.endsWith('.codebook.jsonld'),
-  merge: (base: string, a: string, b: string) => ({ text: mergeCodebooks(base, a, b), conflicts: 0 }),
-  conflicts: () => 0,
+  ...createTextType({ id: 'codebook', label: 'Codebook', description: 'A workspace’s codes, for coding passages', files: [{ extensions: ['.jsonld'], language: 'json' }], priority: 4, version: 2 }),
+  match: (path: string) => path === CODEBOOK || path.endsWith('.codebook.jsonld'),
+  merge: (base: string, a: string, b: string, sides: Parameters<typeof mergeLines>[3]) => {
+    const merged = mergeCodebooks(base, a, b);
+    return merged === null ? mergeLines(base, a, b, sides) : { text: merged, conflicts: 0 };
+  },
 };
 
 /** Everyone's codings this device holds: in each person's file beside each document. */
@@ -123,6 +134,8 @@ export const annotationsFeature = defineFeature({
       return next;
     };
     const codebook = async () => readCodebook(await ctx.read(codebookPath(ctx.settings())));
+    /** The codebook to change: null (refused, never overwritten) where its file is not a codebook as it stands. */
+    const codebookToChange = async () => parseCodebook(await ctx.read(codebookPath(ctx.settings())));
     return {
       routes: [
         {
@@ -140,7 +153,8 @@ export const annotationsFeature = defineFeature({
           handle: ({ body, person }) => inTurn(async (): Promise<FeatureResponse> => {
             if (!codingOn(ctx.settings())) return { status: 409, body: { error: 'Coding is off for this workspace' } };
             const b = (body ?? {}) as { op?: string; id?: string; into?: string; label?: string; definition?: string | null; color?: string; broader?: string | null };
-            const book = await codebook();
+            const book = await codebookToChange();
+            if (!book) return { status: 409, body: { error: `${codebookPath(ctx.settings())} is not a codebook as it stands (perhaps an edit by hand went wrong): put it right first, and nothing of it is lost` } };
             const now = new Date().toISOString();
             const byId = new Map(book.codes.map((c) => [c.id, c]));
             const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined;
@@ -178,15 +192,14 @@ export const annotationsFeature = defineFeature({
                   c.modified = now;
                 }
               } else if (b.op === 'delete') {
-                const used = (await everyonesCodings(ctx)).some((x) => codeOf(x.item) === code.id);
                 for (const c of book.codes) if (c.broader === code.id) {
                   if (code.broader) c.broader = code.broader;
                   else delete c.broader;
                   c.modified = now;
                 }
-                // Codings name it (someone's own, not to be rewritten): kept, marked deleted. Else gone.
-                if (used) code.deleted = true;
-                else book.codes = book.codes.filter((c) => c.id !== code.id);
+                // Kept, marked deleted, never taken away: codings may name it that no device here can see (not yet saved, on
+                // another device, of a code merged into it), and they are their makers' own, not to be rewritten.
+                code.deleted = true;
               } else return { status: 400, body: { error: 'Not a change to the codebook' } };
               code.modified = now;
             }
@@ -250,7 +263,7 @@ export const annotationsFeature = defineFeature({
               const docText = await ctx.read(doc);
               for (const item of items) {
                 const kind = kindOf(item);
-                if (kind === 'other') continue;
+                if (kind !== 'comment' && kind !== 'reply') continue;
                 const about = aboutOf(item);
                 const found = about?.kind === 'passage' && docText !== null ? findPassage(docText, about) : null;
                 out.push({ path: doc, id: String(item.id), kind, text: textOf(item), by: creatorOf(item), created: String(item.created ?? ''), quote: about?.kind === 'passage' ? about.exact : null, at: found });

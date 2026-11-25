@@ -9,7 +9,7 @@ import { applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } fr
 import { prosemirrorToYXmlFragment, updateYFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { FRAGMENT, type FeatureJson, type PresenceUser, type RoomMessage } from './model.js';
-import { seedIn, updateIn, viewOf, whatChanged, type FeatureSeed, type FeatureView } from './features.js';
+import { featureChanges, seedIn, updateIn, viewOf, whatChanged, type FeatureSeed, type FeatureView } from './features.js';
 
 export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState, FeatureJson } from './model.js';
 export type { Anchors, FeatureSeed, FeatureView } from './features.js';
@@ -19,7 +19,7 @@ export type { Anchors, FeatureSeed, FeatureView } from './features.js';
  * the room for this host's person, from their files, seeded once it is there:
  * 0082), or a state (a session's, from another device, features and all).
  */
-export type RoomSeed = { doc: PMNode; features?: { person: string; seed: FeatureSeed } } | { state: Uint8Array };
+export type RoomSeed = { doc: PMNode; features?: { person: string; seed: FeatureSeed } } | { state: Uint8Array; own?: boolean };
 
 export interface RelayHooks {
   /** Throw to reject. Returns the user recorded for the connection. */
@@ -51,15 +51,17 @@ export interface RelayOptions {
 const HOST_ORIGIN = { kuraa: 'host' };
 
 /** Where a change to a room came from: one of this host's clients, the host, or another device. */
-export type UpdateSource = { from: 'client'; user: PresenceUser | null } | { from: 'host' } | { from: 'peer'; peer: string; user: PresenceUser | null };
+export type UpdateSource = { from: 'client'; user: PresenceUser | null } | { from: 'host' } | { from: 'peer'; peer: string; user: PresenceUser | null; sync?: boolean };
 
-interface PeerOrigin { kuraa: 'peer'; peer: string; user: PresenceUser | null }
+/** A change from another device: who passed it on (and, `via>origin`, made it); a sync holds anyone's, whoever made them. */
+interface PeerOrigin { kuraa: 'peer'; peer: string; user: PresenceUser | null; sync?: boolean }
 const isPeerOrigin = (o: unknown): o is PeerOrigin => typeof o === 'object' && o !== null && (o as PeerOrigin).kuraa === 'peer';
 
 export class Relay {
   private readonly server: Server;
   private readonly path: string;
   private readonly updateListeners = new Set<(room: string, update: Uint8Array, source: UpdateSource) => void>();
+  private readonly featureListeners = new Set<(room: string, id: string, person: string, keys: string[], source: UpdateSource) => void>();
   private readonly awarenessListeners = new Set<(room: string, update: Uint8Array, peer: string | null) => void>();
   /** Awareness clients each other device brought into each room: `room\0peer` → client ids. */
   private readonly peerClients = new Map<string, Set<number>>();
@@ -101,7 +103,20 @@ export class Relay {
       onLoadDocument: async ({ documentName, document }) => {
         const seed = await this.hooks.load(documentName);
         if (!seed) throw new Error(`Unknown or stale room: ${documentName}`);
-        if ('state' in seed) Y.applyUpdate(document, seed.state, HOST_ORIGIN);
+        // Who changes which keys of whose feature maps (0082), for the host to write a person's file with only what they did.
+        document.on('afterTransaction', (tr: Y.Transaction) => {
+          if (!this.featureListeners.size) return;
+          const changes = featureChanges(document, tr);
+          if (!changes.length) return;
+          const o: unknown = tr.origin;
+          const source: UpdateSource = o === HOST_ORIGIN ? { from: 'host' }
+            : isPeerOrigin(o) ? { from: 'peer', peer: o.peer, user: o.user, ...(o.sync ? { sync: true } : {}) }
+            : { from: 'client', user: null };
+          for (const fn of this.featureListeners) for (const c of changes) fn(documentName, c.id, c.person, c.keys, source);
+        });
+        // A state this host made (a session it starts, seeded from its person's files) is its own; one from elsewhere (another
+        // device's session) holds anyone's: told as a sync.
+        if ('state' in seed) Y.applyUpdate(document, seed.state, seed.own ? HOST_ORIGIN : { kuraa: 'peer', peer: '', user: null, sync: true } satisfies PeerOrigin);
         else {
           document.transact(() => prosemirrorToYXmlFragment(seed.doc, document.getXmlFragment(FRAGMENT)), HOST_ORIGIN);
           if (seed.features) seedIn(document, seed.doc.type.schema, seed.features.person, seed.features.seed, HOST_ORIGIN);
@@ -110,7 +125,7 @@ export class Relay {
       },
       onChange: async ({ documentName, context, transactionOrigin, update }) => {
         const source: UpdateSource = transactionOrigin === HOST_ORIGIN ? { from: 'host' }
-          : isPeerOrigin(transactionOrigin) ? { from: 'peer', peer: transactionOrigin.peer, user: transactionOrigin.user }
+          : isPeerOrigin(transactionOrigin) ? { from: 'peer', peer: transactionOrigin.peer, user: transactionOrigin.user, ...(transactionOrigin.sync ? { sync: true } : {}) }
           : { from: 'client', user: (context as { user?: PresenceUser } | undefined)?.user ?? null };
         for (const fn of this.updateListeners) fn(documentName, update, source);
         if (source.from === 'host') return;
@@ -226,6 +241,12 @@ export class Relay {
     return () => this.updateListeners.delete(fn);
   }
 
+  /** Every change to a person's feature map in any room (0082): the keys changed, and where the change came from. */
+  onFeatureChange(fn: (room: string, id: string, person: string, keys: string[], source: UpdateSource) => void): () => void {
+    this.featureListeners.add(fn);
+    return () => this.featureListeners.delete(fn);
+  }
+
   /** Every change to who is in a room (cursors, names), encoded; `peer` if another device brought it. */
   onAwareness(fn: (room: string, update: Uint8Array, peer: string | null) => void): () => void {
     this.awarenessListeners.add(fn);
@@ -245,10 +266,10 @@ export class Relay {
   }
 
   /** Apply another device's change to the room; its clients see it as anyone's edit. */
-  applyPeerUpdate(room: string, update: Uint8Array, peer: string, user: PresenceUser | null): boolean {
+  applyPeerUpdate(room: string, update: Uint8Array, peer: string, user: PresenceUser | null, o: { sync?: boolean } = {}): boolean {
     const d = this.doc(room);
     if (!d || !update.length) return false;
-    Y.applyUpdate(d, update, { kuraa: 'peer', peer, user } satisfies PeerOrigin);
+    Y.applyUpdate(d, update, { kuraa: 'peer', peer, user, ...(o.sync ? { sync: true } : {}) } satisfies PeerOrigin);
     return true;
   }
 

@@ -204,6 +204,17 @@ export function observeFeature(ydoc: Y.Doc, id: string, fn: () => void): () => v
   return () => ydoc.off('afterTransaction', after);
 }
 
+/** The keys of people's feature maps a transaction changed (set or taken away), by feature and person. */
+export function featureChanges(ydoc: Y.Doc, tr: Y.Transaction): { id: string; person: string; keys: string[] }[] {
+  const out: { id: string; person: string; keys: string[] }[] = [];
+  for (const [type, keys] of tr.changed) {
+    const name = nameOf(ydoc, type as YType);
+    const m = name ? MAP.exec(name) : null;
+    if (m) out.push({ id: m[1]!, person: m[2]!, keys: [...keys].filter((k): k is string => typeof k === 'string') });
+  }
+  return out;
+}
+
 /** A root type's name in a document, if it is one. */
 function nameOf(ydoc: Y.Doc, type: YType): string | null {
   if (type._item) return null;

@@ -396,11 +396,20 @@ const fileRoutes: Route[] = [
     const isFolder = lstatSync(abs).isDirectory();
     // What is kept beside a file: only the deleter's own goes with it; others' stay, theirs (0082).
     const companions = isFolder ? [] : await host.features.ownFilesOf(path);
+    // A folder: everything in it but others' own files, which stay where they are, theirs.
+    const me = host.features.person();
+    const theirs = isFolder ? (await host.listFiles()).filter((p) => p.startsWith(`${path}/`) && ownerOf(p) !== null && ownerOf(p) !== me) : [];
     const commit = await host.serial(async () => {
       await host.requireWritable();
       // A folder's open rooms go with it.
       if (isFolder) await host.dropRoomsUnder(path);
       else await host.dropRoom(path);
+      if (theirs.length) {
+        const gone = (await host.listFiles()).filter((p) => p.startsWith(`${path}/`) && !theirs.includes(p));
+        for (const p of gone) await rm(host.resolvePath(p, { link: 'self' }), { force: true, maxRetries: 5 });
+        await removeEmptyFolders(abs);
+        return host.commitPaths(gone, `Delete ${path} (but others’ own files in it)`);
+      }
       // Retried while Windows says busy (another program has a file open, for a moment).
       await rm(abs, { recursive: true, maxRetries: 5 });
       for (const c of companions) await host.features.removeOwn(c);
@@ -410,6 +419,19 @@ const fileRoutes: Route[] = [
     send(res, 200, { path, commit });
   }),
 ];
+
+/** Remove the empty folders under a folder, and it if that leaves it empty. */
+async function removeEmptyFolders(abs: string): Promise<void> {
+  const { readdir, rmdir } = await import('node:fs/promises');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(abs, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) if (e.isDirectory()) await removeEmptyFolders(join(abs, e.name));
+  await rmdir(abs).catch(() => undefined);
+}
 
 /** Whether two paths name one file (or folder): the same one on disk, as on a file system that ignores case. */
 function sameFile(a: string, b: string): boolean {

@@ -207,21 +207,25 @@ format. Built in step 1 (*Built*, below), but the narrower audiences.*
 - **Whether it is shown is the reader's choice:** by author, by kind (codings, comments), by code;
   kept as theirs (Settings › You, and the Comments and Codes panels' filters).
 - **The policy says so, without knowing any feature.** A file whose name is `@<identity ID>` and an
-  extension, in any folder, is that person's own: they may change it wherever they read it, and
-  no one else may, whatever the rules say, but to move it unchanged (the gate takes a commit that
-  takes someone's own file away and puts the same content, under the same name, elsewhere): a
-  document renamed or moved carries the folder beside it, files and all. This is a new kind of
+  extension, in a folder beside a document that is there, is that person's own: they may change it
+  wherever they read it, and no one else may, whatever the rules say, but to move it unchanged with
+  its document (the gate takes a commit that moves a document and, under the same name and with the
+  same content, the files beside it): a document renamed or moved carries the folder beside it,
+  files and all. A file so named anywhere else keeps to the rules. This is a new kind of
   permission, judged alike everywhere: `PROTOCOL` goes up.
 - **A document deleted leaves others' annotations on it as theirs** (the owner's choice): its
   folder keeps their files, the deleter's own going with the document, and the file list shows
-  them on their own, for their authors to remove (or to keep).
+  them on their own, for their authors to remove (or to keep). A folder deleted keeps them too.
 - **Live, in a room**, each person's annotations are a map of their own (`feature:<id>:<person>`),
-  seeded from their file by their own device, never by another's: a map anyone else could fill is
-  one its owner's device could be made to sign. A change to a room's feature maps is taken only
-  from a device of the person whose map it is; a change to the document, as now, only from one
-  who may change it. Each device writes its own person's file from the room, signed by them, not
-  the leader (who still writes the document). The annotations of people with no device in the
-  room are shown from their files, found again by their quotes. Annotations for a
+  seeded from their file by their own device. Each device writes its own person's file from the
+  room, signed by them, not the leader (who still writes the document), and **only with what that
+  person did there**: their own clients' changes, their own devices' edits, their seeding. A sync
+  between devices holds anyone's changes, whoever made them, and a room joined comes with its
+  state: what they put in a person's map is shown, and never written into their file as theirs.
+  An edit to a person's map is taken only as its maker's own; a sync, whole, from someone who may
+  change the document (refusing it would lose the document's edits in it too); a change to the
+  document, as now, only from one who may change it. The annotations of people with no device in
+  the room are shown from their files, found again by their quotes. Annotations for a
   narrower audience are not put in the room, which everyone reading the document shares: they are
   kept through the feature's routes, in their own space, and reach their readers by git.
 - **Merging** is simpler: two people never write one file. A person's two devices still can, and
@@ -392,8 +396,9 @@ Features and the hooks above, with the changes building them made. Annotations a
   feature's file types are registered, and in the merge signature, whether it is on or off.
 - **Rooms' state** is a map per feature and person in the room's Yjs document
   (`feature:<id>:<person>`), with a record of whose were seeded, by their own devices, from their
-  files: only those are written back, so a session started without a feature (or without a
-  person's device) never empties a file, and the client offers nothing to do in it. A feature
+  files: the client offers nothing to do where its person's is not, and a file is written only with
+  what its person did there, so a session started without a feature (or without a person's
+  device) never empties one. A feature
   turned on while rooms are open, or a device joining a session, seeds its person's at once.
   Anchors are Yjs relative positions, resolved by walking the fragment with node sizes from the
   schema: the same on the host as in a browser, with no editor view. Each device writes its own
@@ -409,9 +414,10 @@ Features and the hooks above, with the changes building them made. Annotations a
   it shows (`of`), and search leaves them out. `GET /api/companions` gives everyone's beside a
   document, as they are or at a commit.
 - **Own files** are their owners' alone (docs/policy.md, *A person's own files*): the policy's
-  `mayWrite`, the gate (which takes moves of them unchanged, and judges which space's history it
-  judges), and rooms (`takes`: a person's feature state only as theirs, readers' changes to their
-  own). `PROTOCOL` is 8. A host without an identity writes nothing of anyone's.
+  `mayWrite`, beside a document that is there; the gate (which takes moves of them unchanged with
+  their documents, and knows which space's history it judges); rooms (`takes`); and each host,
+  which writes into its person's file only what they did in the room (`Mine`). `PROTOCOL` is 8. A
+  host without an identity writes nothing of anyone's.
 - **A feature's writes** (`FeatureContext.write`) are to this host's person's own files and the
   files it declares, checked against who may change them, and refused (409) for one beside a
   document whose room is open: that is the room's to write.
@@ -432,7 +438,7 @@ Features and the hooks above, with the changes building them made. Annotations a
   (`packages/host/test/features.test.ts`) and the browser's (`tests/e2e/features.spec.ts`, whose
   build alone has it: `vite build --mode e2e`) drive it, and it is a model for writing a feature.
 
-**Not yet:** a room for a branch no longer checked out is committed onto that branch without its
-companions; a feature cannot yet change the state of a room open on another device but through
-its people (`FeatureContext` has no way into rooms).
+**Not yet:** a feature cannot change the state of a room open on another device but through its
+people (`FeatureContext` has no way into rooms); an author's choice of a narrower audience for some
+of their annotations.
 

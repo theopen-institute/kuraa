@@ -18,6 +18,7 @@
 import { constants } from 'node:fs';
 import { open, readdir, rm, rmdir } from 'node:fs/promises';
 import { isUtf8 } from 'node:buffer';
+import { dirname } from 'node:path';
 import { HookBus, sourceMapOf, type DocumentType, type HookEvent, type ParsedDocument } from '@kuraa/kernel';
 import {
   COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, companionFolder, documentOf, ownFile, ownerOf,
@@ -77,6 +78,16 @@ export function checkFeatures(list: unknown[]): HostFeature[] {
     return f as HostFeature;
   });
 }
+
+/**
+ * What this host's person did in a room (0082): by feature, the keys of their
+ * map whose values they last set (or took away) here, from their own clients,
+ * their own devices' edits, or seeded from their file. Their file is written
+ * with these alone: what anyone else put in their map (a device that may change
+ * the document passing a sync on, or a session's state when joining) is shown,
+ * never signed as theirs.
+ */
+export type Mine = Map<string, Set<string>>;
 
 /** One entry of .kuraa/features.json. */
 type Entry = { on?: boolean } & FeatureSettings;
@@ -294,7 +305,7 @@ export class HostFeatures {
   async removeOwn(path: string): Promise<void> {
     const abs = this.port.resolvePath(path);
     await rm(abs, { force: true });
-    await rmdir(abs.slice(0, abs.lastIndexOf('/'))).catch(() => undefined);
+    await rmdir(dirname(abs)).catch(() => undefined);
   }
 
   /** This host's person, as last read. */
@@ -373,16 +384,25 @@ export class HostFeatures {
    * written (null: none), for the features their map was seeded for. Nothing is
    * written here.
    */
-  companionTexts(path: string, type: DocumentType, doc: Node, parsed: ParsedDocument, view: FeatureView, current: ReadonlyMap<string, string | null> = new Map()): Map<string, { feature: HostFeature; text: string | null }> {
+  companionTexts(path: string, type: DocumentType, doc: Node, parsed: ParsedDocument, view: FeatureView, current: ReadonlyMap<string, string | null>, mine: Mine): Map<string, { feature: HostFeature; text: string | null }> {
     const out = new Map<string, { feature: HostFeature; text: string | null }>();
     const person = this.me;
     if (!person || this.documentOf(path)) return out;
     const sourceMap = sourceMapOf(type, doc, parsed);
     for (const f of this.roomFeatures()) {
-      if (!view.seeded(f.id, person)) continue;
+      // Only what this person did here goes into their file: nothing of theirs changed here, nothing written.
+      const keys = mine.get(f.id);
+      if (!keys?.size) continue;
       const c = ownFile(path, f.room!.companion, person, f.room!.extension);
+      const all = view.entries(f.id, person);
+      const entries: { [key: string]: Json } = {};
+      const removed: string[] = [];
+      for (const k of keys) {
+        if (k in all) entries[k] = all[k]!;
+        else removed.push(k);
+      }
       try {
-        const text = f.room!.write({ path, type, doc, text: parsed.text, parsed, person, entries: view.entries(f.id, person), companion: current.get(c) ?? null, sourceMap, positionOf: (a) => view.positionOf(a), settings: this.settings(f.id) });
+        const text = f.room!.write({ path, type, doc, text: parsed.text, parsed, person, entries, removed, companion: current.get(c) ?? null, sourceMap, positionOf: (a) => view.positionOf(a), settings: this.settings(f.id) });
         out.set(c, { feature: f, text });
       } catch (e) {
         this.port.log(`${f.id}: could not write ${c} from the room (${(e as Error).message}); it is left as it was`);
@@ -397,18 +417,18 @@ export class HostFeatures {
    * document in a space goes into that space at once, never onto the
    * workspace's own branch. Returns the files written or removed.
    */
-  async writeRoom(path: string, type: DocumentType, doc: Node, parsed: ParsedDocument, view: FeatureView): Promise<string[]> {
+  async writeRoom(path: string, type: DocumentType, doc: Node, parsed: ParsedDocument, view: FeatureView, mine: Mine): Promise<string[]> {
     const written: string[] = [];
     const person = this.me;
     if (!person) return written;
     // The files as they are, read first; then written from the room, with nothing between.
     const current = new Map<string, string | null>();
     for (const f of this.roomFeatures()) {
-      if (!view.seeded(f.id, person) || this.documentOf(path)) continue;
+      if (!mine.get(f.id)?.size || this.documentOf(path)) continue;
       const c = ownFile(path, f.room!.companion, person, f.room!.extension);
       current.set(c, await readPlain(this.port.resolvePath(c)));
     }
-    for (const [c, { text }] of this.companionTexts(path, type, doc, parsed, view, current)) {
+    for (const [c, { text }] of this.companionTexts(path, type, doc, parsed, view, current, mine)) {
       const before = current.get(c) ?? null;
       if (text === before) continue;
       if (text === null) await this.removeOwn(c);
@@ -420,6 +440,11 @@ export class HostFeatures {
       written.push(c);
     }
     return written;
+  }
+
+  /** What the features whose files these are are called: for a commit that says nothing else of them. */
+  labelsOf(paths: string[]): string[] {
+    return [...new Set(paths.map((p) => [...this.loaded.values()].find((f) => documentOf(p, f.companions ?? []) !== null)?.label ?? p))];
   }
 
   /** Lines for an automatic commit that changed companions: what their features say of each. */

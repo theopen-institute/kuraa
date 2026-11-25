@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
-import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
+import { connectHeadless, featureUpdate, type HeadlessClient } from '@kuraa/session/testing';
 import { defineFeature, type FeatureEvents, type HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
 import { startHost, type RunningHost } from '../src/index.js';
@@ -322,6 +322,38 @@ describe('features', () => {
     writeFileSync(join(dir, `other.md.marks/@${ME}.json`), '{"marks": []} tide');
     const found = (await json('/api/search?q=tide')).body as { files: { path: string }[] };
     expect(found.files.map((f) => f.path)).toEqual(['notes.md']);
+  });
+
+  it('writes into your file only what you did: what a sync put in your map is shown, never signed as yours', async () => {
+    await turn('marks', true);
+    const { room } = (await (await api(`/api/rooms?path=notes.md`)).json()) as { room: string };
+    const a = await connect('notes.md');
+    mark(a, 'm1', 'tide');
+    await until(() => readMarks(file(COMPANION)).length === 1, 10_000, 'your mark written');
+    // Another device passes on a sync that puts a mark in your map (one it may not make).
+    const relay = running.host.sessionRelay;
+    const fake = featureUpdate(relay.state(room)!, 'marks', ME, { fake: { lost: true, start: 0, end: 3, quote: 'not mine', by: 'Mallory', color: '#000' } });
+    relay.applyPeerUpdate(room, fake, 'f'.repeat(64), null, { sync: true });
+    await until(() => 'fake' in a.feature('marks', ME).entries(), 5000, 'the sync in the room');
+    // Your next mark: written with yours, not with what the sync put there.
+    mark(a, 'm2', 'Light rain');
+    await until(() => readMarks(file(COMPANION)).length === 2, 10_000, 'your second mark written');
+    expect(readMarks(file(COMPANION)).map((m) => m.id).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('deletes a folder but others’ own files in it, which stay theirs', async () => {
+    await turn('marks', true);
+    mkdirSync(join(dir, 'field/notes.md.marks'), { recursive: true });
+    writeFileSync(join(dir, 'field/notes.md'), NOTES);
+    writeFileSync(join(dir, `field/notes.md.marks/@${BO}.json`), JSON.stringify({ marks: [] }));
+    writeFileSync(join(dir, `field/notes.md.marks/@${ME}.json`), JSON.stringify({ marks: [] }));
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'A folder');
+    expect((await api(`/api/files?path=field`, { method: 'DELETE' })).status).toBe(200);
+    expect(existsSync(join(dir, 'field/notes.md'))).toBe(false);
+    expect(existsSync(join(dir, `field/notes.md.marks/@${ME}.json`))).toBe(false);
+    expect(existsSync(join(dir, `field/notes.md.marks/@${BO}.json`))).toBe(true);
+    expect(git(dir, 'status', '--porcelain')).toBe('');
   });
 
   it('tells features what happened, after it happened', async () => {

@@ -24,6 +24,15 @@ export interface HeadlessClient {
   destroy(): void;
 }
 
+/** A change setting entries in someone's feature map, made on a copy of a room's state (another device's, say): for tests to pass on. */
+export function featureUpdate(state: Uint8Array, id: string, person: string, set: { [key: string]: FeatureJson }): Uint8Array {
+  const copy = new Y.Doc();
+  Y.applyUpdate(copy, state);
+  const sv = Y.encodeStateVector(copy);
+  updateIn(copy, id, person, { set });
+  return Y.encodeStateAsUpdate(copy, sv);
+}
+
 export function connectHeadless(opts: { url: string; room: string; token: string; user: PresenceUser; schema: Schema }): HeadlessClient {
   const ydoc = new Y.Doc();
   const fragment = ydoc.getXmlFragment(FRAGMENT);

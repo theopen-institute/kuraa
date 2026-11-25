@@ -56,7 +56,12 @@ export interface FeatureRoom {
   extension: string;
   /** What a person's map starts with, from their own file as it is (null: there is none). */
   seed(input: RoomSeedInput): { [key: string]: Json };
-  /** A person's own file's text from their map, or null for none (it is removed). Called at each save of the room. */
+  /**
+   * A person's own file's text: the file as it is (`companion`), with the
+   * entries they changed here set (`entries`) and those they took away removed
+   * (`removed`); every other entry as the file says. Null for none (it is
+   * removed). Called at each save of the room, only where they changed something.
+   */
   write(input: RoomWriteInput): string | null;
 }
 
@@ -88,9 +93,15 @@ export interface RoomWriteInput {
   parsed: ParsedDocument;
   /** Whose file it is: this host's person. */
   person: string;
-  /** Their entries in the room. */
+  /**
+   * The entries of their map they set here (from their own clients and
+   * devices, or seeded from their file), as the room has them now. Only these:
+   * what anyone else put in their map is never written into their file.
+   */
   entries: { [key: string]: Json };
-  /** Their own file's text as it is now (null: none). */
+  /** The keys of entries they took away here. */
+  removed: string[];
+  /** Their own file's text as it is now (null: none): what is not in `entries` or `removed` stays as it says. */
   companion: string | null;
   sourceMap: SourceMap;
   /** Where an anchor is in `doc` now, or null if what it was at is gone. */

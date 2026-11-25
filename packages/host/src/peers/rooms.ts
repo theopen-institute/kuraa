@@ -211,27 +211,23 @@ export class Rooms {
 
   /**
    * Whether a change to a room is taken from a device (`origin`: the device an
-   * edit was made on; null for a sync, which may hold anyone's): its document
-   * only from those whose people may change it (0066); a person's feature maps
-   * (0082) only as their own, an edit made on one of their devices, or a sync
-   * from someone who may change the document; and this host's own person's maps
-   * only from their own devices, whoever passes the change on, since this host
-   * writes them to that person's file, signed as theirs. Where no feature keeps
-   * state in rooms here, as before: from those who may change the document.
+   * edit was made on; null for a sync, which holds anyone's): its document only
+   * from those whose people may change it (0066). A person's feature maps
+   * (0082): in an edit, only as its maker's own; a sync, whole, from someone who
+   * may change the document (what it holds of anyone's maps is shown, never
+   * written as theirs: each host writes into its person's file only what they
+   * did, features.ts), and from anyone else only if it holds nothing but their
+   * own maps. Where no feature keeps state in rooms here, as before.
    */
   private takes(room: RoomView, update: Uint8Array, link: string, origin: string | null): boolean {
     const docOk = this.node.mayWrite(link, room.path) && (origin === null || this.node.mayWrite(origin, room.path));
     if (!this.host.features.keepsRoomState()) return docOk;
+    if (origin === null && docOk) return true;
     const w = this.host.sessionRelay.whatChanged(room.name, update);
     if (!w) return docOk;
     if ((w.doc || w.other) && !docOk) return false;
-    const me = this.host.features.person();
     const maker = this.node.personOfDevice(origin ?? link);
-    for (const p of w.people) {
-      if (origin !== null && maker !== p) return false;
-      if (origin === null && !docOk && maker !== p) return false;
-      if (p === me && maker !== me) return false;
-    }
+    for (const p of w.people) if (maker !== p) return false;
     return true;
   }
 
@@ -624,7 +620,7 @@ export class Rooms {
           const theyMay = this.node.mayWrite(link.key, now.path);
           // Who edited it there since its last commit: credited by whichever device commits (its person, as the records say).
           if (Array.isArray(m.people) && m.people.length && theyMay) this.host.addContributors(now.name, [this.credit(link.key)]);
-          if (m.op === 'sync' && this.takes(now, bytesOf(m.update), link.key, null)) relay.applyPeerUpdate(now.name, bytesOf(m.update), link.key, null);
+          if (m.op === 'sync' && this.takes(now, bytesOf(m.update), link.key, null)) relay.applyPeerUpdate(now.name, bytesOf(m.update), link.key, null, { sync: true });
           const update = relay.diff(now.name, bytesOf(m.sv));
           if (m.op === 'open') this.send(link, { type: 'room', op: 'sync', key: now.key, session: now.session!, sv: relay.stateVector(now.name) ?? EMPTY, update: update ?? EMPTY, base: now.base, people: this.host.roomContributors(now.name) });
           else if (update) this.send(link, { type: 'room', op: 'update', key: now.key, update });

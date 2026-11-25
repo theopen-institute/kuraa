@@ -11,7 +11,7 @@
 import { createTextType } from '@kuraa/format-text';
 import { defineFeature, type FeatureResponse, type Json } from '@kuraa/feature-kit/host';
 import { OWN_NAME } from '@kuraa/feature-kit/host';
-import { EXTENSION, SUFFIX, describeMarks, findQuote, mergeMarks, readMarks, writeMarks, type Mark } from './marks.js';
+import { EXTENSION, SUFFIX, describeMarks, findQuote, mergeMarks, readMarks, writeMarks } from './marks.js';
 
 export { EXTENSION, SUFFIX, readMarks, writeMarks, mergeMarks, findQuote, type Mark } from './marks.js';
 
@@ -51,28 +51,30 @@ export const marksFeature = defineFeature({
       }
       return out;
     },
-    write({ entries, text, sourceMap, positionOf }) {
-      const marks: Mark[] = [];
+    // The file as it is, with what its person changed here: their other marks stay as the file says.
+    write({ entries, removed, companion, text, sourceMap, positionOf }) {
+      const marks = new Map(readMarks(companion).map((m) => [m.id, m]));
+      for (const id of removed) marks.delete(id);
       for (const [id, v] of Object.entries(entries)) {
         const m = v as RoomMark;
         if (!m || typeof m !== 'object' || typeof m.quote !== 'string') continue;
         const base = { id, quote: m.quote, by: m.by ?? '', color: m.color ?? '' };
         if ('lost' in m) {
-          marks.push({ ...base, start: m.start, end: m.end });
+          marks.set(id, { ...base, start: m.start, end: m.end });
           continue;
         }
         const from = positionOf(m.from);
         const to = positionOf(m.to);
         if (from === null || to === null || to <= from) {
           // Its text is gone: kept, with no place, never dropped.
-          marks.push({ ...base, start: null, end: null });
+          marks.set(id, { ...base, start: null, end: null });
           continue;
         }
         const start = sourceMap.toText(from);
         const end = sourceMap.toText(to, -1);
-        marks.push({ ...base, start, end, quote: text.slice(start, end) });
+        marks.set(id, { ...base, start, end, quote: text.slice(start, end) });
       }
-      return writeMarks(marks);
+      return writeMarks([...marks.values()]);
     },
   },
   describe: ({ before, after }) => describeMarks(before, after),

@@ -125,19 +125,28 @@ holds, and on all of them together:
 
 ## A person's own files
 
-A file whose name is `@` and an identity ID, with any extension (`@7f3a…e1.jsonld`), in any folder, is
-that person's own ([0082](decisions/0082-annotations.md): annotations are their authors'). The
-policy needs no operation for it, and knows no feature: `mayWrite` says that only its owner may
-change it, wherever they read it (in the workspace's own files: anyone in the workspace; in a
-space's history, its audience), and that no one else may, whatever the rules say, admins and the
-owner included. Where there is no policy (one computer), anyone may, as with every file.
+A file whose name is `@` and an identity ID, with any extension (`@7f3a…e1.jsonld`), in a folder
+beside a document (`p01.md.annotations/`: the document's name and a dotted ending, the document
+there), is that person's own ([0082](decisions/0082-annotations.md): annotations are their
+authors'). The policy needs no operation for it, and knows no feature: `mayWrite` says that only
+its owner may change it, wherever they read it (in the workspace's own files: anyone in the
+workspace; in a space's history, its audience), and that no one else may, whatever the rules say,
+admins and the owner included. A file so named anywhere else (beside no document) is judged by the
+rules, as any file. Where there is no policy (one computer), anyone may, as with every file.
 
-The gate judges a commit touching anyone's own file even where there are no rules, with one more
-thing it takes: a move of someone's own file, unchanged (the file taken away and the same content
-put under the same name elsewhere in the same commit), from anyone, so a document renamed carries
-everyone's files beside it. A change to one, or a move that changes it, by anyone but its owner is
-refused, and their version kept. Live rooms keep to the same: a change to a person's feature
-state is taken only as theirs (rooms.ts, `takes`).
+The gate judges a commit touching anyone's own file even where there are no rules: whether it is
+beside a document it looks in the commit (or, a document deleted with it, its first parent). It
+takes one more thing, from anyone: a move of someone's own file, unchanged, with its document (the
+file taken away and the same content put under the same name beside the document's new name, the
+document taken away and put there, in the same commit), so a document renamed carries everyone's
+files beside it. A change to one, or a move of it elsewhere, by anyone but its owner is refused, and
+their version kept.
+
+Live rooms keep to the same where it can be told (rooms.ts, `takes`): an edit to a person's feature
+state only as its maker's own; a sync, which holds anyone's, whole from someone who may change the
+document. What protects a person's file is that each host writes into it only what its own person
+did in the room (their clients' changes, their own devices' edits, and their seeding from the
+file): whatever else is in their state is shown, never signed as theirs.
 
 ## Making one again
 

@@ -90,12 +90,31 @@ describe('a person’s own files', () => {
     renameSync(join(r.dir, BO_FILE), join(r.dir, `field/${BO_FILE}`));
     c = await commit(r, ['notes.md', 'field/notes.md', BO_FILE, `field/${BO_FILE}`], ada.key);
     expect((await gate(r.git, r.base, c, ctx)).refused).toEqual([]);
-    // Moved and changed at once: refused (as are both of its paths).
+    // Moved with its document but changed: Bo's taken away is refused (the copy elsewhere, beside nothing there, is no one's own).
     r = repo();
     rmSync(join(r.dir, BO_FILE));
     write(r, `elsewhere/${BO_FILE}`, '{"items": ["changed"]}\n');
     c = await commit(r, [BO_FILE, `elsewhere/${BO_FILE}`], ada.key);
-    expect((await gate(r.git, r.base, c, ctx)).refused.map((x) => x.path).sort()).toEqual([BO_FILE, `elsewhere/${BO_FILE}`].sort());
+    expect((await gate(r.git, r.base, c, ctx)).refused.map((x) => x.path)).toEqual([BO_FILE]);
+    // Moved unchanged, but not with its document (beside another one): refused.
+    r = repo();
+    write(r, 'other.md', '# Other\n');
+    run(r.dir, 'add', 'other.md');
+    run(r.dir, 'commit', '-q', '-m', 'Other');
+    const before = run(r.dir, 'rev-parse', 'HEAD');
+    mkdirSync(join(r.dir, 'other.md.annotations'), { recursive: true });
+    renameSync(join(r.dir, BO_FILE), join(r.dir, `other.md.annotations/@${bo.id}.jsonld`));
+    c = await commit(r, [BO_FILE, `other.md.annotations/@${bo.id}.jsonld`], ada.key);
+    expect((await gate(r.git, before, c, ctx)).refused.map((x) => x.path).sort()).toEqual([BO_FILE, `other.md.annotations/@${bo.id}.jsonld`].sort());
+  });
+
+  it('are their owner’s only beside a document: a file so named anywhere else keeps to the rules', async () => {
+    const ctx: GateContext = policy({ t: 'rule', path: 'board/', by: ['admins'] });
+    const r = repo();
+    write(r, `board/@${bo.id}.md`, '# Bo’s, in the admins’ folder\n');
+    const c = await commit(r, [`board/@${bo.id}.md`], bo.key);
+    expect((await gate(r.git, r.base, c, ctx)).refused.map((x) => x.path)).toEqual([`board/@${bo.id}.md`]);
+    expect(ctx.policy.mayWrite(bo.id, `board/@${bo.id}.md`)).toBe(false);
   });
 
   it('are judged as read where they are: a space’s history, by its audience', async () => {

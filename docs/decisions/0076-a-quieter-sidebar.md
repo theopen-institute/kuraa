@@ -27,10 +27,13 @@ The owner asked:
 - **The connection's light is left of the workspace's name**: green when the open document is
   connected, amber while connecting, red when cut off, grey with none open. Its tooltip says so in
   words, with who else is here; screen readers read the same.
-- **No bar at the foot of the sidebar; ⚙ alone in its lower right corner** opens Settings at the
-  workspace (with no workspace open, at You). It was first **Workspace settings…** in the menu of
-  the workspace's name; the owner asked for a gear there instead. ⌘, still opens
-  Settings at what is in front of you, and the desktop app's own menu has Settings too.
+- **No ⚙ and no bar at the foot of the sidebar.** In the menu of the workspace's name, the open
+  workspace's row has icons at its right: ⚙ opens Settings at the workspace, and, where it syncs,
+  ⟳ is **Sync now** (with how many saves the online copy lacks; it turns while syncing). With no
+  workspace open, the menu has **Settings…** (at You). They were first lines of the menu of their
+  own, then ⚙ in the sidebar's lower right corner; the owner asked for icons on the workspace's
+  row instead, beside what they act on. ⌘, still opens Settings at what is in front of you, and the
+  desktop app's own menu has Settings too.
 
 ## The page
 

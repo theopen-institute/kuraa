@@ -888,16 +888,9 @@ function useSettings(s: Settings) {
               @sync="syncNow"
               @switch="switchWorkspace"
               @add="addingWorkspace = true"
+              @settings="openSettings('workspace')"
             />
           </span>
-        </template>
-        <!-- Settings, at the workspace: ⚙ in the sidebar's lower right corner. -->
-        <template #footer>
-          <div class="pane-footer">
-            <button type="button" :title="S.menu.workspaceSettings" :aria-label="S.menu.workspaceSettings" data-testid="workspace-settings" @click="openSettings('workspace')">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6.9 1.5h2.2l.4 1.9 1.2.5 1.6-1.1 1.6 1.6-1.1 1.6.5 1.2 1.9.4v2.2l-1.9.4-.5 1.2 1.1 1.6-1.6 1.6-1.6-1.1-1.2.5-.4 1.9H6.9l-.4-1.9-1.2-.5-1.6 1.1-1.6-1.6 1.1-1.6-.5-1.2-1.9-.4V6.9l1.9-.4.5-1.2-1.1-1.6 1.6-1.6 1.6 1.1 1.2-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
-            </button>
-          </div>
         </template>
         <!-- The workspace's own action, beside New file: search it. -->
         <template #actions>
@@ -916,14 +909,10 @@ function useSettings(s: Settings) {
             :can-add="canAdd"
             @switch="switchWorkspace"
             @add="addingWorkspace = true"
+            @settings="openSettings('you')"
           />
         </div>
         <div class="tree-scroll" />
-        <div class="pane-footer">
-          <button type="button" :title="S.menu.settings" :aria-label="S.menu.settings" data-testid="workspace-settings" @click="openSettings('you')">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6.9 1.5h2.2l.4 1.9 1.2.5 1.6-1.1 1.6 1.6-1.1 1.6.5 1.2 1.9.4v2.2l-1.9.4-.5 1.2 1.1 1.6-1.6 1.6-1.6-1.1-1.2.5-.4 1.9H6.9l-.4-1.9-1.2-.5-1.6 1.1-1.6-1.6 1.1-1.6-.5-1.2-1.9-.4V6.9l1.9-.4.5-1.2-1.1-1.6 1.6-1.6 1.6 1.1 1.2-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
-          </button>
-        </div>
       </nav>
 
       <main class="pane pane-centre">

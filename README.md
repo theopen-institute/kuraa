@@ -168,8 +168,10 @@ colour, your key, and how each kind of document is edited for you; in this brows
 (the open document's header; in its file), **Workspace** (its name, as its heading, with **Rename
 workspace…**; packages, people and computers, its groups and permissions, and removing it from the
 list; in the workspace) and **Host** (its settings, only its owner changes them; and every component
-it has, the online copy among them, with its settings for the open workspace). ⚙, in the
-sidebar's lower right corner, opens it at the workspace (with none open, at You); ⌘, (Ctrl+,) at the open document
+it has, the online copy among them, with its settings for the open workspace). ⚙, at the
+right of the open workspace's row in the menu of its name, opens it at the workspace (with none
+open, **Settings…** there, at You); beside it, where the workspace syncs, ⟳ syncs it now (with how
+many saves the online copy lacks); ⌘, (Ctrl+,) at the open document
 (else the workspace); **Document settings…** and right-clicking a file at the document; ⌥⌘, where you
 left it. Commit ids and branch names are behind **Details**. A light left of the workspace's name
 says whether you are connected (green), and its tooltip who else is here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and

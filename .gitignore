@@ -7,3 +7,5 @@ playwright-report/
 apps/desktop/build/
 apps/desktop/vendor/
 .dev-workspaces/
+# Chats' worktrees (CLAUDE.md): a checkout each, never committed here
+.claude/worktrees/

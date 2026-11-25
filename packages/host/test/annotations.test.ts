@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
-import { annotationsFeature, aboutOf, readPage, textOf, type Item } from '@kuraa/annotations';
+import { annotationsFeature, aboutOf, codeOf, readCodebook, readPage, textOf, type Item } from '@kuraa/annotations';
 import { startHost, type RunningHost } from '../src/index.js';
 import { createPerson } from '../src/peers/person.js';
 
@@ -156,5 +156,62 @@ describe('comments', () => {
     expect(a.read().textBetween(from, from + 'Nobody came'.length)).toBe('Nobody came');
     expect(e['urn:uuid:c2']).toMatchObject({ lost: true });
     expect(textOf(e['urn:uuid:c2']!.item)).toBe('Rain');
+  });
+
+  it('codes: a codebook changed by whoever may, codings in your own file, counted and retrieved, merged and deleted without touching anyone’s', async () => {
+    const post = async (body: object) => {
+      const r = await api('/api/features/annotations/codebook', { method: 'POST', body: JSON.stringify({ body, by: ALICE }) });
+      return { status: r.status, body: (await r.json()) as { id: string; error?: string } };
+    };
+    // Off until the workspace codes.
+    expect((await post({ op: 'add', label: 'Trust' })).status).toBe(409);
+    expect((await api('/api/features/annotations', { method: 'PATCH', body: JSON.stringify({ settings: { coding: true }, by: ALICE }) })).status).toBe(200);
+    const institutions = (await post({ op: 'add', label: 'Institutions' })).body.id;
+    const council = (await post({ op: 'add', label: 'Council', broader: institutions })).body.id;
+    const govt = (await post({ op: 'add', label: 'Govt' })).body.id;
+    const spare = (await post({ op: 'add', label: 'Spare' })).body.id;
+    expect((await post({ op: 'change', id: institutions, broader: council })).status).toBe(400);
+    expect((await post({ op: 'change', id: council, definition: 'The town council', color: '#123456' })).status).toBe(200);
+    let book = readCodebook(file('codebook.jsonld'));
+    expect(book.codes.find((c) => c.id === council)).toMatchObject({ label: 'Council', definition: 'The town council', color: '#123456', broader: institutions });
+    expect(git(dir, 'log', '-1', '--format=%s')).toMatch(/codebook\.jsonld/);
+
+    // Two passages coded, one with Govt.
+    const a = await connect();
+    const f = a.feature('annotations', ME);
+    const code = (id: string, codeId: string, phrase: string) => {
+      const at = where(a.read(), phrase);
+      const item: Item = { ...comment('commenting', id, '', { source: '../notes.md', selector: [] }), motivation: 'classifying', body: { type: 'SpecificResource', source: codeId, purpose: 'classifying' } };
+      f.update({ set: { [id]: { item, from: f.anchorAt(at, 1), to: f.anchorAt(at + phrase.length, -1) } } });
+    };
+    code('urn:uuid:k1', council, 'the council');
+    code('urn:uuid:k2', govt, 'Nobody came');
+    await until(() => readPage(file(OWN)).length === 2 && git(dir, 'status', '--porcelain') === '', 10_000, 'the codings committed');
+    const k1 = readPage(file(OWN)).find((i) => i.id === 'urn:uuid:k1')!;
+    expect(k1).toMatchObject({ motivation: 'classifying', body: { type: 'SpecificResource', source: council, purpose: 'classifying' } });
+    expect((aboutOf(k1) as { exact: string }).exact).toBe('the council');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Field notes: 2 codings added (Alice Ng)');
+
+    // Counted, and retrieved with the codes under one.
+    const json = async (p: string) => (await (await api(p)).json()) as never;
+    expect(await json('/api/features/annotations/counts')).toEqual({ [council]: 1, [govt]: 1 });
+    const under = (await json(`/api/features/annotations/retrieve?code=${encodeURIComponent(institutions)}&below=1`)) as { id: string; at: { from: number; to: number } }[];
+    expect(under.map((r) => r.id)).toEqual(['urn:uuid:k1']);
+    expect(NOTES.slice(under[0]!.at.from, under[0]!.at.to)).toBe('the council');
+    expect(await json(`/api/features/annotations/retrieve?code=${encodeURIComponent(institutions)}&below=0`)).toEqual([]);
+
+    // Govt merged into Council: its codings count as Council's, and nobody's file is rewritten.
+    const before = file(OWN);
+    expect((await post({ op: 'merge', id: govt, into: council })).status).toBe(200);
+    expect(await json('/api/features/annotations/counts')).toEqual({ [council]: 2 });
+    expect(file(OWN)).toBe(before);
+    expect(codeOf(readPage(file(OWN)).find((i) => i.id === 'urn:uuid:k2')!)).toBe(govt);
+    // Deleting a code in use keeps it, marked deleted; one not in use goes.
+    expect((await post({ op: 'delete', id: council })).status).toBe(200);
+    expect((await post({ op: 'delete', id: spare })).status).toBe(200);
+    book = readCodebook(file('codebook.jsonld'));
+    expect(book.codes.find((c) => c.id === council)).toMatchObject({ deleted: true });
+    expect(book.codes.find((c) => c.id === spare)).toBeUndefined();
+    expect(textOf(k1)).toBe('');
   });
 });

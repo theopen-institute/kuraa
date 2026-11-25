@@ -10,6 +10,12 @@
 //   browser); and those no longer found, whose passages are gone.
 // - Recent comments (a panel of the workspace): everyone's newest, each opening
 //   at its passage.
+// - Coding (where the workspace codes, step 3): Code beside a selection (⌥⌘U);
+//   coded passages underlined in their codes' colours, a mark for each in the
+//   margin; the Codes panel (the codebook as a tree, with counts: add, rename,
+//   define, colour, nest, merge, delete; apply one to the passage selected; the
+//   codings at a passage, removing your own); the Retrieve panel (every passage
+//   coded with a code, and those under it, across the workspace).
 //
 // Yours are in the room, changed live; everyone else's are in the room while a
 // device of theirs is, else read from their files and found again by quote.
@@ -19,11 +25,13 @@ import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json } from '@kuraa/feature-kit/client';
-import { SUFFIX, aboutOf, creatorOf, findPassage, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import { codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
 import type { RoomAnnotation } from './index.js';
 
 const COMMENT_KEYS = 'Mod-Alt-m';
 const PANEL_KEYS = 'Mod-Alt-k';
+const CODE_KEYS = 'Mod-Alt-u';
 
 /** An annotation as shown: whose, where it is in the document now (if it is about a passage that is found). */
 interface Shown {
@@ -31,7 +39,7 @@ interface Shown {
   person: string;
   mine: boolean;
   item: Item;
-  kind: 'comment' | 'reply' | 'other';
+  kind: 'comment' | 'reply' | 'coding' | 'other';
   about: About | null;
   from: number | null;
   to: number | null;
@@ -59,7 +67,60 @@ interface Store {
   listeners: Set<() => void>;
   /** Found passages of people's files, for one document. */
   cached: { doc: Node | null; shown: Shown[] };
+  /** A passage being coded: anchors at its ends, and its quote. */
+  coding: { from: Json; to: Json; quote: string } | null;
+  /** The passage whose codings are shown (its mark in the margin was clicked): where it starts. */
+  codedAt: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// The codebook, as the client has it: one per workspace (per feature context), read from the host and read again
+// when it says it changed.
+
+interface Codes {
+  book: Codebook;
+  path: string;
+  loaded: boolean;
+  listeners: Set<() => void>;
+  reload(): Promise<void>;
+}
+const codebooks = new WeakMap<object, Codes>();
+
+/** The codebook for a feature context (its workspace), loaded once and kept up to date. */
+function codesOf(ctx: FeatureClientContext): Codes {
+  let c = codebooks.get(ctx.request);
+  if (c) return c;
+  const codes: Codes = {
+    book: { scheme: '', label: 'Codebook', codes: [] },
+    path: 'codebook.jsonld',
+    loaded: false,
+    listeners: new Set(),
+    async reload() {
+      try {
+        const r = (await ctx.request('GET', 'codebook')) as unknown as { path: string; book: Codebook };
+        codes.book = r.book;
+        codes.path = r.path;
+      } catch { /* off, or the host cannot say: as it was */ }
+      codes.loaded = true;
+      for (const fn of [...codes.listeners]) fn();
+    },
+  };
+  c = codes;
+  codebooks.set(ctx.request, c);
+  ctx.onMessage((m) => {
+    if (m && typeof m === 'object' && !Array.isArray(m) && (m as { codebook?: unknown }).codebook) void codes.reload();
+  });
+  void codes.reload();
+  return c;
+}
+
+/** Whether the workspace codes. */
+const coding = (ctx: FeatureClientContext) => ctx.status().settings.coding === true;
+/** A coding's code, as it is now (merged codes followed), or null. */
+const codeFor = (codes: Codes, item: Item): Code | null => {
+  const id = codeOf(item);
+  return id ? resolveCode(codes.book, id) : null;
+};
 
 /** The live document's store, by path, for its panel. */
 const stores = new Map<string, Store>();
@@ -155,8 +216,23 @@ function startComment(store: Store, state: EditorState): boolean {
   return true;
 }
 
+/** Begin coding what is selected: the Codes panel opens with it, to apply a code. */
+function startCoding(store: Store, state: EditorState): boolean {
+  const room = store.ctx.state;
+  const { from, to, empty } = state.selection;
+  if (!room || empty) return false;
+  const quote = state.doc.textBetween(from, to, ' ');
+  if (!quote.trim()) return false;
+  store.coding = { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1), quote };
+  store.codedAt = null;
+  store.ctx.openPanel('codes');
+  tell(store);
+  return true;
+}
+
 function editor(ctx: FeatureEditorContext) {
-  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] } };
+  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, coding: null, codedAt: null };
+  const codes = codesOf(ctx);
   // Only the live document's is its panel's (a past version's is its own).
   if (ctx.state) stores.set(ctx.path, store);
   let liveKey = '';
@@ -170,8 +246,17 @@ function editor(ctx: FeatureEditorContext) {
     props: {
       decorations: (state) => {
         const size = state.doc.content.size;
-        const decos = collect(store, state.doc).filter((s) => s.kind === 'comment' && s.from !== null && s.to !== null && s.to <= size).map((s) =>
+        const shown = collect(store, state.doc).filter((s) => s.from !== null && s.to !== null && s.to <= size);
+        const decos = shown.filter((s) => s.kind === 'comment').map((s) =>
           Decoration.inline(s.from!, s.to!, { class: s.id === store.focus ? 'kuraa-commented kuraa-commented-focus' : 'kuraa-commented', 'data-annotation': s.id }));
+        // Coded passages: underlined in their codes' colours (where the workspace codes).
+        if (coding(ctx)) {
+          for (const s of shown) {
+            if (s.kind !== 'coding') continue;
+            const code = codeFor(codes, s.item);
+            decos.push(Decoration.inline(s.from!, s.to!, { class: 'kuraa-coded', style: `--kuraa-code: ${code?.color ?? '#888'}`, title: code ? code.label : 'A code no longer in the codebook', 'data-annotation': s.id }));
+          }
+        }
         return DecorationSet.create(state.doc, decos);
       },
     },
@@ -188,6 +273,7 @@ function editor(ctx: FeatureEditorContext) {
         });
       };
       store.listeners.add(redraw);
+      codes.listeners.add(redraw);
       // People coming and going from the room: their files read again (shown from them while they are away).
       const off = ctx.state?.observe(() => {
         const now = ctx.state ? [ctx.state.me, ...Object.keys(ctx.state.others())].sort().join() : '';
@@ -203,25 +289,53 @@ function editor(ctx: FeatureEditorContext) {
         destroy: () => {
           off?.();
           store.listeners.delete(redraw);
+          codes.listeners.delete(redraw);
           if (stores.get(ctx.path) === store) stores.delete(ctx.path);
         },
       };
     },
   });
   return {
-    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (state: EditorState) => startComment(store, state) })],
-    margin: (view: EditorView) => collect(store, view.state.doc).filter((s) => s.kind === 'comment' && s.from !== null).map((s) => ({
-      key: s.id,
-      pos: s.from!,
-      label: '💬',
-      title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
-      run: () => {
-        store.focus = s.id;
-        ctx.openPanel('comments');
-        tell(store);
-      },
-    })),
-    selectionActions: (view: EditorView) => (ctx.state ? [{ label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void startComment(store, view.state) }] : []),
+    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (state: EditorState) => startComment(store, state), [CODE_KEYS]: (state: EditorState) => coding(ctx) && startCoding(store, state) })],
+    margin: (view: EditorView) => {
+      const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
+      const items = shown.filter((s) => s.kind === 'comment').map((s) => ({
+        key: s.id,
+        pos: s.from!,
+        label: '💬',
+        title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
+        run: () => {
+          store.focus = s.id;
+          ctx.openPanel('comments');
+          tell(store);
+        },
+      }));
+      if (!coding(ctx)) return items;
+      // One mark per coded passage start, in its first code's colour, saying every code there.
+      const byStart = new Map<number, Shown[]>();
+      for (const s of shown) if (s.kind === 'coding') byStart.set(s.from!, [...(byStart.get(s.from!) ?? []), s]);
+      for (const [pos, list] of byStart) {
+        const labels = list.map((s) => codeFor(codes, s.item)?.label ?? 'A code no longer in the codebook');
+        items.push({
+          key: `coded:${pos}`,
+          pos,
+          label: list.length > 1 ? `●${list.length}` : '●',
+          title: `Coded: ${[...new Set(labels)].join(', ')}`,
+          color: codeFor(codes, list[0]!.item)?.color,
+          run: () => {
+            store.codedAt = pos;
+            store.coding = null;
+            ctx.openPanel('codes');
+            tell(store);
+          },
+        } as (typeof items)[number] & { color?: string });
+      }
+      return items;
+    },
+    selectionActions: (view: EditorView) => (ctx.state ? [
+      { label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void startComment(store, view.state) },
+      ...(coding(ctx) ? [{ label: 'Code', keys: CODE_KEYS, testid: 'annotations-code', run: () => void startCoding(store, view.state) }] : []),
+    ] : []),
     destroy: () => {
       if (stores.get(ctx.path) === store) stores.delete(ctx.path);
     },
@@ -518,6 +632,392 @@ function mountRecent(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// Coding: the Codes panel and the Retrieve panel
+
+/** A new coding of this person's: a passage classified with a code. */
+function newCoding(ctx: FeatureClientContext, me: string, code: string, quote: string, source: string): Item {
+  const now = new Date().toISOString();
+  return {
+    id: `urn:uuid:${crypto.randomUUID()}`,
+    type: 'Annotation',
+    motivation: 'classifying',
+    created: now,
+    modified: now,
+    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    body: { type: 'SpecificResource', source: code, purpose: 'classifying' },
+    target: { source, selector: [{ type: 'TextQuoteSelector', exact: quote }] },
+  };
+}
+
+/** What the Retrieve panel is to show, when a code's Retrieve was chosen. */
+let retrieveWanted: { code: string; below: boolean } | null = null;
+const retrieveListeners = new Set<() => void>();
+
+function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
+  injectStyle();
+  const body = el('div', { cls: 'kuraa-comments kuraa-codes', testid: 'annotations-codes' });
+  root.append(body);
+  const codes = codesOf(pctx);
+  let counts: { [id: string]: number } = {};
+  let filter = '';
+  let editing: string | null = null;
+  let error: string | null = null;
+  let store: Store | null = null;
+  /** The passage the find box was last given the focus for: given it once, as it appears, never taken back on a redraw. */
+  let focusedFor: object | null = null;
+  const loadCounts = async () => {
+    try {
+      const got = (await pctx.request('GET', 'counts')) as unknown as { [id: string]: number };
+      if (JSON.stringify(got) === JSON.stringify(counts)) return;
+      counts = got;
+    } catch {
+      counts = {};
+    }
+    draw();
+  };
+  // Counts are of what is written (a coding a moment after it is made): asked again a little after anything changes.
+  let countsTimer: ReturnType<typeof setTimeout> | undefined;
+  const countsSoon = () => {
+    clearTimeout(countsTimer);
+    countsTimer = setTimeout(() => void loadCounts(), 1500);
+  };
+  const change = async (b: Json) => {
+    error = null;
+    try {
+      const r = (await pctx.request('POST', 'codebook', b)) as unknown as { id: string | null; book: Codebook };
+      codes.book = r.book;
+      for (const fn of [...codes.listeners]) fn();
+      return r.id;
+    } catch (e) {
+      error = (e as Error).message;
+      draw();
+      return null;
+    }
+  };
+  const apply = (code: string) => {
+    const s = store;
+    const state = pctx.state();
+    if (!s?.coding || !state) return;
+    const name = pctx.path()!.slice(pctx.path()!.lastIndexOf('/') + 1);
+    const item = newCoding(pctx, state.me, code, s.coding.quote, `../${name}`);
+    state.update({ set: { [String(item.id)]: { item, from: s.coding.from, to: s.coding.to } as unknown as Json } });
+    s.coding = null;
+    filter = '';
+    tell(s);
+    countsSoon();
+  };
+
+  function draw() {
+    const now = stores.get(pctx.path() ?? '') ?? null;
+    if (now !== store) {
+      store?.listeners.delete(draw);
+      store = now;
+      store?.listeners.add(draw);
+    }
+    body.replaceChildren();
+    if (!coding(pctx)) {
+      body.append(el('p', { cls: 'kuraa-note', text: 'Coding is off for this workspace. Turn it on in Settings › Workspace, under Annotations.' }));
+      return;
+    }
+    if (error) body.append(el('p', { cls: 'kuraa-note kuraa-error', text: error }));
+    const tree = codeTree(codes.book);
+    const s = store;
+    const state = pctx.state();
+
+    // Coding the passage selected: a code to apply, found by name, or made.
+    if (s?.coding && state) {
+      const box = el('div', { cls: 'kuraa-thread kuraa-new', testid: 'codes-apply-box' });
+      box.append(el('blockquote', { text: s.coding.quote }));
+      const find = el('input', { testid: 'codes-filter' }) as HTMLInputElement;
+      find.placeholder = 'Find a code, or name a new one';
+      find.value = filter;
+      find.oninput = () => {
+        filter = find.value;
+        draw();
+      };
+      find.onkeydown = (e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          s.coding = null;
+          tell(s);
+        }
+      };
+      box.append(find);
+      const wanted = filter.trim().toLowerCase();
+      const matching = tree.filter(({ code }) => !wanted || code.label.toLowerCase().includes(wanted));
+      const list = el('div', { cls: 'kuraa-code-list' });
+      for (const { code, depth } of matching.slice(0, 40)) {
+        const b = button(code.label, () => apply(code.id), 'codes-apply', 'kuraa-code-choice');
+        b.style.paddingLeft = `${6 + depth * 12}px`;
+        b.prepend(swatch(code.color));
+        list.append(b);
+      }
+      box.append(list);
+      if (wanted && !tree.some(({ code }) => code.label.toLowerCase() === wanted)) {
+        box.append(button(`New code “${filter.trim()}”, applied`, () => void change({ op: 'add', label: filter.trim() }).then((id) => id && apply(id)), 'codes-create-apply'));
+      }
+      box.append(el('div', { cls: 'kuraa-actions' }, button('Cancel', () => {
+        s.coding = null;
+        tell(s);
+      }, 'codes-cancel')));
+      body.append(box);
+      if (focusedFor !== s.coding) {
+        focusedFor = s.coding;
+        queueMicrotask(() => {
+          if (!find.isConnected) return;
+          find.focus();
+          find.setSelectionRange(find.value.length, find.value.length);
+        });
+      } else if (document.activeElement === body.ownerDocument.body) {
+        // Drawn again while it was being typed in: the focus back where it was.
+        queueMicrotask(() => find.isConnected && find.focus());
+      }
+    }
+
+    // The codings at a passage (its mark in the margin): each person's, yours to remove.
+    if (s?.codedAt !== null && s?.codedAt !== undefined && s.view) {
+      const here = collect(s, s.view.state.doc).filter((a) => a.kind === 'coding' && a.from === s.codedAt);
+      if (here.length) {
+        const box = el('div', { cls: 'kuraa-thread', testid: 'codes-here' });
+        const about = here[0]!.about;
+        if (about?.kind === 'passage') box.append(el('blockquote', { text: about.exact }));
+        for (const a of here) {
+          const code = codeFor(codes, a.item);
+          const row = el('div', { cls: 'kuraa-comment', testid: 'codes-here-row' });
+          row.append(el('div', {}, swatch(code?.color), el('span', { text: ` ${code?.label ?? 'A code no longer in the codebook'}` })), el('div', { cls: 'kuraa-meta', text: `${creatorOf(a.item) || 'Someone'} · ${when(String(a.item.created ?? ''))}` }));
+          if (a.mine && state) row.append(el('div', { cls: 'kuraa-actions' }, button('Remove', () => {
+            state.update({ remove: [a.id] });
+            tell(s);
+            countsSoon();
+          }, 'codes-remove', 'danger')));
+          box.append(row);
+        }
+        body.append(box);
+      }
+    }
+
+    // The codebook: a tree, each with its count; add, and change each.
+    const list = el('div', { cls: 'kuraa-codebook', testid: 'codes-tree' });
+    if (!tree.length) list.append(el('p', { cls: 'kuraa-note', text: 'No codes yet: add one below, or select some text, then Code (⌥⌘U).' }));
+    for (const { code, depth } of tree) {
+      const row = el('div', { cls: 'kuraa-code', testid: 'codes-row' });
+      row.style.paddingLeft = `${depth * 14}px`;
+      const head = el('div', { cls: 'kuraa-code-head' }, swatch(code.color), el('span', { cls: 'kuraa-code-label', text: code.label }), el('span', { cls: 'kuraa-meta', text: String(counts[code.id] ?? 0) }));
+      head.append(button('Retrieve', () => {
+        retrieveWanted = { code: code.id, below: true };
+        for (const fn of [...retrieveListeners]) fn();
+        pctx.openPanel('retrieve');
+      }, 'codes-retrieve'), button(editing === code.id ? 'Done' : 'Edit', () => {
+        editing = editing === code.id ? null : code.id;
+        draw();
+      }, 'codes-edit'));
+      row.append(head);
+      if (code.definition && editing !== code.id) row.append(el('div', { cls: 'kuraa-meta kuraa-text', text: code.definition }));
+      if (editing === code.id) row.append(codeEditor(code));
+      list.append(row);
+    }
+    body.append(list);
+    const name = el('input', { testid: 'codes-new-name' }) as HTMLInputElement;
+    name.placeholder = 'A new code';
+    const add = () => {
+      if (name.value.trim()) void change({ op: 'add', label: name.value.trim() });
+    };
+    name.onkeydown = (e) => {
+      if (e.key === 'Enter') add();
+    };
+    body.append(el('div', { cls: 'kuraa-bar' }, name, button('Add', add, 'codes-add')));
+  }
+
+  /** A code's settings: its name, what it means, its colour, where it goes; merging it into another; deleting it. */
+  function codeEditor(code: Code) {
+    const others = codeTree(codes.book).filter(({ code: c }) => c.id !== code.id);
+    const box = el('div', { cls: 'kuraa-composer', testid: 'codes-editor' });
+    const label = el('input', { testid: 'codes-label' }) as HTMLInputElement;
+    label.value = code.label;
+    const definition = el('textarea', { testid: 'codes-definition' }) as HTMLTextAreaElement;
+    definition.placeholder = 'What it means, and when to use it';
+    definition.value = code.definition ?? '';
+    const colour = el('input', { testid: 'codes-colour' }) as HTMLInputElement;
+    colour.type = 'color';
+    colour.value = code.color ?? '#888888';
+    const parent = el('select', { testid: 'codes-parent' }) as HTMLSelectElement;
+    const top = el('option', { text: '(at the top)' });
+    top.value = '';
+    parent.append(top);
+    for (const { code: c, depth } of others) {
+      const o = el('option', { text: `${'  '.repeat(depth)}${c.label}` });
+      o.value = c.id;
+      parent.append(o);
+    }
+    parent.value = code.broader ?? '';
+    box.append(
+      el('label', { text: 'Name ' }, label),
+      el('label', { text: 'Means ' }, definition),
+      el('label', { text: 'Colour ' }, colour),
+      el('label', { text: 'Under ' }, parent),
+      el('div', { cls: 'kuraa-actions' }, button('Save', () => void change({ op: 'change', id: code.id, label: label.value, definition: definition.value, color: colour.value, broader: parent.value || null }).then(() => {
+        editing = null;
+        draw();
+      }), 'codes-save')),
+    );
+    const into = el('select', { testid: 'codes-merge-into' }) as HTMLSelectElement;
+    for (const { code: c, depth } of others) {
+      const o = el('option', { text: `${'  '.repeat(depth)}${c.label}` });
+      o.value = c.id;
+      into.append(o);
+    }
+    if (others.length) {
+      box.append(el('div', { cls: 'kuraa-actions' }, el('label', { text: 'Merge into ' }, into), button('Merge', () => void pctx.ui.askConfirm(`Merge “${code.label}” into the code chosen? Passages coded with it count as that code’s, everyone’s.`, 'Merge').then((ok) => {
+        if (!ok) return;
+        void change({ op: 'merge', id: code.id, into: into.value }).then(() => {
+          editing = null;
+          void loadCounts();
+        });
+      }), 'codes-merge')));
+    }
+    box.append(el('div', { cls: 'kuraa-actions' }, button('Delete…', () => void pctx.ui.askConfirm(`Delete the code “${code.label}”? Codes under it move up. Where passages are coded with it, it is kept, marked deleted: the codings are their makers’.`, 'Delete', true).then((ok) => {
+      if (!ok) return;
+      void change({ op: 'delete', id: code.id }).then(() => {
+        editing = null;
+        void loadCounts();
+      });
+    }), 'codes-delete', 'danger')));
+    return box;
+  }
+
+  codes.listeners.add(draw);
+  draw();
+  void loadCounts();
+  const off = pctx.onDocument(() => {
+    const now = stores.get(pctx.path() ?? '') ?? null;
+    if (now !== store) draw();
+    countsSoon();
+  });
+  return () => {
+    clearTimeout(countsTimer);
+    off();
+    codes.listeners.delete(draw);
+    store?.listeners.delete(draw);
+    body.remove();
+  };
+}
+
+/** Every passage coded with a code (and those under it, if asked), across the workspace, each opening at its passage. */
+function mountRetrieve(root: HTMLElement, pctx: FeaturePanelContext): () => void {
+  injectStyle();
+  const body = el('div', { cls: 'kuraa-comments', testid: 'annotations-retrieve' });
+  root.append(body);
+  const codes = codesOf(pctx);
+  let wanted = retrieveWanted;
+  let rows: { path: string; person: string; id: string; code: string; by: string; created: string; quote: string | null; at: { from: number; to: number } | null }[] = [];
+  let asked = 0;
+  const load = async () => {
+    const n = ++asked;
+    if (!wanted) {
+      rows = [];
+      draw();
+      return;
+    }
+    try {
+      const got = (await pctx.request('GET', `retrieve?code=${encodeURIComponent(wanted.code)}&below=${wanted.below ? 1 : 0}`)) as unknown as typeof rows;
+      if (n === asked) rows = got;
+    } catch {
+      if (n === asked) rows = [];
+    }
+    draw();
+  };
+  function draw() {
+    body.replaceChildren();
+    if (!coding(pctx)) {
+      body.append(el('p', { cls: 'kuraa-note', text: 'Coding is off for this workspace.' }));
+      return;
+    }
+    const tree = codeTree(codes.book);
+    const pick = el('select', { testid: 'retrieve-code' }) as HTMLSelectElement;
+    const none = el('option', { text: 'Choose a code' });
+    none.value = '';
+    pick.append(none);
+    for (const { code, depth } of tree) {
+      const o = el('option', { text: `${'  '.repeat(depth)}${code.label}` });
+      o.value = code.id;
+      pick.append(o);
+    }
+    pick.value = wanted?.code ?? '';
+    pick.onchange = () => {
+      wanted = pick.value ? { code: pick.value, below: wanted?.below ?? true } : null;
+      void load();
+    };
+    const below = el('input', { testid: 'retrieve-below' }) as HTMLInputElement;
+    below.type = 'checkbox';
+    below.checked = wanted?.below ?? true;
+    below.onchange = () => {
+      if (wanted) wanted = { ...wanted, below: below.checked };
+      void load();
+    };
+    body.append(el('div', { cls: 'kuraa-bar' }, pick, el('label', {}, below, ' and the codes under it')));
+    if (!wanted) return;
+    body.append(el('p', { cls: 'kuraa-note', testid: 'retrieve-count', text: `${rows.length} passage${rows.length === 1 ? '' : 's'}` }));
+    for (const r of rows) {
+      const code = resolveCode(codes.book, r.code);
+      const row = el('button', { cls: 'kuraa-recent', testid: 'retrieve-row' });
+      row.type = 'button';
+      row.append(el('span', { cls: 'kuraa-meta', text: `${r.path} · ${r.by || 'Someone'}${code && code.id !== wanted.code ? ` · ${code.label}` : ''}` }));
+      if (r.quote) row.append(el('blockquote', { text: r.quote }));
+      row.onclick = () => pctx.openFile(r.path, r.at ?? undefined);
+      body.append(row);
+    }
+  }
+  const follow = () => {
+    wanted = retrieveWanted;
+    void load();
+  };
+  retrieveListeners.add(follow);
+  codes.listeners.add(draw);
+  void load();
+  return () => {
+    retrieveListeners.delete(follow);
+    codes.listeners.delete(draw);
+    body.remove();
+  };
+}
+
+/** A small square of a code's colour. */
+const swatch = (color: string | undefined) => {
+  const s = el('span', { cls: 'kuraa-swatch' });
+  s.style.background = color ?? '#888';
+  return s;
+};
+
+/** Settings › Workspace › Annotations: whether the workspace codes. */
+function mountSettings(root: HTMLElement, ctx: FeatureClientContext): () => void {
+  injectStyle();
+  const body = el('div', { cls: 'kuraa-settings' });
+  const box = el('input', { testid: 'annotations-coding' }) as HTMLInputElement;
+  box.type = 'checkbox';
+  box.checked = coding(ctx);
+  box.disabled = !ctx.status().mayChange;
+  box.onchange = async () => {
+    box.disabled = true;
+    try {
+      await ctx.saveSettings({ ...ctx.status().settings, coding: box.checked });
+      ctx.notify(box.checked ? 'Coding is on for this workspace.' : 'Coding is off for this workspace. Codings and the codebook are kept.');
+    } catch (e) {
+      box.checked = !box.checked;
+      ctx.notify((e as Error).message, 'warn');
+    } finally {
+      box.disabled = !ctx.status().mayChange;
+    }
+  };
+  body.append(
+    el('label', { cls: 'kuraa-check' }, box, ' Coding: a codebook, and passages coded with it'),
+    el('p', { cls: 'kuraa-note', text: `Comments are on wherever Annotations is. Coding is a method a project chooses: its codebook is ${codesOf(ctx).path}, in the workspace, everyone’s; each person’s codings are their own, beside each document.` }),
+  );
+  root.append(body);
+  return () => body.remove();
+}
+
 let styled = false;
 /** Its styles, once, in the app's colours. */
 function injectStyle() {
@@ -543,6 +1043,19 @@ function injectStyle() {
 .kuraa-lost summary { cursor: pointer; color: var(--muted, #666); }
 .kuraa-recent { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border, #ddd); border-radius: 6px; }
 .kuraa-recent:hover, .kuraa-recent:focus-visible { border-color: var(--accent, #c08a00); }
+.kuraa-coded { text-decoration: underline; text-decoration-color: var(--kuraa-code, #888); text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-skip-ink: none; }
+.kuraa-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; flex: none; }
+.kuraa-code { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--border, #ddd); }
+.kuraa-code-head { display: flex; align-items: center; gap: 6px; }
+.kuraa-code-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kuraa-code-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; }
+.kuraa-code-choice { all: unset; cursor: pointer; display: flex; align-items: center; padding: 3px 6px; border-radius: 4px; }
+.kuraa-code-choice:hover, .kuraa-code-choice:focus-visible { background: var(--accent-soft, #eee); }
+.kuraa-codes input:not([type]), .kuraa-codes select { font: inherit; padding: 4px 6px; border: 1px solid var(--border, #ddd); border-radius: 4px; background: var(--bg, #fff); color: inherit; }
+.kuraa-codes label { display: flex; gap: 6px; align-items: center; }
+.kuraa-error { color: var(--danger, #b42318); }
+.kuraa-settings { display: flex; flex-direction: column; gap: 6px; }
+.kuraa-check { display: flex; gap: 6px; align-items: center; }
 `;
   const style = document.createElement('style');
   style.dataset.feature = 'annotations';
@@ -556,14 +1069,22 @@ export const annotationsClient = defineClientFeature({
   panels: [
     { id: 'comments', label: 'Comments', about: 'document', keys: PANEL_KEYS, mount: mountComments },
     { id: 'recent', label: 'Recent comments', about: 'workspace', mount: mountRecent },
+    { id: 'codes', label: 'Codes', about: 'workspace', mount: mountCodes },
+    { id: 'retrieve', label: 'Retrieve', about: 'workspace', mount: mountRetrieve },
   ],
   documentMenu: (ctx) => [
     { label: 'Comments', keys: PANEL_KEYS, testid: 'menu-comments', run: () => ctx.openPanel('comments') },
     { label: 'Recent comments', testid: 'menu-recent-comments', run: () => ctx.openPanel('recent') },
+    ...(coding(ctx) ? [
+      { label: 'Codes', testid: 'menu-codes', run: () => ctx.openPanel('codes') },
+      { label: 'Retrieve coded passages', testid: 'menu-retrieve', run: () => ctx.openPanel('retrieve') },
+    ] : []),
   ],
+  settings: { workspace: { label: 'Annotations', mount: mountSettings } },
   help: [
-    { group: 'Comments', keys: [COMMENT_KEYS], does: 'Comment on the selected text' },
-    { group: 'Comments', keys: [PANEL_KEYS], does: 'Show the document’s comments' },
+    { group: 'Comments and coding', keys: [COMMENT_KEYS], does: 'Comment on the selected text' },
+    { group: 'Comments and coding', keys: [PANEL_KEYS], does: 'Show the document’s comments' },
+    { group: 'Comments and coding', keys: [CODE_KEYS], does: 'Code the selected text (where the workspace codes)' },
   ],
 });
 

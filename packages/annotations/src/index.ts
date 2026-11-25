@@ -10,9 +10,17 @@
 // is gone (kept, never dropped).
 import { createTextType } from '@kuraa/format-text';
 import { OWN_NAME, defineFeature, type FeatureResponse, type Json } from '@kuraa/feature-kit/host';
-import { EXTENSION, SUFFIX, aboutOf, creatorOf, describePages, findPassage, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
+import { EXTENSION, SUFFIX, aboutOf, codeOf, creatorOf, describePages, findPassage, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
+import { CODEBOOK, COLOURS, codeAndBelow, mergeCodebooks, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
+import type { FeatureContext, FeatureSettings } from '@kuraa/feature-kit/host';
 
 export * from './format.js';
+export * from './codebook.js';
+
+/** Whether a workspace codes (a setting of its own: comments are for any workspace, coding a method a project chooses). */
+export const codingOn = (settings: FeatureSettings) => settings.coding === true;
+/** Where a workspace keeps its codebook: its setting, else codebook.jsonld at its top. */
+export const codebookPath = (settings: FeatureSettings) => (typeof settings.codebook === 'string' && /^[^/.][^\0]*\.jsonld$/.test(settings.codebook) && !settings.codebook.includes('..') ? settings.codebook : CODEBOOK);
 
 /** An annotation in a room: the annotation, and while its passage is found, anchors at its ends. */
 export interface RoomAnnotation {
@@ -30,6 +38,30 @@ const pageType = {
   conflicts: () => 0,
 };
 
+/** The codebook: shown as JSON-LD text, merged by code (everyone's, changed at once on several devices). */
+const codebookType = {
+  ...createTextType({ id: 'codebook', label: 'Codebook', description: 'A workspace’s codes, for coding passages', files: [{ extensions: ['.jsonld'], language: 'json' }], priority: 4 }),
+  match: (path: string) => path === CODEBOOK || path.endsWith(`/${CODEBOOK}`) || path.endsWith('.codebook.jsonld'),
+  merge: (base: string, a: string, b: string) => ({ text: mergeCodebooks(base, a, b), conflicts: 0 }),
+  conflicts: () => 0,
+};
+
+/** Everyone's codings this device holds: in each person's file beside each document. */
+async function everyonesCodings(ctx: FeatureContext): Promise<{ path: string; person: string; item: Item; docText: string | null }[]> {
+  const out: { path: string; person: string; item: Item; docText: string | null }[] = [];
+  const texts = new Map<string, string | null>();
+  for (const p of await ctx.list()) {
+    const doc = ctx.documentOf(p);
+    if (!doc) continue;
+    const items = readPage(await ctx.read(p)).filter((i) => kindOf(i) === 'coding');
+    if (!items.length) continue;
+    if (!texts.has(doc)) texts.set(doc, await ctx.read(doc));
+    const person = p.slice(p.lastIndexOf('/@') + 2, p.lastIndexOf('/@') + 66);
+    for (const item of items) out.push({ path: doc, person, item, docText: texts.get(doc) ?? null });
+  }
+  return out;
+}
+
 /** The document as an annotation's file names it: beside it, one folder up. */
 const sourceOf = (path: string) => `../${path.slice(path.lastIndexOf('/') + 1)}`;
 
@@ -37,8 +69,9 @@ export const annotationsFeature = defineFeature({
   id: 'annotations',
   label: 'Annotations',
   description: 'Comment on passages and documents, and reply: each person’s kept beside the document in a file of their own, never in it.',
-  types: [pageType],
+  types: [pageType, codebookType],
   companions: [SUFFIX],
+  files: (settings) => [codebookPath(settings)],
   room: {
     companion: SUFFIX,
     extension: EXTENSION,
@@ -82,8 +115,126 @@ export const annotationsFeature = defineFeature({
   },
   describe: ({ before, after }) => describePages(before, after),
   open(ctx) {
+    // Changes to the codebook, one at a time: each reads what the last wrote.
+    let queue: Promise<unknown> = Promise.resolve();
+    const inTurn = <T>(fn: () => Promise<T>): Promise<T> => {
+      const next = queue.then(fn, fn);
+      queue = next.catch(() => undefined);
+      return next;
+    };
+    const codebook = async () => readCodebook(await ctx.read(codebookPath(ctx.settings())));
     return {
       routes: [
+        {
+          // The codebook, and whether the workspace codes.
+          method: 'GET',
+          path: 'codebook',
+          async handle(): Promise<FeatureResponse> {
+            return { body: { path: codebookPath(ctx.settings()), coding: codingOn(ctx.settings()), book: (await codebook()) as unknown as Json } };
+          },
+        },
+        {
+          // Change the codebook: add, change (name, definition, colour, parent), merge one code into another, delete one.
+          method: 'POST',
+          path: 'codebook',
+          handle: ({ body, person }) => inTurn(async (): Promise<FeatureResponse> => {
+            if (!codingOn(ctx.settings())) return { status: 409, body: { error: 'Coding is off for this workspace' } };
+            const b = (body ?? {}) as { op?: string; id?: string; into?: string; label?: string; definition?: string | null; color?: string; broader?: string | null };
+            const book = await codebook();
+            const now = new Date().toISOString();
+            const byId = new Map(book.codes.map((c) => [c.id, c]));
+            const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined;
+            const colour = typeof b.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color.toLowerCase() : undefined;
+            const parentOk = (parent: string | null | undefined, self?: string) => parent === null || parent === undefined || (byId.has(parent) && (!self || !codeAndBelow(book, self).has(parent)));
+            let id = b.id;
+            if (b.op === 'add') {
+              if (!label) return { status: 400, body: { error: 'A code needs a name' } };
+              if (!parentOk(b.broader)) return { status: 400, body: { error: 'No such code to put it under' } };
+              id = `urn:uuid:${randomId()}`;
+              book.codes.push({ id, label, ...(b.broader ? { broader: b.broader } : {}), color: colour ?? COLOURS[book.codes.length % COLOURS.length]!, ...(typeof b.definition === 'string' && b.definition.trim() ? { definition: b.definition.trim() } : {}), modified: now });
+            } else {
+              const code = id ? byId.get(id) : undefined;
+              if (!code) return { status: 404, body: { error: 'No such code' } };
+              if (b.op === 'change') {
+                if (label !== undefined && !label) return { status: 400, body: { error: 'A code needs a name' } };
+                if (!parentOk(b.broader, code.id)) return { status: 400, body: { error: 'A code cannot be put under itself, or one under it' } };
+                if (label) code.label = label;
+                if (b.definition !== undefined) {
+                  if (b.definition && b.definition.trim()) code.definition = b.definition.trim();
+                  else delete code.definition;
+                }
+                if (colour) code.color = colour;
+                if (b.broader !== undefined) {
+                  if (b.broader) code.broader = b.broader;
+                  else delete code.broader;
+                }
+              } else if (b.op === 'merge') {
+                const into = b.into ? resolveCode(book, b.into) : null;
+                if (!into || into.id === code.id || codeAndBelow(book, code.id).has(into.id)) return { status: 400, body: { error: 'Merge it into another code, not itself or one under it' } };
+                // Kept, saying what replaces it: codings of it, everyone's own, count as the other's. Its children move up to it.
+                code.replacedBy = into.id;
+                for (const c of book.codes) if (c.broader === code.id) {
+                  c.broader = into.id;
+                  c.modified = now;
+                }
+              } else if (b.op === 'delete') {
+                const used = (await everyonesCodings(ctx)).some((x) => codeOf(x.item) === code.id);
+                for (const c of book.codes) if (c.broader === code.id) {
+                  if (code.broader) c.broader = code.broader;
+                  else delete c.broader;
+                  c.modified = now;
+                }
+                // Codings name it (someone's own, not to be rewritten): kept, marked deleted. Else gone.
+                if (used) code.deleted = true;
+                else book.codes = book.codes.filter((c) => c.id !== code.id);
+              } else return { status: 400, body: { error: 'Not a change to the codebook' } };
+              code.modified = now;
+            }
+            await ctx.write(codebookPath(ctx.settings()), writeCodebook(book), { by: person });
+            ctx.tell({ codebook: true });
+            return { body: { id: id ?? null, book: book as unknown as Json } };
+          }),
+        },
+        {
+          // How many passages each code has (merged codes' counting as what replaces them), everyone's, this device holds.
+          method: 'GET',
+          path: 'counts',
+          async handle(): Promise<FeatureResponse> {
+            const book = await codebook();
+            const counts: { [id: string]: number } = {};
+            for (const c of await everyonesCodings(ctx)) {
+              const id = codeOf(c.item);
+              const code = id ? resolveCode(book, id) : null;
+              if (code) counts[code.id] = (counts[code.id] ?? 0) + 1;
+            }
+            return { body: counts };
+          },
+        },
+        {
+          // Every passage coded with a code (and the codes under it, if asked), across the documents this device holds.
+          method: 'GET',
+          path: 'retrieve',
+          async handle({ query }): Promise<FeatureResponse> {
+            const book = await codebook();
+            const wanted = query.get('code') ?? '';
+            if (!book.codes.some((c) => c.id === wanted)) return { status: 404, body: { error: 'No such code' } };
+            const codes = query.get('below') === '1' ? codeAndBelow(book, wanted) : new Set(book.codes.filter((c) => resolveCode(book, c.id)?.id === wanted || c.id === wanted).map((c) => c.id));
+            const rows: Json[] = [];
+            for (const c of await everyonesCodings(ctx)) {
+              const id = codeOf(c.item);
+              if (!id || !codes.has(id)) continue;
+              const about = aboutOf(c.item);
+              const at = about?.kind === 'passage' && c.docText !== null ? findPassage(c.docText, about) : null;
+              rows.push({ path: c.path, person: c.person, id: String(c.item.id), code: resolveCode(book, id)?.id ?? id, by: creatorOf(c.item), created: String(c.item.created ?? ''), quote: about?.kind === 'passage' ? about.exact : null, at });
+            }
+            rows.sort((a, b) => {
+              const x = a as { path: string; at: { from: number } | null };
+              const y = b as { path: string; at: { from: number } | null };
+              return x.path.localeCompare(y.path) || (x.at?.from ?? 0) - (y.at?.from ?? 0);
+            });
+            return { body: rows };
+          },
+        },
         {
           // The workspace's newest comments and replies, everyone's, on the documents this device holds.
           method: 'GET',

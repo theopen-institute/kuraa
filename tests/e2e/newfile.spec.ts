@@ -219,7 +219,8 @@ test('right-clicking a folder renames it, with what is in it', async ({ page }) 
   await expect(page.getByTestId(`folder:${folder}`)).toHaveCount(0);
   expect(existsSync(join(E2E.dir, moved))).toBe(true);
   expect(existsSync(join(E2E.dir, folder))).toBe(false);
-  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Rename ${folder} to ${folder}-renamed`);
+  // The open file's room is closed as the rename starts, so the app may show the new names a moment before its commit is made.
+  await expect.poll(() => execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Rename ${folder} to ${folder}-renamed`);
   await expect(page.locator('.tree-file.selected')).toContainText('inside.md');
   await expect(page.getByTestId('editor')).toContainText('Inside');
 });

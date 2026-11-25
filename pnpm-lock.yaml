@@ -235,6 +235,9 @@ importers:
       '@kuraa/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@kuraa/features':
+        specifier: workspace:*
+        version: link:../../packages/features
       '@kuraa/formats':
         specifier: workspace:*
         version: link:../../packages/formats
@@ -271,10 +274,19 @@ importers:
       '@kuraa/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../../packages/feature-kit
+      '@kuraa/features':
+        specifier: workspace:*
+        version: link:../../packages/features
       '@kuraa/formats':
         specifier: workspace:*
         version: link:../../packages/formats
     devDependencies:
+      '@kuraa/feature-example':
+        specifier: workspace:*
+        version: link:../../packages/feature-example
       '@vitejs/plugin-vue':
         specifier: ^6.0.11
         version: 6.0.11(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(vue@3.5.45(typescript@6.0.3))
@@ -317,6 +329,9 @@ importers:
       '@kuraa/editor-kit':
         specifier: workspace:*
         version: link:../editor-kit
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -390,6 +405,51 @@ importers:
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit
+
+  packages/feature-example:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/format-text':
+        specifier: workspace:*
+        version: link:../format-text
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.9
+        version: 1.42.9
+
+  packages/feature-kit:
+    dependencies:
+      '@kuraa/editor-kit':
+        specifier: workspace:*
+        version: link:../editor-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.9
+        version: 1.42.9
+
+  packages/features:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
 
   packages/format-pandoc:
     dependencies:
@@ -524,6 +584,12 @@ importers:
       '@hyperswarm/secret-stream':
         specifier: ^6.9.2
         version: 6.9.2(bare-buffer@3.7.3)(bare-events@2.9.2)(bare-url@2.5.8)
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/features':
+        specifier: workspace:*
+        version: link:../features
       '@kuraa/formats':
         specifier: workspace:*
         version: link:../formats
@@ -570,6 +636,9 @@ importers:
       '@kuraa/env-podman':
         specifier: workspace:*
         version: link:../env-podman
+      '@kuraa/feature-example':
+        specifier: workspace:*
+        version: link:../feature-example
       '@kuraa/format-pandoc':
         specifier: workspace:*
         version: link:../format-pandoc

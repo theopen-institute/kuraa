@@ -325,7 +325,8 @@ describe('edits passed on in a room', () => {
       applyPeerAwareness: (_name: string, update: Uint8Array) => awareness.push(update),
       removePeerAwareness: () => undefined,
     };
-    const host = { sessionRelay: relay, roomView: () => room, liveRoom: () => room, liveRooms: () => [room], spaceOf: () => null, roomContributors: () => [], addContributors: () => undefined, commitSoon: () => undefined };
+    // No feature keeps state in rooms here (0082): edits are taken as they always were.
+    const host = { sessionRelay: relay, roomView: () => room, liveRoom: () => room, liveRooms: () => [room], spaceOf: () => null, roomContributors: () => [], addContributors: () => undefined, commitSoon: () => undefined, features: { keepsRoomState: () => false, person: () => null } };
     const links = new Map<string, PeerLink>();
     const link = (key: string) => {
       const l = { key, accepted: true, remote: key.slice(0, 4), hello: { workspace: WS }, sendRoom: () => true } as unknown as PeerLink;

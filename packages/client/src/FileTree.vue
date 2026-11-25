@@ -28,6 +28,8 @@ const props = defineProps<{
   shared?: boolean;
   /** Folders with permissions of their own (0069): their path (`dir/`), who reads and who may change, in words. */
   folders?: { path: string; readers?: string; writers?: string }[];
+  /** What features add to a file's menu (0082), after its own items. */
+  featureItems?: (path: string) => ContextItem[];
 }>();
 const emit = defineEmits<{
   select: [path: string];
@@ -270,6 +272,7 @@ function menuItems(path: string, kind: 'file' | 'folder' | 'top'): ContextItem[]
       ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', path), testid: 'context:permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void rename(path), testid: 'context:rename' },
       { label: S.common.deleteEllipsis, run: () => void remove(path), danger: true, testid: 'context:delete' },
+      ...(props.featureItems?.(path) ?? []).map((item, i) => ({ ...item, divided: i === 0 })),
     ];
   }
   const where = kind === 'folder' ? S.tree.inFolder(name) : '';

@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@hyperswarm/secret-stream": "^6.9.2",
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/features": "workspace:*",
     "@kuraa/formats": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "@kuraa/run-components": "workspace:*",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@kuraa/env-podman": "workspace:*",
+    "@kuraa/feature-example": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",

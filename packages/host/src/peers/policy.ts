@@ -67,6 +67,7 @@
 import { createHash } from 'node:crypto';
 import crypto from 'hypercore-crypto';
 import type { KeyPair } from '../keys.js';
+import { ownerOf } from '@kuraa/feature-kit';
 
 export type Role = 'admin' | 'member';
 
@@ -222,6 +223,22 @@ export function retired(op: PolicyOp): boolean {
     case 'perm': return email(op.write) || email(op.read);
     default: return false;
   }
+}
+
+/** Whether a path is in a folder named as one beside a document is (`<document>.<suffix>/`): its last part has a dot past its start. */
+export function companionShaped(path: string): boolean {
+  const folder = path.slice(0, Math.max(0, path.lastIndexOf('/')));
+  const name = folder.slice(folder.lastIndexOf('/') + 1);
+  return name.indexOf('.', 1) > 0;
+}
+
+/** The documents a companion folder could be beside: its name with each of its dotted endings taken off (`a.md.notes` → `a.md`, `a`). */
+export function documentsBeside(path: string): string[] {
+  const folder = path.slice(0, Math.max(0, path.lastIndexOf('/')));
+  const start = folder.lastIndexOf('/') + 1;
+  const out: string[] = [];
+  for (let i = folder.indexOf('.', start + 1); i > 0; i = folder.indexOf('.', i + 1)) out.push(folder.slice(0, i));
+  return out;
 }
 
 /** A private path, as a permission names it: its hash, in this workspace (0069). */
@@ -498,8 +515,18 @@ export class Policy {
     return [...this.perms.values()].some((p) => p.space === space);
   }
 
-  /** Whether a person (null: no one's, as an unsigned commit) may change a file: by its rule, or anyone if it has none. */
-  mayWrite(id: string | null, path: string): boolean {
+  /**
+   * Whether a person (null: no one's, as an unsigned commit) may change a file:
+   * by its rule, or anyone if it has none. A person's own file (0082: named
+   * `@<identity ID>`, in a folder beside a document, `p01.md.annotations/`) is
+   * theirs alone, wherever they read it (`space`: the history it is in; null,
+   * the workspace's own), whatever the rules say. `beside`: whether it is beside
+   * a document that is there (the gate looks); by its name alone if not given.
+   * A file so named anywhere else is judged by the rules, as any other.
+   */
+  mayWrite(id: string | null, path: string, space: string | null = null, beside?: boolean): boolean {
+    const owner = ownerOf(path);
+    if (owner && (beside ?? companionShaped(path))) return !this.founded || (id === owner && this.mayRead(id, space));
     const rule = this.ruleFor(path);
     if (!rule) return true;
     if (!id) return false;

@@ -1087,6 +1087,11 @@ export class PeerNode {
     return a.policy.mayWrite(a.personOf.get(device) ?? null, path);
   }
 
+  /** Whose a device is (its person's identity ID), as the records said when the members last changed; null if no one's known. */
+  personOfDevice(device: string): string | null {
+    return this.access?.personOf.get(device) ?? null;
+  }
+
   private async updateAccess(): Promise<void> {
     const personOf = new Map<string, string>();
     for (const d of [this.myKey, ...(await this.identity.members()).map((m) => m.key)]) {

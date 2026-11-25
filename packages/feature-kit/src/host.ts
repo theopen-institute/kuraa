@@ -1,0 +1,195 @@
+// A feature's host half: what it brings to every host that loads it, and what it
+// does for each workspace where it is on. The host imports no feature: whoever
+// starts it passes them (the command line, the desktop app, `pnpm dev`: the
+// standard list in @kuraa/features), as run components are.
+import type { Node } from 'prosemirror-model';
+import type { DocumentType, ParsedDocument, SourceMap } from '@kuraa/kernel';
+import { FEATURE_API_VERSION, type Anchor, type FeatureSettings, type Json, type Person } from './index.js';
+
+export * from './index.js';
+
+export interface HostFeature {
+  apiVersion: number;
+  /** Its id (FEATURE_ID): 'annotations'. */
+  id: string;
+  /** What people call it: 'Annotations'. */
+  label: string;
+  /** A sentence on what it does (Settings). */
+  description?: string;
+  /**
+   * Document types for its files (its companions, its codebook), usually
+   * with a `merge` of their own. Registered on every host that loads the
+   * feature, on or off, so that turning it off does not change how a device
+   * merges.
+   */
+  types?: DocumentType[];
+  /**
+   * The suffixes of its companion folders (COMPANION_SUFFIX): beside each
+   * document, named after it, a folder of each person's own file
+   * (`p01.md.annotations/@<id>.jsonld`). The core moves them with their
+   * documents (a deletion takes only the deleter's own), keeps them in their
+   * document's space, folds them under it in the file list and leaves them out
+   * of search.
+   */
+  companions?: string[];
+  /** Files of its own besides companions (a codebook), by the workspace's settings: the only others it may write. */
+  files?(settings: FeatureSettings): string[];
+  /** What it keeps in each document's room, live, written to a companion with the document. */
+  room?: FeatureRoom;
+  /** A line for an automatic commit that changed one of its files ("2 marks added"); null to say nothing. */
+  describe?(change: { path: string; before: string | null; after: string | null }): string | null;
+  /** Opened for each workspace where it is on; closed when it goes off, or the host stops. */
+  open?(ctx: FeatureContext): FeatureSession;
+}
+
+/**
+ * State kept in each document's room, shared live by everyone in it: a map of
+ * JSON values by key for each person, whose anchors move with everyone's typing.
+ * Each person's is seeded from their own file by their own device, changed only
+ * from their devices, and written to their file by their device, when it saves
+ * the room (the device that leads it with the document, in the same commit).
+ */
+export interface FeatureRoom {
+  /** The suffix of the companion folder it is kept in: one of `companions`. */
+  companion: string;
+  /** Its files' extension: `.jsonld`. */
+  extension: string;
+  /** What a person's map starts with, from their own file as it is (null: there is none). */
+  seed(input: RoomSeedInput): { [key: string]: Json };
+  /**
+   * A person's own file's text: the file as it is (`companion`), with the
+   * entries they changed here set (`entries`) and those they took away removed
+   * (`removed`); every other entry as the file says. Null for none (it is
+   * removed). Called at each save of the room, only where they changed something.
+   */
+  write(input: RoomWriteInput): string | null;
+}
+
+export interface RoomSeedInput {
+  /** The document's path. */
+  path: string;
+  type: DocumentType;
+  /** The document, as the session starts with it, and its text. */
+  doc: Node;
+  text: string;
+  parsed: ParsedDocument;
+  /** Whose map it is: this host's person. */
+  person: string;
+  /** Their own file's text, if there is one. */
+  companion: string | null;
+  /** Places in the document's text and in the document, both ways. */
+  sourceMap: SourceMap;
+  /** An anchor at a document position, in the session being started (assoc: which side it keeps to when text is typed there; -1 the left, else the right). */
+  anchorAt(pos: number, assoc?: -1 | 1): Anchor;
+  settings: FeatureSettings;
+}
+
+export interface RoomWriteInput {
+  path: string;
+  type: DocumentType;
+  /** The document as written, its text and parse. */
+  doc: Node;
+  text: string;
+  parsed: ParsedDocument;
+  /** Whose file it is: this host's person. */
+  person: string;
+  /**
+   * The entries of their map they set here (from their own clients and
+   * devices, or seeded from their file), as the room has them now. Only these:
+   * what anyone else put in their map is never written into their file.
+   */
+  entries: { [key: string]: Json };
+  /** The keys of entries they took away here. */
+  removed: string[];
+  /** Their own file's text as it is now (null: none): what is not in `entries` or `removed` stays as it says. */
+  companion: string | null;
+  sourceMap: SourceMap;
+  /** Where an anchor is in `doc` now, or null if what it was at is gone. */
+  positionOf(anchor: Anchor): number | null;
+  settings: FeatureSettings;
+}
+
+/** What happened, after it happened: a feature's handlers cannot refuse or hold it up. */
+export interface FeatureEvents {
+  /** A document's room started a session here. */
+  open: { path: string };
+  /** A document's text was written from its room. */
+  save: { path: string; text: string };
+  /** A commit was made here, of these paths. */
+  commit: { commit: string; paths: string[] };
+  /** Work from elsewhere was brought in (another device, the online copy): these files changed. */
+  merge: { from: string | null; to: string; paths: string[] };
+  /** A file or folder was renamed or moved here (companions moved with it). */
+  rename: { from: string; to: string; folder: boolean };
+  /** A file or folder was deleted here (companions with it). */
+  delete: { path: string; folder: boolean };
+  /** The workspace's settings for the feature changed (here or in a merge). */
+  settings: { settings: FeatureSettings };
+}
+
+export type FeatureEvent = keyof FeatureEvents;
+
+/** What the host gives a feature for one workspace. */
+export interface FeatureContext {
+  readonly id: string;
+  /** Its settings for the workspace, as they are now. */
+  settings(): FeatureSettings;
+  /** A workspace file's text, if this device holds it and it is text; null otherwise. */
+  read(path: string): Promise<string | null>;
+  /**
+   * Write one of its own files (this host's person's own file beside a
+   * document that exists, or one it declared), whole, or remove it (null):
+   * checked against who may change it, committed (credited to `by`), kept in
+   * its document's space. Rejects, in words for people, what it may not write.
+   */
+  write(path: string, text: string | null, o?: { by?: Person | null }): Promise<void>;
+  /** The workspace's files this device holds. */
+  list(): Promise<string[]>;
+  /** You: this host's person's identity ID; null until there is one (then nothing of yours can be written). */
+  me(): string | null;
+  /** A person's own file beside a document (by default yours, by this feature's first suffix and its room's extension, or `.json`). */
+  companionOf(doc: string, o?: { person?: string; suffix?: string; extension?: string }): string;
+  /** Everyone's own files beside a document that this device holds, with their text. */
+  companions(doc: string, suffix?: string): Promise<{ person: string; path: string; text: string }[]>;
+  /** The document a companion file of this feature belongs to, or null. */
+  documentOf(path: string): string | null;
+  /** Be told after something happens. Returns how to stop. */
+  on<E extends FeatureEvent>(event: E, fn: (payload: FeatureEvents[E]) => void | Promise<void>): () => void;
+  /** Tell its client halves: those with `path` open, or every one with any document open. */
+  tell(message: Json, path?: string): void;
+  log(message: string): void;
+}
+
+/** A request to one of its routes: /api/features/<id>/<path>. */
+export interface FeatureRequest {
+  method: FeatureRoute['method'];
+  /** What follows /api/features/<id>/. */
+  path: string;
+  query: URLSearchParams;
+  /** The JSON body, if any. */
+  body: Json | undefined;
+  /** Who asked, as the client says (absent if it says nothing). */
+  person: Person | null;
+}
+
+export interface FeatureResponse {
+  status?: number;
+  body?: Json;
+}
+
+export interface FeatureRoute {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  /** What follows /api/features/<id>/: exact. */
+  path: string;
+  handle(req: FeatureRequest): FeatureResponse | Promise<FeatureResponse>;
+}
+
+/** A feature opened for one workspace. */
+export interface FeatureSession {
+  routes?: FeatureRoute[];
+  close?(): void | Promise<void>;
+}
+
+export function defineFeature(feature: Omit<HostFeature, 'apiVersion'>): HostFeature {
+  return { apiVersion: FEATURE_API_VERSION, ...feature };
+}

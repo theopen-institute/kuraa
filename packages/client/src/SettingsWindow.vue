@@ -33,6 +33,8 @@ import SettingsDocument from './SettingsDocument.vue';
 import SettingsHost from './SettingsHost.vue';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsYou from './SettingsYou.vue';
+import type { FeatureStatus } from '@kuraa/feature-kit/client';
+import type { ActiveFeature } from './features.js';
 
 const props = defineProps<{
   hub: HubApi;
@@ -58,6 +60,12 @@ const props = defineProps<{
   editors: Record<string, FormatEditor>;
   editorsOff: string[];
   toolsKey?: number;
+  /** Features (0082): how each the host has stands for the workspace; the client halves on there (for their parts of Settings); those you hid. */
+  features?: FeatureStatus[];
+  /** Turn a feature on or off for the workspace (the app's: it goes through if Settings closes meanwhile). */
+  turnFeature?: (id: string, on: boolean) => Promise<void>;
+  featureParts?: ActiveFeature[];
+  hiddenFeatures?: string[];
 }>();
 const emit = defineEmits<{
   close: [];
@@ -71,6 +79,8 @@ const emit = defineEmits<{
   /** A file's or folder's permissions, to open (0069). */
   permissions: [path: string];
   packages: [runner: ChunkRunner, engine: string];
+  /** The features you hid (0082), in this browser. */
+  hiddenFeatures: [ids: string[]];
 }>();
 
 const section = ref<SettingsSection>(props.section);
@@ -186,8 +196,12 @@ useDialog(root, () => {
             :settings="settings"
             :editors="editors"
             :editors-off="editorsOff"
+            :features="features ?? []"
+            :feature-parts="featureParts ?? []"
+            :hidden-features="hiddenFeatures ?? []"
             @save-settings="(s) => emit('saveSettings', s)"
             @editors-off="(ids) => emit('editorsOff', ids)"
+            @hidden-features="(ids) => emit('hiddenFeatures', ids)"
           />
           <SettingsDocument v-show="section === 'document'" ref="documentPart" :path="path" :header="header" :opening="opening" />
           <SettingsWorkspace
@@ -196,6 +210,9 @@ useDialog(root, () => {
             :workspace="workspace"
             :runner="runner"
             :can-remove="canRemoveWorkspace"
+            :features="features ?? []"
+            :feature-parts="featureParts ?? []"
+            :turn-feature="turnFeature ?? (async () => undefined)"
             @remove="thenClose(() => emit('removeWorkspace'))"
             @invite="thenClose(() => emit('invite'))"
             @permissions="(p) => thenClose(() => emit('permissions', p))"

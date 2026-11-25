@@ -35,7 +35,8 @@
 // version of merging is checked only for what it holds that neither parent did.
 import type { Git } from '../git.js';
 import { commitSigner } from '../signing.js';
-import type { Policy } from './policy.js';
+import { documentsBeside, type Policy } from './policy.js';
+import { ownerOf } from '@kuraa/feature-kit';
 
 /** The trailer a signed commit names the policy it was made under with: the policy's heads. */
 export const POLICY_TRAILER = 'Kuraa-Policy';
@@ -56,6 +57,8 @@ export const MERGE_TRAILER = 'Kuraa-Merge';
 
 export interface GateContext {
   policy: Policy;
+  /** The space whose history is judged (null: the workspace's own): who reads what is in it, for a person's own files (0082). */
+  space?: string | null;
   /** Signing keys no longer their person's: whose they were, and the commits that still count (Identity.cutKeys). */
   cutKeys?: Map<string, { person: string; heads: string[] }>;
   /** The tree of the merge of two commits, as this device makes it; and what its merges' trailer says (merging.ts, mergeTrailerValue). */
@@ -114,8 +117,10 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
   // Write rules, or cutoffs, to judge by; else only what no one brings in this way (unsafePaths).
   const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0;
   for (const [c, ...parents] of list as [string, ...string[]][]) {
-    if (!judging) {
-      const changed = (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', ...(parents.length >= 2 ? [parents[0]!] : []), c])).stdout.split('\0').filter(Boolean);
+    // A commit touching anyone's own files (0082) is judged, rules or none: they are their owners' alone.
+    const quick = judging ? null : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', ...(parents.length >= 2 ? [parents[0]!] : []), c])).stdout.split('\0').filter(Boolean);
+    if (quick && (!ctx.policy.founded || !quick.some((p) => ownerOf(p)))) {
+      const changed = quick;
       const unsafe = await unsafePaths(git, c, parents, changed, ctx.policy);
       if (!unsafe.size) {
         for (const path of changed) tainted.set(path, null);
@@ -140,9 +145,13 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
       ? await mergeChanges(git, c, parents, message, ctx)
       : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);
     const unsafe = await unsafePaths(git, c, parents, changed, ctx.policy);
+    // Someone's own files moved unchanged with their document (0082): anyone may.
+    const moved = parents.length >= 2 ? new Set<string>() : await ownMoves(git, c);
     for (const path of changed) {
+      // Someone's own file counts as theirs only beside a document that is there (in the commit, or before it: one deleted).
+      const beside = ownerOf(path) ? await besideDocument(git, c, parents[0] ?? null, path) : undefined;
       // By someone who may: taken, and whatever was refused before it with it.
-      if (!cut && !unsafe.has(path) && ctx.policy.mayWrite(by, path)) tainted.set(path, null);
+      if (!cut && !unsafe.has(path) && (ctx.policy.mayWrite(by, path, ctx.space ?? null, beside) || moved.has(path))) tainted.set(path, null);
       else tainted.set(path, { commit: c, by });
     }
   }
@@ -155,6 +164,58 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
     refused.push({ commit: t.commit, path, by: t.by ? ctx.nameOf(t.by) ?? null : null });
   }
   return { keeps, refused, waitFor: [] };
+}
+
+/** Whether a file is beside a document that is there: in the commit, or (a document deleted with it) in its first parent. */
+async function besideDocument(git: Git, commit: string, parent: string | null, path: string): Promise<boolean> {
+  for (const doc of documentsBeside(path)) {
+    for (const at of [commit, parent]) {
+      if (at && (await git.run(['cat-file', '-e', `${at}:${doc}`], { allowFail: true })).code === 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The paths of a commit (not a merge) that move people's own files unchanged
+ * with their documents (0082): one taken away and the same content put under the
+ * same name elsewhere, where the document its folder was beside was taken away
+ * and the document the new one is beside was put there, in the same commit. A
+ * document renamed carries the files kept beside it this way, everyone's:
+ * moving them changes nothing of theirs. A move of them anywhere else is not one.
+ */
+async function ownMoves(git: Git, commit: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const raw = (await git.run(['diff-tree', '-r', '-z', '--no-commit-id', '--no-renames', '--root', commit], { allowFail: true })).stdout.split('\0');
+  const deleted = new Set<string>();
+  const addedAll = new Set<string>();
+  const gone = new Map<string, string[]>();
+  const added: { path: string; key: string }[] = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const m = /^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) ([ADM])/.exec(raw[i]!);
+    const path = raw[i + 1]!;
+    if (!m) continue;
+    if (m[3] === 'D') deleted.add(path);
+    if (m[3] === 'A') addedAll.add(path);
+    if (!ownerOf(path)) continue;
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    if (m[3] === 'D') gone.set(`${name}\0${m[1]}`, [...(gone.get(`${name}\0${m[1]}`) ?? []), path]);
+    else if (m[3] === 'A') added.push({ path, key: `${name}\0${m[2]}` });
+  }
+  // Whether `from` and `to` are beside documents moved in this commit, by the same ending (`.annotations`).
+  const withDocument = (from: string, to: string) => documentsBeside(from).some((d1) => {
+    const ending = from.slice(d1.length, from.lastIndexOf('/'));
+    const d2 = to.slice(0, to.lastIndexOf('/') - ending.length);
+    return deleted.has(d1) && addedAll.has(d2) && to.slice(d2.length, to.lastIndexOf('/')) === ending;
+  });
+  for (const a of added) {
+    const from = gone.get(a.key);
+    const i = from?.findIndex((f) => withDocument(f, a.path)) ?? -1;
+    if (i < 0) continue;
+    out.add(a.path);
+    out.add(from!.splice(i, 1)[0]!);
+  }
+  return out;
 }
 
 /** A path as a disk that tells neither case nor Unicode forms apart takes it (most Macs', Windows'). */

@@ -16,6 +16,7 @@ import { APP_KEYS, keyLabel } from './keys.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import CodeSection from './CodeSection.vue';
+import type { FeatureMenuItem } from '@kuraa/feature-kit/client';
 
 const props = defineProps<{
   /** What the open file is called: its title, or its filename. */
@@ -30,6 +31,8 @@ const props = defineProps<{
   at: { top: number; right: number };
   /** The workspace is shared with other people's devices: Permissions… is offered (0066). */
   shared?: boolean;
+  /** What features add (0082): a group of their own, after the versions. */
+  featureItems?: FeatureMenuItem[];
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -88,7 +91,8 @@ const groups = computed<Item[][]>(() => {
     if (props.conflicts) writing.push({ label: S.menu.nextConflict, keys: 'Mod-Alt-n', testid: 'menu-next-conflict', run: () => then(() => emit('nextConflict')) });
   }
   const versions: Item[] = [{ label: S.menu.saveVersion, testid: 'menu-save-version', run: () => then(() => emit('saveVersion')) }];
-  return [view, writing, versions].filter((g) => g.length);
+  const features: Item[] = (props.featureItems ?? []).map((i) => ({ label: i.label, keys: i.keys, testid: i.testid, run: () => then(() => i.run()) }));
+  return [view, writing, versions, features].filter((g) => g.length);
 });
 
 const own = computed<Item[]>(() => [

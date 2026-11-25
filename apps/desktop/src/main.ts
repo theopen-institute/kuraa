@@ -18,6 +18,7 @@
 //   --engine <id>...     engines to turn on (default: r); --engine none for none
 //   --env <id>           where code runs (default: the only environment loaded)
 //   --format <id>...     document formats to turn on (default: all)
+//   --feature <id>...    features to turn on (default: all; each workspace turns them on too)
 //   --component <spec>...   more run components (engines, environments): flag only, see 0047
 //   --allow-unsandboxed  allow an environment that is not sandboxed: flag only, see 0047
 //   --podman <path>      the Podman program (also KURAA_PODMAN): flag only, see 0047
@@ -42,6 +43,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { gitIdentity, inspectFolder, lastResort, onNewerVersion, SettingsStore, startHub, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
+import { standardFeatures } from '@kuraa/features';
 import type { ShellConfig } from '@kuraa/client';
 import { D } from './strings.js';
 import { startUpdates, updatable, type Updates } from './updates.js';
@@ -60,7 +62,7 @@ const { values: flags } = parseArgs({
   args: process.argv.slice(app.isPackaged ? 1 : 2).filter((a) => a !== '.'),
   options: {
     open: { type: 'string' }, join: { type: 'string' }, token: { type: 'string' },
-    engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true },
+    engine: { type: 'string', multiple: true }, env: { type: 'string' }, format: { type: 'string', multiple: true }, feature: { type: 'string', multiple: true },
     component: { type: 'string', multiple: true }, 'allow-unsandboxed': { type: 'boolean' },
     workspaces: { type: 'string' },
     'r-image': { type: 'string', multiple: true },
@@ -125,6 +127,7 @@ function flagSettings(): Partial<Settings> {
     ...(engines ? { runCode: engines.some((e) => e !== 'none') } : {}),
     ...(list(flags['r-image']) ? { rImages: list(flags['r-image']) } : {}),
     ...(list(flags.format) ? { formats: list(flags.format) } : {}),
+    ...(list(flags.feature) ? { features: list(flags.feature) } : {}),
     ...(typeof flags.env === 'string' ? { environment: flags.env } : {}),
     ...(typeof flags.workspaces === 'string' ? { workspaces: resolve(flags.workspaces) } : {}),
   };
@@ -204,6 +207,7 @@ async function startOwnHub(): Promise<RunningHub> {
     settings,
     // What only flags set: more components, the sandbox, the Podman program, engines named; and tests' timings.
     hosts: {
+      features: standardFeatures,
       run: {
         ...(engines ? { engines } : {}),
         components: [...standardRunComponents, ...(list(flags.component) ?? [])],

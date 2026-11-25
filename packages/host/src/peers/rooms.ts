@@ -191,7 +191,8 @@ export class Rooms {
       // Made here, or passed on from the device it was made on (through): passed on only where this device takes it.
       const [via, origin] = source.from === 'peer' ? source.peer.split('>') as [string, string?] : [null, undefined];
       const from = origin ?? via ?? this.node.myKey;
-      if (via && !this.node.mayWrite(from, room.path)) return;
+      // (Where features keep state in rooms, what was taken from another device was judged as it came: takes.)
+      if (via && !this.node.mayWrite(from, room.path) && !this.host.features.keepsRoomState()) return;
       for (const link of this.peersIn(room)) {
         if (link.key === via || link.key === from) continue;
         this.send(link, { type: 'room', op: 'update', key: room.key, update, by, ...(from !== this.node.myKey ? { origin: from } : {}) });
@@ -206,6 +207,28 @@ export class Rooms {
 
   private send(link: PeerLink, m: RoomMessage): void {
     link.sendRoom(m);
+  }
+
+  /**
+   * Whether a change to a room is taken from a device (`origin`: the device an
+   * edit was made on; null for a sync, which holds anyone's): its document only
+   * from those whose people may change it (0066). A person's feature maps
+   * (0082): in an edit, only as its maker's own; a sync, whole, from someone who
+   * may change the document (what it holds of anyone's maps is shown, never
+   * written as theirs: each host writes into its person's file only what they
+   * did, features.ts), and from anyone else only if it holds nothing but their
+   * own maps. Where no feature keeps state in rooms here, as before.
+   */
+  private takes(room: RoomView, update: Uint8Array, link: string, origin: string | null): boolean {
+    const docOk = this.node.mayWrite(link, room.path) && (origin === null || this.node.mayWrite(origin, room.path));
+    if (!this.host.features.keepsRoomState()) return docOk;
+    if (origin === null && docOk) return true;
+    const w = this.host.sessionRelay.whatChanged(room.name, update);
+    if (!w) return docOk;
+    if ((w.doc || w.other) && !docOk) return false;
+    const maker = this.node.personOfDevice(origin ?? link);
+    for (const p of w.people) if (maker !== p) return false;
+    return true;
   }
 
   /** Whether a device's person may read a document: one in a space, only its audience (0066); nothing of it is said to anyone else. */
@@ -597,7 +620,7 @@ export class Rooms {
           const theyMay = this.node.mayWrite(link.key, now.path);
           // Who edited it there since its last commit: credited by whichever device commits (its person, as the records say).
           if (Array.isArray(m.people) && m.people.length && theyMay) this.host.addContributors(now.name, [this.credit(link.key)]);
-          if (m.op === 'sync' && theyMay) relay.applyPeerUpdate(now.name, bytesOf(m.update), link.key, null);
+          if (m.op === 'sync' && this.takes(now, bytesOf(m.update), link.key, null)) relay.applyPeerUpdate(now.name, bytesOf(m.update), link.key, null, { sync: true });
           const update = relay.diff(now.name, bytesOf(m.sv));
           if (m.op === 'open') this.send(link, { type: 'room', op: 'sync', key: now.key, session: now.session!, sv: relay.stateVector(now.name) ?? EMPTY, update: update ?? EMPTY, base: now.base, people: this.host.roomContributors(now.name) });
           else if (update) this.send(link, { type: 'room', op: 'update', key: now.key, update });
@@ -650,7 +673,7 @@ export class Rooms {
         // Only from a device whose person may change the document (0066), made on one whose person may too: any other's
         // edits are not taken, whoever passes them on. Only from a device in this session: two sessions never combine (0077).
         const origin = typeof m.origin === 'string' && /^[0-9a-f]{64}$/.test(m.origin) ? m.origin : link.key;
-        if (room && theirs.get(m.key)?.session === room.session && this.node.mayWrite(link.key, room.path) && this.node.mayWrite(origin, room.path)) {
+        if (room && theirs.get(m.key)?.session === room.session && this.takes(room, bytesOf(m.update), link.key, origin)) {
           relay.applyPeerUpdate(room.name, bytesOf(m.update), through(link.key, origin), this.credit(origin, m.by));
         }
         return;

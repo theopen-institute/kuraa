@@ -179,7 +179,13 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
   border-bottom: 1px solid var(--border); background: var(--surface);
 }
 .toolbar-spacer { flex: 1; }
-.editor-scroll { flex: 1; overflow: auto; cursor: text; }
+.editor-scroll { flex: 1; overflow: auto; cursor: text; position: relative; }
+/* What features put beside the text (0082): marks in the margin at their lines, and actions beside a selection. */
+.feature-mark { position: absolute; width: 22px; height: 20px; padding: 0; border: 0; background: none; font: 12px/20px var(--font); cursor: pointer; text-align: center; border-radius: 4px; }
+.feature-mark:hover, .feature-mark:focus-visible { background: var(--accent-soft); }
+.selection-actions { position: absolute; z-index: 5; display: flex; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgb(0 0 0 / 12%); cursor: default; }
+.selection-actions button { border: 0; background: none; padding: 3px 8px; border-radius: 4px; font: 13px var(--font); cursor: pointer; }
+.selection-actions button:hover, .selection-actions button:focus-visible { background: var(--accent-soft); }
 /* The file from disk while its room connects: read, not yet typed in. */
 .editor-preview { cursor: default; }
 .chunk-output, .code-node-header { cursor: default; }

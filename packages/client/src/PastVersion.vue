@@ -13,6 +13,8 @@ import { blocksFrom, compareTexts, type Comparison } from './compare.js';
 import { peopleOf } from './history.js';
 import { S } from './strings.js';
 import ReadOnlyCode from './ReadOnlyCode.vue';
+import type { Node as PMNode } from 'prosemirror-model';
+import type { Plugin } from 'prosemirror-state';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
 
 const props = defineProps<{
@@ -32,6 +34,8 @@ const props = defineProps<{
   now?: () => string | null;
   /** Whether this person may make the document read as this version (false: they may not change it, 0066). */
   canRestore?: boolean;
+  /** What features show on it, with what was kept beside it then (0082). */
+  extend?: (doc: PMNode) => { plugins: Plugin[]; destroy(): void };
 }>();
 const emit = defineEmits<{ back: []; restore: [] }>();
 
@@ -101,7 +105,7 @@ onMounted(() => {
         </template>
       </div>
       <ReadOnlyCode v-else-if="mode === 'source' && !type.editor?.layout" :text="text" />
-      <ReadOnlyDoc v-else :text="text" :type="type" :path="path" :format-editor="formatEditor" />
+      <ReadOnlyDoc v-else :text="text" :type="type" :path="path" :format-editor="formatEditor" :extend="extend" />
     </div>
   </div>
 </template>

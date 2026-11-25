@@ -7,7 +7,9 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
-import { Relay, decodeDoc, encodeDoc, vectorOf, type ChunkRef, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
+import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
+import { COMPANIONS_FILE, FEATURES_FILE, type HostFeature } from '@kuraa/feature-kit/host';
+import { HostFeatures } from './features.js';
 import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
 import { renameOver } from './files.js';
@@ -83,6 +85,13 @@ export interface HostOptions {
    * engines are on, and where code runs (see runner.ts). Off by default.
    */
   run?: RunOptions;
+  /**
+   * Features (0082): their host halves, passed by whoever starts the host (the
+   * standard list is @kuraa/features). None by default: the host imports none.
+   */
+  features?: HostFeature[];
+  /** Which of them are on here, by id (--feature, Settings › Host). Default: all. Each workspace turns them on for itself too. */
+  featuresOn?: string[];
   /** If the folder is not a git repository, make it one (committing what is in it) instead of failing. */
   init?: boolean;
   /**
@@ -188,11 +197,17 @@ interface RoomRecord {
   releasing: boolean;
   /** Since when this device waits to lead it (takeOver): for the commit the room holds to come. */
   waitingSince: number | null;
-  timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout; lead?: NodeJS.Timeout };
+  /** Companions written or removed from the room's state since its last commit (0082): committed with it. */
+  companions: Set<string>;
+  /** Companions' text kept with edits not written when the host last stopped: the room's features start from these. */
+  keptCompanions: Record<string, string | null> | null;
+  /** What this host's person did in the room's session (features.ts, Mine): their file is written with this alone. */
+  mine: import('./features.js').Mine;
+  timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout; lead?: NodeJS.Timeout; own?: NodeJS.Timeout };
 }
 
 /** What a new room starts from, read apart from the queue (Host.prepareRecord). */
-interface PreparedRecord extends Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'previous' | 'state' | 'baseCommit' | 'lastHash' | 'dirty' | 'needsOutsideCheck'> {
+interface PreparedRecord extends Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'previous' | 'state' | 'baseCommit' | 'lastHash' | 'dirty' | 'needsOutsideCheck' | 'keptCompanions'> {
   /** The file's text as read. */
   text: string;
 }
@@ -237,6 +252,8 @@ interface Unsaved {
   /** The edits' text. */
   pending: string;
   baseCommit: string | null;
+  /** What features kept beside it, as their companions' text then (0082). */
+  companions?: Record<string, string | null>;
 }
 
 export class Host {
@@ -266,6 +283,8 @@ export class Host {
    * opened for this workspace at start. None without such a component.
    */
   readonly syncs = new Map<string, { sync: Sync; session: SyncSession }>();
+  /** Features (0082): loaded, on or off, for this workspace; their companions, rooms' state, events and routes (features.ts). */
+  readonly features: HostFeatures;
   readonly workspace: string;
   private readonly records = new Map<string, RoomRecord>();
   private readonly byRoom = new Map<string, RoomRecord>();
@@ -311,8 +330,12 @@ export class Host {
     const known = this.allTypes.map((t) => t.id);
     for (const id of options.formats ?? []) if (!known.includes(id)) throw new Error(`Unknown format "${id}". Known: ${known.join(', ')}.`);
     for (const t of this.allTypes) if (!options.formats || options.formats.includes(t.id)) this.registry.register(t);
-    for (const t of this.allTypes) this.mergeTypes.register(t);
-    this.mergeSignature = mergeSignature(this.allTypes);
+    this.features = new HostFeatures(this.featurePort(), options.features, options.featuresOn);
+    // Features' file types (their companions, say): always on, and merged by, whether or not the feature is on (0082).
+    const featureTypes = this.features.types();
+    for (const t of featureTypes) this.registry.register(t);
+    for (const t of [...this.allTypes, ...featureTypes]) this.mergeTypes.register(t);
+    this.mergeSignature = mergeSignature([...this.allTypes, ...featureTypes]);
   }
 
   log(msg: string): void {
@@ -346,6 +369,7 @@ export class Host {
     this.onBranch = this.gitState.branch;
     this.spaces = new Spaces(this.git, this.dir, this.tmpDir);
     await this.spaces.refresh(this.onBranch);
+    await this.features.refresh();
     const run = this.options.run;
     const components = await loadRunComponents(run?.components);
     // Online copies take what was committed, a while after; and, at start, whatever was committed while the host was away.
@@ -436,6 +460,18 @@ export class Host {
       upgrade: (req) => upgradeAllowed(req, this.requests),
     }, { host: this.options.host ?? '127.0.0.1', port: this.options.port ?? 0 });
     this.address = await this.relay.listen();
+    // What this host's person does in rooms (0082): their own clients' changes, their devices' edits, and their seeding, never a sync's.
+    this.relay.onFeatureChange((room, id, person, keys, source) => {
+      const rec = this.byRoom.get(room);
+      if (!rec || person !== this.features.person()) return;
+      const theirs = source.from !== 'peer' || (!source.sync && this.ownDevice(source.peer));
+      const set = rec.mine.get(id) ?? new Set<string>();
+      for (const k of keys) {
+        if (theirs) set.add(k);
+        else set.delete(k);
+      }
+      rec.mine.set(id, set);
+    });
     this.startWatcher();
     // Branches switched and operations run outside the app are seen here (and by the watcher, sooner).
     this.gitPoll = setInterval(() => {
@@ -461,6 +497,8 @@ export class Host {
         try {
           await this.flushNow(rec);
           await this.commitNow(rec);
+          // This person's own, from a room another device leads (0082).
+          if (!this.leads(rec)) await this.writeOwn(rec);
         } catch (e) {
           this.log(`could not save ${rec.path} while stopping (kept for next time): ${(e as Error).message}`);
         }
@@ -472,6 +510,7 @@ export class Host {
     // The saves just made, and any still waiting to be pushed, go to the online copies before they stop (a while at most).
     await Promise.all([...this.syncs.values()].map(({ session }) => session.pushPending?.(FINAL_PUSH_MS).catch(() => undefined)));
     for (const { session } of this.syncs.values()) session.close();
+    await this.features.close();
     await this.peers?.close();
     await this.runner.close();
     await this.relay.close();
@@ -698,9 +737,10 @@ export class Host {
         baseCommit: kept.baseCommit ?? head, lastHash: kept.lastHash, dirty: true,
         // The file changed while the host was away: an outside change against those edits.
         needsOutsideCheck: blobId(text) !== kept.lastHash,
+        keptCompanions: kept.companions ?? null,
       };
     }
-    return { key, path, branch, type, text, previous: type.parse(text), state: null, baseCommit: head, lastHash: blobId(text), dirty: false, needsOutsideCheck: false };
+    return { key, path, branch, type, text, previous: type.parse(text), state: null, baseCommit: head, lastHash: blobId(text), dirty: false, needsOutsideCheck: false, keptCompanions: null };
   }
 
   /** A prepared room, taken as the file's room. */
@@ -708,6 +748,7 @@ export class Host {
     const rec = this.newRecord({ key: p.key, path: p.path, branch: p.branch, type: p.type, baseCommit: p.baseCommit, previous: p.previous, lastHash: p.lastHash, state: p.state });
     rec.dirty = p.dirty;
     rec.needsOutsideCheck = p.needsOutsideCheck;
+    rec.keptCompanions = p.keptCompanions;
     this.records.set(p.key, rec);
     this.byRoom.set(rec.room, rec);
     return rec;
@@ -747,6 +788,9 @@ export class Host {
       usedAt: Date.now(),
       releasing: false,
       waitingSince: null,
+      companions: new Set(),
+      keptCompanions: null,
+      mine: new Map(),
       timers: {},
     };
     rec.room = this.roomName(rec);
@@ -774,6 +818,8 @@ export class Host {
       if (rec.room !== room) return null;
     }
     this.keepRecord(rec);
+    // A new session: nothing yet done in it by this host's person (0082).
+    rec.mine = new Map();
     // Moved to another device's session (switchRoom): its state, as it came.
     if (rec.session && rec.state) {
       const state = rec.state;
@@ -790,18 +836,98 @@ export class Host {
       this.log(`joined ${rec.path}'s session on another device`);
       return { state: joined.state };
     }
+    // What features keep in the room starts from their companions (0082): read first, then made from the document as it is.
+    // (Nothing is waited for where no feature keeps state in rooms: a session starts as it always did.)
+    const seeding = this.features.keepsRoomState() ? await this.features.seedFor(rec.path, rec.keptCompanions ?? undefined).catch((e: unknown) => {
+      this.log(`could not read what features keep beside ${rec.path}: ${(e as Error).message}`);
+      return undefined;
+    }) : undefined;
+    if (this.byRoom.get(room) !== rec || rec.session) return rec.session && rec.state ? { state: rec.state } : null;
     rec.session = newId();
     rec.leading = true;
     // Afresh, written by a client id of its own: never the state of a session before.
-    const state = encodeDoc(this.current(rec));
+    const doc = this.current(rec);
+    const state = encodeDoc(doc, seeding?.(rec.type, doc, this.parsedOf(rec, doc)));
     rec.state = null;
+    // Edits kept from before are now in the room's state, where a feature on seeded from them; else they wait to be written (flushNow).
+    if (seeding) rec.keptCompanions = null;
     rec.flushedSv = rec.dirty ? null : vectorOf(state);
-    return { state };
+    void this.features.emit('open', { path: rec.path });
+    // Made here, from this person's own files: theirs (0082).
+    return { state, own: true };
+  }
+
+  /** A room's document as parsed: its last written text's parse, if it is still that, else parsed anew from it. */
+  private parsedOf(rec: RoomRecord, doc: ReturnType<RoomRecord['type']['parse']>['doc']): ParsedDocument {
+    if (doc === rec.previous.doc) return rec.previous;
+    const text = rec.type.serialize(doc, rec.previous);
+    return text === rec.previous.text ? rec.previous : rec.type.parse(text);
+  }
+
+  /**
+   * What features keep in a room, as it is now, from wherever it is held (the
+   * relay, or the state it is to open or holds unwritten): a copy, so it stays
+   * as the document read with it, whatever is typed meanwhile. Null where no
+   * feature on keeps state in rooms.
+   */
+  private featureView(rec: RoomRecord): FeatureView | null {
+    if (!this.features.keepsRoomState()) return null;
+    const state = this.relay.state(rec.room) ?? rec.state;
+    return state ? featuresOfState(state, rec.type.schema) : null;
+  }
+
+  /**
+   * Rooms open here whose maps for this host's person are not seeded (0082: a
+   * feature turned on while they were open, or a session joined on another
+   * device): seeded now from this person's own files, so what they do there is
+   * written back. Every open room, led here or not: each person's are their
+   * own device's to seed.
+   */
+  async seedOpenRooms(only?: RoomRecord): Promise<void> {
+    for (const rec of only ? [only] : [...this.records.values()]) {
+      if (!this.relay.isOpen(rec.room)) continue;
+      const view = this.relay.features(rec.room, rec.type.schema);
+      const missing = view ? this.features.unseeded(view) : [];
+      if (!missing.length) continue;
+      const seeding = await this.features.seedFor(rec.path, undefined, missing).catch(() => undefined);
+      if (!seeding || !this.relay.isOpen(rec.room)) continue;
+      const doc = this.current(rec);
+      const { person, seed } = seeding(rec.type, doc, this.parsedOf(rec, doc));
+      this.relay.seedFeatures(rec.room, rec.type.schema, person, seed);
+    }
+  }
+
+  /**
+   * Write this host's person's own files from a room another device leads
+   * (0082): the leader writes the document, and its own person's files; each
+   * person's are their own device's to write, and to commit, as their own.
+   */
+  private async writeOwn(rec: RoomRecord, leaving = false): Promise<void> {
+    if (rec.timers.own) clearTimeout(rec.timers.own);
+    rec.timers.own = undefined;
+    // (Leaving a session another device led: this device no longer in it, so it "leads" its room, but wrote nothing of it.)
+    if ((this.leads(rec) && !leaving) || !this.features.keepsRoomState()) return;
+    const st = await this.readGitState();
+    if (pausedBecause(st) || st.branch !== rec.branch) return;
+    const doc = this.current(rec);
+    const view = this.featureView(rec);
+    if (!view) return;
+    const parsed = this.parsedOf(rec, doc);
+    const before = new Map<string, string | null>();
+    for (const c of await this.features.ownFilesOf(rec.path)) before.set(c, await readFile(this.resolvePath(c), 'utf8').catch(() => null));
+    const written = await this.features.writeRoom(rec.path, rec.type, doc, parsed, view, rec.mine);
+    if (!written.length) return;
+    const beside = this.features.describe(await Promise.all(written.map(async (c) => ({ path: c, before: before.get(c) ?? null, after: existsSync(this.resolvePath(c)) ? await readFile(this.resolvePath(c), 'utf8') : null }))));
+    await this.commitPaths(written, describeEdit(rec.type, rec.path, parsed.text, parsed.text, [], beside.length ? beside : this.features.labelsOf(written)));
   }
 
   /** A room's document is open here (a client came): the other devices are told. */
   private onRoomLoaded(room: string): void {
-    if (this.byRoom.get(room)) this.peers?.rooms.opened(room);
+    const rec = this.byRoom.get(room);
+    if (!rec) return;
+    this.peers?.rooms.opened(room);
+    // A session joined from another device: this person's own maps, from their files (0082).
+    if (this.features.keepsRoomState()) void this.seedOpenRooms(rec).catch((e) => this.log(`could not seed your own beside ${rec.path}: ${e}`));
   }
 
   private onClientChange(room: string, user: PresenceUser | null): void {
@@ -809,8 +935,11 @@ export class Host {
     if (!rec) return;
     rec.dirty = true;
     if (user) rec.contributors.set(user.email || user.name, user);
-    // Written and committed by the device that leads the session (0077).
-    if (!this.leads(rec)) return;
+    // Written and committed by the device that leads the session (0077); this person's own annotations, by their device (0082).
+    if (!this.leads(rec)) {
+      if (this.features.keepsRoomState() && !rec.timers.own) rec.timers.own = setTimeout(() => void this.serial(() => this.writeOwn(rec)).catch((e) => this.log(`could not write your own beside ${rec.path}: ${e}`)), this.timings.flushMs);
+      return;
+    }
     const t = rec.timers;
     if (t.flush) clearTimeout(t.flush);
     t.flush = setTimeout(() => void this.serial(() => this.flushNow(rec)).catch((e) => this.log(`flush failed: ${e}`)), this.timings.flushMs);
@@ -914,6 +1043,9 @@ export class Host {
         } catch (e) {
           this.log(`could not save ${rec.path} on leaving it: ${(e as Error).message}`);
         }
+      } else {
+        // Not led here: this person's own, from the session as it was left (0082).
+        await this.writeOwn(rec, true).catch((e) => this.log(`could not save your own beside ${rec.path} on leaving it: ${(e as Error).message}`));
       }
       if (!rec.dirty) rec.state = null;
       this.peers?.rooms.left(key, rec.baseCommit);
@@ -1004,6 +1136,8 @@ export class Host {
     // The room as written: its text, and how far its edits go (for devices moving to another session: rooms.ts).
     const sv = this.relay.stateVector(rec.room);
     const doc = this.current(rec);
+    // What features keep in the room, as it is with this document (0082).
+    const view = this.featureView(rec);
     const text = rec.type.serialize(doc, rec.previous);
     rec.dirty = false;
     if (text !== rec.previous.text || notText) {
@@ -1022,6 +1156,38 @@ export class Host {
       this.broadcast(rec, { type: 'flushed', at: rec.lastFlushAt, hash: rec.lastHash });
       // Committed after the usual wait, even if a commit made meanwhile let go of the one set for it.
       if (!rec.timers.commit) this.commitSoon(rec.room);
+      void this.features.emit('save', { path: rec.path, text });
+    }
+    // This person's own files kept with edits not written when the host last stopped, where no feature seeded the room from
+    // them (one off now): written as they were, never lost (0082).
+    if (rec.keptCompanions) {
+      const me = this.features.person();
+      for (const [c, kept] of Object.entries(rec.keptCompanions)) {
+        if (!me || !c.includes(`/@${me}`)) continue;
+        if (kept === null) await this.features.removeOwn(c);
+        else {
+          await mkdir(dirname(this.resolvePath(c)), { recursive: true });
+          await this.writeAtomic(this.resolvePath(c), kept);
+        }
+        rec.companions.add(c);
+        rec.uncommitted = true;
+      }
+      rec.keptCompanions = null;
+    }
+    // What features keep in the room, beside the document (0082): from the same document, into the same commit.
+    if (view) {
+      try {
+        const written = await this.features.writeRoom(rec.path, rec.type, doc, rec.previous, view, rec.mine);
+        for (const c of written) rec.companions.add(c);
+        if (written.length) {
+          rec.uncommitted = true;
+          if (!rec.timers.commit) this.commitSoon(rec.room);
+        }
+      } catch (e) {
+        // Tried again at the next save: the document's own text is written.
+        rec.dirty = true;
+        this.log(`could not write what features keep beside ${rec.path}: ${(e as Error).message}`);
+      }
     }
     rec.flushedSv = sv;
     if (!rec.session) rec.state = null;
@@ -1055,7 +1221,9 @@ export class Host {
     }
     rec.editingSince = null;
     // Nothing written since the file was last known to be committed: nothing to commit (and no git to run for it).
-    if (message === undefined && st.branch === rec.branch && !rec.dirty && !rec.uncommitted && rec.committedHash === rec.lastHash) return null;
+    if (message === undefined && st.branch === rec.branch && !rec.dirty && !rec.uncommitted && rec.committedHash === rec.lastHash && !rec.companions.size) return null;
+    // Companions written from the room's state go into the same commit (0082).
+    const companions = [...rec.companions];
     const people = [...rec.contributors.values()];
     const extra = message === undefined ? [AUTOSAVE_TRAILER] : [];
     let committed: string | null;
@@ -1065,9 +1233,15 @@ export class Host {
         // A named version says what it is; otherwise say what changed, and mark it as a save the host made.
         if (text === undefined) {
           const before = await this.git.run(['show', `${this.refFor(rec.path)}:${rec.path}`], { allowFail: true });
-          text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, people.map((u) => u.name));
+          const beside = this.features.describe(await Promise.all(companions.map(async (c) => {
+            const was = await this.git.run(['show', `${this.refFor(c)}:${c}`], { allowFail: true });
+            const abs = this.resolvePath(c);
+            return { path: c, before: was.code === 0 ? was.stdout : null, after: existsSync(abs) ? await readFile(abs, 'utf8') : null };
+          })));
+          text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, people.map((u) => u.name), beside);
         }
-        committed = await this.commitPaths([rec.path], text, people, extra);
+        committed = await this.commitPaths([rec.path, ...companions], text, people, extra);
+        for (const c of companions) rec.companions.delete(c);
       } else {
         const now = rec.type.serialize(this.current(rec), rec.previous);
         if (text === undefined) {
@@ -1078,6 +1252,16 @@ export class Host {
         rec.previous = rec.type.parse(now);
         rec.lastHash = blobId(now);
         rec.dirty = false;
+        // This person's own files written from the room before the branch was switched (0082): onto its branch too, and
+        // put back as the branch checked out has them.
+        for (const c of companions) {
+          const abs = this.resolvePath(c);
+          const own = existsSync(abs) ? await readFile(abs, 'utf8') : null;
+          if (own !== null) committed = (await this.commitToBranch(rec.branch, c, own, withTrailers(text, people, [...extra, ...(await this.policyTrailer())]))) ?? committed;
+          if ((await this.git.run(['cat-file', '-e', `HEAD:${c}`], { allowFail: true })).code === 0) await this.git.run(['checkout', 'HEAD', '--', c], { allowFail: true });
+          else await this.features.removeOwn(c);
+          rec.companions.delete(c);
+        }
       }
     } catch (e) {
       this.saveFailed(rec, e);
@@ -1266,8 +1450,12 @@ export class Host {
     // Never in the middle of a git operation, or with no branch checked out.
     await this.requireWritable();
     // A space's files, in its own history (0066); the rest, the workspace's own.
+    const all = paths;
     const spaced = await this.commitSpaces(paths, withTrailers(message, coAuthors, [...extra, ...(await this.policyTrailer())]));
-    if (spaced.commit) this.refsChanged();
+    if (spaced.commit) {
+      this.refsChanged();
+      void this.features.emit('commit', { commit: spaced.commit, paths: all.filter((p) => !spaced.rest.includes(p)) });
+    }
     paths = spaced.rest;
     if (!paths.length) return spaced.commit;
     // A path neither here nor in git (a merge took it away while its room was open) has nothing to commit, and git would refuse it.
@@ -1297,6 +1485,7 @@ export class Host {
     const head = await this.git.head();
     this.log(`committed ${head?.slice(0, 7)} ${message}`);
     this.refsChanged();
+    if (head) void this.features.emit('commit', { commit: head, paths });
     return head;
   }
 
@@ -1525,6 +1714,11 @@ export class Host {
   }
 
   async checkPath(path: string): Promise<void> {
+    // Which features are on, changed outside the app (0082).
+    if (path === FEATURES_FILE || path === COMPANIONS_FILE) {
+      await this.features.refresh();
+      await this.seedOpenRooms();
+    }
     // Most changes are to files no one has open (a build, an install): don't ask git which branch this is for those.
     if (![...this.records.values()].some((r) => r.path === path)) return;
     const branch = await this.git.branch();
@@ -1707,17 +1901,32 @@ export class Host {
         pending = null;
       }
     }
-    if (pending === null || pending === raw.text) return none();
+    const companions = raw.companions && typeof raw.companions === 'object' && !Array.isArray(raw.companions)
+      ? Object.fromEntries(Object.entries(raw.companions as Record<string, unknown>).filter(([k, v]) => typeof k === 'string' && (v === null || typeof v === 'string'))) as Record<string, string | null>
+      : undefined;
+    if (pending === null || (pending === raw.text && !companions)) return none();
     const lastHash = isBlobId(raw.lastHash) ? raw.lastHash : blobId(raw.text);
-    return { key, path: String(raw.path), branch: String(raw.branch), typeId: type.id, typeVersion: type.version, lastHash, text: raw.text, pending, baseCommit: typeof raw.baseCommit === 'string' ? raw.baseCommit : null };
+    return { key, path: String(raw.path), branch: String(raw.branch), typeId: type.id, typeVersion: type.version, lastHash, text: raw.text, pending, baseCommit: typeof raw.baseCommit === 'string' ? raw.baseCommit : null, ...(companions ? { companions } : {}) };
   }
 
   /** Keep a room's edits not yet written, for the next time the host starts (only while they cannot be written). */
   private async saveUnsaved(rec: RoomRecord): Promise<void> {
     if (!rec.dirty) return;
-    const pending = rec.type.serialize(this.current(rec), rec.previous);
-    if (pending === rec.previous.text) return;
-    const entry: Unsaved = { key: rec.key, path: rec.path, branch: rec.branch, typeId: rec.type.id, typeVersion: rec.type.version, lastHash: rec.lastHash, text: rec.previous.text, pending, baseCommit: rec.baseCommit };
+    const doc = this.current(rec);
+    const pending = rec.type.serialize(doc, rec.previous);
+    // What features keep beside it (0082), as their companions would be written: kept where it differs from the files.
+    const view = this.featureView(rec);
+    let companions: Record<string, string | null> | undefined;
+    if (view) {
+      const current = new Map<string, string | null>();
+      for (const c of await this.features.ownFilesOf(rec.path)) current.set(c, await readFile(this.resolvePath(c), 'utf8').catch(() => null));
+      for (const [c, { text }] of this.features.companionTexts(rec.path, rec.type, doc, this.parsedOf(rec, doc), view, current, rec.mine)) {
+        const now = current.get(c) ?? null;
+        if (now !== text) (companions ??= {})[c] = text;
+      }
+    }
+    if (pending === rec.previous.text && !companions) return;
+    const entry: Unsaved = { key: rec.key, path: rec.path, branch: rec.branch, typeId: rec.type.id, typeVersion: rec.type.version, lastHash: rec.lastHash, text: rec.previous.text, pending, baseCommit: rec.baseCommit, ...(companions ? { companions } : {}) };
     await this.writeAtomic(this.unsavedFile(rec.key), JSON.stringify(entry));
     this.unsaved.add(rec.key);
   }
@@ -1826,9 +2035,9 @@ export class Host {
    * Merge commits as every device does (see merging.ts), reading files with
    * this host's document types.
    */
-  async merge(x: string, y: string): Promise<MergeOutcome> {
-    // Who may change what (0066): judged by the workspace's policy, where it has one (peers/gate.ts).
-    const g = this.gate ? await this.judgeBoth(x, y) : null;
+  async merge(x: string, y: string, space: string | null = null): Promise<MergeOutcome> {
+    // Who may change what (0066): judged by the workspace's policy, where it has one (peers/gate.ts), in the history it is (a space's: 0082).
+    const g = this.gate ? await this.judgeBoth(x, y, space) : null;
     if (g?.waitFor.length) throw new WaitingForPolicy(g.waitFor);
     return mergeCommits(this.git, x, y, { typeFor: (path, head) => this.mergeTypes.resolve(path, head), tmpDir: this.tmpDir, keeps: g?.keeps, refused: g?.refused, signature: this.mergeSignature });
   }
@@ -1840,8 +2049,8 @@ export class Host {
    * same merge (0025). A file kept as it was keeps the side whose change was not
    * refused; where both sides' were, it keeps its version where they meet.
    */
-  private async judgeBoth(x: string, y: string): Promise<GateResult> {
-    const [theirs, ours] = await Promise.all([this.gate!(x, y), this.gate!(y, x)]);
+  private async judgeBoth(x: string, y: string, space: string | null = null): Promise<GateResult> {
+    const [theirs, ours] = await Promise.all([this.gate!(x, y, space), this.gate!(y, x, space)]);
     const waitFor = [...new Set([...theirs.waitFor, ...ours.waitFor])].sort();
     if (waitFor.length) return { keeps: new Map(), refused: [], waitFor };
     const keeps = new Map([...theirs.keeps, ...ours.keeps]);
@@ -1864,7 +2073,7 @@ export class Host {
   }
 
   /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */
-  gate: ((x: string | null, y: string) => Promise<GateResult>) | null = null;
+  gate: ((x: string | null, y: string, space?: string | null) => Promise<GateResult>) | null = null;
 
   /**
    * Where a commit took a room's file, if one did (it is in no file now, and the
@@ -1937,6 +2146,14 @@ export class Host {
       this.refsChanged();
       // The workspace may have been renamed on another device.
       await this.refreshName();
+      // Features (0082): their choices may have changed, and companions follow documents renamed elsewhere.
+      const changed = head && this.features.inUse() ? (await this.git.run(['diff', '--name-only', '-z', head, outcome.commit], { allowFail: true })).stdout.split('\0').filter(Boolean) : [];
+      if (changed.includes(FEATURES_FILE) || changed.includes(COMPANIONS_FILE)) {
+        await this.features.refresh();
+        await this.seedOpenRooms();
+      }
+      await this.followRenamedDocuments(changed).catch((e) => this.log(`could not move what is kept beside renamed documents: ${(e as Error).message}`));
+      void this.features.emit('merge', { from: head, to: outcome.commit, paths: changed });
       // The files may have changed: everyone with something open reloads the list (and the workspace's name).
       for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at: new Date().toISOString() });
     }
@@ -2214,11 +2431,11 @@ export class Host {
     const base = mine || readNow;
     if (!base && this.gate) {
       // A space's history arriving here for the first time is judged too (0071): taken whole, or not at all.
-      const g = await this.gate(null, theirs);
+      const g = await this.gate(null, theirs, id);
       if (g.waitFor.length) throw new WaitingForPolicy(g.waitFor);
       if (g.refused.length) throw new NotBrought(`holds changes not its makers’ to make (${[...new Set(g.refused.map((r) => r.path))].join(', ')}): not brought in`);
     }
-    const outcome = base ? await this.merge(base, theirs) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
+    const outcome = base ? await this.merge(base, theirs, id) : { commit: theirs, kind: 'fast-forward' as const, conflicts: [], copies: [] };
     if (outcome.commit === mine) return outcome;
     await this.git.run(['update-ref', '-m', `bring in a space's ${branch}`, own, outcome.commit, mine]);
     if (current) {
@@ -2248,6 +2465,12 @@ export class Host {
    */
   async moveToSpace(path: string, target: string | null): Promise<void> {
     if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
+    // What is kept beside a document goes where it goes (0082).
+    // Only this person's own: others' are theirs to move (0082), and stay where those who read the document could read them.
+    for (const p of [path, ...(await this.features.ownFilesOf(path))]) await this.moveOneToSpace(p, target);
+  }
+
+  private async moveOneToSpace(path: string, target: string | null): Promise<void> {
     await this.serial(async () => {
       await this.requireWritable();
       await this.commitAll();
@@ -2514,6 +2737,75 @@ export class Host {
     this.relay.release(rec.room);
   }
 
+  /** The workspace's files this device holds: git's, untracked ones as .gitignore leaves them, and those of the spaces it holds. */
+  async listFiles(): Promise<string[]> {
+    const out = await this.git.out(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
+    const spaced = this.spaces.entries().map(([p]) => p).filter((p) => existsSync(join(this.dir, p)));
+    return [...new Set([...out.split('\0').filter(Boolean), ...spaced])].sort();
+  }
+
+  /**
+   * Companions whose documents a merge renamed (0082), made where the feature
+   * was not there to move them (another app, an older host): moved to their
+   * documents' new names, as a commit of this device's. A companion whose
+   * document was deleted is left, and shows in the file list on its own. Call inside serial().
+   */
+  private async followRenamedDocuments(changed: string[]): Promise<void> {
+    const moves: [string, string][] = [];
+    for (const p of changed) {
+      if (this.features.documentOf(p) || existsSync(this.resolvePath(p, { link: 'self' }))) continue;
+      // Everyone's files go: moved, unchanged, which anyone may (the gate takes a move of someone's own file).
+      const left = await this.features.filesOf(p);
+      if (!left.length) continue;
+      const to = await this.takenByCommit(p);
+      if (!to) continue;
+      for (const c of left) {
+        const next = `${to}${c.slice(p.length)}`;
+        if (!existsSync(this.resolvePath(next))) moves.push([c, next]);
+      }
+    }
+    if (!moves.length) return;
+    for (const [from, to] of moves) {
+      await mkdir(dirname(this.resolvePath(to)), { recursive: true });
+      await renameOver(this.resolvePath(from), this.resolvePath(to));
+      await this.carrySpaces(from, to, false);
+    }
+    await this.commitPaths(moves.flat(), moves.length === 1 ? `Move ${moves[0]![0]} with its document` : `Move ${moves.length} files with their documents`);
+  }
+
+  /** Whether an edit from another device (`via>origin`, or the device itself) was made on one of this host's person's devices. */
+  private ownDevice(peer: string): boolean {
+    const [via, origin] = peer.split('>');
+    const me = this.features.person();
+    return !!me && !!this.peers && this.peers.node.personOfDevice(origin || via || '') === me;
+  }
+
+  /** What features (features.ts) are given of the host: as little as they need. */
+  private featurePort(): import('./features.js').FeaturePort {
+    return {
+      log: (m) => this.log(m),
+      serial: (fn) => this.serial(fn),
+      requireWritable: () => this.requireWritable(),
+      resolvePath: (p) => this.resolvePath(p),
+      writeAtomic: async (abs, text) => {
+        await mkdir(dirname(abs), { recursive: true });
+        await this.writeAtomic(abs, text);
+      },
+      commitPaths: (paths, message, by) => this.commitPaths(paths, message, by ?? []),
+      commitIntoSpace: (id, paths, message) => this.commitIntoSpace(id, paths, message),
+      spaceOf: (p) => this.spaceOf(p),
+      canWrite: async (p) => (this.peers ? (await this.peers.access(p)).canWrite : true),
+      list: () => this.listFiles(),
+      tell: (feature, message, path) => {
+        const m: RoomMessage = { type: 'feature', feature, message, path };
+        if (path) this.broadcastPath(path, m);
+        else for (const rec of this.records.values()) this.broadcast(rec, m);
+      },
+      roomOpen: (p) => [...this.records.values()].some((r) => r.path === p && !!this.relay && this.relay.isOpen(r.room)),
+      person: async () => (this.peers ? (await this.peers.node.policy()).me : (await (await import('./peers/person.js')).readPerson())?.id ?? null),
+    };
+  }
+
   /** Public view of a room for the HTTP API. */
   describe(rec: RoomRecord) {
     return {
@@ -2616,6 +2908,8 @@ export interface TreeEntry {
   cannotOpen?: string;
   /** How many conflicts it keeps, when it keeps any. */
   conflicts?: number;
+  /** A companion (0082): the document it is kept beside, which the file list shows it with. */
+  of?: string;
 }
 
 /** Two of these paths differ in case alone: a rename in case (drama to Drama). */

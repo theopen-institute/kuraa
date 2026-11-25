@@ -15,13 +15,13 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: E2E.url, trace: 'retain-on-failure' },
   projects: [
-    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|search|versions|polish|tools|preferences)\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|search|versions|polish|tools|preferences|features)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
     { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],
   webServer: {
-    // A shared host on a fresh workspace, serving the built web client.
-    command: 'pnpm --filter @kuraa/web build && tsx tests/e2e/serve.ts',
+    // A shared host on a fresh workspace, serving the built web client (built for the tests: with the example feature, 0082).
+    command: 'pnpm --filter @kuraa/web build --mode e2e && tsx tests/e2e/serve.ts',
     url: E2E.url,
     reuseExistingServer: false,
     timeout: 120_000,

@@ -37,7 +37,12 @@ export type RoomMessage =
   /** A workspace's packages changed (installed, removed, restored). */
   | { type: 'packages'; engine: string; message: string }
   /** A tool (TeX, say) is being downloaded, changed or removed: ask the host how tools stand (GET /api/tools). */
-  | { type: 'tools'; at: string };
+  | { type: 'tools'; at: string }
+  /** What a feature's host half tells its client halves (0082): about `path`, or the workspace (null). */
+  | { type: 'feature'; feature: string; message: FeatureJson; path: string | null };
+
+/** What features keep in rooms and tell clients: JSON (0082). */
+export type FeatureJson = null | boolean | number | string | FeatureJson[] | { [key: string]: FeatureJson };
 
 // Running code chunks. The host runs them; every client with the document open
 // sees the same runs and outputs. Outputs are never written into the file.

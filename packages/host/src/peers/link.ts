@@ -29,9 +29,12 @@ const CONTROL = 'kuraa/control/1';
  * edits saying whose they are; policy operations asked for by commits); 7:
  * 0077 (rooms are sessions, told apart by an id, with one device leading each)
  * and 0078 (clashes settled by what gives less, not by rank; workspaces from
- * before founded again; attestations and trustee rotations no longer taken).
+ * before founded again; attestations and trustee rotations no longer taken);
+ * 8: 0082 (a file named `@<identity ID>` is its person's own: only they change
+ * it, but to move it unchanged; rooms take a person's feature state only as
+ * theirs, and readers' changes to their own).
  */
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

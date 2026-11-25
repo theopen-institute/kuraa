@@ -320,16 +320,16 @@ export class Peers {
     };
     this.stateDir = stateDir;
     // Who may change what, where work comes in (0066).
-    host.gate = (x, y) => this.gate(x, y);
+    host.gate = (x, y, space) => this.gate(x, y, space ?? null);
   }
 
   private readonly stateDir: string;
 
   /** The workspace's write rules, applied to the commits `y` brings to `x` (gate.ts). */
-  private async gate(x: string | null, y: string): Promise<GateResult> {
+  private async gate(x: string | null, y: string, space: string | null = null): Promise<GateResult> {
     const ctx = await this.gateContext();
     if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
-    return gate(this.host.git, x, y, { ...ctx, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+    return gate(this.host.git, x, y, { ...ctx, space, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
   }
 
   /**

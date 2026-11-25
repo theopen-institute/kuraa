@@ -56,13 +56,26 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await page.keyboard.press(`${MOD}+Slash`);
   const sheet = page.getByRole('dialog', { name: 'Markdown and shortcuts' });
   await expect(sheet).toBeVisible();
-  await expect(sheet).toContainText('**bold**');
-  await expect(sheet).toContainText('Cite: choose from the bibliography');
-  await expect(sheet.getByTestId('help:Keys')).toContainText(key('⌘B', 'Ctrl+B'));
+  // One row for a thing: what to type for it and its keys side by side.
+  const bold = sheet.getByTestId('help:Text').getByRole('row', { name: /^Bold/ });
+  await expect(bold).toContainText('**bold**');
+  await expect(bold).toContainText(key('⌘B', 'Ctrl+B'));
+  await expect(sheet).toContainText('pick from the bibliography');
+  await expect(sheet).toContainText(key('⌥⌘1–3', 'Ctrl+Alt+1–3'));
   await expect(sheet).toContainText(key('⇧⌘F', 'Ctrl+Shift+F'));
   await expect(sheet).toContainText(key('⌥⌘O', 'Ctrl+Alt+O'));
-  await expect(sheet).toContainText(key('⇧⌘↩', 'Ctrl+Shift+Enter'));
-  await expect(sheet).toContainText('R Markdown');
+  await expect(sheet.getByTestId('help:Code chunks')).toContainText(key('⇧⌘↩', 'Ctrl+Shift+Enter'));
+  await expect(sheet.getByTestId('help:Code chunks')).toContainText('New R chunk');
+  // Typing filters it (the filter has focus), by what a line is, its cue or its keys.
+  const filter = sheet.getByTestId('help-filter');
+  await expect(filter).toBeFocused();
+  await page.keyboard.type('table');
+  await expect(sheet.getByRole('row', { name: /^Table/ })).toBeVisible();
+  await expect(bold).toHaveCount(0);
+  await filter.fill('nothing like this');
+  await expect(sheet.getByTestId('help-none')).toBeVisible();
+  await filter.fill('');
+  await expect(bold).toBeVisible();
   // Escape closes it, and focus goes back to the document.
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0);

@@ -249,52 +249,47 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
   };
 }
 
-const TYPING = 'Typing';
-const WRITING = 'Citations, images, math and tables';
-const KEYS = 'Keys';
+const TEXT = 'Text';
+const BLOCKS = 'Paragraphs';
+const INSERT = 'Notes, citations, math';
+const EDITING = 'Editing';
 
-/** What Pandoc markdown's cues and keys do: the Markdown and shortcuts sheet (decisions 0008, 0040). */
+/**
+ * What Pandoc markdown's cues and keys do: the Markdown and shortcuts sheet
+ * (decisions 0008, 0040, 0084). One line for each thing, what to type for it
+ * and its keys side by side; a note may name a key in braces ({Mod-Click}).
+ */
 export const PANDOC_HELP: HelpItem[] = [
-  { group: TYPING, type: '# ', does: 'Heading (## for the next level, up to ######)' },
-  { group: TYPING, type: '> ', does: 'Block quote' },
-  { group: TYPING, type: '- ', does: 'Bullet list (or * or +)' },
-  { group: TYPING, type: '1. ', does: 'Numbered list' },
-  { group: TYPING, keys: ['Tab', 'Shift-Tab'], does: 'In a list: the item in a level, or out (then - or 1. for the other kind)' },
-  { group: TYPING, type: '**bold**', does: 'Bold (or __bold__)' },
-  { group: TYPING, type: '*italic*', does: 'Italic (or _italic_)' },
-  { group: TYPING, type: '~~gone~~', does: 'Struck through' },
-  { group: TYPING, type: '`code`', does: 'Code in a line' },
-  { group: TYPING, type: 'H~2~O   x^2^', does: 'Subscript, superscript' },
-  { group: TYPING, type: '[text](https://…)', does: 'Link' },
-  { group: TYPING, type: '---', does: 'A line across the page' },
-  { group: TYPING, type: '``` then Enter', does: 'Code block (```python for a language)' },
-  { group: TYPING, type: '[^label]', does: 'Footnote: a new one is added at the end' },
-  { group: TYPING, type: '^[text]', does: 'Inline note' },
-  { group: TYPING, keys: ['Backspace'], does: 'Straight after a cue: back to what you typed. At the start of a list item: the item a level out' },
-  { group: WRITING, type: '@', does: 'Cite: choose from the bibliography the header names' },
-  { group: WRITING, type: '[@smith2020, p. 3]', does: 'A citation as Pandoc writes it (@smith2020 alone cites in the text)' },
-  { group: WRITING, type: '![caption](plot.png)', does: 'Image; or paste or drop an image file' },
-  { group: WRITING, type: '$x^2$', does: 'Math in the line' },
-  { group: WRITING, type: '$$ then Enter', does: 'Display math, on lines of its own' },
-  { group: WRITING, type: '| a | b | then Enter', does: 'Table with those headings' },
-  { group: WRITING, keys: ['Tab', 'Shift-Tab'], does: 'In a table: the next or previous cell' },
-  { group: WRITING, keys: ['Shift-F10'], does: 'In a table: rows and columns (or right-click)' },
-  { group: KEYS, keys: ['Mod-b'], does: 'Bold' },
-  { group: KEYS, keys: ['Mod-i'], does: 'Italic' },
-  { group: KEYS, keys: ['Mod-e'], does: 'Code' },
-  { group: KEYS, keys: ['Mod-Shift-x'], does: 'Struck through' },
-  { group: KEYS, keys: ['Mod-k', 'Mod-Shift-k'], does: 'Link the selected text; in a link, change its address (empty: no link). ⌘-click a link to open it' },
-  { group: KEYS, keys: ['Mod-Alt-1', 'Mod-Alt-2', 'Mod-Alt-3'], does: 'Heading 1, 2, 3' },
-  { group: KEYS, keys: ['Mod-Alt-0'], does: 'Plain paragraph' },
-  { group: KEYS, keys: ['Mod-Shift-8'], does: 'Bullet list (in a numbered list: bullets instead)' },
-  { group: KEYS, keys: ['Mod-Shift-7'], does: 'Numbered list (in a bullet list: numbers instead)' },
-  { group: KEYS, keys: ['Mod-Shift-.'], does: 'Block quote' },
-  { group: KEYS, keys: ['Mod-['], does: 'Out of a list or quote' },
-  { group: KEYS, keys: ['Mod-Alt-c'], does: 'Code block' },
-  { group: KEYS, keys: ['Mod-Alt-f'], does: 'A numbered footnote' },
-  { group: KEYS, keys: ['Shift-Enter'], does: 'Line break; in a note, a new paragraph' },
-  { group: KEYS, keys: ['Mod-Enter'], does: 'Leave a code block or table' },
-  { group: KEYS, keys: ['Mod-Alt-n'], does: 'The next conflict' },
+  { group: TEXT, does: 'Bold', type: '**bold**', keys: ['Mod-b'] },
+  { group: TEXT, does: 'Italic', type: '*italic*', keys: ['Mod-i'] },
+  { group: TEXT, does: 'Struck through', type: '~~gone~~', keys: ['Mod-Shift-x'] },
+  { group: TEXT, does: 'Code', type: '`code`', keys: ['Mod-e'] },
+  { group: TEXT, does: 'Link', type: '[text](url)', keys: ['Mod-k', 'Mod-Shift-k'], note: '{Mod-Click} opens it' },
+  { group: TEXT, does: 'Subscript, superscript', type: 'H~2~O x^2^' },
+
+  { group: BLOCKS, does: 'Heading 1, 2, 3', type: '# ## ###', keys: ['Mod-Alt-1', 'Mod-Alt-2', 'Mod-Alt-3'] },
+  { group: BLOCKS, does: 'Plain paragraph', keys: ['Mod-Alt-0'] },
+  { group: BLOCKS, does: 'Bullet list', type: '- ', keys: ['Mod-Shift-8'] },
+  { group: BLOCKS, does: 'Numbered list', type: '1. ', keys: ['Mod-Shift-7'] },
+  { group: BLOCKS, does: 'Block quote', type: '> ', keys: ['Mod-Shift-.'] },
+  { group: BLOCKS, does: 'Code block', type: '```', enter: true, keys: ['Mod-Alt-c'], note: '```python for a language' },
+  { group: BLOCKS, does: 'Line across the page', type: '---' },
+
+  { group: INSERT, does: 'Footnote', type: '[^label]', keys: ['Mod-Alt-f'] },
+  { group: INSERT, does: 'Inline note', type: '^[text]' },
+  { group: INSERT, does: 'Citation', type: '@', note: 'pick from the bibliography' },
+  { group: INSERT, does: 'Image', type: '![caption](file.png)', note: 'or paste or drop one' },
+  { group: INSERT, does: 'Math', type: '$x^2$' },
+  { group: INSERT, does: 'Display math', type: '$$', enter: true },
+  { group: INSERT, does: 'Table', type: '| a | b |', enter: true },
+
+  { group: EDITING, does: 'List item in, out', keys: ['Tab', 'Shift-Tab'] },
+  { group: EDITING, does: 'Out of a list or quote', keys: ['Mod-['] },
+  { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph' },
+  { group: EDITING, does: 'Leave a code block or table', keys: ['Mod-Enter'] },
+  { group: EDITING, does: 'Next cell, previous cell', keys: ['Tab', 'Shift-Tab'], note: 'in a table' },
+  { group: EDITING, does: 'Rows and columns', keys: ['Shift-F10'], note: 'in a table; or right-click' },
+  { group: EDITING, does: 'Next conflict', keys: ['Mod-Alt-n'] },
 ];
 
 /** A Pandoc markdown editor, optionally extended (R Markdown adds its chunks). */

@@ -103,6 +103,45 @@ describe('rendering documents', () => {
     expect((await api('/api/renders/file?path=notes.md&format=docx')).status).toBe(404);
   });
 
+  it('says what an output was made from, committing the document first, and gives those files back (0081)', async () => {
+    await host(PAPER_ON);
+    const { room } = (await (await api('/api/rooms?path=notes.md')).json()) as { room: string };
+    const c = connectHeadless({ url: running!.url.replace(/^http/, 'ws') + '/collab', room, token: running!.token, user: ADA, schema: pandocMarkdown.schema });
+    clients.push(c);
+    await c.ready;
+    const doc = c.read();
+    let pos = -1;
+    doc.descendants((n, p) => {
+      if (pos < 0 && n.isTextblock && n.textContent.includes('tide')) pos = p + 1;
+      return pos < 0;
+    });
+    c.write(new Transform(doc).insert(pos, pandocMarkdown.schema.text('Just now: ')).doc);
+    await new Promise((r) => setTimeout(r, 200));
+    // Edited outside the app, and not committed.
+    writeFileSync(join(dir, 'code.R'), 'x <- 2\n');
+
+    const { state } = await render('notes.md');
+    expect(state.state).toBe('done');
+    // The edit being typed was committed (commits wait a minute here), so the commit named holds it.
+    const made = state.output!.madeFrom!;
+    expect(made).toEqual({ commit: git(dir, 'rev-parse', 'HEAD'), spaces: [], uncommitted: ['code.R'] });
+    expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Just now: The tide');
+
+    // Changed since: the files it was made from are as they were.
+    writeFileSync(join(dir, 'notes.md'), '# Notes\n\nRewritten.\n');
+    git(dir, 'commit', '-q', '-am', 'Rewritten');
+    const res = await api('/api/renders/made-from?path=notes.md&format=html');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/zip');
+    expect(res.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''notes-html-made-from.zip");
+    const zip = join(dir, '.git', 'made-from.zip');
+    writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+    expect(execFileSync('unzip', ['-p', zip, 'notes-html-made-from/notes.md'], { encoding: 'utf8' })).toContain('Just now: The tide was out.');
+    expect(execFileSync('unzip', ['-p', zip, 'notes-html-made-from/code.R'], { encoding: 'utf8' })).toBe('x <- 1\n');
+    // A format never rendered says so.
+    expect((await api('/api/renders/made-from?path=notes.md&format=docx')).status).toBe(404);
+  });
+
   it('says why a render failed, with the log behind it, and keeps the last good output', async () => {
     await host(PAPER_ON);
     const { state } = await render('broken.md');

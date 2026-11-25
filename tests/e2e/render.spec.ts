@@ -1,6 +1,6 @@
 // Rendering from the browser: the Preview panel shows the document knitted in a
 // Podman container, in a frame where nothing in it runs; ⇧⌘R renders what was
-// just typed; Word is saved as a file. Skipped where Podman is not installed and running.
+// just typed; Word is saved as a file, and the files it was made from as a zip. Skipped where Podman is not installed and running.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
@@ -58,6 +58,14 @@ test('the Preview panel renders the document as it is now, and saves Word', asyn
   await panel.getByTestId('save-docx').click();
   const file = await download;
   expect(file.suggestedFilename()).toBe(path.slice(path.lastIndexOf('/') + 1).replace(/\.Rmd$/, '.docx'));
+
+  // The files it was made from (0081), as they were, in a zip: the document with what was typed.
+  const zipped = page.waitForEvent('download', { timeout: 60_000 });
+  await panel.getByTestId('render-made-from').click();
+  const zip = await zipped;
+  expect(zip.suggestedFilename()).toBe(path.slice(path.lastIndexOf('/') + 1).replace(/\.Rmd$/, '-docx-made-from.zip'));
+  const inside = execFileSync('unzip', ['-p', await zip.path(), `${zip.suggestedFilename().replace(/\.zip$/, '')}/${path}`], { encoding: 'utf8' });
+  expect(inside).toContain('Typed just now.');
 
   // A failure says why, with the log behind Details.
   await page.getByTestId('editor').locator('p', { hasText: 'The answer is' }).click();

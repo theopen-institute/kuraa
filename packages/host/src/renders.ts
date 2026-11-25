@@ -22,9 +22,10 @@ import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/pr
 import { createHash } from 'node:crypto';
 import { join, posix, resolve } from 'node:path';
 import type { RenderFormat, RenderResult } from '@kuraa/run-kit';
-import type { PresenceUser } from '@kuraa/session/server';
+import type { MadeFrom, PresenceUser } from '@kuraa/session/server';
 import type { Runner } from './runner.js';
 import { renameOver } from './files.js';
+import { checkMadeFrom } from './madefrom.js';
 
 export type { RenderFormat };
 export const RENDER_FORMATS: RenderFormat[] = ['html', 'docx', 'pdf'];
@@ -48,8 +49,11 @@ export interface RenderState {
   by: string | null;
   startedAt: string;
   finishedAt: string | null;
-  /** The latest output of this format, if there is one (it may be from before a failed render). */
-  output: { at: string; size: number } | null;
+  /**
+   * The latest output of this format, if there is one (it may be from before a failed render), and what it
+   * was made from (0081; absent on renders from before).
+   */
+  output: { at: string; size: number; madeFrom?: MadeFrom } | null;
   /** A tool the document needs that this computer lacks, and people may download: what to offer. */
   needs?: { tool: string; label: string; downloadBytes: number } | null;
 }
@@ -79,8 +83,10 @@ export class Renders {
     root: string;
     stateDir: string;
     runner: Runner;
-    /** Write the document's open room, if it has one, to its file. */
+    /** Write the document's open room, if it has one, to its file, and commit it. */
     flush(path: string): Promise<void>;
+    /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
+    madeFrom(path: string): Promise<MadeFrom>;
     log(m: string): void;
   }) {}
 
@@ -115,10 +121,22 @@ export class Renders {
 
   private async saved(path: string, format: RenderFormat): Promise<RenderState | null> {
     try {
-      return JSON.parse(await readFile(join(this.dir(path), `${format}.json`), 'utf8')) as RenderState;
+      const state = JSON.parse(await readFile(join(this.dir(path), `${format}.json`), 'utf8')) as RenderState;
+      if (state.output?.madeFrom !== undefined) {
+        const made = checkMadeFrom(state.output.madeFrom);
+        if (made) state.output.madeFrom = made;
+        else delete state.output.madeFrom;
+      }
+      return state;
     } catch {
       return null;
     }
+  }
+
+  /** What the latest output of a format was made from, if it says. */
+  async madeFrom(path: string, format: RenderFormat): Promise<MadeFrom | null> {
+    const live = this.current.get(`${path}\0${format}`);
+    return (live?.state ?? (await this.saved(path, format)))?.output?.madeFrom ?? null;
   }
 
   /** The latest output of a format, if there is one. */
@@ -169,8 +187,12 @@ export class Renders {
   private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>, person: PresenceUser | null): Promise<void> {
     const { path, format } = state;
     state.message = 'Rendering…';
-    // The document as it is now: what is being typed reaches the file first.
+    // The document as it is now: what is being typed reaches the file (and a commit) first.
     await this.o.flush(path);
+    const madeFrom = await this.o.madeFrom(path).catch((e: Error) => {
+      this.o.log(`could not say what ${path} was rendered from: ${e.message}`);
+      return undefined;
+    });
     const scratch = join(this.o.stateDir, 'run', 'render', createHash('sha1').update(path).digest('hex').slice(0, 12));
     // Emptied, not made again: Podman on a Mac can take a folder removed and made again for one missing.
     await mkdir(scratch, { recursive: true });
@@ -211,7 +233,7 @@ export class Renders {
           await writeFile(tmp, bytes);
           await renameOver(tmp, file);
           state.state = 'done';
-          state.output = { at: new Date().toISOString(), size: bytes.length };
+          state.output = { at: new Date().toISOString(), size: bytes.length, ...(madeFrom ? { madeFrom } : {}) };
         }
       } else state.state = 'failed';
     } finally {

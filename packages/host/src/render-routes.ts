@@ -46,6 +46,21 @@ export const renderRoutes: Route[] = [
     });
     c.res.end(bytes);
   }),
+
+  // The files the latest output was made from, put together as they were (0081), as a zip.
+  route('GET', '/api/renders/made-from', async (c) => {
+    const path = pathOf(c, c.q.get('path'));
+    const format = formatOf(c.q.get('format'));
+    const made = await c.host.renders.madeFrom(path, format);
+    if (!made) throw new HttpError(404, 'This render does not say what it was made from: render it again.');
+    const name = `${basename(path).replace(/\.[^.]*$/, '')}-${format}-made-from`;
+    const bytes = await c.host.madeFromZip(made, name);
+    c.res.writeHead(200, {
+      'content-type': 'application/zip', 'content-length': bytes.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${name}.zip`)}`,
+    });
+    c.res.end(bytes);
+  }),
 ];
 
 // Searching the workspace's text files, and open documents as they are being edited.

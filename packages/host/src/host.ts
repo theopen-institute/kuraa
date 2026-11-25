@@ -24,6 +24,7 @@ import { AUTOSAVE_TRAILER, describeEdit } from './messages.js';
 import type { Peers, PeerOptions } from './peers/peers.js';
 import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './peers/gate.js';
 import { Spaces, spaceRef } from './spaces.js';
+import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 /** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
@@ -377,6 +378,7 @@ export class Host {
       },
       log: (m) => this.log(m),
       hidden: (path) => this.hiddenFrom(path),
+      madeFrom: (path) => this.madeFrom(path),
     });
     this.renders = new Renders({
       root: this.dir,
@@ -386,8 +388,15 @@ export class Host {
         // Not while git is busy outside the app: the file may be half-way through it.
         await this.requireWritable();
         const rec = this.records.get(`${await this.git.branch()}:${path}`);
-        if (rec) await this.serial(() => this.flushNow(rec));
+        // Written and committed (where this device leads the room), so the commit it is rendered from holds it (0081).
+        if (rec) {
+          await this.serial(async () => {
+            await this.flushNow(rec);
+            await this.commitNow(rec);
+          });
+        }
       },
+      madeFrom: (path) => this.madeFrom(path),
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) {
@@ -1174,17 +1183,42 @@ export class Host {
   async hiddenFrom(path: string): Promise<string[]> {
     const entries = this.spaces?.entries() ?? [];
     if (!entries.length || !this.peers) return [];
+    const holds = await this.wideEnough(path);
+    return entries.filter(([, space]) => !holds(space)).map(([p]) => p);
+  }
+
+  /** Whether code run for a document may read a space: everyone who reads the document reads it (0066). */
+  private async wideEnough(path: string): Promise<(space: string) => boolean> {
+    if (!this.peers) return () => false;
     const policy = await this.peers.node.identity.policy();
     const readers = policy.readers(this.spaceOf(path));
     const wide = new Map<string, boolean>();
-    const holds = (space: string) => {
+    return (space: string) => {
       if (!wide.has(space)) {
         const theirs = policy.readers(space);
         wide.set(space, [...readers].every((r) => theirs.has(r)));
       }
       return wide.get(space)!;
     };
-    return entries.filter(([, space]) => !holds(space)).map(([p]) => p);
+  }
+
+  /** What code run for a document reads now (0081): the commit of each history it may read, and the files that differ. */
+  async madeFrom(path: string): Promise<MadeFrom> {
+    const ids = this.spaces?.ids() ?? [];
+    const holds = ids.length ? await this.wideEnough(path) : () => false;
+    const entries = this.spaces?.entries() ?? [];
+    const spaces = ids.filter(holds).map((id) => ({ id, ref: this.spaces.refOf(id)!, files: entries.filter(([, s]) => s === id).map(([p]) => p) }));
+    return madeFrom(this.git, this.dir, spaces);
+  }
+
+  /**
+   * The files an output was made from, as a zip, or why they cannot be had: a commit no longer here (a
+   * space this device no longer holds, say).
+   */
+  async madeFromZip(made: MadeFrom, name: string): Promise<Buffer> {
+    const missing = await missingFrom(this.git, made);
+    if (missing) throw new HttpError(410, `The files it was made from are no longer all here (${missing.slice(0, 7)} is missing).`);
+    return zipOf(this.git, await putTogether(this.git, made, join(await this.git.gitDir(), 'kuraa', 'tmp')), name);
   }
 
   /** The space a file is in (null: the workspace's own). */

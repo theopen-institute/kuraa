@@ -710,6 +710,9 @@ export const S = {
     downloading: (label: string, progress: string | null) => `Downloading ${label}…${progress ? ` ${progress}` : ''}`,
     downloadFailed: (label: string, why: string) => `${label} could not be downloaded: ${why}`,
     formats: { html: 'HTML', docx: 'Word', pdf: 'PDF' } as Record<string, string>,
+    madeFrom: 'Files it was made from…',
+    madeFromTitle: 'Save the workspace’s files as they were when this was rendered (a zip), to make it again or keep with it',
+    madeFromUnsaved: (n: number) => `${count(n, 'file', 'files')} had changes not yet saved in the history when it was rendered: those are in the zip as last saved.`,
   },
 
   search: {

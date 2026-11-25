@@ -11,7 +11,7 @@ import crypto from 'hypercore-crypto';
 import type { RunRecord } from '@kuraa/session/model';
 import { Git } from '../src/git.js';
 import { commitSigner } from '../src/signing.js';
-import { MAX_LIVE_BYTES, MAX_SHARED_BYTES, OUTPUTS, SharedOutputs, fetchedFrom, outputsRefspec, type SharedOutputsDeps } from '../src/peers/outputs.js';
+import { MAX_LIVE_BYTES, MAX_SHARED_BYTES, OUTPUTS, SharedOutputs, fetchedFrom, outputsRefspec, readRun, type SharedOutputsDeps } from '../src/peers/outputs.js';
 import type { OutputsFrame } from '../src/peers/link.js';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -28,6 +28,7 @@ function run(id: string, code: string, extra: Partial<RunRecord> = {}): RunRecor
     id, path: DOC, chunk: { label: null, index: 0, codeHash: code }, engine: 'r', state: 'done',
     outputs: [{ type: 'text', text: `[1] ${code}\n` }],
     basis: { session: 's1', steps: [{ label: 'setup', index: 0, codeHash: 'h0', complete: true }] },
+    madeFrom: { commit: 'c'.repeat(40), spaces: [{ id: 'a'.repeat(32), commit: 'd'.repeat(40) }], uncommitted: ['data.csv'] },
     by: { name: 'Ada', color: '#d33' }, queuedAt: '2026-11-20T10:00:00.000Z', finishedAt: '2026-11-20T10:00:01.000Z', ms: 900, ...extra,
   };
 }
@@ -219,6 +220,13 @@ describe('shared run outputs', () => {
     expect(git(b.dir, 'for-each-ref', OUTPUTS)).toBe('');
     expect(await b.out.runs(DOC)).toEqual([]);
     expect(b.changes.at(-1)).toEqual({ path: DOC, added: [], removed: ['r1'] });
+  });
+
+  it('take what a run was made from only in its own shape (0081)', () => {
+    const r = run('r1', 'x');
+    expect(readRun(r, new Map())?.madeFrom).toEqual(r.madeFrom);
+    expect(readRun({ ...r, madeFrom: { ...r.madeFrom, commit: 'HEAD~1' } }, new Map())).toMatchObject({ id: 'r1' });
+    expect(readRun({ ...r, madeFrom: { ...r.madeFrom, commit: 'HEAD~1' } }, new Map())?.madeFrom).toBeUndefined();
   });
 
   it('publish the newest runs first, up to a limit', async () => {

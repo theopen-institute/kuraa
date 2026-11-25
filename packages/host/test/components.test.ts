@@ -141,6 +141,8 @@ describe('run components', () => {
 
     const first = await run(0, 'a');
     expect(first).toMatchObject({ engine: 'echo', basis: { steps: [] } });
+    // What its code could read, as it ran (0081): the workspace's commit, and nothing changed since.
+    expect(first.madeFrom).toEqual({ commit: git(dir, 'rev-parse', 'HEAD'), spaces: [], uncommitted: [] });
     const second = await run(1, 'b');
     expect(second.basis).toEqual({ session: first.basis!.session, steps: [step(0, 'a')] });
     // Running a chunk again in the same version replaces its earlier step. Part of a

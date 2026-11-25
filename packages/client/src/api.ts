@@ -1,5 +1,5 @@
 // The host's HTTP API. Client and host meet only over HTTP and WebSocket.
-import type { ChunkRef, RunRecord, RunSessionInfo } from '@kuraa/session/model';
+import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 
 export interface WorkspaceInfo {
@@ -201,7 +201,8 @@ export interface RenderState {
   by: string | null;
   startedAt: string;
   finishedAt: string | null;
-  output: { at: string; size: number } | null;
+  /** The latest output, and what it was made from (0081; absent on renders from before). */
+  output: { at: string; size: number; madeFrom?: MadeFrom } | null;
   /** A tool the document needs that this computer lacks, and people may download. */
   needs?: { tool: string; label: string; downloadBytes: number } | null;
 }
@@ -355,6 +356,10 @@ export class HostApi {
   /** A document's latest output in a format. */
   async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
+  }
+  /** The files a document's latest output in a format was made from, as they were, in a zip (0081). */
+  async renderMadeFrom(path: string, format: RenderFormat): Promise<Blob> {
+    return (await this.req(`/api/renders/made-from?path=${encodeURIComponent(path)}&format=${format}`)).blob();
   }
   /** Search the workspace's text files, and open documents as they are now. */
   search(query: string, caseSensitive: boolean) { return this.json<SearchResult>(`/api/search?q=${encodeURIComponent(query)}${caseSensitive ? '&case=1' : ''}`); }

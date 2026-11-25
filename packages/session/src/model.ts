@@ -88,6 +88,21 @@ export interface RunBasis {
   steps: RunStep[];
 }
 
+/**
+ * What an output was made from (0081): the commit of each history its code could read, and the files it
+ * could read that differed from them. Enough to put those files together again, as they were.
+ */
+export interface MadeFrom {
+  /** The workspace's own branch, at the commit it was on (null: none yet). */
+  commit: string | null;
+  /** Each space its code could read (0066), with the commit it was read at. */
+  spaces: { id: string; commit: string }[];
+  /** Files its code could read that differed from those commits (edited, new or taken away): the first 50. */
+  uncommitted: string[];
+  /** How many more there were. */
+  more?: number;
+}
+
 export interface RunRecord {
   id: string;
   path: string;
@@ -96,6 +111,8 @@ export interface RunRecord {
   engine?: string;
   /** What its session had run before it (absent on runs that never started, or from older hosts). */
   basis?: RunBasis;
+  /** What its code could read, as it ran (0081; absent on runs that never started, or from older hosts). */
+  madeFrom?: MadeFrom;
   state: RunState;
   outputs: ChunkOutput[];
   by: { name: string; color: string };

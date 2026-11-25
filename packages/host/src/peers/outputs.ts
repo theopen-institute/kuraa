@@ -39,6 +39,7 @@ import type { KeyPair } from '../keys.js';
 import type { OutputsFrame } from './link.js';
 import { renameOver } from '../files.js';
 import { signCommitObject, splitSignature, sshSigner } from '../signing.js';
+import { checkMadeFrom } from '../madefrom.js';
 
 /** Each device's outputs: `refs/kuraa/outputs/<device key>`. */
 export const OUTPUTS = 'refs/kuraa/outputs/';
@@ -834,5 +835,7 @@ export function readRun(v: unknown, images: Map<string, string>, states: Set<str
     const steps = (basis.steps as Record<string, unknown>[]).filter((s) => s && typeof s === 'object' && (s.label === null || isStr(s.label)) && typeof s.index === 'number' && isStr(s.codeHash) && typeof s.complete === 'boolean');
     if (steps.length === basis.steps.length) run.basis = { session: basis.session, steps: steps.map((s) => ({ label: s.label as string | null, index: s.index as number, codeHash: s.codeHash as string, complete: s.complete as boolean })) };
   }
+  const made = r.madeFrom === undefined ? null : checkMadeFrom(r.madeFrom);
+  if (made) run.madeFrom = made;
   return run;
 }

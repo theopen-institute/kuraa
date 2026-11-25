@@ -10,7 +10,7 @@ import { prosemirrorToYXmlFragment, updateYFragment, yXmlFragmentToProseMirrorRo
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { FRAGMENT, type PresenceUser, type RoomMessage } from './model.js';
 
-export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, RunSessionInfo, RunSessionState } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState } from './model.js';
 
 /** What a room starts from: a ProseMirror document, or a state (a session's, from another device). */
 export type RoomSeed = { doc: PMNode } | { state: Uint8Array };

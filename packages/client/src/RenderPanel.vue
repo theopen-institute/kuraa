@@ -174,6 +174,19 @@ async function save(format: RenderFormat) {
   }
 }
 
+async function saveMadeFrom(format: RenderFormat) {
+  try {
+    const name = `${outputName(props.path, format).replace(/\.[^.]*$/, '')}-${format}-made-from.zip`;
+    saveFile(await props.api.renderMadeFrom(props.path, format), name);
+  } catch (e) {
+    error.value = e;
+  }
+}
+
+/** What the output shown was made from, when it says. */
+const madeFrom = computed(() => (shown.value?.state === 'done' && !fetching.value ? shown.value.output?.madeFrom ?? null : null));
+const unsaved = computed(() => (madeFrom.value ? madeFrom.value.uncommitted.length + (madeFrom.value.more ?? 0) : 0));
+
 watch(() => props.toolsKey, () => {
   if (fetching.value) void followTool();
 });
@@ -235,6 +248,10 @@ const status = computed(() => {
       {{ status }}
       <div v-if="shown?.state === 'failed' && shown.needs && !fetching" class="render-needs">
         <button type="button" class="primary" data-testid="render-download-tool" @click="download(shown.needs, shown.format)">{{ S.render.download(shown.needs.label, megabytes(shown.needs.downloadBytes)) }}</button>
+      </div>
+      <div v-if="madeFrom && shown" class="render-made-from">
+        <button type="button" :title="S.render.madeFromTitle" data-testid="render-made-from" @click="saveMadeFrom(shown.format)">{{ S.render.madeFrom }}</button>
+        <span v-if="unsaved" class="muted" data-testid="render-made-from-unsaved"> {{ S.render.madeFromUnsaved(unsaved) }}</span>
       </div>
       <details v-if="shown?.log && shown.state !== 'rendering'" class="render-log">
         <summary>{{ S.common.details }}</summary>

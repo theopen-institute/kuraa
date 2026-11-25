@@ -27,7 +27,7 @@ import {
   type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RenderTools, type RunComponent,
   type Tool, type ToolUse,
 } from '@kuraa/run-kit';
-import type { ChunkRef, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
+import type { ChunkRef, MadeFrom, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
 import type { RunComponents } from './components.js';
 import { renameOver } from './files.js';
 import { ToolStore, type ToolEnv, type ToolInfo, type ToolResult } from './tools.js';
@@ -181,6 +181,8 @@ export class Runner {
     idleMs?: number;
     /** Workspace files code run for a document must not see (0066: files not everyone who reads the document reads). */
     hidden?: (path: string) => Promise<string[]>;
+    /** What code run for a document reads now: the commits, and the files that differ from them (0081). */
+    madeFrom?: (path: string) => Promise<MadeFrom>;
   }) {
     for (const id of o.options?.engines ?? []) if (!o.components.engines.has(id)) throw new Error(`Unknown engine "${id}". Known: ${[...o.components.engines.keys()].join(', ') || 'none'}.`);
     this.on = [...(o.options?.engines ?? [])];
@@ -853,6 +855,12 @@ export class Runner {
       this.setInfo(s, 'ready', version);
     }
     record.basis = { session: s.id, steps: [...s.history] };
+    // What its code can read, as it starts: kept with its outputs, so they can be made again from it.
+    const made = await this.o.madeFrom?.(path).catch((e: Error) => {
+      this.o.log(`could not say what ${path} was run from: ${e.message}`);
+      return undefined;
+    });
+    if (made) record.madeFrom = made;
     this.setInfo(s, 'busy');
     try {
       const result = await session.run({ id: record.id, code: job.code, header: job.header, dir: dirname(resolve(this.o.root, path)) });

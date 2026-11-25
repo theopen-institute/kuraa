@@ -29,7 +29,7 @@ function cursorBuilder(user: { name?: string; color?: string }): HTMLElement {
   return cursor;
 }
 
-export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, RunSessionInfo, RunSessionState } from './model.js';
+export type { PresenceUser, RoomMessage, ChunkOutput, ChunkRef, RunRecord, RunState, RunStep, RunBasis, MadeFrom, RunSessionInfo, RunSessionState } from './model.js';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'unauthorized';
 

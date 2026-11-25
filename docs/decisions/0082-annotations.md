@@ -1,9 +1,9 @@
 # 0082 · Annotations: coding and comments, kept beside the documents, as a feature (proposed)
 
 **Status: step 1 of the build order is built: features and the hooks the core gives them, with an
-example feature (*Built: step 1*), as revised by *Who owns an annotation*; and step 2, comments
-(*Built: step 2*). Coding and what follows (steps 3 to 5) are not; nor is an author's choice of a
-narrower audience.** It
+example feature (*Built: step 1*), as revised by *Who owns an annotation*; step 2, comments
+(*Built: step 2*); and step 3, coding (*Built: step 3*). Steps 4 and 5 are not; nor is an author's
+choice of a narrower audience.** It
 adds a kind of component (a **feature**) and the hooks the core gives it, and the first feature:
 **annotations**, which does two things on one base:
 **coding** passages, as qualitative data analysis tools (NVivo, ATLAS.ti, MAXQDA) do, and
@@ -124,7 +124,9 @@ A code is a `skos:Concept`: its name (`prefLabel`), what it means (`definition`)
 (`scopeNote`), its parent (`broader`) and its colour (schema.org's `color`, so no vocabulary of our
 own is needed). Codings name codes by id, so renaming a code changes one line. Merging two codes
 or deleting one rewrites the codings that name it, in every companion the device holds, as one
-commit. Comments do not use the codebook.
+commit (*revised* by *Who owns an annotation*: codings are their makers' own, never rewritten; a
+code merged says what replaces it, `isReplacedBy`, and one deleted is kept, marked deprecated;
+see *Built: step 3*). Comments do not use the codebook.
 
 ### Why these
 
@@ -472,4 +474,42 @@ the web shell have it; each workspace turns it on (Settings › Workspace).
 
 The example feature's panel moved to ⌥⌘J, giving ⌥⌘M to Comment, as in other editors. The browser
 tests' host loads the standard features with the example.
+
+## Built: step 3
+
+Coding, in `@kuraa/annotations`, where a workspace turns it on: a setting of its own under
+Annotations (Settings › Workspace, `coding: true`), as comments are for any workspace and coding a
+method a project chooses.
+
+- **The codebook** (`codebook.ts`): `codebook.jsonld` at the workspace's top (or another name in
+  the settings, `codebook`, ending `.codebook.jsonld`, so the file is known as a codebook by its name
+  alone), a SKOS concept scheme in JSON-LD, one code to a line, sorted by id. It is a workspace file,
+  everyone's, not anyone's own: changed through the feature's routes (`POST codebook`: add, change
+  its name, definition, colour or parent, merge, delete) by whoever may change it, one change at a
+  time, and merged by code when two devices change it at once (the later `modified` winning).
+- **A codebook edited by hand keeps what it says.** What the app does not read (a `scopeNote`, other
+  labels, nodes of other kinds, terms of the file's own context) is written back as it was. A colour
+  is taken only as `#rrggbb`, as it goes into a page's style; any other is kept, unused. A file that
+  is not a codebook (a hand edit gone wrong) is never taken for an empty one: the app refuses to
+  change it (409) until it is put right, and two devices' versions of it merge line by line, as any
+  text does, rather than by code.
+- **Codes merged or deleted rewrite nobody's codings**, which are their makers' own. A code merged
+  into another says so (`isReplacedBy`, Dublin Core's), and codings of it count as the other's; its
+  children move up to it. A code deleted is kept, marked deleted (`deprecated`, OWL's), and shown
+  as "a code no longer in the codebook" where it is used. It is kept even where no coding this device
+  holds names it, as codings this device cannot read (in spaces it is not in) may. Codes under a
+  deleted one move up. Codes caught in a loop (two devices each putting one under the other) are
+  shown at the top of the tree, to be put right.
+- **A coding** is an annotation in its maker's own file: `classifying`, its body the code
+  (`SpecificResource`, `purpose: classifying`), its target a passage, found again as comments are.
+- **In the app**: **Code** beside a selection (⌥⌘U), opening the **Codes** panel to find a code by
+  name or make one and apply it; coded passages underlined in their codes' colours, a mark in the
+  margin for each passage (saying its codes, the count where several), opening the codings there,
+  yours to remove; the codebook as a tree with each code's count (`GET counts`), each to edit
+  (name, meaning, colour, parent), merge or delete; **Retrieve** (from a code, or the ⋯ menu):
+  every passage coded with a code, and those under it if asked (`GET retrieve`), across the
+  documents this device holds, each opening at its passage.
+
+Not yet: comments on a coding (a memo on it) in the interface, though the format has them;
+dragging a selection onto a code.
 

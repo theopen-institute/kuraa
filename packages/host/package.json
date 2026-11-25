@@ -26,6 +26,7 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@kuraa/annotations": "workspace:*",
     "@kuraa/env-podman": "workspace:*",
     "@kuraa/feature-example": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",

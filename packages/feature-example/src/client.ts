@@ -162,7 +162,7 @@ export const marksClient = defineClientFeature({
     id: 'marks',
     label: 'Marks',
     about: 'document',
-    keys: 'Mod-Alt-m',
+    keys: 'Mod-Alt-j',
     mount(el, ctx) {
       const list = document.createElement('ul');
       list.className = 'example-marks';
@@ -210,7 +210,7 @@ export const marksClient = defineClientFeature({
       return () => off();
     },
   }],
-  documentMenu: (ctx) => [{ label: 'Marks', keys: 'Mod-Alt-m', testid: 'menu-example-marks', run: () => ctx.openPanel('marks') }],
+  documentMenu: (ctx) => [{ label: 'Marks', keys: 'Mod-Alt-j', testid: 'menu-example-marks', run: () => ctx.openPanel('marks') }],
   fileMenu: (path, ctx) => [{
     label: 'Clear your marks…',
     testid: 'context:example-clear-marks',
@@ -252,7 +252,7 @@ export const marksClient = defineClientFeature({
       },
     },
   },
-  help: [{ group: 'Marks (example)', keys: ['Mod-Alt-m'], does: 'Show the marks in this document' }],
+  help: [{ group: 'Marks (example)', keys: ['Mod-Alt-j'], does: 'Show the marks in this document' }],
 });
 
 export const clients = { marks: marksClient };

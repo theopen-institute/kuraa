@@ -101,6 +101,8 @@ let source: SourceEditor | null = null;
 let featureEditors: { id: string; editor: FeatureEditor; state: FeatureState | null }[] = [];
 /** Goes up when a feature asks to be drawn again, or its state in the room changes. */
 const featureTick = ref(0);
+/** Goes up when the editor gains or loses the focus: what features offer beside a selection is drawn again (and only that). */
+const focusTick = ref(0);
 /** The features at work in the open document, with their state in the room (said on the page, for tests and for reading it). */
 const featuresHere = ref('');
 /** Commands the format offers by name (insert a table, the next conflict). */
@@ -417,6 +419,15 @@ function open(carried: Carried | null = null): () => void {
         : { class: 'prose', spellcheck: 'true', 'data-testid': 'editor' },
       // ⌘-click (Ctrl-click elsewhere) on a link opens it; a plain click puts the cursor in it, to edit it.
       handleDOMEvents: {
+        // What features offer beside a selection shows only while the editor has the focus (drawn again, nothing else).
+        focus: () => {
+          focusTick.value++;
+          return false;
+        },
+        blur: () => {
+          focusTick.value++;
+          return false;
+        },
         click: (_v, e) => {
           if (!(isMac() ? e.metaKey : e.ctrlKey) || e.button !== 0) return false;
           const a = (e.target as Element | null)?.closest?.('a[href]');
@@ -599,8 +610,9 @@ function drawFeatures() {
   }
   margin.value = marginLayout(items).map((m) => ({ ...m, left }));
   const sel = v.state.selection;
-  // (A document you may not change, too: what is yours to say about it, features offer where they have your state.)
-  const actions = sel.empty ? [] : featureEditors.flatMap((f) => {
+  // (A document you may not change, too: what is yours to say about it, features offer where they have your state.) Only while
+  // the editor has the focus: typing elsewhere (a feature's panel), the selection stays, but what to do with it is done.
+  const actions = sel.empty || !v.hasFocus() ? [] : featureEditors.flatMap((f) => {
     try {
       return f.editor.selectionActions?.(v) ?? [];
     } catch (e) {
@@ -615,7 +627,7 @@ function drawFeatures() {
   const end = v.coordsAtPos(sel.to);
   selectionBar.value = { top: at(end.bottom) + 6, left: Math.max(8, end.left - outer.left + box.scrollLeft - 12), items: actions };
 }
-watch([tick, featureTick, view, () => props.showSource], drawFeatures, { flush: 'post' });
+watch([tick, featureTick, focusTick, view, () => props.showSource], drawFeatures, { flush: 'post' });
 // How the features stand changed (their settings, say): drawn again with it.
 watch(() => props.features, () => featureTick.value++);
 let resizeObserver: ResizeObserver | null = null;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { startHost } from '../../packages/host/src/index.js';
 import { standardRunComponents } from '../../packages/run-components/src/index.js';
 import { marksFeature } from '../../packages/feature-example/src/index.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 import { createPerson, readPerson } from '../../packages/host/src/peers/person.js';
 import { E2E, NOTES } from './env.js';
 
@@ -31,8 +32,8 @@ const running = await startHost({
   host: '127.0.0.1',
   token: E2E.token,
   run: { engines: ['r'], components: standardRunComponents, allowInstalls: true, dataDir: join(E2E.dir, '..', 'kuraa-e2e-rdata') },
-  // The example feature (0082), off until a test turns it on for the workspace: features.spec.ts.
-  features: [marksFeature],
+  // The standard features (annotations) and the example one (0082), off until a test turns them on for the workspace.
+  features: [...standardFeatures, marksFeature],
   staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
   timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
   log: (m) => console.log(`[host] ${m}`),

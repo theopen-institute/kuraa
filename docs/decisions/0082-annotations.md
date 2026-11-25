@@ -1,8 +1,9 @@
 # 0082 · Annotations: coding and comments, kept beside the documents, as a feature (proposed)
 
 **Status: step 1 of the build order is built: features and the hooks the core gives them, with an
-example feature (*Built: step 1*, at the end), as revised by *Who owns an annotation*. Annotations
-themselves (steps 2 to 5) are not; nor is an author's choice of a narrower audience.** It
+example feature (*Built: step 1*), as revised by *Who owns an annotation*; and step 2, comments
+(*Built: step 2*). Coding and what follows (steps 3 to 5) are not; nor is an author's choice of a
+narrower audience.** It
 adds a kind of component (a **feature**) and the hooks the core gives it, and the first feature:
 **annotations**, which does two things on one base:
 **coding** passages, as qualitative data analysis tools (NVivo, ATLAS.ti, MAXQDA) do, and
@@ -339,10 +340,10 @@ this proposal adds it.
 
 **Comments:**
 
-- **In the margin**: each comment as a card beside its passage, with its replies; reply, edit or
-  delete your own.
-- **Comments** panel: the document's comments in order, and the workspace's newest, each opening at
-  its passage.
+- **In the margin**: a 💬 beside each commented passage, opening its thread (*revised*: the threads
+  are in the Comments panel, not cards in the margin, which is too narrow for them).
+- **Comments** panel: the document's threads in order, each comment with its replies; reply, edit
+  or delete your own. **Recent comments**: the workspace's newest, each opening at its passage.
 
 ## Build order
 
@@ -441,4 +442,34 @@ Features and the hooks above, with the changes building them made. Annotations a
 **Not yet:** a feature cannot change the state of a room open on another device but through its
 people (`FeatureContext` has no way into rooms); an author's choice of a narrower audience for some
 of their annotations.
+
+## Built: step 2
+
+Comments, on the base coding will share: `@kuraa/annotations` (its host half; `./client`, its client
+half; `./format`, the files' format), in the standard list (`@kuraa/features`), so every host and
+the web shell have it; each workspace turns it on (Settings › Workspace).
+
+- **The format** (`format.ts`): each person's file a W3C AnnotationPage (`@context`, `id` its own
+  name, `items` one to a line, sorted by id, keys in one order). A passage named by a
+  `TextQuoteSelector` (with 32 characters either side) and a `TextPositionSelector` in code
+  points; its `source` the document's name from the folder (`../p01.md`). Comments are
+  `commenting`, replies `replying` (targeting the comment's id), a comment on the document targets
+  the document. Kinds not known are kept as they are. A person's two devices' versions merge by id,
+  the later `modified` winning.
+- **Finding passages again**: at their place if their quote is there; else, of the places their
+  quote is, the one whose text around it agrees most with what was around it, then the nearest;
+  else *no longer found*: kept, never dropped. (Found approximately, where the words themselves
+  changed, is left for later.)
+- **In the room**, each annotation of yours is `{ item, from, to }` (anchors while it is found) or
+  `{ item, lost }`; the host writes your file from it, naming each passage as the text has it then.
+- **In the app**: commented passages tinted, a 💬 in the margin opening the thread; **Comment**
+  beside a selection (⌥⌘M), in any document you read; the **Comments** panel (⌥⌘K, and the ⋯ menu):
+  threads in the order of the text, replies, editing and deleting your own, a comment on the whole
+  document, whose are shown (everyone's, or only yours: your choice, in this browser), and those
+  no longer found; **Recent comments**, the workspace's newest (`GET /api/features/annotations/recent`).
+  Others' comments are live while a device of theirs is in the room, else read from their files.
+- **Comment text** is shown as text (its Markdown not drawn yet), never as HTML.
+
+The example feature's panel moved to ⌥⌘J, giving ⌥⌘M to Comment, as in other editors. The browser
+tests' host loads the standard features with the example.
 

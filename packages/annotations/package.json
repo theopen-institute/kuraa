@@ -1,0 +1,20 @@
+{
+  "name": "@kuraa/annotations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./format": "./src/format.ts"
+  },
+  "dependencies": {
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/format-text": "workspace:*",
+    "@kuraa/kernel": "workspace:*",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-view": "^1.42.9"
+  }
+}

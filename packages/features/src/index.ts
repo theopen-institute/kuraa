@@ -4,7 +4,8 @@
 // components. The host itself imports none. Their client halves are in
 // ./client, for the shells to pass the client.
 //
-// None yet: annotations (coding and comments) will be the first.
+//   @kuraa/annotations   comments (and, to come, coding) on documents, kept beside them
 import type { HostFeature } from '@kuraa/feature-kit/host';
+import { annotationsFeature } from '@kuraa/annotations';
 
-export const standardFeatures: HostFeature[] = [];
+export const standardFeatures: HostFeature[] = [annotationsFeature];

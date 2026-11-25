@@ -46,7 +46,7 @@ test('a feature: on for the workspace, in the document, its panel, menus and set
   await expect(page.getByTestId('status')).toContainText('Connected');
   const para = page.getByTestId('editor').locator('p', { hasText: 'tide' });
   await para.selectText();
-  await expect(page.getByTestId('selection-actions')).toHaveCount(0);
+  await expect(page.getByTestId('example-mark-selection')).toHaveCount(0);
 
   // On for the workspace (saved in it, for everyone): the document opens again with it; Mark beside a selection.
   await workspaceFeature(page, true);
@@ -72,9 +72,9 @@ test('a feature: on for the workspace, in the document, its panel, menus and set
   const panel = page.getByTestId('feature-panel-marks-marks');
   await expect(panel.getByTestId('example-mark-row')).toHaveCount(1);
   // Its keys close it again, and open it.
-  await page.keyboard.press(`${MOD}+Alt+m`);
+  await page.keyboard.press(`${MOD}+Alt+j`);
   await expect(panel).toHaveCount(0);
-  await page.keyboard.press(`${MOD}+Alt+m`);
+  await page.keyboard.press(`${MOD}+Alt+j`);
   await expect(panel.getByTestId('example-mark-row')).toHaveCount(1);
 
   // Its line on the shortcuts sheet.

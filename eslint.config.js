@@ -13,7 +13,7 @@ const merge = (...rules) => {
 };
 const noYjs = restrict(yjsFamily, 'Only @kuraa/session may import Yjs, y-prosemirror or Hocuspocus.');
 // The core imports no feature (decision 0082): whoever starts it passes them, as run components.
-const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: '^@kuraa/(feature-(?!kit(/|$))[^/]+|features)(/.*)?$', message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, it may.' }] }] };
+const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: '^@kuraa/(feature-(?!kit(/|$))[^/]+|features|annotations)(/.*)?$', message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, it may.' }] }] };
 
 export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', '.dev-workspaces/**'] },
@@ -79,14 +79,14 @@ export default tseslint.config(
     // Features (docs/decisions/0082-annotations.md) and their contract: a host half and a client half that
     // meet the core only through @kuraa/feature-kit. No Yjs (the session gives rooms' state as JSON and
     // anchors), no host, client or session; the client half and the shared entry use no Node.
-    files: ['packages/feature-kit/src/**', 'packages/feature-*/src/**', 'packages/features/src/**'],
+    files: ['packages/feature-kit/src/**', 'packages/feature-*/src/**', 'packages/features/src/**', 'packages/annotations/src/**'],
     rules: merge(
       restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*'], 'Features reach the core only through @kuraa/feature-kit (and the kernel, editor-kit and formats).'),
       noYjs,
     ),
   },
   {
-    files: ['packages/feature-kit/src/index.ts', 'packages/feature-kit/src/client.ts', 'packages/feature-*/src/client.ts', 'packages/feature-*/src/client/**', 'packages/features/src/client.ts'],
+    files: ['packages/feature-kit/src/index.ts', 'packages/feature-kit/src/client.ts', 'packages/feature-*/src/client.ts', 'packages/feature-*/src/client/**', 'packages/features/src/client.ts', 'packages/annotations/src/client.ts', 'packages/annotations/src/format.ts'],
     rules: merge(
       restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*', 'node:*'], 'A feature’s client half runs in the browser, and reaches the client only through @kuraa/feature-kit/client.'),
       noYjs,

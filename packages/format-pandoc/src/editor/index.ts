@@ -256,7 +256,7 @@ const EDITING = 'Editing';
 
 /**
  * What Pandoc markdown's cues and keys do: the Markdown and shortcuts sheet
- * (decisions 0008, 0040, 0084). One line for each thing, what to type for it
+ * (decisions 0008, 0040, 0085). One line for each thing, what to type for it
  * and its keys side by side; a note may name a key in braces ({Mod-Click}).
  */
 export const PANDOC_HELP: HelpItem[] = [

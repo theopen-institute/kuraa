@@ -1,4 +1,4 @@
-# 0084 · Markdown and shortcuts: one row for each thing
+# 0085 · Markdown and shortcuts: one row for each thing
 
 > Changes how the Markdown and shortcuts sheet ([0044](0044-polish.md)) is laid out and how its
 > lines are written. Where its contents come from is as before: each editor module's `help`, built

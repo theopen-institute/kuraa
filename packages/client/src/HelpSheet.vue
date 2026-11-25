@@ -4,7 +4,7 @@
 // (help.ts), shown for this system (⌘ or Ctrl). One row for each thing: what it
 // is, what to type for it, the keys for it. Writing in one column, the app in
 // the other, each one table so its columns line up; a filter narrows them
-// (decision 0084).
+// (decision 0085).
 import { computed, ref, useTemplateRef } from 'vue';
 import type { FormatEditor, HelpItem } from '@kuraa/editor-kit';
 import { helpMatches, helpSheet, type HelpGroup } from './help.js';

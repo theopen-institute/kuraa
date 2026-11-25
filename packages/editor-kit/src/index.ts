@@ -102,16 +102,23 @@ export interface FormatEditor {
   help?: HelpItem[];
 }
 
-/** One line of the Markdown and shortcuts sheet. */
+/**
+ * One line of the Markdown and shortcuts sheet: one thing, with what to type for
+ * it and the keys for it side by side (either, or both).
+ */
 export interface HelpItem {
-  /** The heading it is listed under: 'Typing', 'Keys', 'Citations, images and tables'. */
+  /** The heading it is listed under: 'Text', 'Paragraphs', 'Editing'. Lines with the same heading are listed together. */
   group: string;
-  /** What to type, shown as written: '# ', '**bold**'. */
-  type?: string;
-  /** Or the keys, as key bindings write them ('Mod-b', 'Mod-Alt-1'); the client shows them for the system. */
-  keys?: string[];
-  /** What it does. */
+  /** What it is, in a word or two: 'Bold', 'Block quote'. */
   does: string;
+  /** What to type for it, shown as written: '# ', '**bold**'. */
+  type?: string;
+  /** Whether the typed cue takes effect with Enter (``` then Enter), shown after it. */
+  enter?: boolean;
+  /** The keys for it, as key bindings write them ('Mod-b', 'Mod-Alt-1'); the client shows them for the system. */
+  keys?: string[];
+  /** A word more, shown quietly after what it is: 'or paste or drop one'. */
+  note?: string;
 }
 
 /**

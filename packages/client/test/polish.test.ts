@@ -2,13 +2,13 @@
 // counts with their plurals, keys as people read them and as handlers match
 // them, the file tree's keys, and the shortcuts sheet.
 import { describe, expect, it } from 'vitest';
-import type { FormatEditor } from '@kuraa/editor-kit';
+import type { FormatEditor, HelpItem } from '@kuraa/editor-kit';
 import { ApiError, type TreeFile } from '../src/api.js';
 import { explain } from '../src/errors.js';
 import { count, plural, S } from '../src/strings.js';
 import { keyLabel, keyMatches } from '../src/keys.js';
 import { buildTree, treeKey, visibleItems, type TreeItem } from '../src/tree.js';
-import { helpSheet } from '../src/help.js';
+import { helpMatches, helpSheet } from '../src/help.js';
 
 describe('errors in plain words', () => {
   it('says the common ones plainly, with what to do, and keeps what was said for Details', () => {
@@ -128,12 +128,34 @@ describe('the file tree for the keyboard', () => {
 
 describe('the shortcuts sheet', () => {
   it('lists each module’s lines once, grouped as they group them, then the client’s keys', () => {
-    const md: FormatEditor = { label: 'Markdown', help: [{ group: 'Typing', type: '# ', does: 'Heading' }] };
-    const rmd: FormatEditor = { label: 'R Markdown', help: [...md.help!, { group: 'R Markdown', keys: ['Mod-Alt-i'], does: 'A new R chunk' }] };
+    const md: FormatEditor = { label: 'Markdown', help: [{ group: 'Text', type: '**bold**', keys: ['Mod-b'], does: 'Bold' }] };
+    const rmd: FormatEditor = { label: 'R Markdown', help: [...md.help!, { group: 'Notes', type: '^[text]', does: 'Inline note' }] };
     const sheet = helpSheet({ md, rmd });
-    expect(sheet.map((g) => g.title).slice(0, 2)).toEqual(['Typing', 'R Markdown']);
+    expect(sheet.map((g) => g.title).slice(0, 2)).toEqual(['Text', 'Notes']);
     expect(sheet[0]!.items).toHaveLength(1);
-    const app = sheet.find((g) => g.title === S.help.app)!;
-    expect(app.items.flatMap((i) => i.keys)).toEqual(expect.arrayContaining(['Mod-/', 'Mod-,', 'Mod-Shift-f', 'Mod-Shift-r', 'Mod-f', 'Mod-Alt-o']));
+    expect(sheet.slice(0, 2).every((g) => !g.app)).toBe(true);
+    const keys = sheet.filter((g) => g.app).flatMap((g) => g.items.flatMap((i) => i.keys ?? []));
+    expect(keys).toEqual(expect.arrayContaining(['Mod-/', 'Mod-,', 'Mod-Shift-f', 'Mod-Shift-r', 'Mod-f', 'Mod-Alt-o', 'Mod-Enter', 'F2']));
+  });
+
+  it('lists a module’s line in the client’s group of the same title, first', () => {
+    const rmd: FormatEditor = { label: 'R Markdown', help: [{ group: S.help.code, type: '```{r}', enter: true, keys: ['Mod-Alt-i'], does: 'New R chunk' }] };
+    const sheet = helpSheet({ rmd });
+    expect(sheet.filter((g) => g.title === S.help.code)).toHaveLength(1);
+    const code = sheet.find((g) => g.title === S.help.code)!;
+    expect(code.app).toBe(true);
+    expect(code.items.map((i) => i.does)).toEqual(['New R chunk', S.help.runChunk, S.help.runLine]);
+  });
+
+  it('filters by what a line is, its note, its cue or its keys as shown', () => {
+    const link: HelpItem = { group: 'Text', does: 'Link', type: '[text](url)', keys: ['Mod-k'], note: 'opens with a click' };
+    const label = (k: string) => (k === 'Mod-k' ? '⌘K' : k);
+    expect(helpMatches(link, '', label)).toBe(true);
+    expect(helpMatches(link, 'LINK', label)).toBe(true);
+    expect(helpMatches(link, 'click', label)).toBe(true);
+    expect(helpMatches(link, '](url', label)).toBe(true);
+    expect(helpMatches(link, '⌘k', label)).toBe(true);
+    expect(helpMatches(link, 'text link', label)).toBe(true);
+    expect(helpMatches(link, 'bold', label)).toBe(false);
   });
 });

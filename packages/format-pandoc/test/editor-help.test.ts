@@ -31,10 +31,16 @@ describe('the shortcuts sheet', () => {
     expect(helped.filter((k) => !bound.has(k))).toEqual([]);
   });
 
-  it('says what each line does, and is either typed or pressed', () => {
+  it('says what each line is, and how to type it, press it or both', () => {
     for (const h of pandocEditor.help ?? []) {
       expect(h.does).toBeTruthy();
-      expect(!!h.type !== !!h.keys?.length).toBe(true);
+      expect(!!h.type || !!h.keys?.length).toBe(true);
+      if (h.enter) expect(h.type).toBeTruthy();
     }
+  });
+
+  it('has one line for a thing, with its cue and its keys side by side', () => {
+    const bold = (pandocEditor.help ?? []).filter((h) => h.does === 'Bold');
+    expect(bold).toEqual([expect.objectContaining({ type: '**bold**', keys: ['Mod-b'] })]);
   });
 });

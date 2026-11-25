@@ -23,7 +23,7 @@ async function create(path: string, content: string): Promise<void> {
 async function openApp(page: Page, name = 'Polisher'): Promise<void> {
   page.on('pageerror', (e) => console.error(`page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${name}&email=polish%40example.org`);
-  await expect(page.getByRole('button', { name: 'New file', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New file or folder', exact: true })).toBeVisible();
 }
 
 async function openFile(page: Page, path: string): Promise<void> {

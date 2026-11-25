@@ -113,7 +113,8 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await page.keyboard.press('Escape');
 
     // New and Rename ask in in-app dialogs (Electron has no window.prompt).
-    await page.getByRole('button', { name: 'New file', exact: true }).click();
+    await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
+    await page.getByTestId('context:new-file').click();
     await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
     await page.keyboard.type('Day one');
     await expect(page.locator('[data-testid^="file:untitled-"]')).toContainText('Day one');

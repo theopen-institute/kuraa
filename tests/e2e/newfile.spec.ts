@@ -9,7 +9,7 @@ import { E2E } from './env.js';
 
 async function openApp(page: Page): Promise<void> {
   await page.goto(`/?token=${E2E.token}&name=Maker&email=make%40example.org`);
-  await expect(page.getByRole('button', { name: 'New file', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New file or folder', exact: true })).toBeVisible();
 }
 
 const dialog = (page: Page) => page.getByTestId('ask');
@@ -25,7 +25,8 @@ test('New file makes an untitled document at once: its title is typed in the pag
   await openApp(page);
 
   // No dialog: an untitled Markdown document, open, with the cursor in its title.
-  await page.getByRole('button', { name: 'New file', exact: true }).click();
+  await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
+  await page.getByTestId('context:new-file').click();
   const current = page.locator('[role="treeitem"][aria-current="page"]');
   await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
   const untitled = (await current.getAttribute('data-path'))!;
@@ -136,13 +137,28 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
 
   // A new folder: committed (with a placeholder git keeps), shown, and a place for new files.
   const folder = `runs/folder-${Date.now().toString(36)}`;
-  // Not in the header (only a new file is): right-click the space below the files,
-  // which is there however many files the other tests made.
-  await expect(page.getByRole('button', { name: 'New folder', exact: true })).toHaveCount(0);
+  // ＋ in the header is a menu (decision 0084): a new file or a new folder, at the top level.
+  // A second click closes it, as does Escape.
+  const plus = page.getByRole('button', { name: 'New file or folder', exact: true });
+  const menu = page.getByTestId('context-menu');
+  await plus.click();
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
+  await expect(plus).toHaveAttribute('aria-expanded', 'true');
+  await plus.click();
+  await expect(menu).toHaveCount(0);
+  await plus.click();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(plus).toBeFocused();
+  // The space below the files has the same menu, by right-click.
   const space = page.getByTestId('tree-space');
   await space.scrollIntoViewIfNeeded();
   await space.click({ button: 'right' });
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
+  await page.keyboard.press('Escape');
+  await plus.click();
   await page.getByTestId('context:new-folder').click();
+  await expect(page.getByTestId('ask').locator('input')).toHaveValue('new-folder');
   await page.getByTestId('ask').locator('input').fill(folder);
   await page.getByTestId('ask').getByRole('button', { name: 'Create' }).click();
   const row = page.locator('.tree-dir-row', { hasText: folder.split('/')[1]! });

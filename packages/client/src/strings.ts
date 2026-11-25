@@ -284,6 +284,8 @@ export const S = {
   tree: {
     label: 'Files',
     newFile: 'New file',
+    /** ＋ in the sidebar's header: a menu of a new file or a new folder. */
+    newMenu: 'New file or folder',
     newFileIn: (name: string) => `New file in ${name}`,
     newFolderIn: (name: string) => `New folder in ${name}`,
     newFileMenu: (where: string) => `New file${where}`,

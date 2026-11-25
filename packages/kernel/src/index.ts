@@ -5,6 +5,8 @@ import type { Node, Schema } from 'prosemirror-model';
 import type { MergeResult, MergeSide } from './merge.js';
 
 export { countMarkers, diff3, matches, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
+export { alignedSourceMap, sourceMapOf, type SourceMap } from './sourcemap.js';
+import type { SourceMap } from './sourcemap.js';
 
 export interface ParsedDocument {
   text: string;
@@ -108,6 +110,13 @@ export interface DocumentType {
   merge?(base: string, a: string, b: string, sides: [MergeSide, MergeSide]): MergeResult;
   /** How many conflicts a merge left in this text (with `merge`); without it, git's markers are counted. */
   conflicts?(text: string): number;
+  /**
+   * Where each place in a document is in its text, and back (sourcemap.ts):
+   * for what names places in a file by its text, kept apart from it (a
+   * feature's annotations). Optional: without it, `sourceMapOf` finds each
+   * block's text in its source.
+   */
+  sourceMap?(doc: Node, parsed: ParsedDocument): SourceMap;
   /** Client only. */
   editor?: EditorContribution;
 }
@@ -156,7 +165,7 @@ export class TypeRegistry {
 }
 
 export type HookEvent =
-  | 'open' | 'change' | 'save' | 'commit' | 'pull' | 'merge' | 'rename' | 'delete';
+  | 'open' | 'change' | 'save' | 'commit' | 'pull' | 'merge' | 'rename' | 'delete' | 'settings';
 
 export interface HookHandler<P> {
   order?: number;

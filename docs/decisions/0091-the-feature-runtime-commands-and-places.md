@@ -131,10 +131,40 @@ What that design will have to decide, none of it decided here:
   components are loaded by the host (`--component`); formats' editor modules likewise.
 - **Versions** that mean something: each contract and context versioned, a component saying which
   it needs, and the host and client refusing (or adapting to) one they cannot give.
-- **Trust**: who may add a component (the host's owner, as for `--component`, whose code runs with
-  their rights), and what a client half may reach in the page (today, everything the page can: the
-  host's API with the access code, every document). Third parties' client halves may need to run
-  apart (an iframe, a worker) and reach the page only through the contract, which [0018](0018-untrusted-users.md)'s
-  trust in people, not code, does not cover.
 - **Keys and names** between components nobody coordinated: commands' keys are refused first come,
   first served (above), which is order-dependent; ids may need a publisher's prefix.
+
+## Components are trusted as installed programs
+
+The owner, asked whether components can be locked down: "Down the road, perhaps we'll create plugin
+types that are low risk to allow for easier distribution. But, for now, keep everything full access,
+and just limit who can install them."
+
+**Every component has full access**, as an installed program has, and as editors' extensions
+generally do: whatever runs on the host (every kind has a part there: a format's parser and merge,
+an engine, an environment, a tool, a sync, a feature's host half) can do what the host can, with its
+person's rights, files and git credentials; whatever runs in the page (a feature's client half, a
+format's editor module) can do what the page can (the host's API with the access code, every
+document it opens). The contracts say what a component is given, not what it is kept from. The
+checks they have (`uses`, commands' keys, others' text shown as text) catch mistakes, not malice, and
+are said to be so. Some kinds could never be locked down: an environment is the sandbox, and an
+editor plugin runs inside the editor.
+
+**What keeps it safe is who installs them:**
+
+- **Only the host's owner adds components**: on the command line (`--component`) or in the program
+  that starts the host (the standard lists), as now. Nobody using the host from a browser, and no
+  admin of a workspace, can add one. Where the app comes to offer adding them, it says what this
+  means, plainly: a component can read every document and act as you.
+- **A workspace never brings code.** Workspaces sync between people's devices and are written by
+  people trusted with documents only ([0018](0018-untrusted-users.md)), so nothing in one may load
+  a component: `.kuraa/features.json` turns on only what the host already has, and no file in a
+  workspace names code for the host or the page to load. Code a document runs (chunks, packages)
+  runs in the environment's sandbox, as before. This is a rule any later change keeps.
+- **Whose trust it is shows.** Someone using a host from a browser runs the client halves its owner
+  installed; Settings › Components lists every component the host has, so they can see what that is.
+
+**Later, perhaps: kinds of low risk**, given less and so safe to share more freely: say, a feature
+that only adds panels, menu items and commands, run apart from the page (an iframe or a worker) and
+reaching it only through messages that carry a part of the contract. It would be a kind of its own,
+beside full-access components, not a change to them; nothing above rules it out.

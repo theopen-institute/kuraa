@@ -1,8 +1,8 @@
 # 0088 · A manuscript is a Quarto book (proposed)
 
 **Status: proposed; nothing is built.** It adds a feature, `@kuraa/manuscript`: documents in an
-order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`, shown as a view in
-the sidebar ([0087](0087-the-sidebar-is-made-of-components.md)).
+order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`, shown as a navigation view
+([0087](0087-navigation-is-made-of-components.md)), in whatever layout is on.
 
 The owner, comparing Kuraa with Scrivener, chose first what the rest of Scrivener's way of working
 rests on: a long work kept as many documents in an order of one's own, which the file list (always
@@ -76,14 +76,14 @@ want one.
 
 ### The view
 
-**Manuscript**, a sidebar view: the manuscript's documents in order, by title, each part a heading
+**Manuscript**, a navigation view (in the sidebar, as a tab beside the file tree): the manuscript's documents in order, by title, each part a heading
 that folds, the appendices after them; drag to reorder, into a part or out of it. Below, **Not in the
 manuscript**: the folder's other documents (Scrivener's Research), to drag in. With several
 manuscripts, the view names the one shown and chooses between them. A chapter the list names but
 that is not there (renamed outside the app) is shown as missing, to remove or to point at its file.
 
 In the file menu (0087's): **Add to manuscript** and **Remove from manuscript** (which never deletes
-the file). In ＋'s menu, in the view: **New chapter**, made after the one selected, as New file makes
+the file). Among what the view adds to a layout's ＋: **New chapter**, made after the one selected, as New file makes
 a document.
 
 ### The feature's host half

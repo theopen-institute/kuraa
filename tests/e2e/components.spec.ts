@@ -11,6 +11,7 @@ import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { standardRunComponents } from '../../packages/run-components/src/index.js';
 import { E2E } from './env.js';
 import { openSettings } from './settings.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const RMD = '# Chunks\n\n```{r}\n1 + 1\n```\n';
 
@@ -25,7 +26,7 @@ async function ownHost(formats?: string[]): Promise<RunningHost> {
   writeFileSync(join(dir, 'notes.md'), '# Notes\n\nPlain text here. [A web link](https://example.org/) and [a script](javascript:document.title="pwned").\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'Initial');
-  return startHost({
+  return startHost({ features: standardFeatures,
     dir,
     formats,
     run: { engines: [], components: standardRunComponents, dataDir: mkdtempSync(join(tmpdir(), 'kuraa-e2e-components-data-')) },

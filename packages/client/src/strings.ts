@@ -214,13 +214,6 @@ export const S = {
     redo: 'Redo',
     runChunk: 'Run the chunk',
     runLine: 'Run the line or selection',
-    treeMove: 'Move through files',
-    treeFolder: 'Open or close a folder',
-    treeOpen: 'Open the file',
-    treeRename: 'Rename',
-    treeDelete: 'Delete',
-    treeMenu: 'More',
-    treeMenuNote: 'new, move, the header',
     /** What an empty document says: little (the cues and keys are in Markdown and shortcuts, ⌘/). */
     placeholder: 'Start writing…',
   },
@@ -889,6 +882,18 @@ export const S = {
     fromFlag: (flag: string) => `Set by ${flag} on the command line.`,
     whereNew: 'Where new workspaces go',
     whereData: 'Where packages and tools are kept',
+  },
+
+  /** The core's own menu at the upper left, while no layout gives navigation (0087). */
+  fallback: {
+    title: 'Workspaces, files and settings',
+    newFile: 'New file',
+    filesEllipsis: 'Files…',
+    files: 'Files',
+    settings: 'Settings…',
+    filter: 'Filter by name',
+    nothing: 'No file has that name.',
+    none: 'No files yet.',
   },
 
   workspaceSwitcher: {

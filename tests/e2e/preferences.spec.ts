@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { SettingsStore, startHub, type RunningHub } from '../../packages/host/src/index.js';
 import { standardRunComponents } from '../../packages/run-components/src/index.js';
 import { openSettings } from './settings.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -23,7 +24,7 @@ async function yourWorkspaces(): Promise<{ hub: RunningHub; app: string }> {
     registry: join(app, 'workspaces.json'),
     settings: new SettingsStore(join(app, 'settings.json'), {}, app),
     staticDir: STATIC,
-    hosts: { timings: TIMINGS, run: { components: standardRunComponents } },
+    hosts: { features: standardFeatures, timings: TIMINGS, run: { components: standardRunComponents } },
   });
   const w = await hub.hub.create('Notes');
   writeFileSync(join(w.path, 'analysis.Rmd'), '# Chunks\n\n```{r}\n1 + 1\n```\n');

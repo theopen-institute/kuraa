@@ -11,6 +11,7 @@ import createTestnet from 'hyperdht/testnet.js';
 import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -31,14 +32,14 @@ test('a document only two people read: on their devices, marked so, and gone fro
   const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-spaces-keys-'));
   const as = async (name: string) => ({ ...peers, person: await createPerson(name, join(keys, name, 'person.json')), signing: await keptKey(join(keys, name, 'signing.json')) });
   const asAda = await as('Ada');
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const a = await startHost({ features: standardFeatures, dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
   const joined = async (name: string) => {
     const who = await as(name);
     const dir = join(mkdtempSync(join(tmpdir(), `kuraa-e2e-spaces-${name}-`)), 'notes');
     await joinWorkspace({ dir, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: `${name.toLowerCase()}-laptop`, bootstrap: peers.bootstrap, timeoutMs: 20_000, person: who.person, signing: who.signing });
     git(dir, 'config', 'user.name', name);
     git(dir, 'config', 'user.email', `${name.toLowerCase()}@example.org`);
-    return { dir, h: await startHost({ dir, staticDir: STATIC, timings: TIMINGS, peers: who, invites: { peers: who } }) };
+    return { dir, h: await startHost({ features: standardFeatures, dir, staticDir: STATIC, timings: TIMINGS, peers: who, invites: { peers: who } }) };
   };
   const { h: b } = await joined('Bo');
   const { dir: dirC, h: c } = await joined('Cy');
@@ -105,11 +106,11 @@ test('a folder’s permissions, from its right-click menu: only she reads it, an
   const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-folder-keys-'));
   const as = async (name: string) => ({ ...peers, person: await createPerson(name, join(keys, name, 'person.json')), signing: await keptKey(join(keys, name, 'signing.json')) });
   const asAda = await as('Ada');
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const a = await startHost({ features: standardFeatures, dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
   const asBo = await as('Bo');
   const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-folder-b-')), 'notes');
   await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'bo-laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: asBo.person, signing: asBo.signing });
-  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
       const page = await (await browser.newContext()).newPage();

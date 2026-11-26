@@ -31,6 +31,133 @@ export interface ClientFeature {
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
   /** Lines for the Markdown and shortcuts sheet: what it adds to typing and keys. */
   help?: HelpItem[];
+  /** Where navigation goes in the window (0087): one layout is used at a time. */
+  layout?: FeatureLayout;
+  /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */
+  views?: NavigationView[];
+}
+
+/**
+ * A layout (0087): it puts navigation somewhere in the window (a sidebar, a
+ * bar), with the workspace, its connection, the core's menus and the views
+ * that are on. It is given the window's navigation area, to the left of the
+ * document, as wide as it draws itself.
+ */
+export interface FeatureLayout {
+  id: string;
+  label: string;
+  /**
+   * It offers the workspaces and Settings itself (through workspaceMenu): while
+   * a layout that does is in use, the core's own menu at the upper left is not
+   * drawn.
+   */
+  navigation: boolean;
+  mount(element: HTMLElement, ctx: LayoutContext): () => void;
+}
+
+/** How the open document (or, with none open, the host) is connected, in words, and who else is here. */
+export interface ConnectionInfo {
+  state: 'connected' | 'connecting' | 'disconnected' | 'unauthorized';
+  /** In a word or two: "Connected". */
+  label: string;
+  /** All of it, in lines, for a tooltip: the connection and who else is here, then how the workspace syncs. */
+  title: string;
+  /** How the workspace syncs beyond this computer, a line each. */
+  syncing: string[];
+  /** Who has the open document open, by name, you marked as you. */
+  peers: string[];
+}
+
+/** What the client gives a layout. Everything here is the core's: the layout only places it. */
+export interface LayoutContext extends FeatureClientContext {
+  /**
+   * The open workspace's name (with none open: what to call the list of
+   * workspaces), and whether there is a menu of workspaces (workspaceMenu) to
+   * offer: none on a host of one folder alone.
+   */
+  workspace(): { name: string; open: boolean; menu: boolean };
+  connection(): ConnectionInfo;
+  /** Be told when the workspace, its connection, the views or the panels' buttons change. Returns how to stop. */
+  onChange(fn: () => void): () => void;
+  /** The core's menu of workspaces (switch, add, sync, Settings), under an element. */
+  workspaceMenu(at: HTMLElement): void;
+  /** The core's ＋ menu (New file, New folder…, and what the views add), under an element; pressed again, it closes. */
+  newMenu(at: HTMLElement): void;
+  /** Whether ＋'s menu is open (for its button's aria-expanded). */
+  newMenuOpen(): boolean;
+  /** The workspace's panels with an icon (Search), to offer as buttons. */
+  panelButtons(): { feature: string; id: string; label: string; keys?: string; icon: FileIcon }[];
+  askPanel(feature: string, id: string): void;
+  /** The navigation views that are on, from every feature, each to draw where the layout chooses. */
+  views(): { key: string; label: string; mount(element: HTMLElement): () => void }[];
+  /** Move a file or folder into a folder ('' for the top), as a drop on the layout. */
+  move(path: string, folder: string): void;
+}
+
+/** A file as navigation sees it (the core's list: companions folded under their documents, app folders left out by views). */
+export interface NavigationFile {
+  path: string;
+  /** Its type's id; null for a file the app does not open. */
+  type: string | null;
+  /** A document's title (null: it has none yet); absent for other files. */
+  title?: string | null;
+  /** Conflicts a merge kept in it, to choose between: absent if none. */
+  conflicts?: number;
+  /** Why the app does not open it, if it does not. */
+  cannotOpen?: string;
+  /** Who reads it, in words, if not everyone (0066); who may change it, if not anyone (0069). */
+  readers?: string;
+  writers?: string;
+}
+
+/**
+ * A navigation view (0087): one way of seeing the workspace's files (a tree, a
+ * manuscript). It shows them; what is done to them is the core's.
+ */
+export interface NavigationView {
+  id: string;
+  label: string;
+  mount(element: HTMLElement, ctx: NavigationContext): () => void;
+  /** What it adds to the ＋ menu, after the core's New file and New folder (a manuscript's New chapter). */
+  newItems?(ctx: NavigationContext): FeatureMenuItem[];
+}
+
+/** What the client gives a navigation view. */
+export interface NavigationContext extends FeatureClientContext {
+  /** The open workspace's name. */
+  workspaceName(): string;
+  files(): NavigationFile[];
+  /** Folders with permissions of their own (0069), by path ending in `/`: who reads, who may change, in words. */
+  folders(): { path: string; readers?: string; writers?: string }[];
+  /** The open file. */
+  selected(): string | null;
+  /** Be told when the files, the folders or the open file change. Returns how to stop. */
+  onChange(fn: () => void): () => void;
+  /**
+   * Be told of a place to show: a file or folder just made or moved there
+   * (its folder should be open), or a folder renamed (`from` its old path).
+   * Returns how to stop.
+   */
+  onReveal(fn: (path: string, from?: string) => void): () => void;
+  open(path: string): void;
+  /** Open a file at its first conflict. */
+  openConflicts(path: string): void;
+  /** The pointer rests on a file (null: it left): it is got ready ahead, to open sooner. */
+  prefetch(path: string | null, now?: boolean): void;
+  /** A new document, in a folder (none: the top level), opened with the cursor in its title. */
+  newFile(folder?: string): void;
+  /** A new folder, its name asked for, in a folder (none: the top level). */
+  newFolder(parent?: string): void;
+  /** Rename a file (its title and name, for a document) or a folder (`path` ending in `/`). */
+  rename(path: string): void;
+  /** Delete a file, once the person says so. */
+  remove(path: string): void;
+  /** Move a file or folder into a folder ('' for the top). */
+  move(path: string, folder: string): void;
+  /** The core's menu for a file, a folder (`path` ending in `/`) or the top level (''), at a point. */
+  fileMenu(path: string, at: { x: number; y: number }): void;
+  /** A file's icon, as its type defines it (0023). */
+  icon(file: NavigationFile): FileIcon | undefined;
 }
 
 /** What the client gives a feature wherever it is used. */

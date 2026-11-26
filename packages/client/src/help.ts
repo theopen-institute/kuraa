@@ -37,14 +37,8 @@ export function clientHelp(): HelpGroup[] {
       { does: h.preferences, keys: [APP_KEYS.preferences] },
       { does: h.help, keys: [APP_KEYS.help] },
     ]),
-    group(h.tree, [
-      { does: h.treeMove, keys: ['ArrowUp', 'ArrowDown'] },
-      { does: h.treeFolder, keys: ['ArrowRight', 'ArrowLeft'] },
-      { does: h.treeOpen, keys: ['Enter'] },
-      { does: h.treeRename, keys: ['F2'] },
-      { does: h.treeDelete, keys: ['Delete'] },
-      { does: h.treeMenu, keys: ['Shift-F10'], note: h.treeMenuNote },
-    ]),
+    // The file list's keys are the files view's (0087): its lines come with it, in this group, the client's column.
+    group(h.tree, []),
   ];
 }
 

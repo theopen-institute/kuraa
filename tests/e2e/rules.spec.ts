@@ -12,6 +12,7 @@ import { joinWorkspace, startHost } from '../../packages/host/src/index.js';
 import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
 import { openSettings } from './settings.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -32,12 +33,12 @@ test('an admin says who can change a document; to someone else it is read only, 
   const asAda = { ...peers, person: await createPerson('Ada', join(keys, 'ada', 'person.json')), signing: await keptKey(join(keys, 'ada', 'signing.json')) };
   const boPerson = await createPerson('Bo', join(keys, 'bo', 'person.json'));
   const asBo = { ...peers, person: boPerson, signing: await keptKey(join(keys, 'bo', 'signing.json')) };
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const a = await startHost({ features: standardFeatures, dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
   const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-rules-b-')), 'notes');
   await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: boPerson, signing: asBo.signing });
   git(dirB, 'config', 'user.name', 'Bo');
   git(dirB, 'config', 'user.email', 'bo@example.org');
-  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
       const page = await (await browser.newContext()).newPage();
@@ -106,10 +107,10 @@ test('from a document’s ⋯ menu: an admin says only she can change it; then b
   const asAda = { ...peers, person: await createPerson('Ada', join(keys, 'ada', 'person.json')), signing: await keptKey(join(keys, 'ada', 'signing.json')) };
   const boPerson = await createPerson('Bo', join(keys, 'bo', 'person.json'));
   const asBo = { ...peers, person: boPerson, signing: await keptKey(join(keys, 'bo', 'signing.json')) };
-  const a = await startHost({ dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const a = await startHost({ features: standardFeatures, dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
   const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-perm-b-')), 'notes');
   await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: boPerson, signing: asBo.signing });
-  const b = await startHost({ dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
       const page = await (await browser.newContext()).newPage();

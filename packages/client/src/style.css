@@ -99,15 +99,29 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .panes { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
+/* Navigation (0087): the layout in use draws itself here, as the first column; with none, a narrow column for the core's menu. */
+.layout-area { display: contents; }
+.layout-none { background: var(--panel); border-right: 1px solid var(--border); }
+.panes.no-layout { grid-template-columns: 40px minmax(0, 1fr); }
+.panes.no-layout.history-open { grid-template-columns: 40px minmax(0, 1fr) 280px; }
+.panes.no-layout.side-open { grid-template-columns: 40px minmax(0, 1fr) minmax(320px, 38%); }
+.panes.no-layout.history-open.side-open { grid-template-columns: 40px minmax(0, 1fr) 280px minmax(320px, 34%); }
+.panes { position: relative; }
+.fallback-nav { position: absolute; top: 6px; left: 4px; z-index: 5; }
+.fallback-button { display: grid; place-items: center; width: 32px; height: 30px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
+.fallback-button:hover { color: var(--text); background: var(--selected); }
+.modal.files-list { width: min(520px, 92vw); max-height: min(560px, 80vh); grid-template-rows: auto minmax(0, 1fr) auto; }
+.files-list ul { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.files-list li button { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; border-radius: 5px; }
+.files-list li button.active { background: var(--selected); }
+.files-list-folder { font-size: 12px; margin-left: auto; }
 .panes.history-open { grid-template-columns: 240px minmax(0, 1fr) 280px; }
 .panes.side-open { grid-template-columns: 240px minmax(0, 1fr) minmax(320px, 38%); }
 .panes.history-open.side-open { grid-template-columns: 240px minmax(0, 1fr) 280px minmax(320px, 34%); }
 .pane { min-height: 0; overflow: auto; }
 .pane-left, .pane-right { background: var(--panel); }
 .pane-left { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
-.pane-left .tree-scroll { flex: 1; overflow: auto; min-height: 0; display: flex; flex-direction: column; }
 /* The space below the files: right-click for a new file or folder at the top level. */
-.tree-space { flex: 1 0 48px; }
 .pane-right { border-left: 1px solid var(--border); }
 .pane-header {
   display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
@@ -127,16 +141,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .pane-header-actions button:hover { color: var(--text); background: var(--selected); }
 .pane-header-actions button svg { display: block; margin: 2px 0; }
 
-.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
-.tree li { position: relative; }
-.tree-row {
-  display: flex; width: 100%; gap: 6px; text-align: left; border: 0; border-radius: 0;
-  padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
-}
-.tree [role='treeitem'] { outline: none; }
-.tree [role='treeitem']:focus-visible > .tree-row, .tree [role='treeitem']:focus-visible > .tree-dir-row { outline: 2px solid var(--accent); outline-offset: -2px; }
-.tree-file > .tree-row:hover, .tree-dir-row:hover { background: color-mix(in srgb, var(--selected) 60%, transparent); }
-.tree-icon { width: 12px; color: var(--muted); flex: none; }
 /* File icons: small, thin and quiet, in the muted colour (3:1 and more, as icons need); the open file's in the text's. */
 .file-icon {
   width: 14px; height: 14px; flex: none; align-self: center; margin-left: -1px;
@@ -144,26 +148,8 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
   color: var(--muted);
 }
 .file-icon-dot { fill: currentColor; stroke: none; }
-.tree-file.selected .file-icon { color: var(--text); }
-.tree-folder { color: var(--muted); }
-.tree-file.selected > .tree-row { background: var(--selected); font-weight: 600; }
-.tree-file.untyped > .tree-row { color: var(--muted); }
-.tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tree-file.untitled .tree-name { color: var(--muted); font-style: italic; }
-.tree-actions { position: absolute; right: 4px; top: 1px; display: none; gap: 2px; }
-.tree-actions button { padding: 0 5px; font-size: 12px; background: var(--panel); }
-.tree-actions button { display: inline-flex; align-items: center; padding: 1px 4px; }
-.tree-actions .file-icon { margin: 0; color: var(--text); }
-.tree-dir-row { position: relative; }
 /* Dragging to move: the folder it would land in, and the thing being moved. */
-.tree-dir.drop-target > .tree-dir-row { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-.tree-dir.drop-target > ul { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
-.tree-scroll.drop-target, .pane-header.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
-.tree .dragging { opacity: 0.45; }
-.tree [draggable='true'] { cursor: grab; }
 /* A row's buttons show on hover, and while it has the keyboard's focus (not every folder around it). */
-.tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions,
-.tree-file:focus-within > .tree-actions, .tree-dir:focus > .tree-dir-row > .tree-actions, .tree-actions:focus-within { display: flex; }
 
 .pane-centre { display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
 .centre-stack, .editor-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -527,7 +513,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .conflict-button { margin-left: auto; font: 12px var(--font); padding: 1px 8px; border: 1px solid transparent; background: none; color: var(--accent); cursor: pointer; border-radius: 4px; }
 .conflict-version-bar .conflict-button { margin-left: auto; }
 .conflict-button:hover { background: var(--accent-soft); }
-.tree-conflict { margin-left: 4px; color: var(--warn); font-size: 11px; }
 .conflict-version-body > :first-child { margin-top: 6px; }
 .conflict-version-body > :last-child { margin-bottom: 6px; }
 /* History: editing sessions fold their saves; saves inside are quieter; versions stand out. */
@@ -592,7 +577,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .rule-form { display: grid; gap: 6px; }
 .person-row input, .person-row select { font: 13px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; min-width: 0; }
 .person-row button { white-space: nowrap; }
-.tree-readers { flex: none; align-self: center; margin-left: 5px; color: var(--muted); }
 .readers .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .readers-who { display: grid; gap: 4px; margin: 0 0 0 22px; padding: 0; border: 0; }
 .permissions-part { display: grid; gap: 4px; border: 0; padding: 0; margin: 0 0 10px; }
@@ -643,9 +627,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .find-row button { font-size: 12px; padding: 3px 7px; }
 .find-row button.active { background: var(--accent-soft); }
 .find-count { min-width: 4.5em; color: var(--muted); font-size: 12px; text-align: right; }
-.tree-conflict { cursor: pointer; text-decoration: underline dotted; }
-/* The count is what to click on a file with conflicts; Rename and Delete stay in its right-click menu. */
-.tree-file.has-conflicts:hover > .tree-actions { display: none; }
 
 /* A panel beside the document (FeaturePanel.vue): its heading the client's, its body the component's (0089). */
 .side-panel { display: flex; flex-direction: column; overflow: hidden; }

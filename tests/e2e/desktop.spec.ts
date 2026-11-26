@@ -12,6 +12,7 @@ import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
 import { openSettings } from './settings.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const DESKTOP = resolve(import.meta.dirname, '../../apps/desktop');
 const MAIN = join(DESKTOP, 'build/main.cjs');
@@ -177,7 +178,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
 
 test('joins a shared host without starting one', async () => {
   const dir = makeRepo();
-  const host: RunningHost = await startHost({
+  const host: RunningHost = await startHost({ features: standardFeatures,
     dir, port: 0, host: '127.0.0.1',
     timings: { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 },
   });

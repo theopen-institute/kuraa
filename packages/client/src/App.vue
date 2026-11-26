@@ -20,11 +20,14 @@ import { S } from './strings.js';
 import type { AppProps, EditorStatus, Notice, WorkspaceLink } from './types.js';
 import Editor from './Editor.vue';
 import ErrorBanner from './ErrorBanner.vue';
-import FileTree from './FileTree.vue';
+import FileActions from './FileActions.vue';
+import FallbackMenu from './FallbackMenu.vue';
+import FilesList from './FilesList.vue';
+import FeatureMount from './FeatureMount.vue';
+import ContextMenu from './ContextMenu.vue';
 import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
 import DocumentMenu from './DocumentMenu.vue';
-import ConnectionLight from './ConnectionLight.vue';
 import NoticeToast from './NoticeToast.vue';
 import PackagesDialog from './PackagesDialog.vue';
 import PastVersion from './PastVersion.vue';
@@ -36,12 +39,13 @@ import FolderPicker from './FolderPicker.vue';
 import SettingsWindow from './SettingsWindow.vue';
 import type { SettingsSection } from './settingsSections.js';
 import InviteDialog from './InviteDialog.vue';
-import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
+import { connectionInfo, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
+import { workspaceMenuItems } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
 import { explain } from './errors.js';
-import FileIcon from './FileIcon.vue';
 import type { ContextItem } from './ContextMenu.vue';
 import { activeFeatures, FeatureMessages, loadHiddenFeatures, saveHiddenFeatures, type ActiveFeature, type FeatureApp } from './features.js';
+import type { ContextItem as MenuItem } from './ContextMenu.vue';
 import FeaturePanel from './FeaturePanel.vue';
 
 const props = withDefaults(defineProps<AppProps>(), { shell: () => webShell, editors: () => ({}), features: () => ({}) });
@@ -152,9 +156,11 @@ async function loadFeatures() {
   }
   // Only a change is taken: the same answer keeps what is drawn from it.
   if (asked === api.value && n === featuresAsked && JSON.stringify(list) !== JSON.stringify(featureStatus.value)) featureStatus.value = list;
+  if (asked === api.value && n === featuresAsked) featuresKnown.value = true;
 }
 watch([api, ready], () => {
   featureStatus.value = [];
+  featuresKnown.value = false;
   if (ready.value) void loadFeatures();
 }, { immediate: true });
 const featureNotice = (text: string, kind: 'info' | 'warn' = 'info') => {
@@ -260,6 +266,94 @@ function closePanel(feature: string, panel: string) {
 }
 /** The workspace's panels with an icon (Search's): offered as buttons beside ＋ (0089). */
 const panelButtons = computed(() => features.value.flatMap((f) => (f.feature.panels ?? []).filter((p) => p.about === 'workspace' && p.icon).map((panel) => ({ feature: f.feature.id, panel }))));
+
+// Navigation (0087): a layout places it, views show the files; the core draws
+// none, only its own menu at the upper left while no layout gives navigation.
+// Until the host has said how features stand for the workspace (and with none
+// open), the client's own layouts and views are used, as on by default, so the
+// page does not start without them and then change.
+const LAYOUT_KEY = 'kuraa:layout';
+let storedLayout: string | null = null;
+try { storedLayout = localStorage.getItem(LAYOUT_KEY); } catch { /* storage unavailable */ }
+const featuresKnown = ref(false);
+const navFeatures = computed<ActiveFeature[]>(() => {
+  if (featuresKnown.value && ready.value) return features.value;
+  const assumed: FeatureStatus[] = Object.values(props.features)
+    .filter((f) => f.layout || f.views?.length)
+    .map((f) => ({ id: f.id, label: f.id, description: '', on: true, host: true, workspace: true, settings: {}, mayChange: false, companions: [], me: null }));
+  return activeFeatures(props.features, assumed, hiddenFeatures.value, featureApp, featureMessages);
+});
+const layouts = computed(() => navFeatures.value.filter((f) => f.feature.layout));
+/** The layout in use: the one this person chose (in this browser), else the first. */
+const layout = computed(() => layouts.value.find((f) => f.feature.layout!.id === storedLayout) ?? layouts.value[0] ?? null);
+/** No layout gives navigation: the core's own menu at the upper left. */
+const fallback = computed(() => !layout.value?.feature.layout?.navigation);
+const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
+const navEvents = navigationEvents();
+const prefetcher = new Prefetcher();
+onBeforeUnmount(() => prefetcher.stop());
+/** The core's own menus, opened for navigation: the workspaces'. */
+const coreMenu = shallowRef<{ x: number; y: number; items: MenuItem[] } | null>(null);
+/** Files…: the plain list of the workspace's files (the menu at the upper left). */
+const listingFiles = ref(false);
+const workspaceTitle = computed(() => (ready.value ? workspace.value?.name || hub.value?.find((w) => w.id === chosen.value)?.name || (hub.value ? S.app.workspace : S.app.files) : S.app.workspaces));
+const workspaceItems = (): MenuItem[] => (hub.value ? workspaceMenuItems(
+  {
+    workspaces: hub.value,
+    current: ready.value ? chosen.value : null,
+    name: workspaceTitle.value,
+    canAdd: canAdd.value,
+    sync: ready.value && link.value && (link.value.devices || link.value.online) ? { pending: link.value.online?.pending ?? 0, busy: syncing.value } : null,
+  },
+  {
+    switch: (id) => void switchWorkspace(id),
+    add: () => (addingWorkspace.value = true),
+    settings: () => openSettings(ready.value ? 'workspace' : 'you'),
+    sync: () => void syncNow(),
+  },
+) : []);
+const connection = computed(() => connectionInfo(status.value, !!path.value && !!type.value, link.value));
+const navApp: NavigationApp = {
+  workspace: () => ({ name: workspaceTitle.value, open: ready.value, menu: !!hub.value }),
+  connection: () => connection.value,
+  workspaceMenu: (at) => {
+    const box = at.getBoundingClientRect();
+    coreMenu.value = { x: box.left, y: box.bottom + 4, items: workspaceItems() };
+  },
+  newMenu: (at) => fileActions.value?.newMenu(at),
+  newMenuOpen: () => !!fileActions.value?.newMenuOpen,
+  panelButtons: () => panelButtons.value.map((b) => ({ feature: b.feature, id: b.panel.id, label: b.panel.label, keys: b.panel.keys, icon: b.panel.icon! })),
+  askPanel: (feature, id) => askPanel(feature, id),
+  views: () => views.value.map(({ active, view }) => ({
+    key: `${active.feature.id}:${view.id}`,
+    label: view.label,
+    mount: (el: HTMLElement) => view.mount(el, navigationContext(active.ctx, navApp, navEvents)),
+  })),
+  workspaceName: () => workspace.value?.name ?? S.app.files,
+  files: () => shownFiles.value,
+  folders: () => folderMarks.value,
+  selected: () => path.value,
+  open: (p) => select(p),
+  openConflicts: (p) => showConflicts(p),
+  prefetch: (p, now) => prefetcher.prefetch(api.value, p, path.value, now),
+  newFile: (folder) => void fileActions.value?.create(folder),
+  newFolder: (parent) => void fileActions.value?.newFolder(parent),
+  rename: (p) => fileActions.value?.rename(p),
+  remove: (p) => void fileActions.value?.remove(p),
+  move: (p, folder) => void fileActions.value?.move(p, folder),
+  fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
+  icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
+};
+/** What the views add to ＋. */
+const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(active.ctx, navApp, navEvents))));
+/** The layout drawn: anew only for another layout (or another workspace's features). */
+const layoutMount = computed(() => {
+  const l = layout.value;
+  if (!l) return null;
+  return (el: HTMLElement) => l.feature.layout!.mount(el, layoutContext(l.ctx, navApp, navEvents));
+});
+const layoutKey = computed(() => (layout.value ? `${layout.value.feature.id}:${layout.value.feature.layout!.id}` : ''));
+
 /** Open a file at a range of its text (a feature asked). */
 async function openAtText(p: string, at?: { from: number; to: number }) {
   if (p !== path.value) select(p);
@@ -393,7 +487,8 @@ async function restoreVersion() {
 
 /** The live editor: its find bar, outline and format commands, for the menu. */
 const editor = useTemplateRef<InstanceType<typeof Editor>>('editor');
-const fileTree = useTemplateRef<InstanceType<typeof FileTree>>('fileTree');
+/** What can be done to files (0087): the core's, whatever shows them. */
+const fileActions = useTemplateRef<InstanceType<typeof FileActions>>('fileActions');
 /** A file to show at its first conflict once open (its count in the file list was clicked). */
 const conflictJump = ref<string | null>(null);
 /** A new document, to open with the cursor in its title. */
@@ -879,6 +974,10 @@ function useSettings(s: Settings) {
   saveSettings(s);
   settings.value = s;
 }
+
+// What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
+watch([workspaceTitle, connection, views, panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
+watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
 </script>
 
 <template>
@@ -897,71 +996,18 @@ function useSettings(s: Settings) {
     </div>
     <ErrorBanner v-if="error" :error="error"><button type="button" @click="error = null">{{ S.common.dismiss }}</button></ErrorBanner>
 
-    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!shownFeaturePanel }]">
-      <FileTree
-        v-if="ready"
-        ref="fileTree"
-        :api="api"
-        :shared="sharedWithDevices"
-        :folders="folderMarks"
-        :files="shownFiles"
-        :selected="path"
-        :registry="hostRegistry"
-        :workspace-name="workspace?.name ?? S.app.files"
-        :feature-items="featureFileMenu"
-        @select="select"
-        @document-settings="openDocumentSettings"
-        @created="(p) => (titleFocus = p)"
-        @conflicts="showConflicts"
-        @permissions="openPermissions"
-        @changed="refreshTree"
-        @error="fail"
-      >
-        <template v-if="hub" #title>
-          <span class="workspace-title">
-            <ConnectionLight :status="status" :has-document="!!path && !!type" :link="link" />
-            <WorkspaceSwitcher
-              :workspaces="hub"
-              :current="chosen"
-              :name="workspace?.name || hub.find((w) => w.id === chosen)?.name || S.app.workspace"
-              :can-add="canAdd"
-              :sync="link && (link.devices || link.online) ? { pending: link.online?.pending ?? 0, busy: syncing } : null"
-              @sync="syncNow"
-              @switch="switchWorkspace"
-              @add="addingWorkspace = true"
-              @settings="openSettings('workspace')"
-            />
-          </span>
-        </template>
-        <!-- The workspace's panels with an icon (Search), beside New file (0089). -->
-        <template #actions>
-          <button
-            v-for="b in panelButtons"
-            :key="`${b.feature}:${b.panel.id}`"
-            type="button"
-            class="panel-button"
-            :title="b.panel.keys ? `${b.panel.label} (${keyLabel(b.panel.keys)})` : b.panel.label"
-            :aria-label="b.panel.label"
-            :data-testid="`${b.panel.id}-button`"
-            @click="askPanel(b.feature, b.panel.id)"
-          ><FileIcon :icon="b.panel.icon" /></button>
-        </template>
-      </FileTree>
-      <nav v-else class="pane pane-left" :aria-label="S.app.workspaces">
-        <div class="pane-header">
-          <WorkspaceSwitcher
-            v-if="hub"
-            :workspaces="hub"
-            :current="null"
-            :name="S.app.workspaces"
-            :can-add="canAdd"
-            @switch="switchWorkspace"
-            @add="addingWorkspace = true"
-            @settings="openSettings('you')"
-          />
-        </div>
-        <div class="tree-scroll" />
-      </nav>
+    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!shownFeaturePanel, 'no-layout': !layoutMount }]">
+      <!-- Navigation (0087): the layout in use draws it here; with none that gives it, the core's menu at the upper left. -->
+      <FeatureMount v-if="layoutMount" :key="layoutKey" class="layout-area" :mount="layoutMount" />
+      <div v-else class="layout-none" data-testid="layout-none" />
+      <FallbackMenu
+        v-if="fallback && (ready || hub)"
+        :workspaces="workspaceItems"
+        :open="ready"
+        @new-file="fileActions?.create()"
+        @files="listingFiles = true"
+        @settings="openSettings(ready ? 'workspace' : 'you')"
+      />
 
       <main class="pane pane-centre">
         <div v-if="hub && chosen === null && hubKnown" class="empty">
@@ -980,7 +1026,7 @@ function useSettings(s: Settings) {
             <h2>{{ S.app.emptyTitle }}</h2>
             <p>{{ S.app.emptyBody }}</p>
             <div class="actions">
-              <button type="button" class="primary" data-testid="new-document" @click="fileTree?.create()">{{ S.app.newDocument }}</button>
+              <button type="button" class="primary" data-testid="new-document" @click="fileActions?.create()">{{ S.app.newDocument }}</button>
               <button type="button" data-testid="empty-help" @click="toggleHelp">{{ S.app.shortcuts }} <kbd>{{ keyLabel(APP_KEYS.help) }}</kbd></button>
             </div>
           </div>
@@ -1093,6 +1139,26 @@ function useSettings(s: Settings) {
     </div>
 
     <NoticeToast :notice="shownNotice" @dismiss="notice = null" />
+
+    <FileActions
+      v-if="ready"
+      ref="fileActions"
+      :api="api"
+      :files="shownFiles"
+      :selected="path"
+      :registry="hostRegistry"
+      :shared="sharedWithDevices"
+      :feature-items="featureFileMenu"
+      :new-items="viewItems"
+      @document-settings="openDocumentSettings"
+      @created="(p) => (titleFocus = p)"
+      @permissions="openPermissions"
+      @changed="refreshTree"
+      @error="fail"
+      @reveal="(p, from) => navEvents.reveal.tell(p, from)"
+    />
+    <ContextMenu v-if="coreMenu" :x="coreMenu.x" :y="coreMenu.y" :items="coreMenu.items" @close="coreMenu = null" />
+    <FilesList v-if="listingFiles && ready" :files="shownFiles" @open="select" @close="listingFiles = false" />
 
     <DocumentMenu
       v-if="docMenu && path && type && !viewing"

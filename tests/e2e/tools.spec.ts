@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 import { E2E } from './env.js';
 import { openSettings } from './settings.js';
 
@@ -32,6 +33,8 @@ async function fakeHost(): Promise<RunningHost> {
     },
     staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
     timings: { flushMs: 300, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },
+    // Preview is a component (0089): a host has it where it is given the standard features, as every real one is.
+    features: standardFeatures,
   });
 }
 

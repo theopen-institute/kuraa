@@ -10,8 +10,10 @@
   "dependencies": {
     "@kuraa/annotations": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/files": "workspace:*",
     "@kuraa/outline": "workspace:*",
     "@kuraa/preview": "workspace:*",
-    "@kuraa/search": "workspace:*"
+    "@kuraa/search": "workspace:*",
+    "@kuraa/sidebar": "workspace:*"
   }
 }

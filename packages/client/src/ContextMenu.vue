@@ -30,7 +30,8 @@ export interface ContextIcon {
 }
 
 const props = defineProps<{ x: number; y: number; items: ContextItem[] }>();
-const emit = defineEmits<{ close: [] }>();
+/** Closed: by a press elsewhere (`outside`, what was pressed), choosing, Escape, Tab or scrolling. */
+const emit = defineEmits<{ close: [outside?: Event] }>();
 
 const menu = useTemplateRef<HTMLDivElement>('menu');
 const pos = ref({ left: `${props.x}px`, top: `${props.y}px` });
@@ -69,7 +70,7 @@ function onKey(e: KeyboardEvent) {
 }
 
 const outside = (e: Event) => {
-  if (!menu.value?.contains(e.target as Node)) emit('close');
+  if (!menu.value?.contains(e.target as Node)) emit('close', e);
 };
 const close = () => emit('close');
 let listening = 0;

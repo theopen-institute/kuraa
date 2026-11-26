@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost } from '../../packages/host/src/index.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const version = (by: string, commit: string, text: string) => `::: {.version by="${by}" commit="${commit}"}\n${text}\n:::`;
 const conflict = (a: string, b: string) => `:::: {.conflict}\n${version('Ada', '3f2c1e0', a)}\n\n${version('Bo', '9a41d7b', b)}\n::::`;
@@ -21,7 +22,7 @@ test('a conflict block shows both versions, and choosing settles it for everyone
   writeFileSync(join(dir, 'notes.md'), DOC);
   git('add', '-A');
   git('commit', '-q', '-m', 'Merged, with conflicts');
-  const host = await startHost({
+  const host = await startHost({ features: standardFeatures,
     dir,
     staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
     timings: { flushMs: 200, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import createTestnet from 'hyperdht/testnet.js';
 import { startHost, startHub } from '../../packages/host/src/index.js';
 import { openSettings } from './settings.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -29,11 +30,11 @@ test('workspaces are added from the app: a new folder, or one joined from a link
   writeFileSync(join(theirs, '.kuraa', 'workspace.json'), '{"name":"Bo’s survey"}\n');
   git(theirs, 'add', '-A');
   git(theirs, 'commit', '-q', '-m', 'Initial');
-  const other = await startHost({ dir: theirs, timings: TIMINGS, peers });
+  const other = await startHost({ features: standardFeatures, dir: theirs, timings: TIMINGS, peers });
   const link = await other.host.peers!.inviteLink({ hours: 1, once: true });
 
   const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-hub-'));
-  const hub = await startHub({ root, staticDir: STATIC, hosts: { timings: TIMINGS }, peers });
+  const hub = await startHub({ root, staticDir: STATIC, hosts: { features: standardFeatures, timings: TIMINGS }, peers });
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Ada`);
     await expect(page.getByTestId('no-workspace')).toContainText('No workspaces yet');
@@ -112,7 +113,7 @@ test('workspaces are added from the app: a new folder, or one joined from a link
 
 test('joining says how it is going: looking, a slow network, copying; and why it failed', async ({ page }) => {
   const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-hub-'));
-  const hub = await startHub({ root, staticDir: STATIC, hosts: { timings: TIMINGS } });
+  const hub = await startHub({ root, staticDir: STATIC, hosts: { features: standardFeatures, timings: TIMINGS } });
   // The hub's answers, as the test sets them: a join that goes on until let go.
   let status: object | null = null;
   const asked = new Set<string>();
@@ -160,8 +161,8 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const peers = { bootstrap: testnet.bootstrap as never };
-  const mine = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-a-')), staticDir: STATIC, hosts: { timings: TIMINGS }, peers });
-  const theirs = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-b-')), hosts: { timings: TIMINGS }, peers });
+  const mine = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-a-')), staticDir: STATIC, hosts: { features: standardFeatures, timings: TIMINGS }, peers });
+  const theirs = await startHub({ root: mkdtempSync(join(tmpdir(), 'kuraa-e2e-inv-b-')), hosts: { features: standardFeatures, timings: TIMINGS }, peers });
   const hubCall = (h: typeof mine, path: string, body?: object) =>
     fetch(h.url + path, { method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   try {
@@ -211,7 +212,7 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
 
 test('a workspace whose folder is gone is listed as such, and taken off the list from it', async ({ page }) => {
   const root = mkdtempSync(join(tmpdir(), 'kuraa-e2e-gone-'));
-  const first = await startHub({ root, hosts: { timings: TIMINGS } });
+  const first = await startHub({ root, hosts: { features: standardFeatures, timings: TIMINGS } });
   const add = (name: string) => fetch(`${first.url}/hub/api/workspaces`, {
     method: 'POST', headers: { authorization: `Bearer ${first.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'new', name }),
   });
@@ -219,7 +220,7 @@ test('a workspace whose folder is gone is listed as such, and taken off the list
   expect((await add('Gone')).status).toBe(201);
   await first.close();
   rmSync(join(root, 'gone'), { recursive: true, force: true });
-  const hub = await startHub({ root, token: first.token, staticDir: STATIC, hosts: { timings: TIMINGS } });
+  const hub = await startHub({ root, token: first.token, staticDir: STATIC, hosts: { features: standardFeatures, timings: TIMINGS } });
   try {
     await page.goto(`${hub.url}/?token=${hub.token}&name=Ada`);
     await page.getByTestId('workspace-switcher').click();

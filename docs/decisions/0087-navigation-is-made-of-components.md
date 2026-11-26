@@ -1,6 +1,11 @@
 # 0087 · Navigation is made of components (proposed)
 
-**Status: proposed; nothing is built.** The core stops drawing navigation. It adds two hooks to the
+**Status: built** (steps 1 and 2: the hooks, the core's menu at the upper left, `@kuraa/sidebar`
+and `@kuraa/files`; the manuscript is [0088](0088-a-manuscript-is-a-quarto-book.md)'s). Choosing
+between layouts in Settings › You waits for a second layout: the layout used is the one this browser
+names (`kuraa:layout`), else the first. Until the host says how features stand for a workspace (and
+with none open) the client's own layouts and views are used, as on by default, so the page does not
+start without them. The core stops drawing navigation. It adds two hooks to the
 feature contract, **layouts** (where navigation goes in the window) and **navigation views** (ways of
 seeing the workspace's files), and one switch (**on by default**). Today's sidebar becomes two
 features, `@kuraa/sidebar` (a layout) and `@kuraa/files` (the file tree, a view), changing nothing

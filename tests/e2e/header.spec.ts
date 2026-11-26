@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
+import { standardFeatures } from '../../packages/features/src/index.js';
 
 const PAPER = '---\n# Set by the journal\ntitle: Old title\nauthor: Ada Lovelace\n---\n\n# Introduction\n\nThe text.\n';
 
@@ -20,7 +21,7 @@ async function ownHost(): Promise<{ host: RunningHost; dir: string }> {
   writeFileSync(join(dir, 'plain.md'), '# Plain\n\nNo header.\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'Initial');
-  const host = await startHost({
+  const host = await startHost({ features: standardFeatures,
     dir,
     staticDir: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
     timings: { flushMs: 200, idleCommitMs: 1500, maxCommitMs: 10_000, dropMs: 1000 },

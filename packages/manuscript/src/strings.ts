@@ -7,7 +7,6 @@ export const S = {
   makeTop: 'Make a manuscript of the workspace',
   choose: 'Manuscript',
   untitled: 'Untitled manuscript',
-  needsIndex: 'Quarto wants index.qmd as the first chapter.',
   appendices: 'Appendices',
   notIn: 'Not in the manuscript',
   notInNone: 'Every document in this folder is in it.',

@@ -73,7 +73,9 @@ settings are the writer's and Quarto's.
 **Making a manuscript** (a folder's menu: *Make a manuscript*) writes a `_quarto.yml` with the
 folder's documents as chapters, in the order of their paths (*revised*: no `index.qmd` is made, as
 a feature writes no document). Kuraa shows a manuscript without an index file as it is, and says
-that Quarto will want one.
+nothing of it (*revised*, the owner: "I don't understand what I'm supposed to do about it"): Quarto
+requires one only to render the book, and has no setting to do without it, so rendering a manuscript
+(not built yet) will put one in where the book has none, and nobody need know of it.
 
 ### The view
 
@@ -120,7 +122,10 @@ What the contract lacks, to be added as it is built:
   the sidebar shows **Files** and **Manuscript** in a row above them.
 - **The view**: the manuscript's chapters by title, each part a heading over its chapters, the
   appendices, then **Not in the manuscript** (the folder's documents not listed, outside folders
-  starting `.` or `_`). Drag a row before another, onto a part's heading (into it), onto the
+  starting `.` or `_`). Nothing is shown above the chapters but, with several manuscripts, the list
+  that chooses one (*revised*: no title). Parts' headings stand out (bold, a line above each). While
+  a row is dragged, a line shows where it lands, at the level it lands at: before a row, or below a
+  part's heading when a chapter is dropped onto it (into the part). Drag a row before another, onto a part's heading (into it), onto the
   appendices, or down to Not in the manuscript (out); **Alt+↑** and **Alt+↓** move a row where it
   is. **Add a part…** asks for its title. A chapter listed but not found is struck through, with
   **Take it out**. With several manuscripts, a list above chooses one (remembered in this browser).

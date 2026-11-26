@@ -34,7 +34,8 @@ test('a folder made a manuscript, reordered and changed from its view', async ({
     if (await view.getByTestId('manuscript-choose').count()) await view.getByTestId('manuscript-choose').selectOption({ label: folder });
     const row = (name: string) => view.getByTestId(`manuscript:${folder}/${name}`);
     await expect(row('a.md')).toHaveText('Arrival');
-    await expect(view.getByTestId('manuscript-needs-index')).toBeVisible();
+    // No title above its chapters, and nothing said of Quarto's index file (0088, revised).
+    await expect(view.locator('.manuscript-head')).toHaveCount(0);
 
     // Alt+↓: Arrival after Boats.
     await row('a.md').focus();

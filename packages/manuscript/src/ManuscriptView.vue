@@ -86,12 +86,6 @@ const outside = computed(() => {
     .map((f) => f.path)
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
 });
-/** Quarto wants an index file first. */
-const needsIndex = computed(() => {
-  const first = order.value?.chapters[0];
-  return !!first && !('chapter' in first && /(^|\/)index\.(qmd|md|Rmd|ipynb)$/.test(first.chapter));
-});
-
 /** Send the new order; shown at once. */
 function apply(next: Order) {
   const m = book.value;
@@ -127,6 +121,8 @@ function dropAt(e: DragEvent, place: Place, index: number) {
   e.stopPropagation();
   apply(moveTo(order.value, item, place, index));
 }
+/** A chapter dragged onto a part's heading goes into the part, at its start: the line is drawn below the heading, where it lands. */
+const into = (row: Row) => row.kind === 'part' && !!dragging.value && 'chapter' in dragging.value;
 /** Dropped on a row: before it; on a part's heading, a chapter goes into the part (at its start). */
 function dropOn(e: DragEvent, row: Row) {
   if (row.kind === 'part' && dragging.value && 'chapter' in dragging.value) dropAt(e, { list: 'part', part: row.index }, 0);
@@ -176,19 +172,18 @@ async function makeTop() {
       <button type="button" data-testid="manuscript-make-top" @click="makeTop">{{ S.makeTop }}</button>
     </div>
     <template v-else>
-      <div class="manuscript-head">
-        <select v-if="list.length > 1" :value="book.file" :aria-label="S.choose" data-testid="manuscript-choose" @change="choose(($event.target as HTMLSelectElement).value)">
+      <!-- With several manuscripts, which is shown; with one, nothing above its chapters. -->
+      <div v-if="list.length > 1" class="manuscript-head">
+        <select :value="book.file" :aria-label="S.choose" data-testid="manuscript-choose" @change="choose(($event.target as HTMLSelectElement).value)">
           <option v-for="m in list" :key="m.file" :value="m.file">{{ m.title || m.folder || S.untitled }}</option>
         </select>
-        <span v-else class="manuscript-title" :title="book.file">{{ book.title || S.untitled }}</span>
       </div>
-      <p v-if="needsIndex" class="muted manuscript-note" data-testid="manuscript-needs-index">{{ S.needsIndex }}</p>
       <ol class="manuscript-list" :title="S.moveHint" @dragover="dragOver($event, 'end:top')" @drop="dropAt($event, { list: 'top' }, order!.chapters.length)">
         <li
           v-for="r in rows"
           :key="r.key"
           :data-key="r.key"
-          :class="['manuscript-row', r.kind, { nested: r.nested, selected: r.path === selected, over: over === r.key, missing: r.path && !exists(r.path) }]"
+          :class="['manuscript-row', r.kind, { nested: r.nested, selected: r.path === selected, over: over === r.key && !into(r), 'over-into': over === r.key && into(r), missing: r.path && !exists(r.path) }]"
           :data-testid="r.kind === 'part' ? `manuscript-part:${r.title}` : `manuscript:${r.path}`"
           draggable="true"
           tabindex="0"
@@ -257,16 +252,18 @@ async function makeTop() {
 .manuscript-none p { margin: 0; }
 .manuscript-head { padding: 4px 12px; }
 .manuscript-head select { width: 100%; }
-.manuscript-title { font-weight: 600; }
-.manuscript-note { margin: 0 12px 4px; font-size: 12px; }
 .manuscript-list { list-style: none; margin: 0; padding: 0 0 6px; min-height: 12px; }
-.manuscript-row { display: flex; gap: 6px; align-items: center; padding: 3px 12px; cursor: pointer; outline: none; }
+.manuscript-row { position: relative; display: flex; gap: 6px; align-items: center; padding: 3px 12px; cursor: pointer; outline: none; }
 .manuscript-row.nested { padding-left: 26px; }
-.manuscript-row.part { font-weight: 600; color: var(--muted); margin-top: 4px; }
+.manuscript-row.part { font-weight: 700; color: var(--text); margin-top: 8px; padding-top: 4px; padding-bottom: 4px; border-top: 1px solid var(--border); }
 .manuscript-row:hover { background: color-mix(in srgb, var(--selected) 60%, transparent); }
 .manuscript-row:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .manuscript-row.selected { background: var(--selected); font-weight: 600; }
-.manuscript-row.over { box-shadow: inset 0 2px 0 var(--accent); }
+/* Where a dragged row lands: a line before the row, at its level; below a part's heading (into the part), at its chapters' level. */
+.manuscript-row.over::before, .manuscript-row.over-into::after { content: ''; position: absolute; left: 10px; right: 8px; height: 2px; background: var(--accent); border-radius: 1px; pointer-events: none; }
+.manuscript-row.over::before { top: -1px; }
+.manuscript-row.nested.over::before { left: 24px; }
+.manuscript-row.over-into::after { bottom: -1px; left: 24px; }
 .manuscript-row.missing .manuscript-name { color: var(--muted); text-decoration: line-through; }
 .manuscript-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manuscript-missing { color: var(--warn); font-size: 11px; }

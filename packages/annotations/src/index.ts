@@ -12,7 +12,7 @@ import { createTextType } from '@kuraa/format-text';
 import { mergeLines } from '@kuraa/kernel';
 import { OWN_NAME, defineFeature, type FeatureResponse, type Json } from '@kuraa/feature-kit/host';
 import { EXTENSION, SUFFIX, aboutOf, codeOf, creatorOf, describePages, findPassage, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
-import { CODEBOOK, COLOURS, codeAndBelow, mergeCodebooks, parseCodebook, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
+import { CODEBOOK, COLOURS, TOP_CODEBOOK, codeAndBelow, mergeCodebooks, parseCodebook, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
 import type { FeatureContext, FeatureSettings } from '@kuraa/feature-kit/host';
 
 export * from './format.js';
@@ -20,11 +20,15 @@ export * from './codebook.js';
 
 /** Whether a workspace codes (a setting of its own: comments are for any workspace, coding a method a project chooses). */
 export const codingOn = (settings: FeatureSettings) => settings.coding === true;
+/** The codebook a workspace's setting names, if it names one it may (see codebookPath); null for none. */
+const chosenCodebook = (settings: FeatureSettings): string | null =>
+  typeof settings.codebook === 'string' && (settings.codebook === CODEBOOK || settings.codebook === TOP_CODEBOOK || /^(?:[^/.\0][^\0]*\/)?[^/\0]+\.codebook\.jsonld$/.test(settings.codebook)) && !settings.codebook.split('/').includes('..') ? settings.codebook : null;
 /**
- * Where a workspace keeps its codebook: its setting (named codebook.jsonld at the top, or ending .codebook.jsonld, so that
- * the codebook type knows it by its name and merges it as one), else codebook.jsonld at its top.
+ * Where a workspace keeps its codebook: its setting (.kuraa/codebook.jsonld, codebook.jsonld at the top, or a name ending
+ * .codebook.jsonld, so that the codebook type knows it by its name and merges it as one), else .kuraa/codebook.jsonld,
+ * with the workspace's other settings and records.
  */
-export const codebookPath = (settings: FeatureSettings) => (typeof settings.codebook === 'string' && (settings.codebook === CODEBOOK || /^(?:[^/.\0][^\0]*\/)?[^/\0]+\.codebook\.jsonld$/.test(settings.codebook)) && !settings.codebook.split('/').includes('..') ? settings.codebook : CODEBOOK);
+export const codebookPath = (settings: FeatureSettings) => chosenCodebook(settings) ?? CODEBOOK;
 
 /** An annotation in a room: the annotation, and while its passage is found, anchors at its ends. */
 export interface RoomAnnotation {
@@ -44,13 +48,13 @@ const pageType = {
 
 /**
  * The codebook: shown as JSON-LD text, merged by code (everyone's, changed at once on several devices). Known by its name
- * (codebook.jsonld at the top, or a name ending .codebook.jsonld, as codebookPath allows): never a file elsewhere that
+ * (.kuraa/codebook.jsonld, codebook.jsonld at the top, or a name ending .codebook.jsonld, as codebookPath allows): never a file elsewhere that
  * happens to be called codebook.jsonld. Where a side is not a codebook (a hand edit gone wrong), merged line by line instead,
  * a conflict kept for people to settle, never its codes taken for removed.
  */
 const codebookType = {
   ...createTextType({ id: 'codebook', label: 'Codebook', description: 'A workspace’s codes, for coding passages', files: [{ extensions: ['.jsonld'], language: 'json' }], priority: 4, version: 2 }),
-  match: (path: string) => path === CODEBOOK || path.endsWith('.codebook.jsonld'),
+  match: (path: string) => path === CODEBOOK || path === TOP_CODEBOOK || path.endsWith('.codebook.jsonld'),
   merge: (base: string, a: string, b: string, sides: Parameters<typeof mergeLines>[3]) => {
     const merged = mergeCodebooks(base, a, b);
     return merged === null ? mergeLines(base, a, b, sides) : { text: merged, conflicts: 0 };
@@ -82,7 +86,8 @@ export const annotationsFeature = defineFeature({
   description: 'Comment on passages and documents, and reply: each person’s kept beside the document in a file of their own, never in it.',
   types: [pageType, codebookType],
   companions: [SUFFIX],
-  files: (settings) => [codebookPath(settings)],
+  // Where the workspace names none, the one at the top too: to move it into .kuraa.
+  files: (settings) => (chosenCodebook(settings) ? [codebookPath(settings)] : [CODEBOOK, TOP_CODEBOOK]),
   room: {
     companion: SUFFIX,
     extension: EXTENSION,
@@ -133,9 +138,48 @@ export const annotationsFeature = defineFeature({
       queue = next.catch(() => undefined);
       return next;
     };
-    const codebook = async () => readCodebook(await ctx.read(codebookPath(ctx.settings())));
+    /**
+     * Where the codebook is now: where codebookPath says, except that one still at the top (not yet moved: this device
+     * may not change .kuraa, say, or it came from a device on 0.6.0) is used until it is.
+     */
+    const where = async () => {
+      const path = codebookPath(ctx.settings());
+      if (chosenCodebook(ctx.settings()) || (await ctx.read(path)) !== null) return path;
+      return (await ctx.read(TOP_CODEBOOK)) !== null ? TOP_CODEBOOK : path;
+    };
+    const codebook = async () => readCodebook(await ctx.read(await where()));
     /** The codebook to change: null (refused, never overwritten) where its file is not a codebook as it stands. */
-    const codebookToChange = async () => parseCodebook(await ctx.read(codebookPath(ctx.settings())));
+    const codebookToChange = async () => parseCodebook(await ctx.read(await where()));
+    /**
+     * A codebook at the workspace's top, where the workspace names none, moved into .kuraa: in one commit, its history
+     * following it. Where both are there (a device on 0.6.0 made one at the top since), the top one's codes merged in and
+     * it removed. Left as it is where this device may not (it is used from there meanwhile), or where either is not a
+     * codebook as it stands (a hand edit gone wrong: people put it right first).
+     */
+    const moveIn = () => inTurn(async () => {
+      if (chosenCodebook(ctx.settings())) return;
+      const top = await ctx.read(TOP_CODEBOOK);
+      if (top === null) return;
+      try {
+        const kept = await ctx.read(CODEBOOK);
+        if (kept === null) await ctx.move(TOP_CODEBOOK, CODEBOOK);
+        else {
+          const merged = parseCodebook(top) && parseCodebook(kept) ? mergeCodebooks('', kept, top) : null;
+          if (merged === null) return ctx.log(`${TOP_CODEBOOK} and ${CODEBOOK} are both here, and one is not a codebook as it stands: neither changed`);
+          await ctx.write(CODEBOOK, merged);
+          await ctx.write(TOP_CODEBOOK, null);
+        }
+        ctx.tell({ codebook: true });
+      } catch (e) {
+        ctx.log(`${TOP_CODEBOOK} not moved into .kuraa: ${(e as Error).message}`);
+      }
+    });
+    void moveIn();
+    // Again where one comes in from a device on 0.6.0, or the workspace stops naming its own.
+    ctx.on('merge', ({ paths }) => {
+      if (paths.includes(TOP_CODEBOOK)) void moveIn();
+    });
+    ctx.on('settings', () => void moveIn());
     return {
       routes: [
         {
@@ -143,7 +187,7 @@ export const annotationsFeature = defineFeature({
           method: 'GET',
           path: 'codebook',
           async handle(): Promise<FeatureResponse> {
-            return { body: { path: codebookPath(ctx.settings()), coding: codingOn(ctx.settings()), book: (await codebook()) as unknown as Json } };
+            return { body: { path: await where(), coding: codingOn(ctx.settings()), book: (await codebook()) as unknown as Json } };
           },
         },
         {
@@ -154,7 +198,7 @@ export const annotationsFeature = defineFeature({
             if (!codingOn(ctx.settings())) return { status: 409, body: { error: 'Coding is off for this workspace' } };
             const b = (body ?? {}) as { op?: string; id?: string; into?: string; label?: string; definition?: string | null; color?: string; broader?: string | null };
             const book = await codebookToChange();
-            if (!book) return { status: 409, body: { error: `${codebookPath(ctx.settings())} is not a codebook as it stands (perhaps an edit by hand went wrong): put it right first, and nothing of it is lost` } };
+            if (!book) return { status: 409, body: { error: `${await where()} is not a codebook as it stands (perhaps an edit by hand went wrong): put it right first, and nothing of it is lost` } };
             const now = new Date().toISOString();
             const byId = new Map(book.codes.map((c) => [c.id, c]));
             const label = typeof b.label === 'string' ? b.label.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined;
@@ -203,7 +247,7 @@ export const annotationsFeature = defineFeature({
               } else return { status: 400, body: { error: 'Not a change to the codebook' } };
               code.modified = now;
             }
-            await ctx.write(codebookPath(ctx.settings()), writeCodebook(book), { by: person });
+            await ctx.write(await where(), writeCodebook(book), { by: person });
             ctx.tell({ codebook: true });
             return { body: { id: id ?? null, book: book as unknown as Json } };
           }),

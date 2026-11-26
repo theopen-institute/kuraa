@@ -15,7 +15,10 @@
 //   }
 import type { Json } from '@kuraa/feature-kit';
 
-export const CODEBOOK = 'codebook.jsonld';
+/** Where a workspace keeps its codebook: with its other settings and records, in .kuraa, out of the documents' way. */
+export const CODEBOOK = '.kuraa/codebook.jsonld';
+/** Where 0.6.0 kept it, at the workspace's top: moved into .kuraa where it is found (unless a workspace's setting names it). */
+export const TOP_CODEBOOK = 'codebook.jsonld';
 
 const CONTEXT = {
   skos: 'http://www.w3.org/2004/02/skos/core#',

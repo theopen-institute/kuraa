@@ -26,7 +26,7 @@ import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json } from '@kuraa/feature-kit/client';
 import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, kindOf, readPage, textOf, type About, type Item } from './format.js';
-import { codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
+import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
 import type { RoomAnnotation } from './index.js';
 
 const COMMENT_KEYS = 'Mod-Alt-m';
@@ -92,7 +92,7 @@ function codesOf(ctx: FeatureClientContext): Codes {
   if (c) return c;
   const codes: Codes = {
     book: { scheme: '', label: 'Codebook', codes: [] },
-    path: 'codebook.jsonld',
+    path: CODEBOOK,
     loaded: false,
     listeners: new Set(),
     async reload() {

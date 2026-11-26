@@ -51,7 +51,7 @@ test('coding: a passage coded with a code made there and then, underlined, retri
   await expect(page.getByTestId('feature-mark').filter({ hasText: '●' })).toHaveCount(1);
   await expect.poll(() => codings(path).length).toBe(1);
   const code = codings(path)[0]!.body.source;
-  expect(JSON.parse(readFileSync(join(E2E.dir, 'codebook.jsonld'), 'utf8'))['@graph'].find((n: { id: string }) => n.id === code).prefLabel).toBe('Distrust of institutions');
+  expect(JSON.parse(readFileSync(join(E2E.dir, '.kuraa/codebook.jsonld'), 'utf8'))['@graph'].find((n: { id: string }) => n.id === code).prefLabel).toBe('Distrust of institutions');
   expect(readFileSync(join(E2E.dir, path), 'utf8')).toBe(TEXT);
 
   // The codebook, with the code and its count; its passages retrieved.
@@ -76,6 +76,6 @@ test('coding: a passage coded with a code made there and then, underlined, retri
   await page.getByTestId('subpanel-back').click();
   await settingsSave(page, 'feature-annotations', false, '/api/features/annotations');
   await page.getByTestId('settings-close').click();
-  expect(existsSync(join(E2E.dir, 'codebook.jsonld'))).toBe(true);
+  expect(existsSync(join(E2E.dir, '.kuraa/codebook.jsonld'))).toBe(true);
   await api(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
 });

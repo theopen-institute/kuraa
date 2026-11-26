@@ -130,12 +130,15 @@ and ⌘/ (Ctrl+/), the menu, or the desktop app's Help menu lists everything tha
 pressed, from the same tables the editor binds its keys from
 ([decision 0044](docs/decisions/0044-polish.md)).
 
-The sidebar, the file tree in it, Preview, Search and the Outline are **components**, each a feature
+The sidebar, the file tree in it, Preview, Search, the Outline and **Running code** (the code session
+in the document's ⋯ menu, and **Packages…**) are **components**, each a feature
 on by default that a workspace can turn off (Settings › Workspace, under Features): the core draws no
 navigation, only what is done to files, and with no layout on, a menu at the upper left (the
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
-[0089](docs/decisions/0089-preview-search-and-outline-are-components.md)). **Manuscript**, turned on
+[0089](docs/decisions/0089-preview-search-and-outline-are-components.md),
+[0092](docs/decisions/0092-running-code-is-a-component.md)). A component's keys are said once and bound
+by the core, which refuses keys something else has ([0091](docs/decisions/0091-the-feature-runtime-commands-and-places.md)). **Manuscript**, turned on
 by a workspace, keeps documents in an order of your choosing, from anywhere in the workspace (each in one
 manuscript at most), as Quarto books (a `_quarto-<name>.yml` profile each, beside a top-level
 `_quarto.yml`): **New manuscript…** in the Manuscript beside the file tree, or **Make a manuscript** on a

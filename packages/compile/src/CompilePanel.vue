@@ -1,16 +1,73 @@
 <script setup lang="ts">
 // Compile's panel (0093): the folder chosen (Compile… on its menu), the book's
-// title and format; Compile renders it through the host (its documents in the
-// file tree's order, but those left out), follows it, and saves what it made.
-// The title and format are kept for the folder, for next time.
+// title and format, and its outline: what is in it, in the file tree's order,
+// each row at its heading's level, with whether it is in the book (a folder:
+// all in it) and, for a folder, whether its name is a heading. Compile renders
+// it through the host, follows it, and saves what it made. The title and
+// format are kept for the folder, for next time; what is in and what has a
+// heading, as Compile keeps them (each folder's .kuraa-compile.yml).
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
-import type { FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
-import { excludedPaths, FORMATS, noHeadingPaths, type CompileFormat } from './settings.js';
+import type { BookContent, FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
+import { excludedBy, excludedPaths, FORMATS, noHeadingPaths, type CompileFormat } from './settings.js';
 import { known, load, settingsOf, target } from './store.js';
 import { S } from './strings.js';
 
 const props = defineProps<{ ctx: FeaturePanelContext }>();
 const ctx = props.ctx;
+
+/** What the folder's book could have, as the host last said. */
+const contents = shallowRef<BookContent[]>([]);
+const contentsAsked = { n: 0 };
+async function loadContents() {
+  const p = renderPath.value;
+  const n = ++contentsAsked.n;
+  if (!p) {
+    contents.value = [];
+    return;
+  }
+  try {
+    const items = await ctx.host.bookContents(p);
+    if (n === contentsAsked.n) contents.value = items;
+  } catch (e) {
+    if (n === contentsAsked.n) error.value = ctx.explain(e).text;
+  }
+}
+
+/** Each row of the outline: in the book or not (and why not), its heading's level (none for a folder with no heading). */
+const outline = computed(() => {
+  const noHeading = new Set(noHeadingPaths(known.value));
+  return contents.value.map((c) => {
+    const by = excludedBy(known.value, c.path);
+    // Each folder above it with no heading takes a level away.
+    const above = [...noHeading].filter((f) => c.path.startsWith(`${f}/`)).length;
+    const headed = c.kind === 'document' || !noHeading.has(c.path);
+    return { ...c, included: !by, byParent: !!by && by !== c.path, headed, level: c.depth - above };
+  });
+});
+
+/** In the book, or left out (a folder: all in it). */
+async function setIncluded(path: string, include: boolean) {
+  try {
+    await ctx.request('POST', 'include', { path, include });
+  } catch (e) {
+    error.value = ctx.explain(e).text;
+  }
+  await load(ctx);
+}
+
+/** A folder's name a heading, or not. */
+async function setHeading(path: string, heading: boolean) {
+  try {
+    await ctx.request('POST', 'heading', { folder: path, heading });
+  } catch (e) {
+    error.value = ctx.explain(e).text;
+  }
+  await load(ctx);
+}
+
+// Asked for again (Compile… once more): the outline as the files are now.
+const stopAsk = ctx.onAsk(() => void loadContents());
+onBeforeUnmount(stopAsk);
 
 const folder = computed(() => target.value);
 /** As the host's render takes it: ending in `/`, the top level `/`. */
@@ -47,6 +104,7 @@ watch(folder, (f) => {
   title.value = s?.title ?? shownName.value;
   format.value = s?.format ?? 'docx';
   void follow(false);
+  void loadContents();
 }, { immediate: true });
 
 /** How the folder's render in the chosen format stands; followed while it runs, and saved once it is done if `save`. */
@@ -130,7 +188,41 @@ onBeforeUnmount(() => {
         <legend>{{ S.format }}</legend>
         <label v-for="f in FORMATS" :key="f"><input v-model="format" type="radio" name="compile-format" :value="f" :data-testid="`compile-format:${f}`" /> {{ S.formats[f] }}</label>
       </fieldset>
-      <p class="compile-about">{{ S.about }}<template v-if="leftOut.length"> {{ S.leftOutCount(leftOut.length) }}</template></p>
+      <div class="compile-contents">
+        <span class="compile-contents-head">{{ S.contents }}</span>
+        <p v-if="!outline.length" class="compile-about">{{ S.empty }}</p>
+        <ul v-else class="compile-outline" data-testid="compile-outline">
+          <li
+            v-for="r in outline"
+            :key="r.path"
+            :class="['compile-row', r.kind, { out: !r.included }]"
+            :style="{ paddingLeft: `${(r.depth - 1) * 14}px` }"
+            :data-testid="`compile-row:${r.path}`"
+          >
+            <input
+              type="checkbox"
+              :checked="r.included"
+              :disabled="busy || r.byParent"
+              :title="r.byParent ? S.outWithFolder : S.inBook"
+              :aria-label="`${S.inBook}: ${r.title}`"
+              :data-testid="`compile-include:${r.path}`"
+              @change="setIncluded(r.path, ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="compile-level" :title="r.headed ? S.levelTitle(Math.min(6, r.level)) : S.noHeadingTitle">{{ r.headed ? '#'.repeat(Math.min(6, Math.max(1, r.level))) : '–' }}</span>
+            <span class="compile-name">{{ r.title }}</span>
+            <label v-if="r.kind === 'folder'" class="compile-heading" :title="S.headingTitle">
+              <input
+                type="checkbox"
+                :checked="r.headed"
+                :disabled="busy || !r.included"
+                :data-testid="`compile-heading:${r.path}`"
+                @change="setHeading(r.path, ($event.target as HTMLInputElement).checked)"
+              />{{ S.heading }}
+            </label>
+          </li>
+        </ul>
+      </div>
+      <p class="compile-about">{{ S.about }}</p>
       <p v-if="info?.unavailable" class="compile-warn" data-testid="compile-unavailable">{{ info.unavailable }}</p>
       <div class="compile-actions">
         <button type="button" class="primary" data-testid="compile-button" :disabled="busy || !!info?.unavailable" @click="compile">{{ busy ? S.compiling : S.compile }}</button>
@@ -155,6 +247,17 @@ onBeforeUnmount(() => {
 .compile-formats { border: 0; margin: 0; padding: 0; display: flex; gap: 12px; flex-wrap: wrap; }
 .compile-formats legend { padding: 0; margin-bottom: 3px; }
 .compile-about { margin: 0; color: var(--muted); font-size: 12px; }
+.compile-contents { display: grid; gap: 3px; }
+.compile-contents-head { color: var(--muted); font-size: 12px; }
+.compile-outline { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
+.compile-row { display: flex; align-items: center; gap: 6px; padding-top: 2px; padding-bottom: 2px; padding-right: 6px; font-size: 13px; }
+.compile-row > input { margin: 0 0 0 6px; flex: none; }
+.compile-row.folder > .compile-name { font-weight: 600; }
+.compile-row.out > .compile-name { opacity: 0.5; text-decoration: line-through; }
+.compile-level { flex: none; min-width: 2.6em; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
+.compile-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compile-heading { flex: none; display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.compile-heading > input { margin: 0; }
 .compile-actions { display: flex; gap: 6px; }
 .compile-status { margin: 0; font-size: 12px; }
 .compile-warn { margin: 0; color: var(--warn); font-size: 12px; }

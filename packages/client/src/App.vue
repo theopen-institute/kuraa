@@ -190,6 +190,7 @@ const coreHost: CoreHost = {
   render: (p, format, compile) => api.value.render(p, format, person(), compile),
   renderOutput: (p, format) => api.value.renderOutput(p, format),
   renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
+  bookContents: (folder) => api.value.bookContents(folder),
   tools: () => api.value.tools(),
   downloadTool: async (id) => {
     await api.value.downloadTool(id);

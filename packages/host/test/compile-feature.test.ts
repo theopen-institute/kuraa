@@ -108,4 +108,19 @@ describe('Compile', () => {
     expect((await api('/api/renders', { method: 'POST', body: JSON.stringify({ path: 'nowhere/', format: 'docx', by: ANA }) })).status).toBe(404);
     expect((await api(`/api/renders?path=${encodeURIComponent('novel/')}`)).status).toBe(200);
   });
+
+  it('gives what a folder’s book could have: its folders and documents, nothing left out, each at its depth', async () => {
+    await post('include', { path: 'novel/notes.md', include: false });
+    const contents = async (path: string) => api(`/api/renders/contents?path=${encodeURIComponent(path)}`);
+    const r = await contents('novel/');
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { items: unknown[] }).items).toEqual([
+      { kind: 'folder', path: 'novel/research', title: 'research', depth: 1 },
+      { kind: 'document', path: 'novel/research/sources.md', title: 'sources.md', depth: 2 },
+      { kind: 'document', path: 'novel/arrival.md', title: 'Arrival', depth: 1 },
+      { kind: 'document', path: 'novel/notes.md', title: 'notes.md', depth: 1 },
+    ]);
+    expect((await contents('novel/arrival.md')).status).toBe(400);
+    expect((await contents('nowhere/')).status).toBe(404);
+  });
 });

@@ -2,6 +2,7 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
+import type { BookContent } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -361,6 +362,10 @@ export class HostApi {
   /** A document's latest output in a format. */
   async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
+  }
+  /** What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth. */
+  async bookContents(folder: string): Promise<BookContent[]> {
+    return (await this.json<{ items: BookContent[] }>(`/api/renders/contents?path=${encodeURIComponent(folder)}`)).items;
   }
   /** The files a document's latest output in a format was made from, as they were, in a zip (0081). */
   async renderMadeFrom(path: string, format: RenderFormat): Promise<Blob> {

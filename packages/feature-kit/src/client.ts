@@ -241,6 +241,16 @@ export interface FileMark {
   testid?: string;
 }
 
+/** A folder or document a folder's book could have (0093). */
+export interface BookContent {
+  kind: 'folder' | 'document';
+  path: string;
+  /** A document's title (its filename, without one), a folder's name. */
+  title: string;
+  /** How deep it is in the folder compiled: 1 in the folder itself. */
+  depth: number;
+}
+
 /** A match to open a file at (0089). */
 export interface MatchTarget {
   /** 1-based line of the file (or of the open document's text) the match was on. */
@@ -312,6 +322,12 @@ export interface CoreHost {
   renderOutput(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
   renderMadeFrom(path: string, format: RenderFormat): Promise<Blob>;
+  /**
+   * What a folder's book could have (its path ending in `/`, the top level
+   * `/`: 0093): its folders and documents, nothing left out, in the file
+   * tree's order, each at how deep it is (1: in the folder itself).
+   */
+  bookContents(folder: string): Promise<BookContent[]>;
   /** The tools this computer has or may download. */
   tools(): Promise<{ tools: ToolState[] }>;
   /** Download a tool; follow it with tools(). */

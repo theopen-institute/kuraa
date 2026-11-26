@@ -40,6 +40,13 @@ const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsaf
 export const renderRoutes: Route[] = [
   route('GET', '/api/renders', async (c) => send(c.res, 200, await c.host.renders.info(pathOf(c, c.q.get('path'))))),
 
+  // What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth.
+  route('GET', '/api/renders/contents', async (c) => {
+    const path = pathOf(c, c.q.get('path'));
+    if (!path.endsWith('/')) throw new HttpError(400, 'A folder: its path ending in /');
+    send(c.res, 200, { items: await c.host.bookContents(path === '/' ? '' : path.slice(0, -1)) });
+  }),
+
   route('POST', '/api/renders', async (c) => {
     const body = await readBody(c.req);
     const path = pathOf(c, body.path);

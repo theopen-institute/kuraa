@@ -56,18 +56,31 @@ own headings go below its title (a document without a title: below its folder's)
 out; past `######`, a heading stays at `######`. The owner asked first whether folders could be headings
 "all the way down to ######", then, of the switches and settings that came with it, "What's the
 simplest way to handle it, comparable to what scrivener does?": this one rule, the folder's name as the
-tree shows it (rename the folder for another heading), and one thing more, asked for with it:
-**No heading in Compile** on a folder's menu (**Heading in Compile** to undo it; a struck H by its
-name), for a folder that only organises: it adds no heading and no level, what is in it going on at the
-level it is at, as Scrivener's section layouts let a level go untitled. A folder with no documents in the
+tree shows it (rename the folder for another heading), and one thing more, asked for with it: a
+folder's **Heading** switch, off for a folder that only organises (a struck H by its name in the tree):
+it adds no heading and no level, what is in it going on at the level it is at, as Scrivener's section
+layouts let a level go untitled. A folder with no documents in the
 book has no heading either. That is rendered as a document is (pandoc, with
 Typst or LaTeX for PDF), finding images in each document's folder. R Markdown's chunks are not run in a
 compile, and show as code. A folder's title and format are kept for next time, and it is marked with a
 book.
 
-**Leave out of Compile** on a document's or folder's menu (a folder, all in it), **Put back in Compile**
-to undo it: left out of every compile that would have it, as Scrivener's *Include in compile* is the
-document's own; faded and struck through in the file tree. It stays left out when renamed or moved.
+A document or folder **left out** (a folder, all in it) is left out of every compile that would have it,
+as Scrivener's *Include in compile* is the document's own; faded and struck through in the file tree. It
+stays left out when renamed or moved.
+
+**The choices are made in the panel, not the right-click menu** (*revised*: they were on the menu, as
+**Leave out of Compile** and **No heading in Compile**). The owner: "would it make sense to put those
+toggles in the compile sidebar itself?" Under the title and format, the panel's **Contents**: the folder's
+folders and documents in the file tree's order (the host gives them, `GET /api/renders/contents`;
+components, `host.bookContents(folder)`), indented as the tree is, each with its heading's level (`#`,
+`##`, `–` for none), a box for whether it is in the book (one inside a folder left out, greyed), and for a
+folder, its **Heading** switch: the book's shape before it is made, as Scrivener's compile shows its
+contents. The right-click menu keeps only **Compile…**. Asked, too, whether these could be kept in
+`.kuraa` "like the orderings are": the orders are kept in each folder (`.kuraa-order`), and so are these,
+for the same reasons: they go with the folder when it moves, they are in its space (a folder fewer read
+would otherwise have its files' names in a file everyone reads), and two devices changing two folders
+change two files.
 
 Compile keeps these in a plain file in the folder, `.kuraa-compile.yml`: its title and format, whether
 its name is a heading (`heading: false`), and what in it is left out, by name, as `.kuraa-order` names

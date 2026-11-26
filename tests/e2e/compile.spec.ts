@@ -54,20 +54,21 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   await expect.poll(orderOf(folder)).toBe('c.md tide.md b.md a.md');
   await expect(row(`${folder}/tide.md`)).toBeVisible();
 
-  // Left out of Compile, faded; put back.
-  await row(`${folder}/tide.md`).click({ button: 'right' });
-  await page.getByTestId('context:compile-exclude').click();
-  await expect(page.getByTestId(`mark:left-out:${folder}/tide.md`)).toBeAttached();
-  await expect.poll(() => readIn(`${folder}/.kuraa-compile.yml`)).toContain('exclude:\n  - tide.md\n');
-  await row(`${folder}/tide.md`).click({ button: 'right' });
-  await page.getByTestId('context:compile-include').click();
-  await expect(page.getByTestId(`mark:left-out:${folder}/tide.md`)).toHaveCount(0);
-
-  // Compile… on the folder's menu: its panel, for it.
+  // Compile… on the folder's menu: its panel, for it, with its outline in the tree's order.
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
   await page.getByTestId('context:compile').click();
   await expect(page.getByTestId('compile-folder')).toHaveText(`Compile ${folder}`);
   await expect(page.getByTestId('compile-title')).toHaveValue(folder);
+  const outline = page.getByTestId('compile-outline');
+  await expect(outline.locator('.compile-name')).toHaveText(['Coast', 'Tide', 'Boats', 'Arrival']);
+
+  // Left out from the outline: unticked, faded in the file tree too; put back.
+  await page.getByTestId(`compile-include:${folder}/tide.md`).uncheck();
+  await expect(page.getByTestId(`mark:left-out:${folder}/tide.md`)).toBeAttached();
+  await expect.poll(() => readIn(`${folder}/.kuraa-compile.yml`)).toContain('exclude:\n  - tide.md\n');
+  await expect(page.getByTestId(`compile-row:${folder}/tide.md`)).toHaveClass(/\bout\b/);
+  await page.getByTestId(`compile-include:${folder}/tide.md`).check();
+  await expect(page.getByTestId(`mark:left-out:${folder}/tide.md`)).toHaveCount(0);
 
   // Back to by name, from the folder's menu.
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
@@ -89,12 +90,16 @@ test('a folder compiled to HTML: in the tree’s order, how deep each is its hea
   expect((await api('/api/features/compile/include', { method: 'POST', body: JSON.stringify({ body: { path: `${folder}/notes.md`, include: false }, by: { name: 'Writer', email: 'w@example.org', color: '#123456' } }) })).status).toBe(200);
 
   await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
-  // drafts: no heading, from its menu; marked so.
-  await page.getByTestId(`folder:${folder}/drafts`).click({ button: 'right' });
-  await page.getByTestId('context:compile-no-heading').click();
-  await expect(page.getByTestId(`mark:no-heading:${folder}/drafts`)).toBeAttached();
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
   await page.getByTestId('context:compile').click();
+  // The outline: each row at its heading's level; drafts given no heading there (Dunes up a level), marked so in the tree.
+  const level = (path: string) => page.getByTestId(`compile-row:${folder}/${path}`).locator('.compile-level');
+  await expect(level('North/c.md')).toHaveText('##');
+  await expect(level('drafts/d.md')).toHaveText('##');
+  await page.getByTestId(`compile-heading:${folder}/drafts`).uncheck();
+  await expect(level('drafts/d.md')).toHaveText('#');
+  await expect(level('drafts')).toHaveText('–');
+  await expect(page.getByTestId(`mark:no-heading:${folder}/drafts`)).toBeAttached();
   await page.getByTestId('compile-title').fill('The Coast');
   await page.getByTestId('compile-format:html').check();
   const download = page.waitForEvent('download', { timeout: 590_000 });

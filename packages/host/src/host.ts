@@ -2744,6 +2744,24 @@ export class Host {
   }
 
   /**
+   * What a folder's book could have (0093: '' the top level): its folders and
+   * the documents a book is made of, all of them (nothing left out), in the
+   * file tree's order, each at how deep it is (1: in the folder itself), with
+   * its title or name, for Compile's outline.
+   */
+  async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number }[]> {
+    const paths = await this.listFiles();
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
+    return bookItems(folder, entries, await readOrders(this, paths), []).map((i) => ({
+      kind: i.kind,
+      path: i.path,
+      title: i.kind === 'folder' ? i.name : titles.get(i.path) || basename(i.path),
+      depth: i.level,
+    }));
+  }
+
+  /**
    * A folder compiled (0093: '' the top level): its documents in the file
    * tree's order, but those left out, each as it is now (its open room written
    * first), joined into one Markdown document; with the folders they are in,

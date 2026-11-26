@@ -239,8 +239,7 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   await page.keyboard.press('Shift+F10');
   const menu = page.getByTestId('context-menu');
   await expect(menu).toBeVisible();
-  // The core's, then Compile's (on by default: 0093).
-  await expect(menu.getByRole('menuitem')).toHaveText(['Document settings…', 'Rename…', 'Delete…', 'Leave out of Compile']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Document settings…', 'Rename…', 'Delete…']);
   for (let i = 0; i < 10 && !(await menu.getByTestId('context:document-settings').evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   // Settings, at the document's section, with its header (decision 0064).
@@ -252,7 +251,7 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   // A folder's menu has what goes in it.
   await row(`${dir}/inner`).focus();
   await page.keyboard.press('Shift+F10');
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner', 'New folder in inner…', 'Rename…', 'Compile…', 'No heading in Compile', 'Leave out of Compile']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner', 'New folder in inner…', 'Rename…', 'Compile…']);
   await page.keyboard.press('Escape');
 });
 

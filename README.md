@@ -143,9 +143,8 @@ shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is
 follows by name, and **Sort by name** on the folder's menu forgets it. **Compile…** on any folder's
 menu makes one book of its folders and documents, in that order (Word, PDF or HTML, rendered as documents are,
 where code runs): folders' names and documents' titles become headings, one level deeper for each folder
-down (**No heading in Compile** on a folder's menu skips one that only organises). Any document or folder can be
-**left out of Compile** from its menu (shown faded); the choices and the book's title are kept in a
-`.kuraa-compile.yml` in the folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
+down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. These choices and the book's title are kept in
+a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

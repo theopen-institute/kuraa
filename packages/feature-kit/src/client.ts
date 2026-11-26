@@ -122,12 +122,23 @@ export interface MarginItem {
   key: string;
   /** Its place in the document. */
   pos: number;
-  /** What it says: a few characters. */
+  /** What it says: a few characters, or for a tag a short name. */
   label: string;
   /** What it says when pointed at. */
   title?: string;
   color?: string;
-  run?(): void;
+  /**
+   * How it is drawn: a mark (a few characters: the default), or a tag (a short
+   * name, as a code's, as wide as it needs up to the room beside the text, cut
+   * short there, its title saying it in full).
+   */
+  kind?: 'mark' | 'tag';
+  /** Drawn as pointed at: what it is about is pointed at in the text, say. */
+  active?: boolean;
+  /** Pointed at, and then no longer: to show what it is about. */
+  hover?(on: boolean): void;
+  /** Clicked: given the mark as drawn, to open something beside it. */
+  run?(element: HTMLElement): void;
 }
 
 export interface FeatureMenuItem {

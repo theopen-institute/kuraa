@@ -242,6 +242,36 @@ describe('comments', () => {
     expect(readCodebook(file('.kuraa/codebook.jsonld')).codes.map((c) => c.label).sort()).toEqual(['Fear', 'Trust']);
   });
 
+  it('codes a point (# at the caret): no quote, its start its end, kept beside what is before it and found again', async () => {
+    let a = await connect();
+    let f = a.feature('annotations', ME);
+    const at = where(a.read(), 'Nobody came') - 1;
+    const item: Item = { ...comment('commenting', 'urn:uuid:p1', '', { source: '../notes.md', selector: [{ type: 'TextQuoteSelector', exact: '' }] }), motivation: 'classifying', body: { type: 'SpecificResource', source: 'urn:uuid:code', purpose: 'classifying' } };
+    f.update({ set: { 'urn:uuid:p1': { item, from: f.anchorAt(at, -1), to: f.anchorAt(at, -1) } } });
+    await until(() => readPage(file(OWN)).length === 1 && git(dir, 'status', '--porcelain') === '', 10_000, 'the point coded');
+    const about = aboutOf(readPage(file(OWN))[0]!) as { exact: string; prefix: string; suffix: string; start: number; end: number };
+    expect(about).toMatchObject({ exact: '', start: about.end });
+    expect(about.prefix.endsWith('the council.')).toBe(true);
+    expect(about.suffix.startsWith(' Nobody came')).toBe(true);
+    expect(about.start).toBe([...NOTES.slice(0, NOTES.indexOf(' Nobody came'))].length);
+
+    // Typed at the point: the point stays after what was before it.
+    a.destroy();
+    clients.length = 0;
+    await running.close();
+    writeFileSync(join(dir, 'notes.md'), NOTES.replace('# Day one\n', '# Day one\n\nA line before it all.\n'));
+    git(dir, 'commit', '-qam', 'Outside');
+    await start();
+    a = await connect();
+    f = a.feature('annotations', ME);
+    const e = f.entries() as Record<string, { from?: unknown; to?: unknown; lost?: boolean }>;
+    expect(e['urn:uuid:p1']!.lost).toBeUndefined();
+    const pos = f.positionOf(e['urn:uuid:p1']!.from as never)!;
+    expect(f.positionOf(e['urn:uuid:p1']!.to as never)).toBe(pos);
+    expect(a.read().textBetween(pos - 'the council.'.length, pos)).toBe('the council.');
+    expect(a.read().textBetween(pos, pos + ' Nobody'.length)).toBe(' Nobody');
+  });
+
   it('keeps a codebook the workspace names where it is', async () => {
     await running.close();
     writeFileSync(join(dir, 'codebook.jsonld'), writeCodebook({ scheme: 'urn:uuid:s', label: 'Codebook', codes: [{ id: 'urn:uuid:a', label: 'Trust' }] }));

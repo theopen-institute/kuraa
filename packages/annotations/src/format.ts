@@ -190,7 +190,7 @@ const agreeForwards = (a: string, b: string) => {
  * quote is nowhere (it is no longer found).
  */
 export function findPassage(text: string, p: Extract<About, { kind: 'passage' }>): { from: number; to: number } | null {
-  if (!p.exact) return null;
+  if (!p.exact) return findPoint(text, p);
   const at = p.start === null ? null : fromCodePoints(text, p.start);
   if (at !== null && text.startsWith(p.exact, at)) return { from: at, to: at + p.exact.length };
   let best: { from: number; score: number; distance: number } | null = null;
@@ -200,6 +200,43 @@ export function findPassage(text: string, p: Extract<About, { kind: 'passage' }>
     if (!best || score > best.score || (score === best.score && distance < best.distance)) best = { from: i, score, distance };
   }
   return best ? { from: best.from, to: best.from + p.exact.length } : null;
+}
+
+/**
+ * A point in a text, not a passage (`exact` empty: a TextPositionSelector with
+ * its start at its end, which the W3C model allows, though it says nothing of
+ * it): a code put between two characters (#, typed at the caret).
+ */
+export const isPoint = (about: About | null): boolean => about?.kind === 'passage' && about.exact === '';
+
+/** How much of a point's text before and after it is still around a place. */
+const pointScore = (text: string, at: number, p: { prefix: string; suffix: string }) =>
+  agreeBackwards(text.slice(Math.max(0, at - p.prefix.length), at), p.prefix) + agreeForwards(text.slice(at, at + p.suffix.length), p.suffix);
+
+/**
+ * Where a point is in a text now: at its place if what was around it is still
+ * there; else where most of what was before and after it is, then the nearest;
+ * null where neither is found (it is no longer found). Looked for where the
+ * last few characters before it, or the first few after it, are.
+ */
+function findPoint(text: string, p: Extract<About, { kind: 'passage' }>): { from: number; to: number } | null {
+  const at = p.start === null ? null : fromCodePoints(text, p.start);
+  const whole = p.prefix.length + p.suffix.length;
+  if (!whole) return at !== null && at <= text.length ? { from: at, to: at } : null;
+  if (at !== null && at <= text.length && pointScore(text, at, p) === whole) return { from: at, to: at };
+  const candidates = new Set<number>();
+  const before = p.prefix.slice(-12);
+  const after = p.suffix.slice(0, 12);
+  if (before) for (let i = text.indexOf(before); i >= 0; i = text.indexOf(before, i + 1)) candidates.add(i + before.length);
+  if (after) for (let i = text.indexOf(after); i >= 0; i = text.indexOf(after, i + 1)) candidates.add(i);
+  let best: { at: number; score: number; distance: number } | null = null;
+  for (const c of candidates) {
+    const score = pointScore(text, c, p);
+    const distance = at === null ? 0 : Math.abs(c - at);
+    if (!best || score > best.score || (score === best.score && distance < best.distance)) best = { at: c, score, distance };
+  }
+  // Found only where what is around it is mostly still there: a few letters that happen to agree are not it.
+  return best && best.score >= Math.min(whole, Math.max(8, Math.ceil(whole / 2))) ? { from: best.at, to: best.at } : null;
 }
 
 /** An annotation's kind, from its motivation: a comment, a reply, a coding, or one this version does not show. */

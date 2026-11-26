@@ -303,7 +303,7 @@ this proposal adds it.
 | --- | --- | --- |
 | **features** in `mountApp` | The client halves, by id, as `editors` | new |
 | **Editor plugins, every type** | ProseMirror plugins and decorations for any document, given the `EditorContext`, the room's feature state and the source map. Read-only views (past versions) get them too, with the companion as it was then | new; `FormatEditor` does this for one type |
-| **Margin** | A column beside the document's text that features put marks and cards in, at a passage's height, kept clear of each other | new |
+| **Margin** | A column beside the document's text that features put marks and cards in, at a passage's height, kept clear of each other (*revised*: marks, or **tags**, a short name as wide as it needs, the text moving left of the middle to make room; each may say when it is pointed at, and is told the element clicked; see *Coding by #*) | new |
 | **Panels** | A panel beside the document (as Preview and Search), or of the workspace, with its key and its place in the ⋯ menu. `mount(element, ctx)` returning how to unmount it, so a feature does not depend on the client's Vue ([0016](0016-vue-client.md)) | new; `sidePanel` is a fixed list |
 | **Menu items** | In the document's ⋯ menu ([0074](0074-the-document-menu-is-a-menu.md)) and a file's | new |
 | **Selection actions** | What can be done with the selected text, offered in a small bar beside it. Not the editor's right-click menu: that is the browser's, with its spelling suggestions, and stays so | new |
@@ -503,7 +503,7 @@ method a project chooses.
   shown at the top of the tree, to be put right.
 - **A coding** is an annotation in its maker's own file: `classifying`, its body the code
   (`SpecificResource`, `purpose: classifying`), its target a passage, found again as comments are.
-- **In the app**: **Code** beside a selection (⌥⌘U), opening the **Codes** panel to find a code by
+- **In the app** (*revised*: see *Coding by #*): **Code** beside a selection (⌥⌘U), opening the **Codes** panel to find a code by
   name or make one and apply it; coded passages underlined in their codes' colours, a mark in the
   margin for each passage (saying its codes, the count where several), opening the codings there,
   yours to remove; the codebook as a tree with each code's count (`GET counts`), each to edit
@@ -538,3 +538,43 @@ sidebar does not show it).
   declared, in one commit: refused for a companion (which moves only with its document), for files
   in different spaces (others would read it), where nothing is there to move, or where something
   is already where it would go.
+
+## Coding by # (revision)
+
+The owner, having coded with step 3: the workflow and interface for codes to be very different
+(comments left as they are). A code is named by typing, where the text is; codes are shown in the
+right margin, not on the text; and a code can be put at any point in the text, where the
+annotation standard allows it.
+
+- **# names a code.** Over a selection, typing `#` opens a box at it to name a code: those in the
+  codebook are suggested as it is typed (the one named exactly first, then those starting so, then
+  those with it in a word or anywhere), each with its parents' names. **Enter** applies the code
+  named exactly, or makes a new code of that name and applies it, so a new code is quick to make;
+  **↑↓** choose a suggestion and **Tab** completes the name to it. **Code #** beside a selection,
+  and ⌥⌘U, open the same box. While it is open, what is being coded stays shown.
+- **# at the caret codes a point.** With nothing selected, `#` opens the same box, and the code is
+  put at that point, between two characters: an annotation whose `TextQuoteSelector` has an empty
+  `exact` (with the text before and after it) and whose `TextPositionSelector` has its `start` at
+  its `end`. The W3C model neither defines nor forbids a target of no length (its selectors say
+  nothing of it); other tools may not show such a coding. It is kept after what is before it as
+  text is typed there, and found again by what is around it, where most of that is still there.
+  The document is never changed: `#word` is never written into it.
+- **# is still typed as text where meant as text.** Not in code (a code block, inline code). At the
+  caret, **Esc** closes the box and types `#` with what was typed after it (`#1`), and a **space**
+  in an empty box types `# ` (with the editor's input rules, so a line begun `# ` is still a
+  heading). Over a selection, Esc closes the box, the selection kept.
+- **Codes in the right margin.** Each code at each passage (or point) is a **tag** in the margin at
+  the passage's first line: the code's name, in its colour, everyone's codings of it there as one,
+  saying who coded it. The text is not underlined or tinted: a passage is highlighted, in its code's
+  colour, only while its tag is pointed at, or the passage itself (its tags then shown as pointed
+  at too); a point shows as a pin between the two characters. A tag, clicked, says what it is
+  about and who coded it, and offers **Remove your coding**, **Every passage coded …** (Retrieve)
+  and **The codebook…**.
+- **Colours** are a code's own, in the codebook (`color`), as before; a new code's is chosen at
+  random (any hue, dark enough to read), and can be changed in the Codes panel.
+- **The Codes panel** keeps the codebook (the tree with counts; add, rename, define, colour, nest,
+  merge, delete, retrieve); applying codes and the codings at a passage moved to the box and the
+  tags.
+- **Hooks:** a margin item may be a `tag`, may be drawn as pointed at (`active`), is told when it
+  is pointed at (`hover`), and is given the element clicked (`run(element)`), to open something
+  beside it.

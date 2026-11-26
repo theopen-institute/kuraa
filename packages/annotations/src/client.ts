@@ -10,11 +10,14 @@
 //   browser); and those no longer found, whose passages are gone.
 // - Recent comments (a panel of the workspace): everyone's newest, each opening
 //   at its passage.
-// - Coding (where the workspace codes, step 3): Code beside a selection (⌥⌘U);
-//   coded passages underlined in their codes' colours, a mark for each in the
-//   margin; the Codes panel (the codebook as a tree, with counts: add, rename,
-//   define, colour, nest, merge, delete; apply one to the passage selected; the
-//   codings at a passage, removing your own); the Retrieve panel (every passage
+// - Coding (where the workspace codes): # typed over a selection, or at the
+//   caret, opens a box to name a code (./codebox): those there are suggested,
+//   and Enter applies the one named, or makes it (Code beside a selection, and
+//   ⌥⌘U, open it too). Each coding is a tag in the right margin with its code's
+//   name; its passage is highlighted only while it, or the passage, is pointed
+//   at; a tag opens what can be done (remove yours, find every passage with the
+//   code). The Codes panel (the codebook as a tree, with counts: add, rename,
+//   define, colour, nest, merge, delete); the Retrieve panel (every passage
 //   coded with a code, and those under it, across the workspace).
 //
 // Yours are in the room, changed live; everyone else's are in the room while a
@@ -23,10 +26,11 @@
 import { keymap } from 'prosemirror-keymap';
 import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
-import type { Node } from 'prosemirror-model';
-import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json } from '@kuraa/feature-kit/client';
-import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import type { Node, ResolvedPos } from 'prosemirror-model';
+import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
+import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
 import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
+import { openCodeBox, openMenu, type Suggestion } from './codebox.js';
 import type { RoomAnnotation } from './index.js';
 
 const COMMENT_KEYS = 'Mod-Alt-m';
@@ -67,10 +71,15 @@ interface Store {
   listeners: Set<() => void>;
   /** Found passages of people's files, for one document. */
   cached: { doc: Node | null; shown: Shown[] };
-  /** A passage being coded: anchors at its ends, and its quote. */
-  coding: { from: Json; to: Json; quote: string } | null;
-  /** The passage whose codings are shown (its mark in the margin was clicked): where it starts. */
-  codedAt: number | null;
+  /** What is being coded while the code box is open (a passage, or a point: both ends one place): shown in the text meanwhile. */
+  coding: { from: Json; to: Json } | null;
+  /** How to close the code box, while it is open. */
+  closeBox: (() => void) | null;
+  /** Typing as text what the code box was given (`#`, `# `): # then is typed, not taken for a code. */
+  typing: boolean;
+  /** The codings pointed at: by their tag in the margin, or by their passage in the text (their groups' keys). */
+  hoverTag: string | null;
+  hoverText: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +167,7 @@ function collect(store: Store, doc: Node): Shown[] {
         if (!e || typeof e !== 'object' || !e.item) continue;
         const from = e.from !== undefined && !e.lost ? state.positionOf(e.from) : null;
         const to = e.to !== undefined && !e.lost ? state.positionOf(e.to) : null;
-        const found = from !== null && to !== null && to > from && to <= doc.content.size;
+        const found = from !== null && to !== null && (to > from || (to === from && isPoint(aboutOf(e.item)))) && to <= doc.content.size;
         // Anchored at a passage: about it, as the text has it now (a new one names its passage only once its file is written).
         const named = aboutOf(e.item);
         const about: About | null = found && named?.kind !== 'passage' ? { kind: 'passage', exact: doc.textBetween(from!, to!, ' '), prefix: '', suffix: '', start: null, end: null } : named;
@@ -182,7 +191,9 @@ function collect(store: Store, doc: Node): Shown[] {
         for (const item of readPage(f.text)) {
           const about = aboutOf(item);
           const at = about?.kind === 'passage' ? findPassage(text, about) : null;
-          shown.push({ id: String(item.id), person: f.person, mine: state?.me === f.person, item, kind: kindOf(item), about, from: at ? map.toDoc(at.from) : null, to: at ? map.toDoc(at.to, -1) : null, lost: about?.kind === 'passage' && !at });
+          const point = at !== null && isPoint(about);
+          const from = at ? map.toDoc(at.from, point ? -1 : 1) : null;
+          shown.push({ id: String(item.id), person: f.person, mine: state?.me === f.person, item, kind: kindOf(item), about, from, to: at ? (point ? from : map.toDoc(at.to, -1)) : null, lost: about?.kind === 'passage' && !at });
         }
       }
     }
@@ -217,23 +228,173 @@ function startComment(store: Store, state: EditorState): boolean {
   return true;
 }
 
-/** Begin coding what is selected: the Codes panel opens with it, to apply a code. */
-function startCoding(store: Store, state: EditorState): boolean {
-  const room = store.ctx.state;
-  const { from, to, empty } = state.selection;
-  if (!room || empty) return false;
-  const quote = state.doc.textBetween(from, to, ' ');
-  if (!quote.trim()) return false;
-  store.coding = { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1), quote };
-  store.codedAt = null;
-  store.ctx.openPanel('codes');
+/** The codes to suggest, in the codebook's order, each with its parents' names. */
+function suggestions(book: Codebook): Suggestion[] {
+  const byId = new Map(book.codes.map((c) => [c.id, c]));
+  return codeTree(book).map(({ code }) => {
+    const parents: string[] = [];
+    const seen = new Set([code.id]);
+    for (let up = code.broader ? byId.get(code.broader) : undefined; up && !seen.has(up.id); up = up.broader ? byId.get(up.broader) : undefined) {
+      seen.add(up.id);
+      if (!up.deleted) parents.unshift(up.label);
+    }
+    return { code, parents };
+  });
+}
+
+/** Whether the selection is in code (a code block, inline code): there, # is only ever typed. */
+const inCode = (...at: ResolvedPos[]) => at.some(($p) => !!$p.parent.type.spec.code || $p.marks().some((m) => !!m.type.spec.code));
+
+/** Make a code, by its name: its id, or null (said why) where it could not be made. */
+async function newCode(ctx: FeatureClientContext, codes: Codes, label: string): Promise<string | null> {
+  try {
+    const r = (await ctx.request('POST', 'codebook', { op: 'add', label })) as unknown as { id: string | null; book: Codebook };
+    codes.book = r.book;
+    for (const fn of [...codes.listeners]) fn();
+    return r.id;
+  } catch (e) {
+    ctx.notify(`The code “${label}” was not made: ${(e as Error).message}`, 'warn');
+    return null;
+  }
+}
+
+/** Type text as if typed (input rules and all: `# ` at a line's start is a heading's), not taken for a code. */
+function typeAsText(store: Store, view: EditorView, text: string) {
+  store.typing = true;
+  try {
+    for (const ch of text) {
+      const { from, to } = view.state.selection;
+      const plain = () => view.state.tr.insertText(ch, from, to);
+      if (!view.someProp('handleTextInput', (f) => f(view, from, to, ch, plain))) view.dispatch(plain());
+    }
+  } finally {
+    store.typing = false;
+  }
+}
+
+/**
+ * Open the code box for what is selected, or for the point at the caret: the code named there (or made) applied to it,
+ * as a coding of yours. False where there is nothing to code (no room, coding off, a selection of nothing but space).
+ */
+function openCoding(store: Store, view: EditorView, range?: { from: number; to: number }): boolean {
+  const { ctx } = store;
+  const room = ctx.state;
+  if (!room || !coding(ctx) || view.isDestroyed) return false;
+  // Where # was typed, as the editor says (its selection may not yet have caught up with a click), else the selection.
+  const { from, to } = range ?? view.state.selection;
+  const empty = from === to;
+  const quote = empty ? '' : view.state.doc.textBetween(from, to, ' ');
+  if (!empty && !quote.trim()) return false;
+  store.closeBox?.();
+  const codes = codesOf(ctx);
+  // A point: both ends at the caret, kept after what is before it as text is typed there.
+  const anchors = empty ? { from: room.anchorAt(from, -1), to: room.anchorAt(from, -1) } : { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1) };
+  store.coding = anchors;
+  const end = view.coordsAtPos(to);
+  const closed = () => {
+    store.closeBox = null;
+    store.coding = null;
+    tell(store);
+    if (view.isDestroyed) return;
+    // Back where # was typed: the passage selected again (to code it again, say), or the caret at the point.
+    const a = ctx.state?.positionOf(anchors.from) ?? null;
+    const b = ctx.state?.positionOf(anchors.to) ?? null;
+    const size = view.state.doc.content.size;
+    if (a !== null && b !== null && a <= b && b <= size) {
+      try {
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, a, b)));
+      } catch { /* not a place text can be selected at: as it was */ }
+    }
+    view.focus();
+  };
+  store.closeBox = openCodeBox({
+    at: { left: end.left, top: view.coordsAtPos(from).top, bottom: end.bottom },
+    point: empty,
+    codes: () => suggestions(codes.book),
+    choose: (choice) => {
+      closed();
+      void ('id' in choice ? Promise.resolve(choice.id) : newCode(ctx, codes, choice.label)).then((id) => {
+        const state = ctx.state;
+        if (!id || !state) return;
+        const name = ctx.path.slice(ctx.path.lastIndexOf('/') + 1);
+        const item = newCoding(ctx, state.me, id, quote, `../${name}`);
+        state.update({ set: { [String(item.id)]: { item, ...anchors } as unknown as Json } });
+        tell(store);
+      });
+    },
+    cancel: (typed) => {
+      closed();
+      if (typed && !view.isDestroyed) typeAsText(store, view, typed);
+    },
+  });
   tell(store);
   return true;
 }
 
+/** Codings of one code at one passage (or point), everyone's: one tag in the margin. */
+interface Group {
+  key: string;
+  code: Code | null;
+  from: number;
+  to: number;
+  point: boolean;
+  list: Shown[];
+}
+
+/** The document's codings as tags: one for each code at each passage, in the order of the text. */
+function codedGroups(store: Store, codes: Codes, doc: Node): Group[] {
+  const groups = new Map<string, Group>();
+  for (const s of collect(store, doc)) {
+    if (s.kind !== 'coding' || s.from === null || s.to === null) continue;
+    const code = codeFor(codes, s.item);
+    const key = `${code?.id ?? codeOf(s.item) ?? ''}@${s.from}-${s.to}`;
+    const g = groups.get(key) ?? { key, code, from: s.from, to: s.to, point: s.from === s.to, list: [] };
+    g.list.push(s);
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => a.from - b.from || a.to - b.to || (a.code?.label ?? '').localeCompare(b.code?.label ?? ''));
+}
+
+const NO_CODE = 'A code no longer in the codebook';
+
+/** What can be done with a tag's codings: remove yours, find every passage with its code, open the codebook. */
+function tagMenu(store: Store, g: Group, at: HTMLElement) {
+  const { ctx } = store;
+  const state = ctx.state;
+  const mine = g.list.filter((s) => s.mine);
+  const who = [...new Set(g.list.map((s) => (s.mine ? 'you' : creatorOf(s.item) || 'someone')))];
+  const quote = g.list[0]?.about?.kind === 'passage' ? g.list[0].about.exact : '';
+  const label = g.code?.label ?? NO_CODE;
+  openMenu(at, {
+    title: label,
+    color: g.code?.color,
+    lines: [g.point ? 'At a point in the text' : `“${quote.length > 90 ? `${quote.slice(0, 90)}…` : quote}”`, `Coded by ${who.join(', ')}`],
+    items: [
+      ...(mine.length && state ? [{ label: mine.length > 1 ? 'Remove your codings' : 'Remove your coding', testid: 'code-remove', danger: true, run: () => {
+        state.update({ remove: mine.map((s) => s.id) });
+        store.hoverTag = null;
+        tell(store);
+      } }] : []),
+      ...(g.code ? [{ label: `Every passage coded “${label}”`, testid: 'code-retrieve', run: () => {
+        retrieveWanted = { code: g.code!.id, below: true };
+        for (const fn of [...retrieveListeners]) fn();
+        ctx.openPanel('retrieve');
+      } }] : []),
+      { label: 'The codebook…', testid: 'code-codebook', run: () => ctx.openPanel('codes') },
+    ],
+  });
+}
+
 function editor(ctx: FeatureEditorContext) {
-  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, coding: null, codedAt: null };
+  injectStyle();
+  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, coding: null, closeBox: null, typing: false, hoverTag: null, hoverText: new Set() };
   const codes = codesOf(ctx);
+  /** The passages pointed at in the text: drawn again only where that changed. */
+  const hoverText = (keys: Set<string>) => {
+    if (keys.size === store.hoverText.size && [...keys].every((k) => store.hoverText.has(k))) return;
+    store.hoverText = keys;
+    tell(store);
+  };
   // Only the live document's is its panel's (a past version's is its own).
   if (ctx.state) stores.set(ctx.path, store);
   let liveKey = '';
@@ -250,15 +411,48 @@ function editor(ctx: FeatureEditorContext) {
         const shown = collect(store, state.doc).filter((s) => s.from !== null && s.to !== null && s.to <= size);
         const decos = shown.filter((s) => s.kind === 'comment').map((s) =>
           Decoration.inline(s.from!, s.to!, { class: s.id === store.focus ? 'kuraa-commented kuraa-commented-focus' : 'kuraa-commented', 'data-annotation': s.id }));
-        // Coded passages: underlined in their codes' colours (where the workspace codes).
+        // Coded passages: shown only while pointed at (their tag in the margin, or the passage), in their code's colour.
         if (coding(ctx)) {
-          for (const s of shown) {
-            if (s.kind !== 'coding') continue;
-            const code = codeFor(codes, s.item);
-            decos.push(Decoration.inline(s.from!, s.to!, { class: 'kuraa-coded', style: `--kuraa-code: ${code?.color ?? '#888'}`, title: code ? code.label : 'A code no longer in the codebook', 'data-annotation': s.id }));
+          const pointed = new Set([...store.hoverText, ...(store.hoverTag ? [store.hoverTag] : [])]);
+          if (pointed.size) {
+            for (const g of codedGroups(store, codes, state.doc)) {
+              if (!pointed.has(g.key)) continue;
+              const style = `--kuraa-code: ${g.code?.color ?? '#888'}`;
+              if (g.point) decos.push(Decoration.widget(g.from, () => pin(style), { side: -1, key: `pin:${g.key}`, ignoreSelection: true }));
+              else decos.push(Decoration.inline(g.from, g.to, { class: 'kuraa-coded-hover', style }));
+            }
+          }
+          // What is being coded, while the code box is open (the selection is not shown while the box has the focus).
+          const room = ctx.state;
+          if (store.coding && room) {
+            const from = room.positionOf(store.coding.from);
+            const to = room.positionOf(store.coding.to);
+            if (from !== null && to !== null && to <= size) {
+              if (to > from) decos.push(Decoration.inline(from, to, { class: 'kuraa-coding-now' }));
+              else if (to === from) decos.push(Decoration.widget(from, () => pin('--kuraa-code: var(--accent, #c08a00)'), { side: -1, key: 'pin:now', ignoreSelection: true }));
+            }
           }
         }
         return DecorationSet.create(state.doc, decos);
+      },
+      // # over a selection, or at the caret: the code box, not a #. (Not in code, and not while typing what the box gave back.)
+      handleTextInput: (view, from, to, text) => text === '#' && !store.typing && coding(ctx) && !!ctx.state && !inCode(view.state.doc.resolve(from), view.state.doc.resolve(to)) && openCoding(store, view, { from, to }),
+      handleDOMEvents: {
+        // A coded passage pointed at: highlighted, its tags too.
+        mousemove: (view, e) => {
+          if (!coding(ctx)) return false;
+          const at = view.posAtCoords({ left: e.clientX, top: e.clientY });
+          const keys = new Set<string>();
+          if (at && at.inside >= 0) {
+            for (const g of codedGroups(store, codes, view.state.doc)) if (!g.point && g.from <= at.pos && at.pos < g.to) keys.add(g.key);
+          }
+          hoverText(keys);
+          return false;
+        },
+        mouseleave: () => {
+          hoverText(new Set());
+          return false;
+        },
       },
     },
     view: (view) => {
@@ -289,6 +483,7 @@ function editor(ctx: FeatureEditorContext) {
       return {
         destroy: () => {
           off?.();
+          store.closeBox?.();
           store.listeners.delete(redraw);
           codes.listeners.delete(redraw);
           if (stores.get(ctx.path) === store) stores.delete(ctx.path);
@@ -297,7 +492,7 @@ function editor(ctx: FeatureEditorContext) {
     },
   });
   return {
-    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (state: EditorState) => startComment(store, state), [CODE_KEYS]: (state: EditorState) => coding(ctx) && startCoding(store, state) })],
+    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (state: EditorState) => startComment(store, state), [CODE_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCoding(store, view) })],
     margin: (view: EditorView) => {
       const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
       const items = shown.filter((s) => s.kind === 'comment').map((s) => ({
@@ -312,35 +507,44 @@ function editor(ctx: FeatureEditorContext) {
         },
       }));
       if (!coding(ctx)) return items;
-      // One mark per coded passage start, in its first code's colour, saying every code there.
-      const byStart = new Map<number, Shown[]>();
-      for (const s of shown) if (s.kind === 'coding') byStart.set(s.from!, [...(byStart.get(s.from!) ?? []), s]);
-      for (const [pos, list] of byStart) {
-        const labels = list.map((s) => codeFor(codes, s.item)?.label ?? 'A code no longer in the codebook');
-        items.push({
-          key: `coded:${pos}`,
-          pos,
-          label: list.length > 1 ? `●${list.length}` : '●',
-          title: `Coded: ${[...new Set(labels)].join(', ')}`,
-          color: codeFor(codes, list[0]!.item)?.color,
-          run: () => {
-            store.codedAt = pos;
-            store.coding = null;
-            ctx.openPanel('codes');
+      // A tag for each code at each passage, in its colour, at the passage's first line.
+      const tags: MarginItem[] = codedGroups(store, codes, view.state.doc).map((g) => {
+        const who = [...new Set(g.list.map((s) => (s.mine ? 'you' : creatorOf(s.item) || 'someone')))];
+        const label = g.code?.label ?? NO_CODE;
+        return {
+          key: `code:${g.key}`,
+          pos: g.from,
+          kind: 'tag',
+          label,
+          title: `${label}${g.point ? ' (at a point)' : ''}, coded by ${who.join(', ')}`,
+          color: g.code?.color ?? '#888888',
+          active: store.hoverTag === g.key || store.hoverText.has(g.key),
+          hover: (on: boolean) => {
+            store.hoverTag = on ? g.key : store.hoverTag === g.key ? null : store.hoverTag;
             tell(store);
           },
-        } as (typeof items)[number] & { color?: string });
-      }
-      return items;
+          run: (at: HTMLElement) => tagMenu(store, g, at),
+        };
+      });
+      return [...items, ...tags];
     },
     selectionActions: (view: EditorView) => (ctx.state ? [
       { label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void startComment(store, view.state) },
-      ...(coding(ctx) ? [{ label: 'Code', keys: CODE_KEYS, testid: 'annotations-code', run: () => void startCoding(store, view.state) }] : []),
+      ...(coding(ctx) ? [{ label: 'Code #', keys: CODE_KEYS, testid: 'annotations-code', run: () => void openCoding(store, view) }] : []),
     ] : []),
     destroy: () => {
+      store.closeBox?.();
       if (stores.get(ctx.path) === store) stores.delete(ctx.path);
     },
   };
+}
+
+/** A point coded, as it is shown while pointed at: a pin between two characters, in its code's colour. */
+function pin(style: string) {
+  const s = document.createElement('span');
+  s.className = 'kuraa-point';
+  s.setAttribute('style', style);
+  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -662,12 +866,8 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   root.append(body);
   const codes = codesOf(pctx);
   let counts: { [id: string]: number } = {};
-  let filter = '';
   let editing: string | null = null;
   let error: string | null = null;
-  let store: Store | null = null;
-  /** The passage the find box was last given the focus for: given it once, as it appears, never taken back on a redraw. */
-  let focusedFor: object | null = null;
   /**
    * What is typed or chosen in the panel's boxes, by box (`label:<code>`, `new`…): drawing the panel again (someone else
    * codes, the counts change) keeps it, and the focus where it was, until it is saved or given up.
@@ -713,26 +913,7 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
       return null;
     }
   };
-  const apply = (code: string) => {
-    const s = store;
-    const state = pctx.state();
-    if (!s?.coding || !state) return;
-    const name = pctx.path()!.slice(pctx.path()!.lastIndexOf('/') + 1);
-    const item = newCoding(pctx, state.me, code, s.coding.quote, `../${name}`);
-    state.update({ set: { [String(item.id)]: { item, from: s.coding.from, to: s.coding.to } as unknown as Json } });
-    s.coding = null;
-    filter = '';
-    tell(s);
-    countsSoon();
-  };
-
   function draw() {
-    const now = stores.get(pctx.path() ?? '') ?? null;
-    if (now !== store) {
-      store?.listeners.delete(draw);
-      store = now;
-      store?.listeners.add(draw);
-    }
     // Where the focus is, to put it back once drawn again.
     const active = document.activeElement as (HTMLElement & { selectionStart?: number | null; selectionEnd?: number | null }) | null;
     const focusKey = active && body.contains(active) ? active.dataset.key ?? null : null;
@@ -756,85 +937,9 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
     }
     if (error) body.append(el('p', { cls: 'kuraa-note kuraa-error', text: error }));
     const tree = codeTree(codes.book);
-    const s = store;
-    const state = pctx.state();
-
-    // Coding the passage selected: a code to apply, found by name, or made.
-    if (s?.coding && state) {
-      const box = el('div', { cls: 'kuraa-thread kuraa-new', testid: 'codes-apply-box' });
-      box.append(el('blockquote', { text: s.coding.quote }));
-      const find = el('input', { testid: 'codes-filter' }) as HTMLInputElement;
-      find.dataset.key = 'find';
-      find.placeholder = 'Find a code, or name a new one';
-      find.value = filter;
-      find.oninput = () => {
-        filter = find.value;
-        draw();
-      };
-      find.onkeydown = (e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          s.coding = null;
-          tell(s);
-        }
-      };
-      box.append(find);
-      const wanted = filter.trim().toLowerCase();
-      const matching = tree.filter(({ code }) => !wanted || code.label.toLowerCase().includes(wanted));
-      const list = el('div', { cls: 'kuraa-code-list' });
-      for (const { code, depth } of matching.slice(0, 40)) {
-        const b = button(code.label, () => apply(code.id), 'codes-apply', 'kuraa-code-choice');
-        b.style.paddingLeft = `${6 + depth * 12}px`;
-        b.prepend(swatch(code.color));
-        list.append(b);
-      }
-      box.append(list);
-      if (wanted && !tree.some(({ code }) => code.label.toLowerCase() === wanted)) {
-        box.append(button(`New code “${filter.trim()}”, applied`, () => void change({ op: 'add', label: filter.trim() }).then((id) => id && apply(id)), 'codes-create-apply'));
-      }
-      box.append(el('div', { cls: 'kuraa-actions' }, button('Cancel', () => {
-        s.coding = null;
-        tell(s);
-      }, 'codes-cancel')));
-      body.append(box);
-      if (focusedFor !== s.coding) {
-        focusedFor = s.coding;
-        queueMicrotask(() => {
-          if (!find.isConnected) return;
-          find.focus();
-          find.setSelectionRange(find.value.length, find.value.length);
-        });
-      } else if (document.activeElement === body.ownerDocument.body) {
-        // Drawn again while it was being typed in: the focus back where it was.
-        queueMicrotask(() => find.isConnected && find.focus());
-      }
-    }
-
-    // The codings at a passage (its mark in the margin): each person's, yours to remove.
-    if (s?.codedAt !== null && s?.codedAt !== undefined && s.view) {
-      const here = collect(s, s.view.state.doc).filter((a) => a.kind === 'coding' && a.from === s.codedAt);
-      if (here.length) {
-        const box = el('div', { cls: 'kuraa-thread', testid: 'codes-here' });
-        const about = here[0]!.about;
-        if (about?.kind === 'passage') box.append(el('blockquote', { text: about.exact }));
-        for (const a of here) {
-          const code = codeFor(codes, a.item);
-          const row = el('div', { cls: 'kuraa-comment', testid: 'codes-here-row' });
-          row.append(el('div', {}, swatch(code?.color), el('span', { text: ` ${code?.label ?? 'A code no longer in the codebook'}` })), el('div', { cls: 'kuraa-meta', text: `${creatorOf(a.item) || 'Someone'} · ${when(String(a.item.created ?? ''))}` }));
-          if (a.mine && state) row.append(el('div', { cls: 'kuraa-actions' }, button('Remove', () => {
-            state.update({ remove: [a.id] });
-            tell(s);
-            countsSoon();
-          }, 'codes-remove', 'danger')));
-          box.append(row);
-        }
-        body.append(box);
-      }
-    }
-
     // The codebook: a tree, each with its count; add, and change each.
     const list = el('div', { cls: 'kuraa-codebook', testid: 'codes-tree' });
-    if (!tree.length) list.append(el('p', { cls: 'kuraa-note', text: 'No codes yet: add one below, or select some text, then Code (⌥⌘U).' }));
+    if (!tree.length) list.append(el('p', { cls: 'kuraa-note', text: 'No codes yet: add one below, or select some text (or put the caret anywhere) and type #.' }));
     for (const { code, depth } of tree) {
       const row = el('div', { cls: 'kuraa-code', testid: 'codes-row' });
       row.style.paddingLeft = `${depth * 14}px`;
@@ -931,16 +1036,11 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   codes.listeners.add(draw);
   draw();
   void loadCounts();
-  const off = pctx.onDocument(() => {
-    const now = stores.get(pctx.path() ?? '') ?? null;
-    if (now !== store) draw();
-    countsSoon();
-  });
+  const off = pctx.onDocument(() => countsSoon());
   return () => {
     clearTimeout(countsTimer);
     off();
     codes.listeners.delete(draw);
-    store?.listeners.delete(draw);
     body.remove();
   };
 }
@@ -1084,7 +1184,28 @@ function injectStyle() {
 .kuraa-lost summary { cursor: pointer; color: var(--muted, #666); }
 .kuraa-recent { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border, #ddd); border-radius: 6px; }
 .kuraa-recent:hover, .kuraa-recent:focus-visible { border-color: var(--accent, #c08a00); }
-.kuraa-coded { text-decoration: underline; text-decoration-color: var(--kuraa-code, #888); text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-skip-ink: none; }
+.kuraa-coded-hover { background: color-mix(in srgb, var(--kuraa-code, #888) 24%, transparent); box-shadow: 0 2px 0 color-mix(in srgb, var(--kuraa-code, #888) 70%, transparent); border-radius: 2px; }
+.kuraa-coding-now { background: var(--selected, color-mix(in srgb, var(--accent, #c08a00) 22%, transparent)); }
+.kuraa-point { display: inline-block; width: 3px; height: 1.15em; margin: 0 -1.5px; vertical-align: -0.2em; border-radius: 2px; background: var(--kuraa-code, #888); pointer-events: none; }
+.kuraa-codebox { position: fixed; z-index: 50; min-width: 240px; max-width: 360px; padding: 4px; background: var(--bg, #fff); color: var(--text, inherit); border: 1px solid var(--border, #ddd); border-radius: 8px; box-shadow: 0 6px 24px rgb(0 0 0 / 16%); font: 13px/1.4 var(--font, system-ui); }
+.kuraa-codebox-input { display: flex; align-items: center; gap: 2px; padding: 2px 6px; border-bottom: 1px solid var(--border, #ddd); margin-bottom: 3px; }
+.kuraa-codebox-hash { color: var(--muted, #666); font-weight: 600; }
+.kuraa-codebox-input input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: inherit; font: inherit; padding: 4px 2px; }
+.kuraa-codebox-list { display: flex; flex-direction: column; max-height: 240px; overflow: auto; }
+.kuraa-codebox-row { display: flex; align-items: center; gap: 0; padding: 4px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.kuraa-codebox-row.selected, .kuraa-codebox-row:hover { background: var(--accent-soft, #eee); }
+.kuraa-codebox-label { overflow: hidden; text-overflow: ellipsis; }
+.kuraa-codebox-parents { margin-left: auto; padding-left: 10px; color: var(--muted, #666); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.kuraa-codebox-plus { width: 10px; margin-right: 6px; text-align: center; color: var(--muted, #666); font-weight: 600; }
+.kuraa-codebox-empty { padding: 4px 6px; color: var(--muted, #666); }
+.kuraa-codebox-hint { padding: 4px 6px 2px; color: var(--muted, #666); font-size: 11px; border-top: 1px solid var(--border, #ddd); margin-top: 3px; }
+.kuraa-codemenu { display: flex; flex-direction: column; gap: 2px; padding: 6px; outline: none; }
+.kuraa-codemenu-title { display: flex; align-items: center; font-weight: 600; padding: 2px 4px; }
+.kuraa-codemenu-line { color: var(--muted, #666); font-size: 12px; padding: 0 4px 2px; overflow-wrap: anywhere; }
+.kuraa-codemenu-item { all: unset; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+.kuraa-codemenu-item:first-of-type { margin-top: 4px; }
+.kuraa-codemenu-item:hover, .kuraa-codemenu-item:focus-visible { background: var(--accent-soft, #eee); }
+.kuraa-codemenu-item.danger { color: var(--danger, #b42318); }
 .kuraa-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; flex: none; }
 .kuraa-code { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--border, #ddd); }
 .kuraa-code-head { display: flex; align-items: center; gap: 6px; }
@@ -1125,7 +1246,7 @@ export const annotationsClient = defineClientFeature({
   help: [
     { group: 'Comments and coding', keys: [COMMENT_KEYS], does: 'Comment on the selected text' },
     { group: 'Comments and coding', keys: [PANEL_KEYS], does: 'Show the document’s comments' },
-    { group: 'Comments and coding', keys: [CODE_KEYS], does: 'Code the selected text (where the workspace codes)' },
+    { group: 'Comments and coding', keys: [CODE_KEYS], does: 'Code the selected text, or the point at the caret, as typing # does (where the workspace codes)' },
   ],
 });
 

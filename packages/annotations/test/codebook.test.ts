@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { codeAndBelow, codeTree, mergeCodebooks, parseCodebook, readCodebook, resolveCode, writeCodebook, type Code, type Codebook } from '../src/codebook.js';
+import { codeAndBelow, codeTree, mergeCodebooks, parseCodebook, randomColour, readCodebook, resolveCode, writeCodebook, type Code, type Codebook } from '../src/codebook.js';
+import { findCodes } from '../src/codebox.js';
 import { codeOf, describePages, kindOf, writePage, type Item } from '../src/format.js';
 
 const book = (codes: Code[]): Codebook => ({ scheme: 'urn:uuid:scheme', label: 'Codebook', codes });
@@ -102,5 +103,32 @@ describe('a coding', () => {
     expect(kindOf(coding)).toBe('coding');
     expect(codeOf(coding)).toBe('urn:uuid:code');
     expect(describePages(null, writePage([coding], 'a'.repeat(64)))).toBe('1 coding added');
+  });
+});
+
+describe('a new code', () => {
+  it('has a colour at random, plain #rrggbb, dark enough to read', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const c = randomColour();
+      expect(c).toMatch(/^#[0-9a-f]{6}$/);
+      const [r, g, b] = [1, 3, 5].map((n) => parseInt(c.slice(n, n + 2), 16));
+      expect(0.2126 * r! + 0.7152 * g! + 0.0722 * b!).toBeLessThan(190);
+      seen.add(c);
+    }
+    expect(seen.size).toBeGreaterThan(40);
+    expect(randomColour(() => 0)).toBe(randomColour(() => 0));
+  });
+});
+
+describe('the code box', () => {
+  const s = (label: string) => ({ code: { id: label, label }, parents: [] });
+  const all = [s('Trust in people'), s('Distrust'), s('Institutions'), s('Trust')];
+  it('suggests the code named exactly first, then those starting so, then those with it in a word or anywhere', () => {
+    expect(findCodes(all, 'trust').map((x) => x.code.label)).toEqual(['Trust', 'Trust in people', 'Distrust']);
+    expect(findCodes(all, 'peop').map((x) => x.code.label)).toEqual(['Trust in people']);
+    expect(findCodes(all, 'stit').map((x) => x.code.label)).toEqual(['Institutions']);
+    expect(findCodes(all, 'zzz')).toEqual([]);
+    expect(findCodes(all, '').length).toBe(4);
   });
 });

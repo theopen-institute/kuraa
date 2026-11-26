@@ -11,8 +11,8 @@
 import { createTextType } from '@kuraa/format-text';
 import { mergeLines } from '@kuraa/kernel';
 import { OWN_NAME, defineFeature, type FeatureResponse, type Json } from '@kuraa/feature-kit/host';
-import { EXTENSION, SUFFIX, aboutOf, codeOf, creatorOf, describePages, findPassage, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
-import { CODEBOOK, COLOURS, TOP_CODEBOOK, codeAndBelow, mergeCodebooks, parseCodebook, randomId, readCodebook, resolveCode, writeCodebook } from './codebook.js';
+import { EXTENSION, SUFFIX, aboutOf, codeOf, creatorOf, describePages, findPassage, isPoint, kindOf, mergePages, readPage, selectorsFor, textOf, writePage, type Item } from './format.js';
+import { CODEBOOK, TOP_CODEBOOK, codeAndBelow, mergeCodebooks, parseCodebook, randomId, readCodebook, resolveCode, randomColour, writeCodebook } from './codebook.js';
 import type { FeatureContext, FeatureSettings } from '@kuraa/feature-kit/host';
 
 export * from './format.js';
@@ -100,8 +100,10 @@ export const annotationsFeature = defineFeature({
           continue;
         }
         const at = findPassage(text, about);
+        // A point (a code put at the caret): both ends at it, kept after what is before it as text is typed there.
+        const point = at && isPoint(about) ? anchorAt(sourceMap.toDoc(at.from, -1), -1) : null;
         out[String(item.id)] = (at
-          ? { item, from: anchorAt(sourceMap.toDoc(at.from), 1), to: anchorAt(sourceMap.toDoc(at.to, -1), -1) }
+          ? point ? { item, from: point, to: point } : { item, from: anchorAt(sourceMap.toDoc(at.from), 1), to: anchorAt(sourceMap.toDoc(at.to, -1), -1) }
           : { item, lost: true }) as unknown as Json;
       }
       return out;
@@ -117,9 +119,10 @@ export const annotationsFeature = defineFeature({
         if (e.from !== undefined && e.to !== undefined && !e.lost) {
           const from = positionOf(e.from);
           const to = positionOf(e.to);
-          if (from !== null && to !== null && to > from) {
-            const start = sourceMap.toText(from);
-            const end = sourceMap.toText(to, -1);
+          if (from !== null && to !== null && (to > from || (to === from && isPoint(aboutOf(e.item))))) {
+            // A point: one place in the text, after what is before it.
+            const start = sourceMap.toText(from, to === from ? -1 : 1);
+            const end = to === from ? start : sourceMap.toText(to, -1);
             item = { ...item, target: { source: sourceOf(path), selector: selectorsFor(text, start, end) } };
           }
           // Its text gone: kept as it was named last, to be found again or placed anew.
@@ -209,7 +212,7 @@ export const annotationsFeature = defineFeature({
               if (!label) return { status: 400, body: { error: 'A code needs a name' } };
               if (!parentOk(b.broader)) return { status: 400, body: { error: 'No such code to put it under' } };
               id = `urn:uuid:${randomId()}`;
-              book.codes.push({ id, label, ...(b.broader ? { broader: b.broader } : {}), color: colour ?? COLOURS[book.codes.length % COLOURS.length]!, ...(typeof b.definition === 'string' && b.definition.trim() ? { definition: b.definition.trim() } : {}), modified: now });
+              book.codes.push({ id, label, ...(b.broader ? { broader: b.broader } : {}), color: colour ?? randomColour(), ...(typeof b.definition === 'string' && b.definition.trim() ? { definition: b.definition.trim() } : {}), modified: now });
             } else {
               const code = id ? byId.get(id) : undefined;
               if (!code) return { status: 404, body: { error: 'No such code' } };

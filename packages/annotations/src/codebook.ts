@@ -15,7 +15,10 @@
 //   }
 import type { Json } from '@kuraa/feature-kit';
 
-export const CODEBOOK = 'codebook.jsonld';
+/** Where a workspace keeps its codebook: with its other settings and records, in .kuraa, out of the documents' way. */
+export const CODEBOOK = '.kuraa/codebook.jsonld';
+/** Where 0.6.0 kept it, at the workspace's top: moved into .kuraa where it is found (unless a workspace's setting names it). */
+export const TOP_CODEBOOK = 'codebook.jsonld';
 
 const CONTEXT = {
   skos: 'http://www.w3.org/2004/02/skos/core#',
@@ -263,4 +266,19 @@ export function randomId(): string {
 }
 
 /** Colours for codes, in turn, readable on light and dark. */
-export const COLOURS = ['#c2410c', '#0f766e', '#7c3aed', '#b45309', '#be185d', '#1d4ed8', '#4d7c0f', '#9f1239'];
+/**
+ * A new code's colour, chosen at random (people may choose their own in the
+ * codebook): a hue anywhere, saturated and dark enough to read on white and
+ * be told from the text, as #rrggbb.
+ */
+export function randomColour(random: () => number = Math.random): string {
+  const h = random() * 360;
+  const s = 0.55 + random() * 0.25;
+  const l = 0.38 + random() * 0.1;
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const c = l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(c * 255).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}

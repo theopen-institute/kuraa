@@ -518,6 +518,23 @@ export class HostFeatures {
           else await this.port.commitPaths([path], message, by);
         });
       },
+      move: async (from, to) => {
+        // Its declared files only: companions move with their documents, never on their own.
+        for (const p of [from, to]) {
+          if (own(p)?.doc !== null) throw new HttpError(403, `${f.label} moves only the files it keeps, not ${p}`);
+        }
+        if (this.port.spaceOf(from) !== this.port.spaceOf(to)) throw new HttpError(409, `${from} and ${to} are read by different people: not moved`);
+        for (const p of [from, to]) if (!(await this.port.canWrite(p))) throw new NotAllowed(`You may not change ${p}`);
+        await this.port.serial(async () => {
+          await this.port.requireWritable();
+          const text = await readPlain(this.port.resolvePath(from));
+          if (text === null) throw new HttpError(404, `No ${from} to move`);
+          if ((await readPlain(this.port.resolvePath(to))) !== null) throw new HttpError(409, `${to} is there already: ${from} not moved`);
+          await this.port.writeAtomic(this.port.resolvePath(to), text);
+          await this.removeOwn(from);
+          await this.port.commitPaths([from, to], `Move ${from} to ${to}`);
+        });
+      },
       list: () => this.port.list(),
       me: () => this.me,
       companionOf: (doc, o) => ownFile(doc, o?.suffix ?? f.room?.companion ?? f.companions?.[0] ?? `.${f.id}`, o?.person ?? this.me ?? '', o?.extension ?? f.room?.extension ?? '.json'),

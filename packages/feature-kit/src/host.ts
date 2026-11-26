@@ -143,6 +143,14 @@ export interface FeatureContext {
    * its document's space. Rejects, in words for people, what it may not write.
    */
   write(path: string, text: string | null, o?: { by?: Person | null }): Promise<void>;
+  /**
+   * Move one of the files it declared to another it declares, as it is, in one
+   * commit, so that its history follows it (a file kept somewhere new). Refused
+   * where nothing is there to move, something is already where it would go, the
+   * two are in different spaces (it would be read by others), or either may not
+   * be changed.
+   */
+  move(from: string, to: string): Promise<void>;
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
   /** You: this host's person's identity ID; null until there is one (then nothing of yours can be written). */

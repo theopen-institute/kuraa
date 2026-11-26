@@ -579,7 +579,12 @@ watch(user, (u) => connection?.setUser(u));
 // What features put beside the text (0082): marks in the margin, at their lines,
 // kept clear of each other, and what can be done with the selection, beside it.
 const scroller = useTemplateRef<HTMLDivElement>('scroller');
-const margin = shallowRef<(MarginItem & { at: number; left: number })[]>([]);
+const margin = shallowRef<(MarginItem & { at: number; left: number; room: number })[]>([]);
+/** Tags in the margin (codes, say): the text moves left to make room for them, where there is room to. */
+const marginTags = computed(() => margin.value.some((m) => m.kind === 'tag'));
+function runMark(m: MarginItem, e: MouseEvent) {
+  m.run?.(e.currentTarget as HTMLElement);
+}
 const selectionBar = shallowRef<{ top: number; left: number; items: FeatureMenuItem[] } | null>(null);
 function drawFeatures() {
   const v = view.value;
@@ -608,7 +613,9 @@ function drawFeatures() {
       items.push({ ...item, top: at(v.coordsAtPos(item.pos).top) });
     }
   }
-  margin.value = marginLayout(items).map((m) => ({ ...m, left }));
+  // A tag is as wide as the room to the right of the text, at most.
+  const room = Math.max(48, box.clientWidth + box.scrollLeft - left - 14);
+  margin.value = marginLayout(items).map((m) => ({ ...m, left, room }));
   const sel = v.state.selection;
   // (A document you may not change, too: what is yours to say about it, features offer where they have your state.) Only while
   // the editor has the focus: typing elsewhere (a feature's panel), the selection stays, but what to do with it is done.
@@ -733,19 +740,21 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
     </div>
     <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
     <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
-    <div v-show="!showSource && !(loading && preview !== null)" ref="scroller" class="editor-scroll" :data-features="featuresHere || undefined" @mousedown="onBlankMouseDown">
+    <div v-show="!showSource && !(loading && preview !== null)" ref="scroller" :class="['editor-scroll', { 'margin-tags': marginTags }]" :data-features="featuresHere || undefined" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
       <button
         v-for="m in margin"
         :key="m.key"
         type="button"
-        class="feature-mark"
-        :style="{ top: `${m.at}px`, left: `${m.left}px`, color: m.color }"
+        :class="['feature-mark', { 'feature-tag': m.kind === 'tag', active: m.active }]"
+        :style="m.kind === 'tag' ? { top: `${m.at}px`, left: `${m.left}px`, maxWidth: `${m.room}px`, '--mark-color': m.color ?? 'var(--muted)' } : { top: `${m.at}px`, left: `${m.left}px`, color: m.color }"
         :title="m.title"
         :aria-label="m.title ?? m.label"
-        data-testid="feature-mark"
+        :data-testid="m.kind === 'tag' ? 'feature-tag' : 'feature-mark'"
         @mousedown.stop.prevent
-        @click="m.run?.()"
+        @mouseenter="m.hover?.(true)"
+        @mouseleave="m.hover?.(false)"
+        @click="runMark(m, $event)"
       >{{ m.label }}</button>
       <div v-if="selectionBar" class="selection-actions" role="toolbar" :aria-label="S.features.selection" :style="{ top: `${selectionBar.top}px`, left: `${selectionBar.left}px` }" data-testid="selection-actions" @mousedown.stop.prevent>
         <button v-for="a in selectionBar.items" :key="a.label" type="button" :data-testid="a.testid" @click="a.run()">{{ a.label }}</button>

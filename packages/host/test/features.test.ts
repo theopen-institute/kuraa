@@ -78,11 +78,25 @@ function spyFeature(seen: { event: string; payload: unknown }[]): HostFeature {
   return defineFeature({
     id: 'spy',
     label: 'Spy',
+    files: () => ['spy.json', '.kuraa/spy.json'],
     open(ctx) {
       for (const e of ['open', 'save', 'commit', 'merge', 'rename', 'delete', 'settings'] as (keyof FeatureEvents)[]) {
         ctx.on(e, (payload) => void seen.push({ event: e, payload }));
       }
-      return { routes: [{ method: 'GET', path: 'hello', handle: ({ query }) => ({ body: { hello: query.get('who') } }) }] };
+      return {
+        routes: [
+          { method: 'GET', path: 'hello', handle: ({ query }) => ({ body: { hello: query.get('who') } }) },
+          {
+            method: 'POST',
+            path: 'move',
+            handle: async ({ body }) => {
+              const { from, to } = body as { from: string; to: string };
+              await ctx.move(from, to);
+              return { body: { moved: true } };
+            },
+          },
+        ],
+      };
     },
   });
 }
@@ -322,6 +336,30 @@ describe('features', () => {
     writeFileSync(join(dir, `other.md.marks/@${ME}.json`), '{"marks": []} tide');
     const found = (await json('/api/search?q=tide')).body as { files: { path: string }[] };
     expect(found.files.map((f) => f.path)).toEqual(['notes.md']);
+  });
+
+  it('moves a file it keeps to another it keeps, in one commit, and nothing else', async () => {
+    await turn('spy', true);
+    const move = (from: string, to: string) => api('/api/features/spy/move', { method: 'POST', body: JSON.stringify({ body: { from, to }, by: ALICE }) }).then((r) => r.status);
+    expect(await move('spy.json', '.kuraa/spy.json')).toBe(404);
+    writeFileSync(join(dir, 'spy.json'), '{"kept": true}\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Spy');
+    // Not its own: a document, or a companion (which moves only with its document).
+    expect(await move('notes.md', '.kuraa/spy.json')).toBe(403);
+    expect(await move('spy.json', 'elsewhere.json')).toBe(403);
+    expect(await move('spy.json', COMPANION)).toBe(403);
+    expect(await move('spy.json', '.kuraa/spy.json')).toBe(200);
+    expect(file('spy.json')).toBeNull();
+    expect(file('.kuraa/spy.json')).toBe('{"kept": true}\n');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Move spy.json to .kuraa/spy.json');
+    expect(git(dir, 'show', '--format=', '--name-status', '-M', 'HEAD')).toMatch(/^R100\tspy\.json\t\.kuraa\/spy\.json$/);
+    // Something there already: not moved over it.
+    writeFileSync(join(dir, 'spy.json'), '{"again": true}\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'Spy again');
+    expect(await move('spy.json', '.kuraa/spy.json')).toBe(409);
+    expect(file('.kuraa/spy.json')).toBe('{"kept": true}\n');
   });
 
   it('writes into your file only what you did: what a sync put in your map is shown, never signed as yours', async () => {

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
-import { annotationsFeature, aboutOf, codeOf, readCodebook, readPage, textOf, type Item } from '@kuraa/annotations';
+import { annotationsFeature, aboutOf, codeOf, readCodebook, readPage, textOf, writeCodebook, type Item } from '@kuraa/annotations';
 import { startHost, type RunningHost } from '../src/index.js';
 import { createPerson } from '../src/peers/person.js';
 
@@ -172,7 +172,7 @@ describe('comments', () => {
     const spare = (await post({ op: 'add', label: 'Spare' })).body.id;
     expect((await post({ op: 'change', id: institutions, broader: council })).status).toBe(400);
     expect((await post({ op: 'change', id: council, definition: 'The town council', color: '#123456' })).status).toBe(200);
-    let book = readCodebook(file('codebook.jsonld'));
+    let book = readCodebook(file('.kuraa/codebook.jsonld'));
     expect(book.codes.find((c) => c.id === council)).toMatchObject({ label: 'Council', definition: 'The town council', color: '#123456', broader: institutions });
     expect(git(dir, 'log', '-1', '--format=%s')).toMatch(/codebook\.jsonld/);
 
@@ -211,9 +211,82 @@ describe('comments', () => {
     // Deleting a code keeps it, marked deleted (OWL's deprecated): a coding of it, someone's own, still says what it was.
     expect((await post({ op: 'delete', id: council })).status).toBe(200);
     expect((await post({ op: 'delete', id: spare })).status).toBe(200);
-    book = readCodebook(file('codebook.jsonld'));
+    book = readCodebook(file('.kuraa/codebook.jsonld'));
     expect(book.codes.find((c) => c.id === council)).toMatchObject({ deleted: true });
     expect(book.codes.find((c) => c.id === spare)).toMatchObject({ label: 'Spare', deleted: true });
     expect(textOf(k1)).toBe('');
+  });
+
+  it('moves a codebook at the top into .kuraa, its history with it; one made at the top again, merged in', async () => {
+    const top = (labels: string[]) => writeCodebook({ scheme: 'urn:uuid:s', label: 'Codebook', codes: labels.map((l) => ({ id: `urn:uuid:${l}`, label: l })) });
+    await running.close();
+    writeFileSync(join(dir, 'codebook.jsonld'), top(['Trust']));
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'A codebook, as 0.6.0 kept it');
+    await start();
+    await until(() => file('codebook.jsonld') === null && file('.kuraa/codebook.jsonld') !== null && git(dir, 'status', '--porcelain') === '', 10_000, 'the codebook moved');
+    expect(file('.kuraa/codebook.jsonld')).toBe(top(['Trust']));
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Move codebook.jsonld to .kuraa/codebook.jsonld');
+    // One commit, a rename: its history follows it.
+    expect(git(dir, 'log', '--follow', '--format=%s', '--', '.kuraa/codebook.jsonld').split('\n')).toContain('A codebook, as 0.6.0 kept it');
+    const json = async (p: string) => (await (await api(p)).json()) as { path: string; book: { codes: { label: string }[] } };
+    expect((await json('/api/features/annotations/codebook')).path).toBe('.kuraa/codebook.jsonld');
+
+    // A device on 0.6.0 makes one at the top again: its codes join those in .kuraa.
+    await running.close();
+    writeFileSync(join(dir, 'codebook.jsonld'), top(['Fear']));
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'From 0.6.0');
+    await start();
+    await until(() => file('codebook.jsonld') === null && git(dir, 'status', '--porcelain') === '', 10_000, 'the top one merged in');
+    expect(readCodebook(file('.kuraa/codebook.jsonld')).codes.map((c) => c.label).sort()).toEqual(['Fear', 'Trust']);
+  });
+
+  it('codes a point (# at the caret): no quote, its start its end, kept beside what is before it and found again', async () => {
+    let a = await connect();
+    let f = a.feature('annotations', ME);
+    const at = where(a.read(), 'Nobody came') - 1;
+    const item: Item = { ...comment('commenting', 'urn:uuid:p1', '', { source: '../notes.md', selector: [{ type: 'TextQuoteSelector', exact: '' }] }), motivation: 'classifying', body: { type: 'SpecificResource', source: 'urn:uuid:code', purpose: 'classifying' } };
+    f.update({ set: { 'urn:uuid:p1': { item, from: f.anchorAt(at, -1), to: f.anchorAt(at, -1) } } });
+    await until(() => readPage(file(OWN)).length === 1 && git(dir, 'status', '--porcelain') === '', 10_000, 'the point coded');
+    const about = aboutOf(readPage(file(OWN))[0]!) as { exact: string; prefix: string; suffix: string; start: number; end: number };
+    expect(about).toMatchObject({ exact: '', start: about.end });
+    expect(about.prefix.endsWith('the council.')).toBe(true);
+    expect(about.suffix.startsWith(' Nobody came')).toBe(true);
+    expect(about.start).toBe([...NOTES.slice(0, NOTES.indexOf(' Nobody came'))].length);
+
+    // Typed at the point: the point stays after what was before it.
+    a.destroy();
+    clients.length = 0;
+    await running.close();
+    writeFileSync(join(dir, 'notes.md'), NOTES.replace('# Day one\n', '# Day one\n\nA line before it all.\n'));
+    git(dir, 'commit', '-qam', 'Outside');
+    await start();
+    a = await connect();
+    f = a.feature('annotations', ME);
+    const e = f.entries() as Record<string, { from?: unknown; to?: unknown; lost?: boolean }>;
+    expect(e['urn:uuid:p1']!.lost).toBeUndefined();
+    const pos = f.positionOf(e['urn:uuid:p1']!.from as never)!;
+    expect(f.positionOf(e['urn:uuid:p1']!.to as never)).toBe(pos);
+    expect(a.read().textBetween(pos - 'the council.'.length, pos)).toBe('the council.');
+    expect(a.read().textBetween(pos, pos + ' Nobody'.length)).toBe(' Nobody');
+  });
+
+  it('keeps a codebook the workspace names where it is', async () => {
+    await running.close();
+    writeFileSync(join(dir, 'codebook.jsonld'), writeCodebook({ scheme: 'urn:uuid:s', label: 'Codebook', codes: [{ id: 'urn:uuid:a', label: 'Trust' }] }));
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'A codebook at the top, named in the settings');
+    const features = JSON.parse(file('.kuraa/features.json')!);
+    features.annotations = { ...features.annotations, coding: true, codebook: 'codebook.jsonld' };
+    writeFileSync(join(dir, '.kuraa/features.json'), JSON.stringify(features, null, 2) + '\n');
+    git(dir, 'commit', '-qam', 'Named');
+    await start();
+    const r = (await (await api('/api/features/annotations/codebook')).json()) as { path: string; book: { codes: { label: string }[] } };
+    expect(r.path).toBe('codebook.jsonld');
+    expect(r.book.codes.map((c) => c.label)).toEqual(['Trust']);
+    await new Promise((res) => setTimeout(res, 500));
+    expect(file('codebook.jsonld')).not.toBeNull();
+    expect(file('.kuraa/codebook.jsonld')).toBeNull();
   });
 });

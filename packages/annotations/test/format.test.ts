@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aboutOf, describePages, findPassage, fromCodePoints, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
+import { aboutOf, describePages, findPassage, fromCodePoints, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
 
 const ME = 'a'.repeat(64);
 const comment = (id: string, value: string, modified = '2026-11-25T10:00:00Z', target: Item['target'] = '../p01.md'): Item => ({
@@ -65,6 +65,27 @@ describe('a passage', () => {
     const moved = 'The council met. Later: I never trusted the council. Nobody came.';
     expect(findPassage(moved, p)).toEqual({ from: moved.lastIndexOf('the council'), to: moved.lastIndexOf('the council') + 11 });
     expect(findPassage('Nothing of it here.', p)).toBeNull();
+  });
+
+  it('may be a point (a code put at the caret): no quote, its start its end, found again by what is around it', () => {
+    const at = text.indexOf(' Nobody');
+    const [quote, place] = selectorsFor(text, at, at) as [{ exact: string; prefix: string; suffix: string }, { start: number; end: number }];
+    expect(quote).toMatchObject({ type: 'TextQuoteSelector', exact: '' });
+    expect(quote.prefix.endsWith('the council.')).toBe(true);
+    expect(quote.suffix.startsWith(' Nobody came')).toBe(true);
+    expect(place.end).toBe(place.start);
+    const about = aboutOf({ id: 'x', target: { source: '../p01.md', selector: [quote, place] } } as Item);
+    expect(isPoint(about)).toBe(true);
+    expect(isPoint(aboutOf({ id: 'y', target: { source: '../p01.md', selector: [{ type: 'TextQuoteSelector', exact: 'council' }] } } as Item))).toBe(false);
+    expect(findPassage(text, about as never)).toEqual({ from: at, to: at });
+    // Text added before it: found where what is around it is now.
+    const moved = `A first line.\n\n${text}`;
+    expect(findPassage(moved, about as never)).toEqual({ from: moved.indexOf(' Nobody'), to: moved.indexOf(' Nobody') });
+    // What was before it changed a little: still found by most of what is around it.
+    const edited = text.replace('the council.', 'the Council.');
+    expect(findPassage(edited, about as never)).toEqual({ from: edited.indexOf(' Nobody'), to: edited.indexOf(' Nobody') });
+    // All that was around it gone: no longer found (kept, as a passage would be).
+    expect(findPassage('# Notes\n\nSomething else entirely, written later on.\n', about as never)).toBeNull();
   });
 
   it('is about the document, or another annotation, as its target says', () => {

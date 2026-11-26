@@ -4,6 +4,7 @@
 //   # Kuraa's Compile: …
 //   title: The Coast        the book's title, when this folder is compiled
 //   format: docx            how it was last compiled
+//   heading: false          compiled inside another, its name is no heading
 //   exclude:                what in this folder is left out of any compile
 //     - notes.md
 //     - research
@@ -28,6 +29,8 @@ export interface FolderCompile {
   /** The folder ('' the top level), without a trailing `/`. */
   folder: string;
   title: string | null;
+  /** Whether its name is a heading where it is compiled inside another (false: no heading, nor a level, of its own). */
+  heading: boolean;
   format: CompileFormat | null;
   /** Names in the folder left out of any compile. */
   exclude: string[];
@@ -57,7 +60,7 @@ export function readCompile(folder: string, text: string): FolderCompile {
   const title = typeof o.title === 'string' && o.title.trim() ? o.title.trim() : null;
   const format = FORMATS.includes(o.format as CompileFormat) ? (o.format as CompileFormat) : null;
   const exclude = Array.isArray(o.exclude) ? o.exclude.filter((x): x is string => typeof x === 'string' && !!x.trim() && !x.includes('/')).map((x) => x.trim()) : [];
-  return { folder, title, format, exclude: [...new Set(exclude)] };
+  return { folder, title, format, heading: o.heading !== false, exclude: [...new Set(exclude)] };
 }
 
 /** A folder's Compile file; null (none) where it says nothing. */
@@ -65,9 +68,13 @@ export function writeCompile(c: FolderCompile): string | null {
   const body: Record<string, unknown> = {};
   if (c.title) body.title = c.title;
   if (c.format) body.format = c.format;
+  if (!c.heading) body.heading = false;
   if (c.exclude.length) body.exclude = [...c.exclude].sort();
   return Object.keys(body).length ? HEADER + stringify(body) : null;
 }
+
+/** The folders whose names are no heading where they are compiled (paths). */
+export const noHeadingPaths = (all: readonly FolderCompile[]): string[] => all.filter((c) => !c.heading && c.folder).map((c) => c.folder);
 
 /** Every path left out, from every folder's settings (a folder's: all in it). */
 export const excludedPaths = (all: readonly FolderCompile[]): string[] => all.flatMap((c) => c.exclude.map((n) => inFolder(c.folder, n)));
@@ -92,7 +99,7 @@ export function afterRename(byFolder: ReadonlyMap<string, FolderCompile>, from: 
   if (!was?.exclude.includes(nameOf(from))) return [];
   const [fromDir, toDir] = [folderOf(from), folderOf(to)];
   if (fromDir === toDir) return [{ ...was, exclude: was.exclude.map((n) => (n === nameOf(from) ? nameOf(to) : n)) }];
-  const into = byFolder.get(toDir) ?? { folder: toDir, title: null, format: null, exclude: [] };
+  const into = byFolder.get(toDir) ?? { folder: toDir, title: null, format: null, heading: true, exclude: [] };
   return [withIncluded(was, nameOf(from), true), withIncluded(into, nameOf(to), false)];
 }
 

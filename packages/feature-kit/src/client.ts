@@ -302,10 +302,12 @@ export interface CoreHost {
   /**
    * Render a document (as you, for the record); a render that cannot start says
    * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
-   * is compiled (0091): its documents in the file tree's order, but those
-   * `exclude` names (paths; a folder's, all in it), joined under `title`.
+   * is compiled (0091): its folders and documents in the file tree's order,
+   * but those `exclude` names (paths; a folder's, all in it), joined under
+   * `title`, how deep each is its heading's level; the folders `noHeading`
+   * names (paths) with no heading, nor a level, of their own.
    */
-  render(path: string, format: RenderFormat, compile?: { exclude?: string[]; title?: string }): Promise<RenderState>;
+  render(path: string, format: RenderFormat, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState>;
   /** A document's latest output in a format. */
   renderOutput(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */

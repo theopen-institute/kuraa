@@ -50,7 +50,7 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   await expect.poll(orderOf(folder)).toBe('c.md b.md a.md');
 
   // From another folder, onto the lower half of Coast: moved there, after it.
-  await row(`loose-${id}/tide.md`).dragTo(row(`${folder}/c.md`), { targetPosition: { x: 20, y: box.height - 2 } });
+  await row(`loose-${id}/tide.md`).dragTo(row(`${folder}/c.md`), { targetPosition: { x: 20, y: Math.round(box.height * 0.75) } });
   await expect.poll(orderOf(folder)).toBe('c.md tide.md b.md a.md');
   await expect(row(`${folder}/tide.md`)).toBeVisible();
 
@@ -75,7 +75,7 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   await expect.poll(rowsIn(page, folder)).toBe('a.md b.md c.md tide.md');
 });
 
-test('a folder compiled to HTML: its chapters in the tree’s order, without what is left out', async ({ page }) => {
+test('a folder compiled to HTML: in the tree’s order, how deep each is its heading’s level, without what is left out', async ({ page }) => {
   test.skip(!podmanWorks(), 'Podman is not installed and running');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
@@ -83,10 +83,16 @@ test('a folder compiled to HTML: its chapters in the tree’s order, without wha
   expect((await doc(`${folder}/a.md`, 'Arrival', 'We came by sea.\n\n# The quay\n\nBoats.')).status).toBe(201);
   expect((await doc(`${folder}/b.md`, 'Boats', 'Small ones.')).status).toBe(201);
   expect((await doc(`${folder}/notes.md`, 'Notes', 'NOT IN THE BOOK.')).status).toBe(201);
-  expect((await api('/api/order', { method: 'POST', body: JSON.stringify({ folder, names: ['b.md', 'a.md'] }) })).status).toBe(200);
+  expect((await doc(`${folder}/North/c.md`, 'Cliffs', 'High ones.')).status).toBe(201);
+  expect((await doc(`${folder}/drafts/d.md`, 'Dunes', 'Sandy ones.')).status).toBe(201);
+  expect((await api('/api/order', { method: 'POST', body: JSON.stringify({ folder, names: ['b.md', 'North', 'a.md', 'drafts'] }) })).status).toBe(200);
   expect((await api('/api/features/compile/include', { method: 'POST', body: JSON.stringify({ body: { path: `${folder}/notes.md`, include: false }, by: { name: 'Writer', email: 'w@example.org', color: '#123456' } }) })).status).toBe(200);
 
   await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
+  // drafts: no heading, from its menu; marked so.
+  await page.getByTestId(`folder:${folder}/drafts`).click({ button: 'right' });
+  await page.getByTestId('context:compile-no-heading').click();
+  await expect(page.getByTestId(`mark:no-heading:${folder}/drafts`)).toBeAttached();
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
   await page.getByTestId('context:compile').click();
   await page.getByTestId('compile-title').fill('The Coast');
@@ -97,10 +103,16 @@ test('a folder compiled to HTML: its chapters in the tree’s order, without wha
   expect(file.suggestedFilename()).toBe(`${folder}.html`);
   const html = readFileSync((await file.path())!, 'utf8');
   expect(html).toContain('The Coast');
-  // Boats, then Arrival (the folder's order), Arrival's own section below its chapter; Notes left out.
-  expect(html.indexOf('Small ones.')).toBeGreaterThan(-1);
-  expect(html.indexOf('Small ones.')).toBeLessThan(html.indexOf('We came by sea.'));
+  // Boats, North (Cliffs in it, a level down), Arrival (its own section below it), Dunes (drafts has no heading): the folder's order; Notes left out.
+  const at = (text: string) => html.indexOf(text);
+  expect(at('Small ones.')).toBeGreaterThan(-1);
+  expect([at('Small ones.'), at('High ones.'), at('We came by sea.'), at('Sandy ones.')]).toEqual([...[at('Small ones.'), at('High ones.'), at('We came by sea.'), at('Sandy ones.')]].sort((a, b) => a - b));
+  expect(html).toMatch(/<h1[^>]*>Boats<\/h1>/);
+  expect(html).toMatch(/<h1[^>]*>North<\/h1>/);
+  expect(html).toMatch(/<h2[^>]*>Cliffs<\/h2>/);
   expect(html).toMatch(/<h2[^>]*>The quay<\/h2>/);
+  expect(html).toMatch(/<h1[^>]*>Dunes<\/h1>/);
+  expect(html).not.toMatch(/<h\d[^>]*>drafts<\/h\d>/);
   expect(html).not.toContain('NOT IN THE BOOK');
   await expect(page.getByTestId('compile-saved')).toBeVisible();
   // Its title and format kept for the folder: a book by its name.

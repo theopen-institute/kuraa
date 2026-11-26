@@ -47,11 +47,20 @@ Files whose names begin `.kuraa-` are the app's, about their folder: not shown, 
 
 **Any folder is compiled into one book** (the core's render of a folder; `@kuraa/compile`, on by
 default, asks for it). **Compile…** on a folder's menu opens its panel: the book's title (the folder's
-name at first), Word, PDF or HTML, **Compile**; the book is saved when it is made. Its documents
+name at first), Word, PDF or HTML, **Compile**; the book is saved when it is made. Its folders and documents
 (Markdown, Quarto's, R Markdown) in the order the file tree shows them, through its folders, are joined
-into one Markdown document, in the render's scratch (the workspace is not touched): the book's title as
-its header; each document's title as its chapter's heading, its own headings one level below, its
-header left out; a document without a title as it is. That is rendered as a document is (pandoc, with
+into one Markdown document, in the render's scratch (the workspace is not touched), the book's title as
+its header. **How deep something is in the tree is its heading's level**: in the folder compiled, a
+folder's name and a document's title are `#` headings, one folder down `##`, and so on; a document's
+own headings go below its title (a document without a title: below its folder's); its header is left
+out; past `######`, a heading stays at `######`. The owner asked first whether folders could be headings
+"all the way down to ######", then, of the switches and settings that came with it, "What's the
+simplest way to handle it, comparable to what scrivener does?": this one rule, the folder's name as the
+tree shows it (rename the folder for another heading), and one thing more, asked for with it:
+**No heading in Compile** on a folder's menu (**Heading in Compile** to undo it; a struck H by its
+name), for a folder that only organises: it adds no heading and no level, what is in it going on at the
+level it is at, as Scrivener's section layouts let a level go untitled. A folder with no documents in the
+book has no heading either. That is rendered as a document is (pandoc, with
 Typst or LaTeX for PDF), finding images in each document's folder. R Markdown's chunks are not run in a
 compile, and show as code. A folder's title and format are kept for next time, and it is marked with a
 book.
@@ -60,13 +69,14 @@ book.
 to undo it: left out of every compile that would have it, as Scrivener's *Include in compile* is the
 document's own; faded and struck through in the file tree. It stays left out when renamed or moved.
 
-Compile keeps these in a plain file in the folder, `.kuraa-compile.yml`: its title and format, and what
-in it is left out, by name, as `.kuraa-order` names them.
+Compile keeps these in a plain file in the folder, `.kuraa-compile.yml`: its title and format, whether
+its name is a heading (`heading: false`), and what in it is left out, by name, as `.kuraa-order` names
+them.
 
 The host renders a folder as it renders a document: `POST /api/renders` with a path ending in `/` (the
-top level `/`), what to leave out (`exclude`) and the title; a renderer may be told the folders where
-what it refers to is found (`resources`). Components get it as `host.render(folder, format, { exclude,
-title })`.
+top level `/`), what to leave out (`exclude`), the folders with no heading (`noHeading`) and the title;
+a renderer may be told the folders where what it refers to is found (`resources`). Components get it as
+`host.render(folder, format, { exclude, noHeading, title })`.
 
 **Components mark files.** A feature may put a mark on a file or folder wherever navigation shows them
 (`marks(path)`: words, an icon, faded or not) and say when its marks changed (`marksChanged`). A
@@ -79,7 +89,8 @@ component may want it.
 
 ### Not yet
 
-Folders' names as part headings in a book; R Markdown's chunks run when compiled; a book's other
+A folder's top level as real parts in a LaTeX PDF (`--top-level-division=part`); a heading other than
+the folder's name; R Markdown's chunks run when compiled; a book's other
 settings (author, a table of contents, numbered chapters, a Word template); a Quarto book or bookdown
 export made from the same order; a corkboard or outliner over the same order; a document in more than
 one book, as a reference.

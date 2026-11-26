@@ -5,7 +5,7 @@
 // The title and format are kept for the folder, for next time.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
-import { excludedPaths, FORMATS, type CompileFormat } from './settings.js';
+import { excludedPaths, FORMATS, noHeadingPaths, type CompileFormat } from './settings.js';
 import { known, load, settingsOf, target } from './store.js';
 import { S } from './strings.js';
 
@@ -104,7 +104,7 @@ async function compile() {
     console.warn('[kuraa] Compile could not keep its settings', e);
   }
   try {
-    state.value = await ctx.host.render(p, format.value, { exclude: leftOut.value, title: t });
+    state.value = await ctx.host.render(p, format.value, { exclude: leftOut.value, noHeading: noHeadingPaths(known.value).filter((x) => !f || x.startsWith(`${f}/`)), title: t });
     if (state.value.state !== 'failed') await follow(true);
   } catch (e) {
     error.value = ctx.explain(e).text;

@@ -23,9 +23,9 @@ const pathOf = (c: Context, v: unknown) => {
 /** What a folder's compile leaves out (workspace paths) and its title, as asked (0091). */
 const compileOf = (c: Context, path: string, body: Record<string, unknown>) => {
   if (!path.endsWith('/')) return undefined;
-  const exclude = Array.isArray(body.exclude) ? body.exclude.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : [];
+  const paths = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : []);
   const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : bookName(path);
-  return { exclude, title };
+  return { exclude: paths(body.exclude), noHeading: paths(body.noHeading), title };
 };
 
 const formatOf = (v: unknown): RenderFormat => {

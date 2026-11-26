@@ -73,6 +73,13 @@ export const MIME: Record<RenderFormat, string> = {
   pdf: 'application/pdf',
 };
 
+/** A folder's compile, as asked (0091): what to leave out and which folders have no heading (workspace paths), and the book's title. */
+export interface CompileOptions {
+  exclude: string[];
+  noHeading: string[];
+  title: string;
+}
+
 /** What renders a path: a folder (ending in `/`: 0091) is compiled to Markdown, and rendered as that. */
 const asRendered = (path: string): string => (path.endsWith('/') ? `${path === '/' ? '' : path}book.md` : path);
 
@@ -94,12 +101,12 @@ export class Renders {
     /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
     madeFrom(path: string): Promise<MadeFrom>;
     /** A folder's documents joined, to compile it (0091: '' the top level); a string says why not. */
-    compile(folder: string, exclude: string[], title: string): Promise<{ text: string; resources: string[] } | string>;
+    compile(folder: string, o: CompileOptions): Promise<{ text: string; resources: string[] } | string>;
     log(m: string): void;
   }) {}
 
   /** What a render of a folder (a path ending in `/`, the top level `/`: 0091) compiles, as it was asked. */
-  private readonly compiling = new Map<string, { exclude: string[]; title: string }>();
+  private readonly compiling = new Map<string, CompileOptions>();
 
   private dir(path: string): string {
     return join(this.o.stateDir, 'renders', createHash('sha1').update(path).digest('hex').slice(0, 20));
@@ -160,12 +167,12 @@ export class Renders {
   }
 
   /** Render a document, or join its render in this format under way. Resolves once it has started; `done` when it has finished. */
-  async render(path: string, format: RenderFormat, person: PresenceUser | null, compile?: { exclude: string[]; title: string }): Promise<{ state: RenderState; done: Promise<RenderState> }> {
+  async render(path: string, format: RenderFormat, person: PresenceUser | null, compile?: CompileOptions): Promise<{ state: RenderState; done: Promise<RenderState> }> {
     const by = person?.name ?? null;
     const key = `${path}\0${format}`;
     const under = this.current.get(key);
     if (under) return under;
-    if (path.endsWith('/')) this.compiling.set(key, compile ?? { exclude: [], title: path === '/' ? 'Book' : path.slice(0, -1).split('/').pop()! });
+    if (path.endsWith('/')) this.compiling.set(key, compile ?? { exclude: [], noHeading: [], title: path === '/' ? 'Book' : path.slice(0, -1).split('/').pop()! });
     const why = await this.unavailable(path);
     const found = this.o.runner.rendererFor(asRendered(path));
     const previous = await this.saved(path, format);
@@ -205,7 +212,7 @@ export class Renders {
     let joined: { text: string; resources: string[] } | null = null;
     if (compile) {
       state.message = 'Putting the documents together…';
-      const r = await this.o.compile(path === '/' ? '' : path.slice(0, -1), compile.exclude, compile.title);
+      const r = await this.o.compile(path === '/' ? '' : path.slice(0, -1), compile);
       if (typeof r === 'string') {
         Object.assign(state, { state: 'failed', message: r, finishedAt: new Date().toISOString(), progress: null });
         return;

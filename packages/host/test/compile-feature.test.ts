@@ -24,7 +24,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 15_000, what =
   throw new Error(`Timed out waiting for ${what}`);
 }
 
-type Folder = { folder: string; title: string | null; format: string | null; exclude: string[] };
+type Folder = { folder: string; title: string | null; format: string | null; heading: boolean; exclude: string[] };
 
 describe('Compile', () => {
   let dir: string;
@@ -69,7 +69,15 @@ describe('Compile', () => {
     expect((await post('include', { path: 'novel/gone.md', include: false })).status).toBe(404);
 
     expect((await post('settings', { folder: 'novel', title: 'The Coast', format: 'pdf' })).status).toBe(200);
-    expect(await folders()).toEqual([{ folder: 'novel', title: 'The Coast', format: 'pdf', exclude: ['notes.md', 'research'] }]);
+    expect(await folders()).toEqual([{ folder: 'novel', title: 'The Coast', format: 'pdf', heading: true, exclude: ['notes.md', 'research'] }]);
+
+    // A folder's name no heading where it is compiled inside another, and a heading again.
+    expect((await post('heading', { folder: 'novel/research', heading: false })).status).toBe(200);
+    expect(read('novel/research/.kuraa-compile.yml')).toMatch(/\nheading: false\n$/);
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('No heading for novel/research/ in Compile');
+    expect((await post('heading', { folder: 'nowhere', heading: false })).status).toBe(404);
+    expect((await post('heading', { folder: 'novel/research', heading: true })).status).toBe(200);
+    expect(existsSync(join(dir, 'novel/research/.kuraa-compile.yml'))).toBe(false);
 
     // Put back, and nothing kept: the file goes.
     await post('include', { path: 'novel/notes.md', include: true });

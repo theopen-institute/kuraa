@@ -41,6 +41,8 @@ export interface FeatureApp {
   explain(error: unknown): { text: string; details: string | null };
   keyLabel(keys: string): string;
   moveFile(from: string, to: string): Promise<void>;
+  /** A feature's marks on files changed (0091): navigation asks again. */
+  marksChanged(): void;
   /** A feature's settings or choice changed: ask the host how features stand again. */
   changed(): void;
 }
@@ -109,6 +111,7 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     explain: (error) => app.explain(error),
     keyLabel: (keys) => app.keyLabel(keys),
     moveFile: (from, to) => app.moveFile(from, to),
+    marksChanged: () => app.marksChanged(),
   };
 }
 

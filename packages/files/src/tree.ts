@@ -2,7 +2,7 @@
 // through, and what each row can do.
 import type { InjectionKey, Ref } from 'vue';
 import type { FileIcon } from '@kuraa/kernel';
-import type { NavigationFile } from '@kuraa/feature-kit/client';
+import type { FileMark, NavigationFile } from '@kuraa/feature-kit/client';
 
 type TreeFile = NavigationFile;
 
@@ -11,7 +11,20 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 /** What the sidebar shows for a file: a document's title, or its filename (a document without a title, or not a document). */
 export const shownName = (f: TreeFile): string => f.title || nameOf(f.path);
 
-export interface Folder { name: string; path: string; folders: Map<string, Folder>; files: TreeFile[] }
+/** A row's content: a folder, or a file. */
+export type Child = { name: string; folder: Folder; file?: undefined } | { name: string; file: TreeFile; folder?: undefined };
+
+export interface Folder {
+  name: string;
+  path: string;
+  folders: Map<string, Folder>;
+  files: TreeFile[];
+  /** What is in it, in the order shown (0091): as arranged, where it has an order; then by name, folders first. */
+  children: Child[];
+}
+
+/** A folder's order, as people arranged it: the names of what is in it ('' the top level); null where it has none. */
+export type Orders = (folder: string) => readonly string[] | null;
 
 /**
  * Folders the app keeps for itself, not shown in the sidebar: .kuraa holds the
@@ -24,32 +37,64 @@ const shown = (path: string) => !APP_FOLDERS.some((d) => path === d || path.star
 /** git keeps no empty folders: a new folder holds this, which the sidebar does not show. */
 const PLACEHOLDER = '.gitkeep';
 
-export function buildTree(files: TreeFile[]): Folder {
-  const root: Folder = { name: '', path: '', folders: new Map(), files: [] };
+export function buildTree(files: TreeFile[], orders: Orders = () => null): Folder {
+  const root: Folder = { name: '', path: '', folders: new Map(), files: [], children: [] };
   for (const f of files.filter((x) => shown(x.path))) {
     const parts = f.path.split('/');
     let dir = root;
     for (const part of parts.slice(0, -1)) {
       let next = dir.folders.get(part);
       if (!next) {
-        next = { name: part, path: dir.path ? `${dir.path}/${part}` : part, folders: new Map(), files: [] };
+        next = { name: part, path: dir.path ? `${dir.path}/${part}` : part, folders: new Map(), files: [], children: [] };
         dir.folders.set(part, next);
       }
       dir = next;
     }
     if (parts[parts.length - 1] !== PLACEHOLDER) dir.files.push(f);
   }
-  // Files in the order people read them: by title (or filename), numbers in order.
+  // By name: folders first, then files in the order people read them, by title (or filename), numbers in order.
+  // Where the folder has an order (0091), what it names comes first, as it names it.
   const sort = (dir: Folder) => {
     dir.files.sort((a, b) => shownName(a).localeCompare(shownName(b), undefined, { numeric: true, sensitivity: 'base' }) || a.path.localeCompare(b.path));
+    const byName: Child[] = [
+      ...[...dir.folders.values()].sort((a, b) => a.name.localeCompare(b.name)).map((folder) => ({ name: folder.name, folder })),
+      ...dir.files.map((file) => ({ name: nameOf(file.path), file })),
+    ];
+    const order = orders(dir.path);
+    if (order) {
+      const named = new Map(byName.map((c) => [c.name, c]));
+      const first = order.flatMap((n) => named.get(n) ?? []);
+      const placed = new Set(first);
+      dir.children = [...first, ...byName.filter((c) => !placed.has(c))];
+    } else dir.children = byName;
     for (const d of dir.folders.values()) sort(d);
   };
   sort(root);
   return root;
 }
 
-/** A folder's folders in the order the sidebar shows them. */
-export const foldersOf = (dir: Folder): Folder[] => [...dir.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+/** A folder's own path, of a file or folder's ('' the top). */
+export const folderOf = (p: string): string => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+
+/**
+ * A folder's names after one of them is put before another (`before`; null:
+ * at the end), taken from where it was, if it was there.
+ */
+export function placeName(names: readonly string[], name: string, before: string | null): string[] {
+  const rest = names.filter((n) => n !== name);
+  const at = before === null ? -1 : rest.indexOf(before);
+  return at < 0 ? [...rest, name] : [...rest.slice(0, at), name, ...rest.slice(at)];
+}
+
+/** A folder's names with one moved up (-1) or down (1) a place; null where it cannot go further. */
+export function nudgeName(names: readonly string[], name: string, by: -1 | 1): string[] | null {
+  const i = names.indexOf(name);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= names.length) return null;
+  const out = [...names];
+  [out[i], out[j]] = [out[j]!, out[i]!];
+  return out;
+}
 
 /** A row of the tree as the keyboard moves through it: a folder or a file, at its depth (1 at the top). */
 export interface TreeItem {
@@ -60,34 +105,38 @@ export interface TreeItem {
   expanded: boolean;
 }
 
-/** The rows the sidebar shows, top to bottom: each folder's folders, then its files; nothing inside a closed folder. */
+/** The rows the sidebar shows, top to bottom, each folder's in its order; nothing inside a closed folder. */
 export function visibleItems(root: Folder, collapsed: ReadonlySet<string>, level = 1): TreeItem[] {
   const out: TreeItem[] = [];
-  for (const f of foldersOf(root)) {
-    const expanded = !collapsed.has(f.path);
-    out.push({ path: f.path, folder: true, level, expanded });
-    if (expanded) out.push(...visibleItems(f, collapsed, level + 1));
+  for (const c of root.children) {
+    if (c.file) {
+      out.push({ path: c.file.path, folder: false, level, expanded: false });
+      continue;
+    }
+    const expanded = !collapsed.has(c.folder.path);
+    out.push({ path: c.folder.path, folder: true, level, expanded });
+    if (expanded) out.push(...visibleItems(c.folder, collapsed, level + 1));
   }
-  for (const f of root.files) out.push({ path: f.path, folder: false, level, expanded: false });
   return out;
 }
 
 /** What a key does on a row of the tree. */
 export type TreeAction =
   | { kind: 'focus'; path: string }
-  | { kind: 'expand' | 'collapse' | 'open' | 'rename' | 'delete' | 'menu'; path: string };
+  | { kind: 'expand' | 'collapse' | 'open' | 'rename' | 'delete' | 'menu' | 'up' | 'down'; path: string };
 
 /**
  * The tree's keys, as a tree view has them: ↑ ↓ Home End move; → opens a
  * folder, or goes into an open one; ← closes it, or goes up to the folder
  * around; Enter (or Space) opens a file or opens and closes a folder; F2
- * renames; Delete deletes; Shift+F10 (or the menu key) shows its menu. Null if
- * the key does nothing here.
+ * renames; Delete deletes; Shift+F10 (or the menu key) shows its menu; Alt+↑
+ * and Alt+↓ move it up and down its folder (0091). Null if the key does nothing here.
  */
-export function treeKey(items: readonly TreeItem[], current: string, key: string, shift = false): TreeAction | null {
+export function treeKey(items: readonly TreeItem[], current: string, key: string, shift = false, alt = false): TreeAction | null {
   const i = items.findIndex((x) => x.path === current);
   const item = items[i];
   if (!item) return items[0] ? { kind: 'focus', path: items[0].path } : null;
+  if (alt) return key === 'ArrowUp' ? { kind: 'up', path: item.path } : key === 'ArrowDown' ? { kind: 'down', path: item.path } : null;
   const focus = (j: number) => {
     const to = items[Math.max(0, Math.min(items.length - 1, j))]!;
     return to.path === current ? null : { kind: 'focus' as const, path: to.path };
@@ -128,6 +177,10 @@ export interface TreeContext {
   /** What is being dragged, and the folder it would land in ('' for the top level). */
   dragging: Ref<string | null>;
   over: Ref<string | null>;
+  /** The row it would land beside (0091), and on which side: a line there. */
+  beside: Ref<{ path: string; side: 'before' | 'after' } | null>;
+  /** Features' marks on a file or folder (its path ending in `/`). */
+  marksOf(path: string): FileMark[];
   select(path: string): void;
   /** Open a file at its first conflict. */
   showConflicts(path: string): void;
@@ -146,8 +199,9 @@ export interface TreeContext {
   contextMenu(e: MouseEvent, path: string, kind: 'file' | 'folder' | 'top'): void;
   dragStart(e: DragEvent, path: string): void;
   dragEnd(): void;
-  dragOver(e: DragEvent, folder: string): void;
-  drop(e: DragEvent, folder: string): void;
+  /** Over a folder's space (onto it, at its end), or over a row (`row`: beside it, or into it if it is a folder). */
+  dragOver(e: DragEvent, folder: string, row?: { path: string; folder: boolean }): void;
+  drop(e: DragEvent, folder: string, row?: { path: string; folder: boolean }): void;
 }
 
 export const TREE: InjectionKey<TreeContext> = Symbol('tree');

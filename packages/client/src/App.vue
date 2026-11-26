@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
-import type { CoreHost, FeatureClientContext, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
+import type { CoreHost, FeatureClientContext, FileMark, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
 import type { Node as PMNode } from 'prosemirror-model';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
@@ -88,6 +88,10 @@ const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
 /** Folders with permissions of their own, for the file list to mark (0069). */
 const folderMarks = shallowRef<{ path: string; readers?: string; writers?: string }[]>([]);
+/** Folders' orders, as people arranged them (0091), by folder ('' the top). */
+const orders = shallowRef<Record<string, string[]>>({});
+/** Features said their marks on files changed (0091): asked again. */
+const marksAsked = ref(0);
 const path = ref<string | null>(null);
 const status = shallowRef<EditorStatus | null>(null);
 const historyKey = ref(0);
@@ -127,7 +131,8 @@ const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;
-  const listed = files.value.some((f) => f.of) ? files.value.filter((f) => !f.of) : files.value;
+  // The app's own files in folders (`.kuraa-order`, a manuscript's: 0091) are not shown: they are about the folder.
+  const listed = files.value.filter((f) => !f.of && !f.path.slice(f.path.lastIndexOf('/') + 1).startsWith('.kuraa-'));
   if (!live && !c) return listed;
   return listed.map((f) => {
     let out = f;
@@ -211,6 +216,7 @@ const featureApp: FeatureApp = {
     const open = path.value;
     await refreshTree(open === from ? to : open?.startsWith(`${from}/`) ? to + open.slice(from.length) : undefined);
   },
+  marksChanged: () => void marksAsked.value++,
   changed: () => void loadFeatures(),
 };
 /** The client halves in use: on for the workspace, and not hidden by this person. */
@@ -324,6 +330,7 @@ function liveContext(id: string): FeatureClientContext {
       explain: (error) => current().explain(error),
       keyLabel: (keys) => current().keyLabel(keys),
       moveFile: (from, to) => current().moveFile(from, to),
+      marksChanged: () => current().marksChanged(),
     };
     liveContexts.set(id, ctx);
   }
@@ -381,6 +388,10 @@ const navApp: NavigationApp = {
   rename: (p) => fileActions.value?.rename(p),
   remove: (p) => void fileActions.value?.remove(p),
   move: (p, folder) => void fileActions.value?.move(p, folder),
+  order: (folder) => orders.value[folder.replace(/\/+$/, '')] ?? null,
+  place: async (p, folder, names) => (await fileActions.value?.place(p, folder, names)) ?? false,
+  sortByName: (folder) => void fileActions.value?.sortByName(folder),
+  marks: (p) => fileMarks(p),
   fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
 };
@@ -429,6 +440,18 @@ function featureFileMenu(p: string): ContextItem[] {
       return (f.feature.fileMenu?.(p, f.ctx) ?? []).map((i) => ({ label: i.label, run: i.run, testid: i.testid }));
     } catch (e) {
       console.error(`[kuraa] the feature ${f.feature.id} could not add to a file's menu`, e);
+      return [];
+    }
+  });
+}
+/** Features' marks on a file or folder (0091), for navigation. */
+function fileMarks(p: string): FileMark[] {
+  return features.value.flatMap((f) => {
+    try {
+      const m = f.feature.marks?.(p, f.ctx);
+      return m ? [m] : [];
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.feature.id} could not mark a file`, e);
       return [];
     }
   });
@@ -773,6 +796,7 @@ async function refreshTree(selectPath?: string | null) {
       workspace.value = ws;
       files.value = tree.files;
       folderMarks.value = tree.folders ?? [];
+      orders.value = tree.orders ?? {};
       error.value = null;
       // Which features are on may have come with the files (a merge): asked again.
       void loadFeatures();
@@ -1052,7 +1076,7 @@ onBeforeUnmount(() => {
 
 // What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
 watch([workspaceTitle, connection, views, panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
-watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
+watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEvents.files.tell());
 </script>
 
 <template>
@@ -1225,6 +1249,7 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :shared="sharedWithDevices"
       :feature-items="featureFileMenu"
       :new-items="viewItems"
+      :orders="orders"
       @document-settings="openDocumentSettings"
       @created="(p) => (titleFocus = p)"
       @permissions="openPermissions"

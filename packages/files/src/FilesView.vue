@@ -8,7 +8,7 @@
 // a folder (or the space below the files) to move it there.
 import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, useTemplateRef } from 'vue';
 import type { NavigationContext } from '@kuraa/feature-kit/client';
-import { buildTree, TREE, treeKey, visibleItems } from './tree.js';
+import { buildTree, folderOf, nudgeName, placeName, TREE, treeKey, visibleItems, type Folder } from './tree.js';
 import { S } from './strings.js';
 import TreeFolder from './TreeFolder.vue';
 
@@ -20,7 +20,10 @@ const files = shallowRef(ctx.files());
 const folders = shallowRef(ctx.folders());
 const selected = ref(ctx.selected());
 const workspaceName = ref(ctx.workspaceName());
+/** Told of a change: what is asked of the core as it is drawn (orders, marks) is asked again. */
+const changes = ref(0);
 const stopChange = ctx.onChange(() => {
+  changes.value++;
   files.value = ctx.files();
   folders.value = ctx.folders();
   workspaceName.value = ctx.workspaceName();
@@ -30,7 +33,19 @@ const stopChange = ctx.onChange(() => {
   }
 });
 
-const tree = computed(() => buildTree(files.value));
+const tree = computed(() => {
+  void changes.value;
+  return buildTree(files.value, (folder) => ctx.order(folder));
+});
+/** A folder of the tree, by its path ('' the top). */
+function folderAt(path: string): Folder | null {
+  let dir: Folder | undefined = tree.value;
+  for (const part of path ? path.split('/') : []) dir = dir?.folders.get(part);
+  return dir ?? null;
+}
+/** The names in a folder, in the order shown. */
+const namesIn = (folder: string) => folderAt(folder)?.children.map((c) => c.name) ?? [];
+const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 const collapsed = ref(new Set<string>());
 const expand = (folder: string) => {
   if (!collapsed.value.has(folder)) return;
@@ -74,15 +89,32 @@ onBeforeUnmount(() => {
   stopOpening();
 });
 
-const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
-
-// Moving: by dragging a file or folder onto a folder (or anywhere in it), or
-// onto the space below the files. A move is a rename (saved, as everything is).
+// Moving and arranging (0091): drag a file or folder between two rows to put
+// it there (in that folder, moved if it was elsewhere), onto a folder to put
+// it in at the end, or onto the space below the files for the top level.
+// A move is a rename; a place, the folder's order (both saved, as everything is).
 const dragging = ref<string | null>(null);
 const over = ref<string | null>(null);
+const beside = ref<{ path: string; side: 'before' | 'after' } | null>(null);
 let opening: { folder: string; timer: ReturnType<typeof setTimeout> } | null = null;
-const canDrop = (from: string | null, folder: string) =>
-  !!from && from !== folder && !folder.startsWith(`${from}/`) && folderOf(from) !== folder;
+/** Whether what is dragged may go into a folder: not into itself, nor (unless `here`) the folder it is in. */
+const canDrop = (from: string | null, folder: string, here = false) =>
+  !!from && from !== folder && !folder.startsWith(`${from}/`) && (here || folderOf(from) !== folder);
+
+/** Where a drop would land: in a folder, beside a row (or at the folder's end), or nowhere. */
+type Landing = { folder: string; beside: { path: string; side: 'before' | 'after' } | null };
+function landing(e: DragEvent, folder: string, row?: { path: string; folder: boolean }): Landing | null {
+  const from = dragging.value;
+  if (!row) return canDrop(from, folder) ? { folder, beside: null } : null;
+  if (row.path === from) return null;
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const y = box.height ? (e.clientY - box.top) / box.height : 0.5;
+  // A folder's row: its top edge before it, its bottom edge (while closed) after it, the rest into it.
+  if (row.folder && y >= 0.3 && (y <= 0.7 || !collapsed.value.has(row.path))) return canDrop(from, row.path) ? { folder: row.path, beside: null } : null;
+  const side = row.folder ? (y < 0.3 ? 'before' : 'after') : y < 0.5 ? 'before' : 'after';
+  const into = folderOf(row.path);
+  return canDrop(from, into, true) ? { folder: into, beside: { path: row.path, side } } : null;
+}
 
 function dragStart(e: DragEvent, path: string) {
   e.stopPropagation();
@@ -100,18 +132,22 @@ function stopOpening() {
 function dragEnd() {
   dragging.value = null;
   over.value = null;
+  beside.value = null;
   stopOpening();
 }
 
-function dragOver(e: DragEvent, folder: string) {
-  if (!canDrop(dragging.value, folder)) return;
+function dragOver(e: DragEvent, folder: string, row?: { path: string; folder: boolean }) {
+  const at = landing(e, folder, row);
+  if (!at) return;
   e.preventDefault();
   e.stopPropagation();
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-  over.value = folder;
+  over.value = at.beside ? null : at.folder;
+  beside.value = at.beside;
+  folder = at.folder;
   // Hovering a closed folder opens it after a moment.
   // Once it has opened, it may open again (closed and hovered in another drag).
-  if (folder && collapsed.value.has(folder) && opening?.folder !== folder) {
+  if (!at.beside && folder && collapsed.value.has(folder) && opening?.folder !== folder) {
     stopOpening();
     opening = {
       folder,
@@ -123,15 +159,32 @@ function dragOver(e: DragEvent, folder: string) {
   }
 }
 
-function drop(e: DragEvent, folder: string) {
-  if (!canDrop(dragging.value, folder)) return;
+function drop(e: DragEvent, folder: string, row?: { path: string; folder: boolean }) {
+  const at = landing(e, folder, row);
+  if (!at) return;
   e.preventDefault();
   e.stopPropagation();
   const from = dragging.value!;
   dragEnd();
+  folder = at.folder;
   if (folder) expand(folder);
-  if (lastFocused.value === from) lastFocused.value = `${folder ? `${folder}/` : ''}${from.slice(from.lastIndexOf('/') + 1)}`;
-  ctx.move(from, folder);
+  const name = nameOf(from);
+  if (lastFocused.value === from) lastFocused.value = `${folder ? `${folder}/` : ''}${name}`;
+  if (at.beside) {
+    // Before a row, or before the one after it (none: at the end).
+    const rest = namesIn(folder).filter((n) => n !== name);
+    const by = nameOf(at.beside.path);
+    const before = at.beside.side === 'before' ? by : rest[rest.indexOf(by) + 1] ?? null;
+    void ctx.place(from, folder, placeName(rest, name, before));
+  } else if (ctx.order(folder)) void ctx.place(from, folder, placeName(namesIn(folder), name, null));
+  else ctx.move(from, folder);
+}
+
+/** Alt+↑ or Alt+↓ on a row: up or down a place in its folder, which keeps that order from then on. */
+function nudge(path: string, by: -1 | 1) {
+  const folder = folderOf(path);
+  const names = nudgeName(namesIn(folder), nameOf(path), by);
+  if (names) void ctx.place(path, folder, names).then(() => focusRow(path));
 }
 
 // The right-click menu (also Shift+F10 or the menu key on a row): the core's,
@@ -186,10 +239,10 @@ async function focusRow(path: string) {
 function onTreeKey(e: KeyboardEvent) {
   const el = e.target as HTMLElement;
   // Keys on a row itself, not on its buttons.
-  if (el.getAttribute('role') !== 'treeitem' || e.altKey || e.ctrlKey || (e.metaKey && e.key !== 'Backspace')) return;
+  if (el.getAttribute('role') !== 'treeitem' || e.ctrlKey || (e.metaKey && e.key !== 'Backspace')) return;
   const key = e.key === 'Backspace' && e.metaKey ? 'Delete' : e.key;
   const path = el.dataset.path!;
-  const action = treeKey(items.value, path, key, e.shiftKey);
+  const action = treeKey(items.value, path, key, e.shiftKey, e.altKey);
   if (!action) return;
   e.preventDefault();
   e.stopPropagation();
@@ -206,6 +259,8 @@ function onTreeKey(e: KeyboardEvent) {
     case 'rename': ctx.rename(folder ? `${action.path}/` : action.path); break;
     case 'delete': if (!folder) ctx.remove(action.path); break;
     case 'menu': menuFor(el, action.path, folder ? 'folder' : 'file'); break;
+    case 'up': nudge(action.path, -1); break;
+    case 'down': nudge(action.path, 1); break;
   }
 }
 
@@ -226,6 +281,11 @@ provide(TREE, {
   },
   dragging,
   over,
+  beside,
+  marksOf: (path) => {
+    void changes.value;
+    return ctx.marks(path);
+  },
   select: (path) => ctx.open(path),
   showConflicts: (path) => ctx.openConflicts(path),
   prefetch: (path, now) => ctx.prefetch(path, now),
@@ -296,6 +356,17 @@ revealFolderOf(selected.value);
 .tree-dir.drop-target > ul { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
 .tree-scroll.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
 .tree .dragging { opacity: 0.45; }
+/* Where a dragged row would land (0091): a line at the row's edge, from its indent. */
+.tree li.drop-before::before, .tree li.drop-after::after {
+  content: ''; position: absolute; left: var(--drop-indent, 8px); right: 4px; height: 2px; border-radius: 1px;
+  background: var(--accent); pointer-events: none; z-index: 1;
+}
+.tree li.drop-before::before { top: -1px; }
+.tree li.drop-after::after { bottom: -1px; }
+/* Features' marks (0091): a small icon by the name; a file left out of something, faded. */
+.tree-mark { flex: none; display: inline-flex; align-items: center; color: var(--muted); }
+.tree-mark .file-icon { margin: 0; }
+.tree-file.muted > .tree-row .tree-name, .tree-dir.muted > .tree-dir-row .tree-name { opacity: 0.5; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .tree [draggable='true'] { cursor: grab; }
 .tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions,
 .tree-file:focus-within > .tree-actions, .tree-dir:focus > .tree-dir-row > .tree-actions, .tree-actions:focus-within { display: flex; }

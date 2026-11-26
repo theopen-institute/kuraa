@@ -135,15 +135,15 @@ on by default that a workspace can turn off (Settings › Workspace, under Featu
 navigation, only what is done to files, and with no layout on, a menu at the upper left (the
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
-[0089](docs/decisions/0089-preview-search-and-outline-are-components.md)). **Manuscript**, turned on
-by a workspace, keeps documents in an order of your choosing, from anywhere in the workspace (each in one
-manuscript at most), as Quarto books (a `_quarto-<name>.yml` profile each, beside a top-level
-`_quarto.yml`): **New manuscript…** in the Manuscript beside the file tree, or **Make a manuscript** on a
-folder's right-click menu; then reorder, in parts and appendices, and add chapters with **New chapter**
-(made in the manuscript's home folder). With **Manuscripts keep their files** on (Settings › Workspace,
-under Manuscript), chapters are moved into their manuscript's home folder, a part's into a folder of its
-name
-([0088](docs/decisions/0088-a-manuscript-is-a-quarto-book.md), [0090](docs/decisions/0090-manuscripts-apart-from-folders.md)).
+[0089](docs/decisions/0089-preview-search-and-outline-are-components.md)).
+
+Any folder can be **arranged by hand**: drag a file or folder between two rows of the file tree (a line
+shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is kept in a plain
+`.kuraa-order` file in the folder (one name per line), which moves with it; whatever it does not name
+follows by name, and **Sort by name** on the folder's menu forgets it. **Manuscript**, turned on by a
+workspace, makes a folder a manuscript (**Make a manuscript** on its menu, marked with a book): its
+documents, in the folder's order, are one book, and any of them, or a folder of them, can be **left
+out** (shown faded) from its menu ([0091](docs/decisions/0091-order-and-manuscripts-over-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

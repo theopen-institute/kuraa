@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NavigationFile as TreeFile } from '@kuraa/feature-kit/client';
-import { buildTree, treeKey, visibleItems, type TreeItem } from '../src/tree.js';
+import { buildTree, nudgeName, placeName, treeKey, visibleItems, type TreeItem } from '../src/tree.js';
 
 describe('the file tree for the keyboard', () => {
   const file = (path: string, title?: string): TreeFile => ({ path, type: 'pandoc-markdown', title: title ?? null });
@@ -47,5 +47,29 @@ describe('the file tree for the keyboard', () => {
 
   it('lands on the first row when the row with focus has gone', () => {
     expect(treeKey(items(), 'gone.md', 'ArrowDown')).toEqual({ kind: 'focus', path: 'notes' });
+  });
+
+  it('moves a row up and down its folder with Alt+↑ and Alt+↓', () => {
+    expect(treeKey(items(), 'a.md', 'ArrowUp', false, true)).toEqual({ kind: 'up', path: 'a.md' });
+    expect(treeKey(items(), 'notes', 'ArrowDown', false, true)).toEqual({ kind: 'down', path: 'notes' });
+    expect(treeKey(items(), 'a.md', 'Enter', false, true)).toBeNull();
+  });
+});
+
+describe('the file tree in an order of its own (0091)', () => {
+  const file = (path: string, title?: string): TreeFile => ({ path, type: 'pandoc-markdown', title: title ?? null });
+  const files = [file('b.md', 'Beta'), file('a.md', 'Alpha'), file('notes/x.md', 'X'), file('notes/w.md', 'W'), file('c.md', 'Gamma')];
+
+  it('shows what a folder’s order names first, as it names it, files and folders together; the rest after, by name', () => {
+    const orders = (f: string) => ({ '': ['c.md', 'notes', 'gone.md'], notes: ['x.md'] } as Record<string, string[]>)[f] ?? null;
+    expect(visibleItems(buildTree(files, orders), new Set()).map((x) => x.path)).toEqual(['c.md', 'notes', 'notes/x.md', 'notes/w.md', 'a.md', 'b.md']);
+  });
+
+  it('puts a name before another, or at the end, and nudges one up or down', () => {
+    expect(placeName(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b']);
+    expect(placeName(['a', 'b', 'c'], 'a', null)).toEqual(['b', 'c', 'a']);
+    expect(placeName(['a', 'b'], 'new', 'b')).toEqual(['a', 'new', 'b']);
+    expect(nudgeName(['a', 'b', 'c'], 'b', -1)).toEqual(['b', 'a', 'c']);
+    expect(nudgeName(['a', 'b', 'c'], 'c', 1)).toBeNull();
   });
 });

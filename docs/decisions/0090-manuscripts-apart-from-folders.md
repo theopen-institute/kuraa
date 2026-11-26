@@ -1,5 +1,8 @@
 # 0090 · Manuscripts apart from folders
 
+**Status: replaced** by [0091](0091-order-and-manuscripts-over-folders.md): a manuscript is a folder
+arranged by hand, and nothing of what follows is built any more.
+
 > Revises [0088](0088-a-manuscript-is-a-quarto-book.md): a manuscript was a folder's `_quarto.yml`,
 > its chapters that folder's documents.
 

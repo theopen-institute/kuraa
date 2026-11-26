@@ -4,7 +4,7 @@
 // connection, the core's menus and the views; a view shows the files; what is
 // done to files is the core's (FileActions.vue). With no layout that gives
 // navigation, the core's own menu at the upper left (FallbackMenu.vue).
-import type { ConnectionInfo, FeatureClientContext, FeatureMenuItem, LayoutContext, NavigationContext, NavigationFile } from '@kuraa/feature-kit/client';
+import type { ConnectionInfo, FeatureClientContext, FeatureMenuItem, FileMark, LayoutContext, NavigationContext, NavigationFile } from '@kuraa/feature-kit/client';
 import type { FileIcon } from '@kuraa/kernel';
 import type { HostApi } from './api.js';
 import type { EditorStatus, WorkspaceLink } from './types.js';
@@ -32,6 +32,10 @@ export interface NavigationApp {
   rename(path: string): void;
   remove(path: string): void;
   move(path: string, folder: string): void;
+  order(folder: string): string[] | null;
+  place(path: string, folder: string, names: string[]): Promise<boolean>;
+  sortByName(folder: string): void;
+  marks(path: string): FileMark[];
   fileMenu(path: string, at: { x: number; y: number }): void;
   icon(file: NavigationFile): FileIcon | undefined;
 }
@@ -98,6 +102,10 @@ export function navigationContext(base: FeatureClientContext, app: NavigationApp
     rename: (path) => app.rename(path),
     remove: (path) => app.remove(path),
     move: (path, folder) => app.move(path, folder),
+    order: (folder) => app.order(folder),
+    place: (path, folder, names) => app.place(path, folder, names),
+    sortByName: (folder) => app.sortByName(folder),
+    marks: (path) => app.marks(path),
     fileMenu: (path, at) => app.fileMenu(path, at),
     icon: (file) => app.icon(file),
   };

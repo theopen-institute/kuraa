@@ -27,6 +27,12 @@ export interface ClientFeature {
   documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
+  /**
+   * A mark it puts on a file or a folder (its path ending in `/`) wherever
+   * navigation shows them (0091: a manuscript's folder, a document left out of
+   * it), or null. Asked again when it says its marks changed (`marksChanged`).
+   */
+  marks?(path: string, ctx: FeatureClientContext): FileMark | null;
   /** Its parts of Settings: the workspace's (its settings, while it is on there) and yours. */
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
   /** Lines for the Markdown and shortcuts sheet: what it adds to typing and keys. */
@@ -161,6 +167,23 @@ export interface NavigationContext extends FeatureClientContext {
   remove(path: string): void;
   /** Move a file or folder into a folder ('' for the top). */
   move(path: string, folder: string): void;
+  /**
+   * A folder's order (0091), as people arranged it: the names of its files and
+   * folders ('' for the top level); null where it has none (shown by name).
+   * What it does not name follows what it does.
+   */
+  order(folder: string): string[] | null;
+  /**
+   * Put a file or folder in a folder ('' for the top) at a place: moved there
+   * if it is elsewhere, and the folder's order made `names` (the names of all
+   * in it, as they are to be shown, its own among them). Whether it was done
+   * (what went wrong is said).
+   */
+  place(path: string, folder: string, names: string[]): Promise<boolean>;
+  /** A folder's order forgotten: shown by name again. */
+  sortByName(folder: string): void;
+  /** Features' marks on a file or a folder (`path` ending in `/`), as they are now (0091). */
+  marks(path: string): FileMark[];
   /** The core's menu for a file, a folder (`path` ending in `/`) or the top level (''), at a point. */
   fileMenu(path: string, at: { x: number; y: number }): void;
   /** A file's icon, as its type defines it (0023). */
@@ -202,6 +225,20 @@ export interface FeatureClientContext {
    * saying why, where it cannot be (someone may not, a file is there already).
    */
   moveFile(from: string, to: string): Promise<void>;
+  /** Its marks on files changed (0091): navigation asks for them again. */
+  marksChanged(): void;
+}
+
+/** A feature's mark on a file or folder in navigation (0091). */
+export interface FileMark {
+  /** What it means, in words: shown on pointing, and said to screen readers. */
+  label: string;
+  /** Drawn beside the name. */
+  icon?: FileIcon;
+  /** The file shown faded (left out of something). */
+  muted?: boolean;
+  /** For tests. */
+  testid?: string;
 }
 
 /** A match to open a file at (0089). */

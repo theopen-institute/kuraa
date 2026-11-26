@@ -28,6 +28,8 @@ const props = defineProps<{
   featureItems?: (path: string) => ContextItem[];
   /** What the navigation views add to ＋ (0087), after New file and New folder. */
   newItems?: () => FeatureMenuItem[];
+  /** Folders' orders, as people arranged them (0091), by folder ('' the top). */
+  orders?: Record<string, string[]>;
 }>();
 const emit = defineEmits<{
   /** Something changed: refresh, and open this file afterwards (null: none; omitted: as is). */
@@ -54,6 +56,9 @@ async function act(fn: () => Promise<unknown>, select?: string | null): Promise<
     return false;
   }
 }
+
+const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
 /** The folder of the open file: where a new folder goes unless one is named. */
 const here = () => (props.selected?.includes('/') ? props.selected.slice(0, props.selected.lastIndexOf('/') + 1) : '');
@@ -94,7 +99,15 @@ async function create(folder = ''): Promise<string | null> {
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   emit('reveal', path);
   emit('created', path);
-  return (await act(() => props.api.createFile(path, ''), path)) ? path : null;
+  // In a folder arranged by hand (0091): after the open file, where it is in it, else at the end.
+  const order = props.orders?.[folder];
+  const after = props.selected && folderOf(props.selected) === folder ? nameOf(props.selected) : null;
+  const name = nameOf(path);
+  const placed = order ? (after && order.includes(after) ? order.flatMap((n) => (n === after ? [n, name] : [n])) : [...order, name]) : null;
+  return (await act(async () => {
+    await props.api.createFile(path, '');
+    if (placed) await props.api.setOrder(folder, placed).catch(() => undefined);
+  }, path)) ? path : null;
 }
 
 // A new document's title, while it is open; once it is left, its filename is made from that title.
@@ -183,7 +196,40 @@ async function remove(path: string) {
   }
 }
 
-const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+/**
+ * Put a file or folder in a folder ('' the top) at a place (0091): moved
+ * there if it is elsewhere, and the folder's order made `names`. Whether it was.
+ */
+async function place(from: string, folder: string, names: string[]): Promise<boolean> {
+  from = from.replace(/\/+$/, '');
+  folder = folder.replace(/\/+$/, '');
+  const moving = folderOf(from) !== folder;
+  if (moving && !canMove(from, folder)) return false;
+  const to = `${folder ? `${folder}/` : ''}${nameOf(from)}`;
+  const selected = props.selected;
+  const follow = selected === from ? to : selected?.startsWith(`${from}/`) ? to + selected.slice(from.length) : selected;
+  if (moving && folder) emit('reveal', `${folder}/`);
+  let moved = false;
+  try {
+    if (moving) {
+      await props.api.renameFile(from, to);
+      moved = true;
+    }
+    await props.api.setOrder(folder, names);
+    emit('changed', follow);
+    return true;
+  } catch (e) {
+    if (moved) emit('changed', follow);
+    emit('error', e);
+    return false;
+  }
+}
+
+/** A folder's order forgotten (0091): by name again. */
+async function sortByName(folder: string) {
+  await act(() => props.api.setOrder(folder.replace(/\/+$/, ''), []), props.selected);
+}
+
 /** Whether a file or folder may be moved into a folder ('' the top): not into itself, nor where it is. */
 const canMove = (from: string, folder: string) => !!from && from !== folder && !folder.startsWith(`${from}/`) && folderOf(from) !== folder;
 
@@ -205,7 +251,7 @@ async function move(from: string, folder: string) {
 // views add.
 const menu = shallowRef<{ x: number; y: number; items: ContextItem[]; plus?: boolean } | null>(null);
 
-function menuItems(path: string): ContextItem[] {
+function menuItems(path: string, plus = false): ContextItem[] {
   const kind = path === '' ? 'top' : path.endsWith('/') ? 'folder' : 'file';
   if (kind === 'file') {
     const file = props.files.find((f) => f.path === path);
@@ -222,6 +268,8 @@ function menuItems(path: string): ContextItem[] {
   return [
     { label: S.tree.newFileMenu(where), run: () => void create(folder), testid: 'context:new-file' },
     { label: S.tree.newFolderMenu(where), run: () => void newFolder(folder), testid: 'context:new-folder' },
+    // Arranged by hand (0091): back to by name. Not in ＋, which is for making.
+    ...(!plus && props.orders?.[folder] ? [{ label: S.tree.sortByName, run: () => void sortByName(folder), testid: 'context:sort-by-name' }] : []),
     ...(kind === 'folder' ? [
       ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', `${folder}/`), testid: 'context:folder-permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void renameFolder(folder), testid: 'context:rename-folder' },
@@ -248,7 +296,7 @@ function newMenu(at: HTMLElement) {
   plusAt = at;
   const box = at.getBoundingClientRect();
   const extra = (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 }));
-  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems(''), ...extra], plus: true };
+  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems('', true), ...extra], plus: true };
 }
 function menuClosed(outside?: Event) {
   closedByPlus = !!menu.value?.plus && !!outside && !!plusAt?.contains(outside.target as Node);
@@ -257,7 +305,7 @@ function menuClosed(outside?: Event) {
 /** Whether ＋'s menu is open (for its button's aria-expanded). */
 const newMenuOpen = computed(() => !!menu.value?.plus);
 
-defineExpose({ create, newFolder, rename, remove, move, fileMenu, newMenu, newMenuOpen });
+defineExpose({ create, newFolder, rename, remove, move, place, sortByName, fileMenu, newMenu, newMenuOpen });
 </script>
 
 <template>

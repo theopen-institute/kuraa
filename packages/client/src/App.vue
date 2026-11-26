@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
-import type { CoreHost, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
+import type { CoreHost, FeatureClientContext, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
 import type { Node as PMNode } from 'prosemirror-model';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
@@ -289,6 +289,27 @@ const layout = computed(() => layouts.value.find((f) => f.feature.layout!.id ===
 /** No layout gives navigation: the core's own menu at the upper left. */
 const fallback = computed(() => !layout.value?.feature.layout?.navigation);
 const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
+/**
+ * A feature's context for navigation that is always its current one: how
+ * features stand changes (one turned on, a merge), and their contexts are made
+ * anew, but a layout or view drawn stays drawn, asking through this.
+ */
+const liveContexts = new Map<string, FeatureClientContext>();
+function liveContext(id: string): FeatureClientContext {
+  let ctx = liveContexts.get(id);
+  if (!ctx) {
+    const current = () => (navFeatures.value.find((f) => f.feature.id === id) ?? features.value.find((f) => f.feature.id === id))?.ctx;
+    ctx = new Proxy({} as FeatureClientContext, {
+      get: (_, key) => {
+        const c = current();
+        if (!c) throw new Error(`the feature ${id} is not in use`);
+        return c[key as keyof FeatureClientContext];
+      },
+    });
+    liveContexts.set(id, ctx);
+  }
+  return ctx;
+}
 const navEvents = navigationEvents();
 const prefetcher = new Prefetcher();
 onBeforeUnmount(() => prefetcher.stop());
@@ -327,7 +348,7 @@ const navApp: NavigationApp = {
   views: () => views.value.map(({ active, view }) => ({
     key: `${active.feature.id}:${view.id}`,
     label: view.label,
-    mount: (el: HTMLElement) => view.mount(el, navigationContext(active.ctx, navApp, navEvents)),
+    mount: (el: HTMLElement) => view.mount(el, navigationContext(liveContext(active.feature.id), navApp, navEvents)),
   })),
   workspaceName: () => workspace.value?.name ?? S.app.files,
   files: () => shownFiles.value,
@@ -345,14 +366,20 @@ const navApp: NavigationApp = {
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
 };
 /** What the views add to ＋. */
-const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(active.ctx, navApp, navEvents))));
-/** The layout drawn: anew only for another layout (or another workspace's features). */
-const layoutMount = computed(() => {
-  const l = layout.value;
-  if (!l) return null;
-  return (el: HTMLElement) => l.feature.layout!.mount(el, layoutContext(l.ctx, navApp, navEvents));
-});
+const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(liveContext(active.feature.id), navApp, navEvents))));
 const layoutKey = computed(() => (layout.value ? `${layout.value.feature.id}:${layout.value.feature.layout!.id}` : ''));
+/** The layout drawn: anew only for another layout, never because how features stand changed. */
+let drawnLayout: { key: string; mount: (el: HTMLElement) => () => void } | null = null;
+const layoutMount = computed(() => {
+  const key = layoutKey.value;
+  const l = layout.value;
+  if (!key || !l) return null;
+  if (drawnLayout?.key !== key) {
+    const feature = l.feature;
+    drawnLayout = { key, mount: (el: HTMLElement) => feature.layout!.mount(el, layoutContext(liveContext(feature.id), navApp, navEvents)) };
+  }
+  return drawnLayout.mount;
+});
 
 /** Open a file at a range of its text (a feature asked). */
 async function openAtText(p: string, at?: { from: number; to: number }) {

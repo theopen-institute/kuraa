@@ -46,7 +46,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 };
 
 /** Put a box at a place on screen: below it, or above where there is no room below. */
-function place(box: HTMLElement, at: ScreenBox) {
+export function place(box: HTMLElement, at: ScreenBox) {
   box.style.left = `${Math.max(8, Math.min(at.left, window.innerWidth - box.offsetWidth - 8))}px`;
   const below = at.bottom + 4;
   box.style.top = below + box.offsetHeight > window.innerHeight - 8 && at.top - box.offsetHeight - 4 > 8 ? `${at.top - box.offsetHeight - 4}px` : `${below}px`;

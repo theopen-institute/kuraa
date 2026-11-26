@@ -38,10 +38,11 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
   await expect(page.getByTestId('status')).toContainText('Connected');
   const editor = page.getByTestId('editor');
 
-  // Annotations on, and coding with it (its own setting, under Annotations).
+  // Annotations on, and coding with it (its own switch, shown under Annotations once it is on).
   await openSettings(page);
+  await expect(page.getByTestId('annotations-coding')).toHaveCount(0);
   await settingsSave(page, 'feature-annotations', true, '/api/features/annotations');
-  await page.getByTestId('open-feature-annotations').click();
+  await expect(page.getByTestId('annotations-comments')).toBeChecked();
   await settingsSave(page, 'annotations-coding', true, '/api/features/annotations');
   await page.getByTestId('settings-close').click();
   await expect(page.locator('.editor-scroll[data-features~="annotations"]')).toBeVisible();
@@ -130,9 +131,7 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
 
   // Coding off, then annotations: nothing of them shown; the codebook kept.
   await openSettings(page);
-  await page.getByTestId('open-feature-annotations').click();
   await settingsSave(page, 'annotations-coding', false, '/api/features/annotations');
-  await page.getByTestId('subpanel-back').click();
   await settingsSave(page, 'feature-annotations', false, '/api/features/annotations');
   await page.getByTestId('settings-close').click();
   await expect(tags).toHaveCount(0);

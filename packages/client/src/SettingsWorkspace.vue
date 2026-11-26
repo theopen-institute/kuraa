@@ -51,6 +51,15 @@ async function setFeature(f: FeatureStatus, on: boolean) {
 }
 /** A feature's settings for the workspace, open as a subpanel. */
 const featureSub = ref<string | null>(null);
+/** Those drawn in the list instead, under the feature's checkbox: by feature, each mounted once while it is on. */
+const inlineMounts = computed(() => {
+  const out = new Map<string, (el: HTMLElement) => () => void>();
+  for (const part of props.featureParts) {
+    const panel = part.feature.settings?.workspace;
+    if (panel?.inline) out.set(part.feature.id, (el: HTMLElement) => panel.mount(el, part.ctx));
+  }
+  return out;
+});
 const subPart = computed(() => props.featureParts.find((f) => f.feature.id === featureSub.value && f.feature.settings?.workspace) ?? null);
 const subMount = computed(() => {
   const part = subPart.value;
@@ -82,7 +91,8 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
         <fieldset class="pref-group">
           <legend>{{ S.features.title }}</legend>
           <p class="pref-note">{{ S.features.about }}</p>
-          <label v-for="f in features" :key="f.id" class="component">
+          <template v-for="f in features" :key="f.id">
+          <label class="component">
             <input
               type="checkbox"
               :checked="f.workspace"
@@ -97,11 +107,13 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
               <span v-if="!f.host" class="component-about">{{ S.features.offHere }}</span>
             </span>
           </label>
+          <FeatureMount v-if="f.workspace && inlineMounts.get(f.id)" class="feature-inline" :mount="inlineMounts.get(f.id)!" :testid="`feature-inline-${f.id}`" />
+          </template>
           <p v-if="features.some((f) => !f.mayChange)" class="pref-note">{{ S.features.mayNotChange }}</p>
           <div v-if="featureError" class="components-error" role="alert">{{ featureError }}</div>
         </fieldset>
         <template v-for="p in featureParts" :key="p.feature.id">
-          <SubpanelLink v-if="p.feature.settings?.workspace" :title="p.feature.settings.workspace.label" :about="p.status.description" :testid="`open-feature-${p.feature.id}`" @open="featureSub = p.feature.id" />
+          <SubpanelLink v-if="p.feature.settings?.workspace && !p.feature.settings.workspace.inline" :title="p.feature.settings.workspace.label" :about="p.status.description" :testid="`open-feature-${p.feature.id}`" @open="featureSub = p.feature.id" />
         </template>
       </section>
       <section v-if="runner && packageEngine" class="settings-part">

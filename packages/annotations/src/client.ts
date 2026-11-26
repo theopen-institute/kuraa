@@ -1,9 +1,12 @@
 // The annotations feature's client half (./index has its host half): comments
 // and replies, on passages and documents (docs/decisions/0082-annotations.md).
 //
-// - In the document: commented passages tinted, and a 💬 in the margin at each,
-//   which opens its thread; Comment beside a selection (⌥⌘M), in any document
-//   you read, whether or not you may change it.
+// - Comments (where the workspace comments: so unless turned off), written and
+//   read where the text is (./commentbox): Comment beside a selection (⌥⌘M)
+//   opens a box just below it to write in, Enter saves; commented passages are
+//   tinted, with a 💬 in the margin at each, which opens its thread in a card
+//   below the passage (reply, edit or delete your own). In any document you
+//   read, whether or not you may change it.
 // - The Comments panel (⌥⌘K): the document's threads in order, each comment
 //   with its replies; reply, and edit or delete your own; comment on the whole
 //   document; whose are shown (everyone's, or yours: your choice, in this
@@ -30,7 +33,8 @@ import type { Node, ResolvedPos } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
 import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
 import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
-import { openCodeBox, openMenu, type Suggestion } from './codebox.js';
+import { openCodeBox, openMenu, type ScreenBox, type Suggestion } from './codebox.js';
+import { composer as cardComposer, openCard, type Card } from './commentbox.js';
 import type { RoomAnnotation } from './index.js';
 
 const COMMENT_KEYS = 'Mod-Alt-m';
@@ -57,8 +61,11 @@ interface Store {
   view: EditorView | null;
   /** People's files, as they are (those with no device in the room are shown from them). */
   files: { person: string; text: string }[];
-  /** A comment being written on a passage: anchors at its ends, and its quote. */
+  /** A comment being written on a passage, in its box at the text: anchors at its ends, and its quote. */
   pending: { from: Json; to: Json; quote: string } | null;
+  /** The card open at the text (a comment being written, or a thread), and what it is for (`new`, or the comment's id). */
+  card: Card | null;
+  cardFor: string | null;
   /** A comment being written on the whole document. */
   onDocument: boolean;
   /** The comment a reply is being written to, or being edited. */
@@ -125,6 +132,8 @@ function codesOf(ctx: FeatureClientContext): Codes {
 
 /** Whether the workspace codes. */
 const coding = (ctx: FeatureClientContext) => ctx.status().settings.coding === true;
+/** Whether the workspace comments: so unless turned off (it always did, before it could be). */
+const commenting = (ctx: FeatureClientContext) => ctx.status().settings.comments !== false;
 /** A coding's code, as it is now (merged codes followed), or null: none, or one deleted (shown as no longer in the codebook). */
 const codeFor = (codes: Codes, item: Item): Code | null => {
   const id = codeOf(item);
@@ -213,19 +222,218 @@ function select(view: EditorView, s: Shown) {
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, s.from, s.to)).scrollIntoView());
 }
 
-/** Begin a comment on what is selected: the panel opens with it. */
-function startComment(store: Store, state: EditorState): boolean {
-  const room = store.ctx.state;
-  const { from, to, empty } = state.selection;
-  if (!room || empty) return false;
-  const quote = state.doc.textBetween(from, to, ' ');
+/** Close what is open at the text: the code box, a comment's card. */
+function closeOpen(store: Store) {
+  store.closeBox?.();
+  store.card?.close('away');
+}
+
+/** Where a passage is on screen now, for a box or card to open just below its end; null where it cannot be said. */
+function screenAt(view: EditorView, from: number | null, to: number | null): ScreenBox | null {
+  if (view.isDestroyed || from === null || to === null || from > to || to > view.state.doc.content.size) return null;
+  try {
+    const end = view.coordsAtPos(to, -1);
+    return { left: end.left, top: view.coordsAtPos(from).top, bottom: end.bottom };
+  } catch {
+    return null;
+  }
+}
+
+/** A comment of yours changed: its text, and when. */
+function editComment(state: NonNullable<FeatureEditorContext['state']>, id: string, text: string) {
+  const was = state.entries()[id] as unknown as RoomAnnotation | undefined;
+  if (!was) return;
+  const b = (was.item.body && typeof was.item.body === 'object' && !Array.isArray(was.item.body) ? was.item.body : {}) as { [k: string]: Json };
+  state.update({ set: { [id]: { ...was, item: { ...was.item, body: { ...b, value: text }, modified: new Date().toISOString() } } as unknown as Json } });
+}
+
+/**
+ * Write a comment on what is selected, in a box just below it (Comment beside a selection, ⌥⌘M): Enter saves it, as a
+ * comment of yours. False where there is nothing to comment on (no room, comments off, a selection of nothing but space).
+ */
+function openCommentBox(store: Store, view: EditorView, range?: { from: number; to: number }): boolean {
+  const { ctx } = store;
+  const room = ctx.state;
+  if (!room || !commenting(ctx) || view.isDestroyed) return false;
+  const { from, to } = range ?? view.state.selection;
+  const quote = from < to ? view.state.doc.textBetween(from, to, ' ') : '';
   if (!quote.trim()) return false;
-  store.pending = { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1), quote };
-  store.onDocument = false;
-  store.focus = null;
-  store.ctx.openPanel('comments');
+  closeOpen(store);
+  const pending = { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1), quote };
+  store.pending = pending;
+  store.cardFor = 'new';
+  let typed = '';
+  let saved = false;
+  const where = () => [ctx.state?.positionOf(pending.from) ?? null, ctx.state?.positionOf(pending.to) ?? null] as const;
+  store.card = openCard({
+    testid: 'comment-box',
+    label: 'Comment on the passage selected',
+    at: () => screenAt(view, ...where()),
+    holding: () => typed.trim() !== '',
+    draw: (card) => card.append(
+      el('div', { cls: 'kuraa-card-head', text: `Comment as ${ctx.person().name || 'you'}` }),
+      cardComposer({
+        testid: 'comment-box-text',
+        placeholder: 'Your comment',
+        action: 'Comment',
+        autofocus: true,
+        input: (t) => {
+          typed = t;
+        },
+        save: (text) => {
+          const state = ctx.state;
+          if (!state) return;
+          const name = ctx.path.slice(ctx.path.lastIndexOf('/') + 1);
+          const item = newItem(ctx, state.me, 'commenting', text, { source: `../${name}`, selector: [{ type: 'TextQuoteSelector', exact: pending.quote }] });
+          state.update({ set: { [String(item.id)]: { item, from: pending.from, to: pending.to } as unknown as Json } });
+          saved = true;
+          store.card?.close('done');
+        },
+        cancel: () => store.card?.close('escape'),
+      }),
+    ),
+    closed: (how) => {
+      store.card = null;
+      store.cardFor = null;
+      store.pending = null;
+      tell(store);
+      // Back in the text (not where something else was clicked): the passage selected again, or, saved, the caret after it.
+      if (how === 'away' || view.isDestroyed) return;
+      const [a, b] = where();
+      if (a !== null && b !== null && a <= b && b <= view.state.doc.content.size) {
+        try {
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, saved ? b : a, b)));
+        } catch { /* not a place text can be selected at: as it was */ }
+      }
+      view.focus();
+    },
+  });
   tell(store);
   return true;
+}
+
+/** A comment's thread, in a card just below its passage (its 💬 in the margin): read it, reply, edit or delete your own. */
+function openThread(store: Store, view: EditorView, id: string, owner?: HTMLElement) {
+  const { ctx } = store;
+  // Its 💬 again: closed.
+  if (store.cardFor === id) {
+    store.card?.close('done');
+    return;
+  }
+  closeOpen(store);
+  const draft = (k: string) => `card:${id}:${k}`;
+  let editing: string | null = null;
+  const thread = () => {
+    const all = collect(store, view.state.doc);
+    const c = all.find((a) => a.id === id && a.kind === 'comment');
+    if (!c) return null;
+    const replies = all.filter((a) => a.kind === 'reply' && a.about?.kind === 'annotation' && a.about.id === id);
+    return { c, replies: replies.sort((x, y) => String(x.item.created).localeCompare(String(y.item.created))) };
+  };
+  const sign = (t: ReturnType<typeof thread>) => JSON.stringify([editing, t ? [t.c, ...t.replies].map((a) => [a.id, a.item.modified ?? '', textOf(a.item)]) : null]);
+  let shownAs = '';
+  const follow = () => {
+    const t = thread();
+    if (!t) card.close('done');
+    else if (sign(t) !== shownAs) card.redraw();
+    else card.move();
+  };
+  const card: Card = openCard({
+    testid: 'comment-thread',
+    label: 'A comment and its replies',
+    owner: () => owner ?? null,
+    at: () => {
+      const t = thread();
+      return t ? screenAt(view, t.c.from, t.c.to) : null;
+    },
+    holding: () => [...store.drafts].some(([k, v]) => k.startsWith(draft('')) && v.trim() !== ''),
+    draw: (box) => {
+      const t = thread();
+      shownAs = sign(t);
+      if (!t) return;
+      const state = ctx.state;
+      const quote = t.c.about?.kind === 'passage' ? t.c.about.exact : '';
+      if (quote) box.append(el('div', { cls: 'kuraa-card-quote', text: `“${quote.length > 140 ? `${quote.slice(0, 140)}…` : quote}”` }));
+      for (const a of [t.c, ...t.replies]) {
+        const row = el('div', { cls: a === t.c ? 'kuraa-card-entry' : 'kuraa-card-entry kuraa-card-reply', testid: a === t.c ? 'thread-comment' : 'thread-reply' });
+        row.append(el('div', { cls: 'kuraa-meta', text: `${a.mine ? 'You' : creatorOf(a.item) || 'Someone'} · ${when(String(a.item.created ?? ''))}${a.item.modified && a.item.modified !== a.item.created ? ' · edited' : ''}` }));
+        if (editing === a.id && a.mine && state) {
+          const k = draft(`edit:${a.id}`);
+          const stop = () => {
+            store.drafts.delete(k);
+            editing = null;
+            card.redraw();
+          };
+          row.append(cardComposer({
+            testid: 'thread-edit',
+            placeholder: 'Your comment',
+            action: 'Save',
+            autofocus: true,
+            initial: store.drafts.get(k) ?? textOf(a.item),
+            input: (v) => store.drafts.set(k, v),
+            save: (text) => {
+              store.drafts.delete(k);
+              editing = null;
+              editComment(state, a.id, text);
+              card.redraw();
+            },
+            cancel: stop,
+          }));
+        } else {
+          row.append(el('div', { cls: 'kuraa-text', text: textOf(a.item) }));
+          if (a.mine && state) {
+            row.append(el('div', { cls: 'kuraa-card-tools' }, button('Edit', () => {
+              editing = a.id;
+              card.redraw();
+              card.element.querySelector<HTMLTextAreaElement>('textarea[data-testid="thread-edit"]')?.focus();
+            }, 'thread-edit-button', 'kuraa-card-link'), button('Delete', () => {
+              state.update({ remove: [a.id] });
+              tell(store);
+            }, 'thread-delete', 'kuraa-card-link danger')));
+          }
+        }
+        box.append(row);
+      }
+      if (state && editing === null) {
+        const k = draft('reply');
+        box.append(cardComposer({
+          testid: 'thread-reply-text',
+          placeholder: 'Reply',
+          action: 'Reply',
+          autofocus: true,
+          initial: store.drafts.get(k) ?? '',
+          input: (v) => store.drafts.set(k, v),
+          save: (text) => {
+            const item = newItem(ctx, state.me, 'replying', text, id);
+            store.drafts.delete(k);
+            state.update({ set: { [String(item.id)]: { item } as unknown as Json } });
+            tell(store);
+          },
+        }));
+      }
+      box.append(el('div', { cls: 'kuraa-card-foot' }, button('All comments in the panel', () => {
+        card.close('done');
+        store.focus = id;
+        ctx.openPanel('comments');
+        tell(store);
+      }, 'thread-panel', 'kuraa-card-link')));
+    },
+    closed: (how) => {
+      store.listeners.delete(follow);
+      for (const k of [...store.drafts.keys()]) if (k.startsWith(draft(''))) store.drafts.delete(k);
+      store.card = null;
+      store.cardFor = null;
+      if (store.focus === id) store.focus = null;
+      tell(store);
+      if (how === 'escape' && !view.isDestroyed) view.focus();
+    },
+  });
+  store.card = card;
+  store.cardFor = id;
+  store.focus = id;
+  // Its thread changing (a reply, an edit, anyone's) drawn again; the text moving, followed.
+  store.listeners.add(follow);
+  tell(store);
 }
 
 /** The codes to suggest, in the codebook's order, each with its parents' names. */
@@ -285,7 +493,7 @@ function openCoding(store: Store, view: EditorView, range?: { from: number; to: 
   const empty = from === to;
   const quote = empty ? '' : view.state.doc.textBetween(from, to, ' ');
   if (!empty && !quote.trim()) return false;
-  store.closeBox?.();
+  closeOpen(store);
   const codes = codesOf(ctx);
   // A point: both ends at the caret, kept after what is before it as text is typed there.
   const anchors = empty ? { from: room.anchorAt(from, -1), to: room.anchorAt(from, -1) } : { from: room.anchorAt(from, 1), to: room.anchorAt(to, -1) };
@@ -387,7 +595,7 @@ function tagMenu(store: Store, g: Group, at: HTMLElement) {
 
 function editor(ctx: FeatureEditorContext) {
   injectStyle();
-  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, coding: null, closeBox: null, typing: false, hoverTag: null, hoverText: new Set() };
+  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, card: null, cardFor: null, coding: null, closeBox: null, typing: false, hoverTag: null, hoverText: new Set() };
   const codes = codesOf(ctx);
   /** The passages pointed at in the text: drawn again only where that changed. */
   const hoverText = (keys: Set<string>) => {
@@ -398,6 +606,8 @@ function editor(ctx: FeatureEditorContext) {
   // Only the live document's is its panel's (a past version's is its own).
   if (ctx.state) stores.set(ctx.path, store);
   let liveKey = '';
+  const switches = () => `${commenting(ctx)} ${coding(ctx)}`;
+  let switched = switches();
   const load = async () => {
     store.files = await ctx.companions(SUFFIX).catch(() => []);
     store.cached = { doc: null, shown: [] };
@@ -409,8 +619,14 @@ function editor(ctx: FeatureEditorContext) {
       decorations: (state) => {
         const size = state.doc.content.size;
         const shown = collect(store, state.doc).filter((s) => s.from !== null && s.to !== null && s.to <= size);
-        const decos = shown.filter((s) => s.kind === 'comment').map((s) =>
-          Decoration.inline(s.from!, s.to!, { class: s.id === store.focus ? 'kuraa-commented kuraa-commented-focus' : 'kuraa-commented', 'data-annotation': s.id }));
+        const decos = commenting(ctx) ? shown.filter((s) => s.kind === 'comment').map((s) =>
+          Decoration.inline(s.from!, s.to!, { class: s.id === store.focus ? 'kuraa-commented kuraa-commented-focus' : 'kuraa-commented', 'data-annotation': s.id })) : [];
+        // What is being commented on, while its box is open (the selection is not shown while the box has the focus).
+        if (store.pending && ctx.state) {
+          const from = ctx.state.positionOf(store.pending.from);
+          const to = ctx.state.positionOf(store.pending.to);
+          if (from !== null && to !== null && from < to && to <= size) decos.push(Decoration.inline(from, to, { class: 'kuraa-now' }));
+        }
         // Coded passages: shown only while pointed at (their tag in the margin, or the passage), in their code's colour.
         if (coding(ctx)) {
           const pointed = new Set([...store.hoverText, ...(store.hoverTag ? [store.hoverTag] : [])]);
@@ -428,7 +644,7 @@ function editor(ctx: FeatureEditorContext) {
             const from = room.positionOf(store.coding.from);
             const to = room.positionOf(store.coding.to);
             if (from !== null && to !== null && to <= size) {
-              if (to > from) decos.push(Decoration.inline(from, to, { class: 'kuraa-coding-now' }));
+              if (to > from) decos.push(Decoration.inline(from, to, { class: 'kuraa-now' }));
               else if (to === from) decos.push(Decoration.widget(from, () => pin('--kuraa-code: var(--accent, #c08a00)'), { side: -1, key: 'pin:now', ignoreSelection: true }));
             }
           }
@@ -481,9 +697,10 @@ function editor(ctx: FeatureEditorContext) {
       });
       void load();
       return {
+        update: () => store.card?.move(),
         destroy: () => {
           off?.();
-          store.closeBox?.();
+          closeOpen(store);
           store.listeners.delete(redraw);
           codes.listeners.delete(redraw);
           if (stores.get(ctx.path) === store) stores.delete(ctx.path);
@@ -492,20 +709,27 @@ function editor(ctx: FeatureEditorContext) {
     },
   });
   return {
-    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (state: EditorState) => startComment(store, state), [CODE_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCoding(store, view) })],
+    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCommentBox(store, view), [CODE_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCoding(store, view) })],
     margin: (view: EditorView) => {
+      // Comments or coding turned on or off (the margin is drawn again then): the text's highlights drawn again too.
+      const now = switches();
+      if (now !== switched) {
+        switched = now;
+        if (!commenting(ctx) && store.cardFor) store.card?.close('away');
+        queueMicrotask(() => {
+          if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(key, true));
+        });
+      }
       const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
-      const items = shown.filter((s) => s.kind === 'comment').map((s) => ({
+      // A 💬 at each comment, opening its thread below its passage.
+      const items: MarginItem[] = commenting(ctx) ? shown.filter((s) => s.kind === 'comment').map((s) => ({
         key: s.id,
         pos: s.from!,
         label: '💬',
         title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
-        run: () => {
-          store.focus = s.id;
-          ctx.openPanel('comments');
-          tell(store);
-        },
-      }));
+        active: store.cardFor === s.id,
+        run: (at: HTMLElement) => openThread(store, view, s.id, at),
+      })) : [];
       if (!coding(ctx)) return items;
       // A tag for each code at each passage, in its colour, at the passage's first line.
       const tags: MarginItem[] = codedGroups(store, codes, view.state.doc).map((g) => {
@@ -529,11 +753,11 @@ function editor(ctx: FeatureEditorContext) {
       return [...items, ...tags];
     },
     selectionActions: (view: EditorView) => (ctx.state ? [
-      { label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void startComment(store, view.state) },
+      ...(commenting(ctx) ? [{ label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void openCommentBox(store, view) }] : []),
       ...(coding(ctx) ? [{ label: 'Code #', keys: CODE_KEYS, testid: 'annotations-code', run: () => void openCoding(store, view) }] : []),
     ] : []),
     destroy: () => {
-      store.closeBox?.();
+      closeOpen(store);
       if (stores.get(ctx.path) === store) stores.delete(ctx.path);
     },
   };
@@ -644,6 +868,10 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
       if (now === shownAs) return;
     }
     body.replaceChildren();
+    if (!commenting(pctx)) {
+      body.append(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Workspace › Features). Those made are kept.' }));
+      return;
+    }
     if (!s || !view) {
       body.append(el('p', { cls: 'kuraa-note', text: 'Open a document to comment on it.' }));
       return;
@@ -669,25 +897,11 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
     };
     body.append(el('div', { cls: 'kuraa-bar' }, state ? button('Comment on the document', () => {
       s.onDocument = true;
-      s.pending = null;
       tell(s);
     }, 'annotations-on-document') : null, el('label', { text: 'Show ' }, whose)));
     if (!state) body.append(el('p', { cls: 'kuraa-note', text: 'Your comments are not kept here: this computer has no identity of yours yet, or the document is opened where comments are not kept.' }));
 
-    // Writing a comment: on the passage selected, or on the document.
-    if (s.pending && state) {
-      const p = s.pending;
-      body.append(el('div', { cls: 'kuraa-thread kuraa-new' }, el('blockquote', { text: p.quote }), composer('new:passage', 'Your comment', (text) => {
-        const item = newItem(pctx, me!, 'commenting', text, { source: `../${name}`, selector: [{ type: 'TextQuoteSelector', exact: p.quote }] });
-        state.update({ set: { [String(item.id)]: { item, from: p.from, to: p.to } as unknown as Json } });
-        s.pending = null;
-        s.focus = String(item.id);
-        tell(s);
-      }, () => {
-        s.pending = null;
-        tell(s);
-      })));
-    }
+    // Writing a comment on the document (one on a passage is written at the passage).
     if (s.onDocument && state) {
       body.append(el('div', { cls: 'kuraa-thread kuraa-new' }, el('p', { cls: 'kuraa-note', text: `On ${name} as a whole` }), composer('new:document', 'Your comment on the document', (text) => {
         const item = newItem(pctx, me!, 'commenting', text, `../${name}`);
@@ -712,11 +926,7 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
       wrap.append(el('div', { cls: 'kuraa-meta', text: `${creatorOf(a.item) || 'Someone'} · ${when(String(a.item.created ?? ''))}${a.item.modified && a.item.modified !== a.item.created ? ' · edited' : ''}` }));
       if (s.editing === a.id && a.mine && state) {
         wrap.append(composer(`edit:${a.id}`, 'Your comment', (text) => {
-          const was = state.entries()[a.id] as unknown as RoomAnnotation | undefined;
-          if (was) {
-            const b = (was.item.body && typeof was.item.body === 'object' && !Array.isArray(was.item.body) ? was.item.body : {}) as { [k: string]: Json };
-            state.update({ set: { [a.id]: { ...was, item: { ...was.item, body: { ...b, value: text }, modified: new Date().toISOString() } } as unknown as Json } });
-          }
+          editComment(state, a.id, text);
           s.editing = null;
           tell(s);
         }, () => {
@@ -773,7 +983,7 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
       list.append(thread);
       if (c.id === s.focus) queueMicrotask(() => thread.scrollIntoView({ block: 'nearest' }));
     }
-    if (!comments.length && !s.pending && !s.onDocument) list.append(el('p', { cls: 'kuraa-note', text: 'No comments yet. Select some text, then Comment (or press ⌥⌘M).' }));
+    if (!comments.length && !s.onDocument) list.append(el('p', { cls: 'kuraa-note', text: 'No comments yet. Select some text, then Comment (or press ⌥⌘M), and write it there.' }));
     body.append(list);
 
     // No longer found: comments whose passages are gone, and replies whose comments are gone. Kept, never dropped.
@@ -809,6 +1019,10 @@ function mountRecent(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   root.append(body);
   let live = true;
   const draw = async () => {
+    if (!commenting(pctx)) {
+      body.replaceChildren(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Workspace › Features). Those made are kept.' }));
+      return;
+    }
     body.replaceChildren(el('p', { cls: 'kuraa-note', text: 'Looking…' }));
     let rows: { path: string; id: string; kind: string; text: string; by: string; created: string; quote: string | null; at: { from: number; to: number } | null }[];
     try {
@@ -1131,29 +1345,35 @@ const swatch = (color: string | undefined) => {
   return s;
 };
 
-/** Settings › Workspace › Annotations: whether the workspace codes. */
+/** Settings › Workspace › Features, under Annotations: comments and coding, each on or off for the workspace. */
 function mountSettings(root: HTMLElement, ctx: FeatureClientContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-settings' });
-  const box = el('input', { testid: 'annotations-coding' }) as HTMLInputElement;
-  box.type = 'checkbox';
-  box.checked = coding(ctx);
-  box.disabled = !ctx.status().mayChange;
-  box.onchange = async () => {
-    box.disabled = true;
-    try {
-      await ctx.saveSettings({ ...ctx.status().settings, coding: box.checked });
-      ctx.notify(box.checked ? 'Coding is on for this workspace.' : 'Coding is off for this workspace. Codings and the codebook are kept.');
-    } catch (e) {
-      box.checked = !box.checked;
-      ctx.notify((e as Error).message, 'warn');
-    } finally {
-      box.disabled = !ctx.status().mayChange;
-    }
+  const choice = (key: 'comments' | 'coding', name: string, about: string, on: () => boolean, said: (on: boolean) => string) => {
+    const box = el('input', { testid: `annotations-${key}` }) as HTMLInputElement;
+    box.type = 'checkbox';
+    box.checked = on();
+    box.disabled = !ctx.status().mayChange;
+    box.setAttribute('aria-label', name);
+    box.onchange = async () => {
+      box.disabled = true;
+      try {
+        await ctx.saveSettings({ ...ctx.status().settings, [key]: box.checked });
+        ctx.notify(said(box.checked));
+      } catch (e) {
+        box.checked = !box.checked;
+        ctx.notify((e as Error).message, 'warn');
+      } finally {
+        box.disabled = !ctx.status().mayChange;
+      }
+    };
+    return el('label', { cls: 'kuraa-switch' }, box, el('span', { cls: 'kuraa-switch-text' }, el('span', { cls: 'kuraa-switch-name', text: name }), el('span', { cls: 'kuraa-meta', text: about })));
   };
   body.append(
-    el('label', { cls: 'kuraa-check' }, box, ' Coding: a codebook, and passages coded with it'),
-    el('p', { cls: 'kuraa-note', text: `Comments are on wherever Annotations is. Coding is a method a project chooses: its codebook is ${codesOf(ctx).path}, in the workspace, everyone’s; each person’s codings are their own, beside each document.` }),
+    choice('comments', 'Comments', 'Select text and press ⌥⌘M (or Comment) to comment on it; reply to anyone’s.', () => commenting(ctx),
+      (on) => (on ? 'Comments are on for this workspace.' : 'Comments are off for this workspace. Those made are kept.')),
+    choice('coding', 'Coding', `Select text, or put the caret anywhere, and type # to code it. The codebook is ${codesOf(ctx).path}, everyone’s; each person’s codings are their own.`, () => coding(ctx),
+      (on) => (on ? 'Coding is on for this workspace.' : 'Coding is off for this workspace. Codings and the codebook are kept.')),
   );
   root.append(body);
   return () => body.remove();
@@ -1185,7 +1405,7 @@ function injectStyle() {
 .kuraa-recent { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border, #ddd); border-radius: 6px; }
 .kuraa-recent:hover, .kuraa-recent:focus-visible { border-color: var(--accent, #c08a00); }
 .kuraa-coded-hover { background: color-mix(in srgb, var(--kuraa-code, #888) 24%, transparent); box-shadow: 0 2px 0 color-mix(in srgb, var(--kuraa-code, #888) 70%, transparent); border-radius: 2px; }
-.kuraa-coding-now { background: var(--selected, color-mix(in srgb, var(--accent, #c08a00) 22%, transparent)); }
+.kuraa-now { background: var(--selected, color-mix(in srgb, var(--accent, #c08a00) 22%, transparent)); }
 .kuraa-point { display: inline-block; width: 3px; height: 1.15em; margin: 0 -1.5px; vertical-align: -0.2em; border-radius: 2px; background: var(--kuraa-code, #888); pointer-events: none; }
 .kuraa-codebox { position: fixed; z-index: 50; min-width: 240px; max-width: 360px; padding: 4px; background: var(--bg, #fff); color: var(--text, inherit); border: 1px solid var(--border, #ddd); border-radius: 8px; box-shadow: 0 6px 24px rgb(0 0 0 / 16%); font: 13px/1.4 var(--font, system-ui); }
 .kuraa-codebox-input { display: flex; align-items: center; gap: 2px; padding: 2px 6px; border-bottom: 1px solid var(--border, #ddd); margin-bottom: 3px; }
@@ -1199,6 +1419,26 @@ function injectStyle() {
 .kuraa-codebox-plus { width: 10px; margin-right: 6px; text-align: center; color: var(--muted, #666); font-weight: 600; }
 .kuraa-codebox-empty { padding: 4px 6px; color: var(--muted, #666); }
 .kuraa-codebox-hint { padding: 4px 6px 2px; color: var(--muted, #666); font-size: 11px; border-top: 1px solid var(--border, #ddd); margin-top: 3px; }
+.kuraa-card { width: 320px; min-width: 0; max-width: calc(100vw - 16px); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.kuraa-card-head { color: var(--muted, #666); font-size: 12px; }
+.kuraa-card-quote { color: var(--muted, #666); font-size: 12px; font-style: italic; border-left: 2px solid var(--accent, #c08a00); padding-left: 6px; overflow-wrap: anywhere; }
+.kuraa-card-entry { display: flex; flex-direction: column; gap: 2px; }
+.kuraa-card-reply { margin-left: 8px; padding-left: 8px; border-left: 2px solid var(--border, #ddd); }
+.kuraa-card-tools { display: flex; gap: 10px; }
+.kuraa-card-link { all: unset; cursor: pointer; color: var(--muted, #666); font-size: 12px; }
+.kuraa-card-link:hover, .kuraa-card-link:focus-visible { color: var(--text, inherit); text-decoration: underline; }
+.kuraa-card-link.danger:hover { color: var(--danger, #b42318); }
+.kuraa-card-composer { display: flex; flex-direction: column; gap: 4px; }
+.kuraa-card-composer textarea { resize: none; font: inherit; line-height: 1.4; padding: 5px 8px; border: 1px solid var(--border, #ddd); border-radius: 6px; background: var(--bg, #fff); color: inherit; outline: none; }
+.kuraa-card-composer textarea:focus { border-color: var(--accent, #c08a00); }
+.kuraa-card-actions { display: flex; align-items: center; gap: 10px; }
+.kuraa-card-hint { margin-right: auto; color: var(--muted, #666); font-size: 11.5px; }
+.kuraa-card-send { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 5px; border: 1px solid var(--accent, #c08a00); background: var(--accent, #c08a00); color: var(--bg, #fff); cursor: pointer; }
+.kuraa-card-send:disabled { opacity: 0.45; cursor: default; }
+.kuraa-card-foot { border-top: 1px solid var(--border, #ddd); padding-top: 6px; }
+.kuraa-switch { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 8px; align-items: start; cursor: pointer; }
+.kuraa-switch > input { margin: 3px 0 0; }
+.kuraa-switch-text { display: grid; gap: 1px; min-width: 0; }
 .kuraa-codemenu { display: flex; flex-direction: column; gap: 2px; padding: 6px; outline: none; }
 .kuraa-codemenu-title { display: flex; align-items: center; font-weight: 600; padding: 2px 4px; }
 .kuraa-codemenu-line { color: var(--muted, #666); font-size: 12px; padding: 0 4px 2px; overflow-wrap: anywhere; }
@@ -1235,16 +1475,18 @@ export const annotationsClient = defineClientFeature({
     { id: 'retrieve', label: 'Retrieve', about: 'workspace', mount: mountRetrieve },
   ],
   documentMenu: (ctx) => [
-    { label: 'Comments', keys: PANEL_KEYS, testid: 'menu-comments', run: () => ctx.openPanel('comments') },
-    { label: 'Recent comments', testid: 'menu-recent-comments', run: () => ctx.openPanel('recent') },
+    ...(commenting(ctx) ? [
+      { label: 'Comments', keys: PANEL_KEYS, testid: 'menu-comments', run: () => ctx.openPanel('comments') },
+      { label: 'Recent comments', testid: 'menu-recent-comments', run: () => ctx.openPanel('recent') },
+    ] : []),
     ...(coding(ctx) ? [
       { label: 'Codes', testid: 'menu-codes', run: () => ctx.openPanel('codes') },
       { label: 'Retrieve coded passages', testid: 'menu-retrieve', run: () => ctx.openPanel('retrieve') },
     ] : []),
   ],
-  settings: { workspace: { label: 'Annotations', mount: mountSettings } },
+  settings: { workspace: { label: 'Annotations', inline: true, mount: mountSettings } },
   help: [
-    { group: 'Comments and coding', keys: [COMMENT_KEYS], does: 'Comment on the selected text' },
+    { group: 'Comments and coding', keys: [COMMENT_KEYS], does: 'Comment on the selected text, in a box beside it (↵ saves)' },
     { group: 'Comments and coding', keys: [PANEL_KEYS], does: 'Show the document’s comments' },
     { group: 'Comments and coding', keys: [CODE_KEYS], does: 'Code the selected text, or the point at the caret, as typing # does (where the workspace codes)' },
   ],

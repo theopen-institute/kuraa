@@ -396,6 +396,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component > input[type='checkbox'] { margin: 3px 0 0; }
 .component:has(input:disabled), .component:has(input:disabled) .component-text { cursor: default; }
 .component-text { display: grid; gap: 1px; min-width: 0; cursor: pointer; }
+/* A feature's own switches, under its checkbox (0082): indented to its name. */
+.feature-inline { margin: -2px 0 4px 23px; }
 .component-name { font-weight: 500; }
 .component-about { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .component-unavailable { color: var(--warn); }

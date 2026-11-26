@@ -83,7 +83,7 @@ const sourceOf = (path: string) => `../${path.slice(path.lastIndexOf('/') + 1)}`
 export const annotationsFeature = defineFeature({
   id: 'annotations',
   label: 'Annotations',
-  description: 'Comment on passages and documents, and reply: each person’s kept beside the document in a file of their own, never in it.',
+  description: 'Comments and replies, and coding with a codebook: each person’s kept beside the document in a file of their own, never in it.',
   types: [pageType, codebookType],
   companions: [SUFFIX],
   // Where the workspace names none, the one at the top too: to move it into .kuraa.

@@ -1,7 +1,8 @@
-// Comments (docs/decisions/0082-annotations.md, step 2), in the app: turned on for the workspace, a
-// passage selected and commented on, the comment kept in the commenter's own file beside the document
-// (a W3C AnnotationPage), never in the document; replied to, edited, a comment on the whole document,
-// the workspace's newest, and taken away again.
+// Comments (docs/decisions/0082-annotations.md, step 2 and "Comments where the text is"), in the app:
+// turned on for the workspace, a passage selected and commented on in a box beside it, the comment kept
+// in the commenter's own file beside the document (a W3C AnnotationPage), never in the document; its
+// thread opened from its 💬, replied to and edited there; the panel; a comment on the whole document;
+// the workspace's newest; comments turned off and on again on their own; taken away again.
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,20 +40,19 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await annotationsOn(page, true);
   await expect(page.locator('.editor-scroll[data-features~="annotations"]')).toBeVisible();
 
-  // A passage selected, then Comment: the panel opens with it, to write in.
-  await page.getByTestId('editor').locator('p', { hasText: 'council' }).selectText();
+  const editor = page.getByTestId('editor');
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+  // A passage selected, then Comment: a box just below it, the passage shown meanwhile; Enter saves.
+  await editor.locator('p', { hasText: 'council' }).selectText();
   await page.getByTestId('annotations-comment').click();
-  const panel = page.getByTestId('feature-panel-annotations-comments');
-  await panel.getByTestId('annotations-text-new').fill('Which council: the old one or the new?');
-  await panel.getByTestId('annotations-save').click();
-  const thread = panel.getByTestId('annotations-thread');
-  await expect(thread).toHaveCount(1);
-  await expect(thread).toContainText('Which council');
-  // About its passage (quoted, to go to), not the document.
-  await expect(thread.getByTestId('annotations-quote')).toHaveText('“After the flood, I never trusted the council.”');
-  // Typing in the panel, nothing is offered beside the selection.
-  await expect(page.getByTestId('selection-actions')).toHaveCount(0);
-  await expect(page.getByTestId('editor').locator('.kuraa-commented')).toHaveText('After the flood, I never trusted the council.');
+  const box = page.getByTestId('comment-box');
+  await expect(box).toBeVisible();
+  await expect(editor.locator('.kuraa-now')).toHaveText('After the flood, I never trusted the council.');
+  await page.keyboard.type('Which council: the old one or the new?');
+  await page.keyboard.press('Enter');
+  await expect(box).toHaveCount(0);
+  await expect(editor.locator('.kuraa-commented')).toHaveText('After the flood, I never trusted the council.');
   await expect(page.getByTestId('feature-mark')).toHaveText('💬');
   // Kept in the commenter's own file, as a W3C annotation; the document as it was.
   await expect.poll(() => annotations(path).map((a) => a.body.value)).toEqual(['Which council: the old one or the new?']);
@@ -60,16 +60,43 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   expect(readFileSync(join(E2E.dir, path), 'utf8')).toBe(TEXT);
   await expect(page.locator(`[data-testid^="file:${path}.annotations/"]`)).toHaveCount(0);
 
-  // A reply, then the comment edited.
-  await thread.getByTestId('annotations-reply-button').click();
-  await panel.getByTestId('annotations-text-reply').fill('The new one, she said later.');
-  await panel.getByTestId('annotations-save').click();
+  // Its 💬: the thread, below the passage, to reply to at once; then the comment edited there.
+  await page.getByTestId('feature-mark').click();
+  const card = page.getByTestId('comment-thread');
+  await expect(card.getByTestId('thread-comment')).toContainText('Which council: the old one or the new?');
+  await page.keyboard.type('The new one, she said later.');
+  await page.keyboard.press('Enter');
+  await expect(card.getByTestId('thread-reply')).toContainText('The new one');
+  await expect(card.getByTestId('thread-reply-text')).toHaveValue('');
+  await card.getByTestId('thread-comment').getByTestId('thread-edit-button').click();
+  await card.getByTestId('thread-edit').fill('Which council, exactly?');
+  await card.getByTestId('thread-edit').press('Enter');
+  await expect(card.getByTestId('thread-comment')).toContainText('Which council, exactly?');
+  await expect(card.getByTestId('thread-comment')).toContainText('edited');
+  await expect.poll(() => annotations(path).length).toBe(2);
+  // Esc closes it.
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+
+  // A comment begun (⌥⌘M) and clicked away from: kept open while something is typed in it; Esc drops it.
+  await editor.locator('p', { hasText: 'Nobody' }).selectText();
+  await page.keyboard.press(`${mod}+Alt+m`);
+  await expect(box).toBeVisible();
+  await page.keyboard.type('Half a thought');
+  await editor.locator('h1', { hasText: 'Interview' }).click();
+  await expect(box).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
+  await expect(page.getByTestId('feature-mark')).toHaveCount(1);
+
+  // The panel (⌥⌘K): the thread, its passage quoted, its reply.
+  await editor.locator('p', { hasText: 'Nobody' }).click();
+  await page.keyboard.press(`${mod}+Alt+k`);
+  const panel = page.getByTestId('feature-panel-annotations-comments');
+  const thread = panel.getByTestId('annotations-thread');
+  await expect(thread).toHaveCount(1);
+  await expect(thread.getByTestId('annotations-quote')).toHaveText('“After the flood, I never trusted the council.”');
   await expect(thread.getByTestId('annotations-reply')).toContainText('The new one');
-  await thread.getByTestId('annotations-comment-row').getByTestId('annotations-edit').click();
-  await panel.getByTestId('annotations-text-edit').fill('Which council, exactly?');
-  await panel.getByTestId('annotations-save').click();
-  await expect(thread.getByTestId('annotations-comment-row')).toContainText('Which council, exactly?');
-  await expect(thread.getByTestId('annotations-comment-row')).toContainText('edited');
 
   // On the document as a whole.
   await panel.getByTestId('annotations-on-document').click();
@@ -86,9 +113,28 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await expect(recent.getByTestId('annotations-recent-row').first()).toBeVisible();
   await expect(recent).toContainText('A short interview');
 
+  // Comments off on their own (under Annotations, in the list of features): nothing of them shown, coding's switch beside it.
+  await openSettings(page);
+  await expect(page.getByTestId('annotations-coding')).toBeVisible();
+  let saved = page.waitForResponse((r) => r.url().endsWith('/api/features/annotations') && r.request().method() === 'PATCH');
+  await page.getByTestId('annotations-comments').uncheck();
+  expect((await saved).status()).toBe(200);
+  await page.getByTestId('settings-close').click();
+  await expect(page.getByTestId('feature-mark')).toHaveCount(0);
+  await expect(editor.locator('.kuraa-commented')).toHaveCount(0);
+  await editor.locator('p', { hasText: 'council' }).selectText();
+  // Nothing beside the selection: coding is off here too.
+  await expect(page.getByTestId('selection-actions')).toHaveCount(0);
+  await openSettings(page);
+  saved = page.waitForResponse((r) => r.url().endsWith('/api/features/annotations') && r.request().method() === 'PATCH');
+  await page.getByTestId('annotations-comments').check();
+  expect((await saved).status()).toBe(200);
+  await page.getByTestId('settings-close').click();
+  await expect(page.getByTestId('feature-mark')).toHaveCount(1);
+
   // The comments again (⌥⌘K), and one taken away: its reply stays, no longer found with it gone.
-  await page.getByTestId('editor').locator('p', { hasText: 'Nobody' }).click();
-  await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+Alt+k`);
+  await editor.locator('p', { hasText: 'Nobody' }).click();
+  await page.keyboard.press(`${mod}+Alt+k`);
   await expect(panel).toBeVisible();
   await panel.getByTestId('annotations-thread').nth(1).getByTestId('annotations-comment-row').getByTestId('annotations-delete').click();
   await expect(panel.getByTestId('annotations-thread')).toHaveCount(1);

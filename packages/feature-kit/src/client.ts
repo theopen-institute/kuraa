@@ -182,6 +182,11 @@ export interface FeaturePanelContext extends FeatureClientContext {
 export interface FeatureSettingsPanel {
   /** Its heading. */
   label: string;
+  /**
+   * Drawn in the list of features, under the feature's own checkbox, while it is on (a few switches, seen at once),
+   * not in a subpanel of its own.
+   */
+  inline?: boolean;
   mount(element: HTMLElement, ctx: FeatureClientContext): () => void;
 }
 

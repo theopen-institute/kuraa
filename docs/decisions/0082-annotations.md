@@ -578,3 +578,30 @@ annotation standard allows it.
 - **Hooks:** a margin item may be a `tag`, may be drawn as pointed at (`active`), is told when it
   is pointed at (`hover`), and is given the element clicked (`run(element)`), to open something
   beside it.
+
+## Comments where the text is; comments and coding each on or off (revision)
+
+The owner, having used both: the coding switch was not found (it was in a subpanel of Annotations);
+a workspace may want comments without coding, or coding without comments; and writing a comment in
+the full side panel was clumsy: it should be written where the text is, as a code is.
+
+- **Comments and Coding, each a switch**, for the workspace, shown at once in Settings › Workspace ›
+  Features, under Annotations, while it is on (no subpanel). Comments is on unless turned off
+  (`comments: false`; every workspace with annotations had them, before it could be); coding is off
+  unless turned on (`coding: true`), as before. Off, nothing of them is shown or offered (the text's
+  tint, the 💬, Comment beside a selection, ⌥⌘M, the menus; the panels say they are off); what was
+  made is kept.
+- **A comment is written at its passage.** Comment beside a selection, or ⌥⌘M, opens a box just
+  below it (`./commentbox`), the passage shown meanwhile: **Enter** saves the comment,
+  **Shift+Enter** is a new line, **Esc** closes it. A click elsewhere closes it too, unless
+  something is typed in it, which is kept until saved or Esc.
+- **A thread is read at its passage.** A comment's 💬 in the margin opens a card just below its
+  passage: the passage quoted, the comment and its replies, who and when; a box to reply at once
+  (Enter); Edit and Delete for your own; **All comments in the panel**. It follows the passage as the
+  document scrolls, and shows what others add as they add it. The 💬 again, Esc, or a click
+  elsewhere closes it.
+- **The Comments panel** stays (⌥⌘K), for all a document's threads at once, a comment on the whole
+  document, whose are shown, and those no longer found; a comment on a passage is no longer written
+  there.
+- **Hooks:** a feature's settings for the workspace may be `inline`: drawn in the list of features,
+  under its checkbox, while it is on, not as a subpanel.

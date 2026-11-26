@@ -184,6 +184,22 @@ describe('features', () => {
     expect(JSON.parse(file('.kuraa/companions.json')!)).toEqual({ suffixes: ['.marks'] });
   });
 
+  it('is on by default where it says so, until the workspace turns it off, which is written as off (0087)', async () => {
+    await running.close();
+    running = await startHost({ dir, timings: FAST, features: [{ ...marksFeature, onByDefault: true }, spyFeature(seen)] });
+    type S = { features: { id: string; on: boolean; workspace: boolean }[] };
+    expect(((await json('/api/features')).body as S).features.find((f) => f.id === 'marks')).toMatchObject({ on: true, workspace: true });
+    expect(file('.kuraa/features.json')).toBeNull();
+    // Off: said so, as the default is on.
+    await turn('marks', false);
+    expect(JSON.parse(file('.kuraa/features.json')!)).toEqual({ marks: { on: false } });
+    expect(((await json('/api/features')).body as S).features.find((f) => f.id === 'marks')).toMatchObject({ on: false, workspace: false });
+    // On again: the default, so nothing is said.
+    await turn('marks', true);
+    expect(JSON.parse(file('.kuraa/features.json')!)).toEqual({});
+    expect(((await json('/api/features')).body as S).features.find((f) => f.id === 'marks')).toMatchObject({ on: true });
+  });
+
   it('is off where the host has it off, whatever the workspace says', async () => {
     await turn('marks', true);
     await running.close();

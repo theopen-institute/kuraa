@@ -5,7 +5,7 @@
 // gives: the host's API, you, notices, dialogs, and opening panels and files.
 // The editor (Editor.vue) adds the open document's part; App.vue draws panels,
 // menus and settings from what the features contribute.
-import { FEATURE_API_VERSION, type ClientFeature, type FeatureClientContext, type FeatureStatus, type Json, type Person } from '@kuraa/feature-kit/client';
+import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
 import type { EditorUi } from '@kuraa/editor-kit';
 import type { HostApi } from './api.js';
 
@@ -35,6 +35,11 @@ export interface FeatureApp {
   ui: EditorUi;
   openPanel(feature: string, panel: string): void;
   openFile(path: string, at?: { from: number; to: number }): void;
+  openMatch(path: string, target: MatchTarget): void;
+  /** The host's own calls, offered to components (0089). */
+  host: CoreHost;
+  explain(error: unknown): { text: string; details: string | null };
+  keyLabel(keys: string): string;
   /** A feature's settings or choice changed: ask the host how features stand again. */
   changed(): void;
 }
@@ -98,6 +103,10 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     openPanel: (id) => app.openPanel(feature.id, id),
     openFile: (path, at) => app.openFile(path, at),
     onMessage: (fn) => messages.on(feature.id, fn),
+    openMatch: (path, target) => app.openMatch(path, target),
+    host: app.host,
+    explain: (error) => app.explain(error),
+    keyLabel: (keys) => app.keyLabel(keys),
   };
 }
 

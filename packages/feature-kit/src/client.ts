@@ -6,7 +6,7 @@
 // The shell passes client halves to the client by id (mountApp's `features`), as
 // it passes editor modules; the client uses one only where the host has the
 // feature loaded, and it is on for the workspace, and the person has not hidden it.
-import type { DocumentType, SourceMap } from '@kuraa/kernel';
+import type { DocumentType, FileIcon, SourceMap } from '@kuraa/kernel';
 import type { EditorUi, HelpItem } from '@kuraa/editor-kit';
 import type { Node, Schema } from 'prosemirror-model';
 import type { Plugin } from 'prosemirror-state';
@@ -53,6 +53,86 @@ export interface FeatureClientContext {
   openFile(path: string, at?: { from: number; to: number }): void;
   /** Be told what its host half tells (FeatureContext.tell): with the path it was about, if any. Returns how to stop. */
   onMessage(fn: (message: Json, path: string | null) => void): () => void;
+  /** Open a file at a match (0089): a line, where on it, and the words, found again in an open document as it has been typed since. */
+  openMatch(path: string, target: MatchTarget): void;
+  /** The host's own calls a component may make (0089): the core's routes, not the feature's. */
+  host: CoreHost;
+  /** An error in plain words, and what was actually said, as the client says errors everywhere. */
+  explain(error: unknown): { text: string; details: string | null };
+  /** Keys, as key bindings write them ('Mod-Shift-f'), as this system shows them (⇧⌘F, Ctrl+Shift+F). */
+  keyLabel(keys: string): string;
+}
+
+/** A match to open a file at (0089). */
+export interface MatchTarget {
+  /** 1-based line of the file (or of the open document's text) the match was on. */
+  line: number;
+  /** Where the match starts in that line. */
+  at: number;
+  query: string;
+  caseSensitive: boolean;
+}
+
+/** A format a document renders to (the host's renders, 0041). */
+export type RenderFormat = 'html' | 'docx' | 'pdf';
+
+/** A document's latest render in one format. */
+export interface RenderState {
+  path: string;
+  format: RenderFormat;
+  state: 'rendering' | 'done' | 'failed';
+  message: string;
+  progress: string | null;
+  log: string;
+  by: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  /** The latest output, and what it was made from (0081): the files that differed from the commit, and how many more. */
+  output: { at: string; size: number; madeFrom?: { uncommitted: readonly unknown[]; more?: number } } | null;
+  /** A tool the document needs that this computer lacks, and people may download. */
+  needs?: { tool: string; label: string; downloadBytes: number } | null;
+}
+
+export interface RenderInfo {
+  /** Formats the document can be rendered to here; none if it cannot be. */
+  formats: RenderFormat[];
+  /** Why it cannot be rendered now, if it cannot. */
+  unavailable: string | null;
+  renders: RenderState[];
+}
+
+/** Where a phrase was found (the host's search, 0042). */
+export interface SearchMatch { line: number; column: number; text: string; at: number }
+export interface SearchFile { path: string; type: string | null; title?: string | null; live: boolean; matches: SearchMatch[] }
+export interface SearchResult { files: SearchFile[]; truncated: boolean }
+
+/** A tool (TeX, say) as far as a component follows it (0045). */
+export interface ToolState {
+  id: string;
+  label: string;
+  state: 'absent' | 'downloading' | 'ready' | 'adding' | 'removing';
+  progress: string | null;
+  error: string | null;
+}
+
+/** The host's calls offered to components (0089). Each rejects as the client's own calls do. */
+export interface CoreHost {
+  /** Search the workspace's text files, and open documents as they are now. */
+  search(query: string, caseSensitive: boolean): Promise<SearchResult>;
+  /** A document's renders: what it can be rendered to, and how its latest ones stand. */
+  renders(path: string): Promise<RenderInfo>;
+  /** Render a document (as you, for the record); a render that cannot start says why, as a failed one. */
+  render(path: string, format: RenderFormat): Promise<RenderState>;
+  /** A document's latest output in a format. */
+  renderOutput(path: string, format: RenderFormat): Promise<Blob>;
+  /** The files a document's latest output was made from, as they were, in a zip (0081). */
+  renderMadeFrom(path: string, format: RenderFormat): Promise<Blob>;
+  /** The tools this computer has or may download. */
+  tools(): Promise<{ tools: ToolState[] }>;
+  /** Download a tool; follow it with tools(). */
+  downloadTool(id: string): Promise<void>;
+  /** Be told when the host says a tool changed (downloaded, removed). Returns how to stop. */
+  onToolsChanged(fn: () => void): () => void;
 }
 
 /**
@@ -152,6 +232,8 @@ export interface FeatureMenuItem {
 export interface FeatureDocumentContext extends FeatureClientContext {
   path: string;
   type: DocumentType;
+  /** The Source view is shown, not the rich one. */
+  source: boolean;
 }
 
 /** A panel the feature draws: beside the open document, or about the workspace. */
@@ -162,6 +244,19 @@ export interface FeaturePanel {
   about: 'document' | 'workspace';
   /** Keys that open it, as key bindings write them; the client binds them while the feature is on. */
   keys?: string;
+  /**
+   * Whether its keys close it while it is open (the default). False: asked for
+   * again while open, it is asked again (onAsk), as ⇧⌘R renders again (0089).
+   */
+  toggle?: boolean;
+  /**
+   * A document's panel drawn over the document's top left, all of it the
+   * panel's own (no heading of the client's), not in the place beside it: it
+   * stays open beside any other panel. Over the rich view only (0089).
+   */
+  over?: boolean;
+  /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */
+  icon?: FileIcon;
   /** Draw it into `element`; returns how to take it down. */
   mount(element: HTMLElement, ctx: FeaturePanelContext): () => void;
 }
@@ -175,6 +270,14 @@ export interface FeaturePanelContext extends FeatureClientContext {
   state(): FeatureState | null;
   /** Be told when the open document changes: another is opened, it is edited, its state changes. Returns how to stop. */
   onDocument(fn: () => void): () => void;
+  /**
+   * The open document as the client follows it, while one is open: when it was
+   * last written to its file, and how many edits made here have not reached
+   * the host yet (0089).
+   */
+  document(): { path: string; writtenAt: string | null; unsynced: number } | null;
+  /** Be told each time the panel is asked for (its keys, a menu, openPanel): once as it opens by being asked, and again while open where it does not toggle. Returns how to stop. */
+  onAsk(fn: () => void): () => void;
   close(): void;
 }
 

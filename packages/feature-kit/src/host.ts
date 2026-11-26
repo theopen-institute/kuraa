@@ -17,6 +17,12 @@ export interface HostFeature {
   /** A sentence on what it does (Settings). */
   description?: string;
   /**
+   * On in a workspace whose .kuraa/features.json says nothing of it (0087):
+   * what the app is not the same without (its navigation, Preview, Search).
+   * A workspace turns it off with `"on": false`.
+   */
+  onByDefault?: boolean;
+  /**
    * Document types for its files (its companions, its codebook), usually
    * with a `merge` of their own. Registered on every host that loads the
    * feature, on or off, so that turning it off does not change how a device

@@ -47,8 +47,6 @@ describe('counts', () => {
     expect(count(2, 'match', 'matches')).toBe('2 matches');
     expect(count(1200, 'change', 'changes')).toBe('1,200 changes');
     expect(plural(1, 'part differs', 'parts differ')).toBe('part differs');
-    expect(S.search.summary(1, 1, false)).toBe('1 match in 1 file.');
-    expect(S.search.summary(3, 2, true)).toBe('3 matches in 2 files (only the first are shown).');
     expect(S.offline.unsent(4)).toBe('4 changes not yet sent.');
   });
 });
@@ -130,12 +128,14 @@ describe('the shortcuts sheet', () => {
   it('lists each module’s lines once, grouped as they group them, then the client’s keys', () => {
     const md: FormatEditor = { label: 'Markdown', help: [{ group: 'Text', type: '**bold**', keys: ['Mod-b'], does: 'Bold' }] };
     const rmd: FormatEditor = { label: 'R Markdown', help: [...md.help!, { group: 'Notes', type: '^[text]', does: 'Inline note' }] };
-    const sheet = helpSheet({ md, rmd });
+    // A component's line in the client's group (Search's, 0089) is listed in it.
+    const search = { label: 'Search', help: [{ group: S.help.findYourWay, does: 'Search every file', keys: ['Mod-Shift-f'] }] } as FormatEditor;
+    const sheet = helpSheet({ md, rmd, search });
     expect(sheet.map((g) => g.title).slice(0, 2)).toEqual(['Text', 'Notes']);
     expect(sheet[0]!.items).toHaveLength(1);
     expect(sheet.slice(0, 2).every((g) => !g.app)).toBe(true);
     const keys = sheet.filter((g) => g.app).flatMap((g) => g.items.flatMap((i) => i.keys ?? []));
-    expect(keys).toEqual(expect.arrayContaining(['Mod-/', 'Mod-,', 'Mod-Shift-f', 'Mod-Shift-r', 'Mod-f', 'Mod-Alt-o', 'Mod-Enter', 'F2']));
+    expect(keys).toEqual(expect.arrayContaining(['Mod-/', 'Mod-,', 'Mod-Shift-f', 'Mod-f', 'Mod-Enter', 'F2']));
   });
 
   it('lists a module’s line in the client’s group of the same title, first', () => {

@@ -31,3 +31,13 @@ export function saveFile(blob: Blob, name: string): void {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
+
+/** A time: hours and minutes if today, the date and time otherwise; a dash if none. */
+export const time = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString();
+};
+
+/** A size people read: '54 MB' (never less than 1 MB, for something to download). */
+export const megabytes = (bytes: number) => `${Math.max(1, Math.round(bytes / 1e6)).toLocaleString()} MB`;

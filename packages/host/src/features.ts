@@ -152,7 +152,13 @@ export class HostFeatures {
 
   /** On for the workspace, here: the host has it on, and the workspace too. */
   isOn(id: string): boolean {
-    return this.onForHost(id) && this.entries[id]?.on === true;
+    return this.onForHost(id) && this.onForWorkspace(id);
+  }
+
+  /** The workspace has it on: its entry says so, or says nothing of a feature on by default (0087). */
+  private onForWorkspace(id: string): boolean {
+    const said = this.entries[id]?.on;
+    return typeof said === 'boolean' ? said : this.loaded.get(id)?.onByDefault === true;
   }
 
   /** Its settings for the workspace: its entry in .kuraa/features.json, without `on`. */
@@ -225,13 +231,15 @@ export class HostFeatures {
       const settings = change.settings !== undefined ? change.settings : this.settingsOf(was);
       if (!isObject(settings)) throw new HttpError(400, 'Settings are an object');
       if ('on' in settings) throw new HttpError(400, '“on” is not a setting');
-      const on = change.on ?? was.on === true;
-      const next: Entry = { ...settings, ...(on ? { on: true } : {}) };
+      const byDefault = f.onByDefault === true;
+      const on = change.on ?? (typeof was.on === 'boolean' ? was.on : byDefault);
+      // Said only where it differs from the feature's default (0087): a feature on by default is turned off with `"on": false`.
+      const next: Entry = { ...settings, ...(on !== byDefault ? { on } : {}) };
       if (Object.keys(next).length) entries[id] = next;
       else delete entries[id];
       const paths = [FEATURES_FILE];
       await this.port.writeAtomic(this.port.resolvePath(FEATURES_FILE), stable(entries));
-      const suffixes = [...new Set([...(await this.readRecorded()), ...(next.on ? f.companions ?? [] : [])])].sort();
+      const suffixes = [...new Set([...(await this.readRecorded()), ...(on ? f.companions ?? [] : [])])].sort();
       if (stable({ suffixes }) !== stable({ suffixes: this.recorded })) {
         await this.port.writeAtomic(this.port.resolvePath(COMPANIONS_FILE), stable({ suffixes }));
         paths.push(COMPANIONS_FILE);
@@ -258,7 +266,7 @@ export class HostFeatures {
       description: f.description ?? '',
       on: this.isOn(f.id),
       host: this.onForHost(f.id),
-      workspace: this.entries[f.id]?.on === true,
+      workspace: this.onForWorkspace(f.id),
       settings: this.settings(f.id),
       mayChange,
       companions: f.companions ?? [],

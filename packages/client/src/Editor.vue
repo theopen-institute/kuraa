@@ -24,7 +24,6 @@ import { defaultBlock } from './blocks.js';
 import { locateMatch, replaceWithText, selectionFor, type MatchTarget } from './docActions.js';
 import FindBar from './FindBar.vue';
 import ReadOnlyDoc from './ReadOnlyDoc.vue';
-import OutlinePanel from './OutlinePanel.vue';
 import { findPlugin } from './find.js';
 import { dialogOpen } from './focus.js';
 import type { FormatCommands } from '@kuraa/editor-kit';
@@ -647,9 +646,8 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 /** A feature's state in the open document's room, for its panels (null if it keeps none here). */
 const featureState = (id: string): FeatureState | null => featureEditors.find((f) => f.id === id)?.state ?? null;
 
-// Find (⌘F) and the outline (⌥⌘O), over the rich view; the Source view finds with its own bar.
+// Find (⌘F), over the rich view; the Source view finds with its own bar.
 const find = ref<{ initial: string; focus: number } | null>(null);
-const outlineOpen = ref(false);
 function openFind() {
   const v = view.value;
   if (!v || props.showSource || props.type.editor?.layout) return false;
@@ -657,10 +655,6 @@ function openFind() {
   const selected = v.state.doc.textBetween(from, to, ' ').slice(0, 200);
   find.value = { initial: selected && !selected.includes('\n') ? selected : find.value?.initial ?? '', focus: (find.value?.focus ?? 0) + 1 };
   return true;
-}
-function toggleOutline() {
-  if (props.type.editor?.layout) return;
-  outlineOpen.value = !outlineOpen.value && !!view.value;
 }
 /** Run a command the format offers by name; false if it has none, or it did not apply. */
 function command(name: keyof FormatCommands): boolean {
@@ -673,10 +667,6 @@ function command(name: keyof FormatCommands): boolean {
 const onWritingKey = (e: KeyboardEvent) => {
   if (!(e.metaKey || e.ctrlKey) || e.defaultPrevented || dialogOpen()) return;
   if (keyMatches(e, APP_KEYS.find) && openFind()) e.preventDefault();
-  else if (keyMatches(e, APP_KEYS.outline)) {
-    e.preventDefault();
-    toggleOutline();
-  }
 };
 onMounted(() => window.addEventListener('keydown', onWritingKey));
 onBeforeUnmount(() => window.removeEventListener('keydown', onWritingKey));
@@ -706,7 +696,7 @@ watch([() => props.focusTitle, view], async ([want, v]) => {
   emit('titleFocused');
 }, { immediate: true });
 
-defineExpose({ openFind, toggleOutline, command, view, docVersion, featureState, featureTick, tick, ...documentActions });
+defineExpose({ openFind, command, view, docVersion, featureState, featureTick, tick, ...documentActions });
 
 // Becoming read-only, or editable again (the workspace's rules changed): the view asks `editable` again.
 watch(() => props.readOnly, () => view.value?.setProps({}));
@@ -739,7 +729,8 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
       <ReadOnlyDoc :text="preview" :type="type" :path="path" :format-editor="formatEditor" />
     </div>
     <FindBar v-if="find && view && !showSource" :view="view" :tick="tick" :initial="find.initial" :focus-key="find.focus" @close="find = null" />
-    <OutlinePanel v-if="outlineOpen && view && !showSource" :view="view" :tick="tick" @close="outlineOpen = false" />
+    <!-- Features' panels over the document's top left (the Outline: 0089), over the rich view only. -->
+    <slot v-if="view && !showSource && !type.editor?.layout" name="over" />
     <div v-show="!showSource && !(loading && preview !== null)" ref="scroller" :class="['editor-scroll', { 'margin-tags': marginTags }]" :data-features="featuresHere || undefined" @mousedown="onBlankMouseDown">
       <div ref="mount" :class="type.editor?.layout ? 'editor-mount editor-mount-lines' : 'editor-mount'" />
       <button

@@ -1,13 +1,16 @@
 <script setup lang="ts">
-// A feature's panel beside the document (0082), drawn by the feature into the
-// panel's body. The panel's head (its name, and closing it) is the client's,
-// as every side panel's is. What the panel is told of the open document (it
-// changed, another was opened) goes to whoever the feature asked to be told.
-import { computed, watch } from 'vue';
+// A feature's panel (0082), drawn by the feature into the panel's body: beside
+// the document, with a head (its name, and closing it) that is the client's, as
+// every side panel's is; or, for an `over` panel, over the document's top left,
+// all of it the feature's (0089). What the panel is told of the open document
+// (it changed, another was opened) goes to whoever the feature asked to be
+// told; each time it is asked for, to whoever listens for that (onAsk).
+import { computed, onBeforeUnmount, useTemplateRef, watch } from 'vue';
 import type { FeaturePanel, FeaturePanelContext, FeatureState } from '@kuraa/feature-kit/client';
 import type { EditorView } from 'prosemirror-view';
 import type { ActiveFeature } from './features.js';
 import { S } from './strings.js';
+import { useReturnFocus } from './vue.js';
 import FeatureMount from './FeatureMount.vue';
 
 const props = defineProps<{
@@ -19,19 +22,31 @@ const props = defineProps<{
   documentTick: number;
   view: () => EditorView | null;
   state: () => FeatureState | null;
+  /** The open document as the client follows it (when last written, edits not yet at the host). */
+  document: { path: string; writtenAt: string | null; unsynced: number } | null;
+  /** Goes up each time the panel is asked for (its keys, a menu, openPanel). */
+  asks: number;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
+const root = useTemplateRef<HTMLElement>('root');
+useReturnFocus(root);
+
 const listeners = new Set<() => void>();
-watch(() => [props.path, props.documentTick], () => {
-  for (const fn of [...listeners]) {
+const askers = new Set<() => void>();
+const tell = (set: Set<() => void>, what: string) => {
+  for (const fn of [...set]) {
     try {
       fn();
     } catch (e) {
-      console.error(`[kuraa] the feature ${props.active.feature.id}'s panel failed on a change`, e);
+      console.error(`[kuraa] the feature ${props.active.feature.id}'s panel failed on ${what}`, e);
     }
   }
-});
+};
+watch(() => [props.path, props.documentTick, props.document?.writtenAt, props.document?.unsynced], () => tell(listeners, 'a change'));
+watch(() => props.asks, () => tell(askers, 'being asked for'));
+let first: ReturnType<typeof setTimeout> | undefined;
+onBeforeUnmount(() => clearTimeout(first));
 
 // A new context (and drawing) only for another panel: the document changing is told, not redrawn.
 const mount = computed(() => {
@@ -41,16 +56,25 @@ const mount = computed(() => {
     path: () => props.path,
     view: () => props.view(),
     state: () => props.state(),
+    document: () => (props.path && props.document?.path === props.path ? { ...props.document } : null),
     onDocument: (fn) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
+    },
+    onAsk: (fn) => {
+      askers.add(fn);
+      return () => askers.delete(fn);
     },
     close: () => emit('close'),
   };
   return (el: HTMLElement) => {
     const down = panel.mount(el, ctx);
+    // Opened by being asked for: told so once it is drawn.
+    clearTimeout(first);
+    first = setTimeout(() => tell(askers, 'being asked for'));
     return () => {
       listeners.clear();
+      askers.clear();
       down();
     };
   };
@@ -58,7 +82,8 @@ const mount = computed(() => {
 </script>
 
 <template>
-  <aside class="pane pane-right side-panel feature-panel" :aria-label="panel.label" :data-testid="`feature-panel-${active.feature.id}-${panel.id}`" @keydown.esc="emit('close')">
+  <FeatureMount v-if="panel.over" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
+  <aside v-else ref="root" class="pane pane-right side-panel feature-panel" :aria-label="panel.label" :data-testid="`feature-panel-${active.feature.id}-${panel.id}`" @keydown.esc="emit('close')">
     <div class="pane-header">
       <span>{{ panel.label }}</span>
       <div class="pane-header-actions">

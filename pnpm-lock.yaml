@@ -477,6 +477,15 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/outline':
+        specifier: workspace:*
+        version: link:../outline
+      '@kuraa/preview':
+        specifier: workspace:*
+        version: link:../preview
+      '@kuraa/search':
+        specifier: workspace:*
+        version: link:../search
 
   packages/format-pandoc:
     dependencies:
@@ -694,6 +703,33 @@ importers:
         specifier: ^1.25.13
         version: 1.25.13
 
+  packages/outline:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.9
+        version: 1.42.9
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
+  packages/preview:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
   packages/run-components:
     dependencies:
       '@kuraa/engine-r':
@@ -717,6 +753,15 @@ importers:
       '@kuraa/session':
         specifier: workspace:*
         version: link:../session
+
+  packages/search:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
 
   packages/session:
     dependencies:

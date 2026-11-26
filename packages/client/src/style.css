@@ -404,9 +404,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component.tool { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
 .component.tool .component-text { cursor: default; }
 .tool-actions { display: flex; gap: 6px; align-items: start; }
-.render-needs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
-.render-made-from { margin-top: 6px; }
-.render-made-from button { font-size: inherit; }
 .r-state.unsandboxed::after { content: ' · not sandboxed'; color: var(--warn); }
 .component-warn { font-weight: 400; color: var(--warn); }
 .components-note code { font-size: 12px; }
@@ -646,46 +643,13 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .find-row button { font-size: 12px; padding: 3px 7px; }
 .find-row button.active { background: var(--accent-soft); }
 .find-count { min-width: 4.5em; color: var(--muted); font-size: 12px; text-align: right; }
-.outline-panel {
-  position: absolute; top: 8px; left: 16px; z-index: 20; width: 16rem; max-height: calc(100% - 24px); overflow: auto; padding: 6px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); font: 13px var(--font);
-}
-.outline-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 6px; color: var(--muted); }
-.outline-head button { border: 0; background: none; padding: 0 4px; }
-.outline-panel ul { list-style: none; margin: 0; padding: 0; }
-.outline-entry { display: block; width: 100%; border: 0; background: none; text-align: left; padding: 3px 8px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.outline-entry:hover, .outline-entry:focus-visible { background: var(--selected); outline: none; }
-.outline-entry.current { color: var(--accent); font-weight: 600; }
-.outline-empty { margin: 4px 6px; color: var(--muted); }
 .tree-conflict { cursor: pointer; text-decoration: underline dotted; }
 /* The count is what to click on a file with conflicts; Rename and Delete stay in its right-click menu. */
 .tree-file.has-conflicts:hover > .tree-actions { display: none; }
 
-/* The Preview and Search panels, beside the document (RenderPanel.vue, SearchPanel.vue). */
+/* A panel beside the document (FeaturePanel.vue): its heading the client's, its body the component's (0089). */
 .side-panel { display: flex; flex-direction: column; overflow: hidden; }
-.render-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.render-actions .muted { margin-left: 6px; font-size: 12px; }
-.render-on-save { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-left: auto; }
-.render-status { padding: 7px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
-.render-status.failed { background: var(--warn-soft); color: var(--warn); }
-.render-log summary { cursor: pointer; margin-top: 4px; color: var(--muted); }
-.render-log pre { max-height: 260px; overflow: auto; font: 11px/1.4 var(--mono); white-space: pre-wrap; color: var(--text); background: var(--surface); padding: 6px; border: 1px solid var(--border); border-radius: 4px; }
-.render-frame { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
-.search-form { display: grid; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.search-form input[type='search'] { width: 100%; }
-.search-case { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-.search-summary { font-size: 12px; margin: 0; }
-.search-results { list-style: none; margin: 0; padding: 0 6px 12px; overflow: auto; flex: 1; }
-.search-file { margin-top: 8px; }
-.search-file-name { display: grid; padding: 2px 6px; }
-.search-file-title { font-weight: 600; font-size: 13px; }
-.search-file-path { font-size: 11px; }
-.search-matches { list-style: none; margin: 0; padding: 0; }
-.search-matches button { display: flex; gap: 8px; width: 100%; text-align: left; border: 0; border-radius: 5px; padding: 3px 6px; background: none; font-size: 12px; }
-.search-matches button:hover { background: var(--selected); }
-.search-line { color: var(--muted); min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
-.search-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
-.search-text mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+.feature-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 
 /* A past version: its details, and compared with the document now (PastVersion.vue). */
 .past-label { white-space: nowrap; }

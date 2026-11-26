@@ -9,6 +9,9 @@
   },
   "dependencies": {
     "@kuraa/annotations": "workspace:*",
-    "@kuraa/feature-kit": "workspace:*"
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/outline": "workspace:*",
+    "@kuraa/preview": "workspace:*",
+    "@kuraa/search": "workspace:*"
   }
 }

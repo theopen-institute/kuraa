@@ -25,9 +25,6 @@ export function clientHelp(): HelpGroup[] {
     group(h.findYourWay, [
       { does: h.find, keys: [APP_KEYS.find] },
       { does: h.findNext, keys: [APP_KEYS.findNext] },
-      { does: h.outline, keys: [APP_KEYS.outline] },
-      { does: h.search, keys: [APP_KEYS.search] },
-      { does: h.preview, keys: [APP_KEYS.preview] },
     ]),
     group(h.code, [
       { does: h.runChunk, keys: [APP_KEYS.runChunk] },

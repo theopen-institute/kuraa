@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
-import type { FeatureStatus } from '@kuraa/feature-kit/client';
+import type { CoreHost, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
 import type { Node as PMNode } from 'prosemirror-model';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
@@ -37,9 +37,9 @@ import SettingsWindow from './SettingsWindow.vue';
 import type { SettingsSection } from './settingsSections.js';
 import InviteDialog from './InviteDialog.vue';
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue';
-import RenderPanel from './RenderPanel.vue';
-import SearchPanel from './SearchPanel.vue';
 import type { MatchTarget } from './docActions.js';
+import { explain } from './errors.js';
+import FileIcon from './FileIcon.vue';
 import type { ContextItem } from './ContextMenu.vue';
 import { activeFeatures, FeatureMessages, loadHiddenFeatures, saveHiddenFeatures, type ActiveFeature, type FeatureApp } from './features.js';
 import FeaturePanel from './FeaturePanel.vue';
@@ -132,22 +132,6 @@ const shownFiles = computed(() => {
     return out;
   });
 });
-/** The Preview or Search panel, beside the document (renders and searches: RenderPanel, SearchPanel). */
-const sidePanel = ref<'preview' | 'search' | null>(null);
-const renderAsked = ref(0);
-const searchAsked = ref(0);
-
-function preview() {
-  if (!path.value || !type.value) return;
-  featurePanel.value = null;
-  sidePanel.value = 'preview';
-  renderAsked.value++;
-}
-function openSearch() {
-  featurePanel.value = null;
-  sidePanel.value = 'search';
-  searchAsked.value++;
-}
 
 // Features (0082): how each the host has stands for the open workspace, which
 // this person hid (in this browser), and the client halves in use, each with
@@ -176,13 +160,45 @@ watch([api, ready], () => {
 const featureNotice = (text: string, kind: 'info' | 'warn' = 'info') => {
   notice.value = { kind, text };
 };
+/** Told when the host says a tool changed (downloaded, removed): components that follow tools (0089). */
+const toolListeners = new Set<() => void>();
+watch(toolsKey, () => {
+  for (const fn of [...toolListeners]) {
+    try {
+      fn();
+    } catch (e) {
+      console.error('[kuraa] a component failed on a tool changing', e);
+    }
+  }
+});
+const person = () => ({ name: settings.value.name, email: settings.value.email, color: settings.value.color });
+/** The host's own calls, offered to components (0089): always the open workspace's. */
+const coreHost: CoreHost = {
+  search: (q, caseSensitive) => api.value.search(q, caseSensitive),
+  renders: (p) => api.value.renders(p),
+  render: (p, format) => api.value.render(p, format, person()),
+  renderOutput: (p, format) => api.value.renderOutput(p, format),
+  renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
+  tools: () => api.value.tools(),
+  downloadTool: async (id) => {
+    await api.value.downloadTool(id);
+  },
+  onToolsChanged: (fn) => {
+    toolListeners.add(fn);
+    return () => toolListeners.delete(fn);
+  },
+};
 const featureApp: FeatureApp = {
   api: () => api.value,
-  person: () => ({ name: settings.value.name, email: settings.value.email, color: settings.value.color }),
+  person,
   notify: featureNotice,
   ui: { askText, askConfirm, notify: featureNotice },
-  openPanel: (feature, panel) => openFeaturePanel(feature, panel),
+  openPanel: (feature, panel) => askPanel(feature, panel),
   openFile: (p, at) => void openAtText(p, at),
+  openMatch: (p, target) => void openMatch(p, target),
+  host: coreHost,
+  explain,
+  keyLabel,
   changed: () => void loadFeatures(),
 };
 /** The client halves in use: on for the workspace, and not hidden by this person. */
@@ -201,21 +217,49 @@ function setHiddenFeatures(ids: string[]) {
   hiddenFeatures.value = ids;
   saveHiddenFeatures(ids);
 }
-/** A feature's panel, if one is open beside the document. */
-const featurePanel = shallowRef<{ feature: string; panel: string } | null>(null);
-const shownFeaturePanel = computed(() => {
-  const fp = featurePanel.value;
-  if (!fp) return null;
-  const active = features.value.find((f) => f.feature.id === fp.feature);
-  const panel = active?.feature.panels?.find((p) => p.id === fp.panel);
+/**
+ * The panels open (0082, 0089): one beside the document at a time, and any
+ * over it (the Outline), each with how many times it has been asked for.
+ */
+type OpenPanel = { feature: string; panel: string; asks: number };
+const featurePanel = shallowRef<OpenPanel | null>(null);
+const overPanels = shallowRef<OpenPanel[]>([]);
+/** A panel open, with its feature in use and its spec, if it can be shown now (a document's needs the live document). */
+function shownPanel(open: OpenPanel | null) {
+  if (!open) return null;
+  const active = features.value.find((f) => f.feature.id === open.feature);
+  const panel = active?.feature.panels?.find((p) => p.id === open.panel);
   if (!active || !panel || (panel.about === 'document' && !(path.value && type.value && !viewing.value))) return null;
-  return { active, panel };
-});
-function openFeaturePanel(feature: string, panel: string) {
-  docMenu.value = null;
-  sidePanel.value = null;
-  featurePanel.value = { feature, panel };
+  return { active, panel, asks: open.asks };
 }
+const shownFeaturePanel = computed(() => shownPanel(featurePanel.value));
+const shownOverPanels = computed(() => overPanels.value.map(shownPanel).filter((p) => !!p));
+const findPanel = (feature: string, panel: string) => features.value.find((f) => f.feature.id === feature)?.feature.panels?.find((p) => p.id === panel);
+/** Whether a panel is open and shown. */
+function panelOpen(feature: string, panel: string): boolean {
+  const same = (o: { active: { feature: { id: string } }; panel: FeaturePanelSpec } | null) => o?.active.feature.id === feature && o.panel.id === panel;
+  return same(shownFeaturePanel.value) || shownOverPanels.value.some(same);
+}
+/** Ask for a panel: open it (beside the document, in place of the one there, or over it), or ask it again if it is open. */
+function askPanel(feature: string, panel: string) {
+  docMenu.value = null;
+  const spec = findPanel(feature, panel);
+  if (!spec) return;
+  const same = (o: OpenPanel | null) => o?.feature === feature && o.panel === panel;
+  if (spec.over) {
+    const was = overPanels.value.find(same);
+    overPanels.value = was ? overPanels.value.map((o) => (o === was ? { ...o, asks: o.asks + 1 } : o)) : [...overPanels.value, { feature, panel, asks: 1 }];
+  } else {
+    const was = featurePanel.value;
+    featurePanel.value = was && same(was) && shownFeaturePanel.value ? { ...was, asks: was.asks + 1 } : { feature, panel, asks: 1 };
+  }
+}
+function closePanel(feature: string, panel: string) {
+  if (featurePanel.value?.feature === feature && featurePanel.value.panel === panel) featurePanel.value = null;
+  overPanels.value = overPanels.value.filter((o) => !(o.feature === feature && o.panel === panel));
+}
+/** The workspace's panels with an icon (Search's): offered as buttons beside ＋ (0089). */
+const panelButtons = computed(() => features.value.flatMap((f) => (f.feature.panels ?? []).filter((p) => p.about === 'workspace' && p.icon).map((panel) => ({ feature: f.feature.id, panel }))));
 /** Open a file at a range of its text (a feature asked). */
 async function openAtText(p: string, at?: { from: number; to: number }) {
   if (p !== path.value) select(p);
@@ -231,7 +275,7 @@ const featureMenu = computed(() => {
   if (!p || !t) return [];
   return features.value.flatMap((f) => {
     try {
-      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t }) ?? [];
+      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t, source: showSource.value }) ?? [];
     } catch (e) {
       console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
       return [];
@@ -523,21 +567,16 @@ const onKey = (e: KeyboardEvent) => {
   } else if (k(APP_KEYS.preferences)) {
     e.preventDefault();
     openSettings();
-  } else if (k(APP_KEYS.search)) {
-    e.preventDefault();
-    openSearch();
-  } else if (k(APP_KEYS.preview)) {
-    e.preventDefault();
-    preview();
   } else {
-    // A feature's panel, by its keys (0082): opened, or closed if it is open.
+    // A feature's panel, by its keys (0082): opened; if it is open, closed, or asked again where it does not toggle (0089).
     for (const f of features.value) {
       const panel = f.feature.panels?.find((p) => p.keys && k(p.keys));
       if (!panel) continue;
+      // A document's panel waits for a document (the keys do nothing without one).
+      if (panel.about === 'document' && !(path.value && type.value && !viewing.value)) return;
       e.preventDefault();
-      const open = featurePanel.value?.feature === f.feature.id && featurePanel.value.panel === panel.id && !!shownFeaturePanel.value;
-      if (open) featurePanel.value = null;
-      else openFeaturePanel(f.feature.id, panel.id);
+      if (panelOpen(f.feature.id, panel.id) && panel.toggle !== false) closePanel(f.feature.id, panel.id);
+      else askPanel(f.feature.id, panel.id);
       return;
     }
   }
@@ -738,6 +777,8 @@ const hostRegistry = computed(() => {
   return markRaw(r);
 });
 const shownNotice = computed(() => notice.value ?? status.value?.notice ?? null);
+/** The open document as panels follow it (0089): when it was last written to its file, and edits not yet at the host. */
+const openDocument = computed(() => (path.value && type.value && !viewing.value ? { path: path.value, writtenAt: status.value?.lastFlushAt ?? null, unsynced: status.value?.unsynced ?? 0 } : null));
 
 // The connection, said plainly while it is lost (after a moment, so a blink does not flash a banner).
 const offline = ref(false);
@@ -856,7 +897,7 @@ function useSettings(s: Settings) {
     </div>
     <ErrorBanner v-if="error" :error="error"><button type="button" @click="error = null">{{ S.common.dismiss }}</button></ErrorBanner>
 
-    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!sidePanel || !!shownFeaturePanel }]">
+    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!shownFeaturePanel }]">
       <FileTree
         v-if="ready"
         ref="fileTree"
@@ -892,11 +933,18 @@ function useSettings(s: Settings) {
             />
           </span>
         </template>
-        <!-- The workspace's own action, beside New file: search it. -->
+        <!-- The workspace's panels with an icon (Search), beside New file (0089). -->
         <template #actions>
-          <button type="button" :title="S.menu.searchTitle(keyLabel(APP_KEYS.search))" :aria-label="S.menu.search" data-testid="search-button" @click="openSearch">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-          </button>
+          <button
+            v-for="b in panelButtons"
+            :key="`${b.feature}:${b.panel.id}`"
+            type="button"
+            class="panel-button"
+            :title="b.panel.keys ? `${b.panel.label} (${keyLabel(b.panel.keys)})` : b.panel.label"
+            :aria-label="b.panel.label"
+            :data-testid="`${b.panel.id}-button`"
+            @click="askPanel(b.feature, b.panel.id)"
+          ><FileIcon :icon="b.panel.icon" /></button>
         </template>
       </FileTree>
       <nav v-else class="pane pane-left" :aria-label="S.app.workspaces">
@@ -984,7 +1032,23 @@ function useSettings(s: Settings) {
               @committed="historyKey++"
               @outside-conflict="outsideConflict"
               @feature-message="(f, m, p) => featureMessages.emit(f, m, p)"
-            />
+            >
+              <template #over>
+                <FeaturePanel
+                  v-for="o in shownOverPanels"
+                  :key="`${o.active.feature.id}:${o.panel.id}`"
+                  :active="o.active"
+                  :panel="o.panel"
+                  :path="path"
+                  :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
+                  :view="() => editor?.view ?? null"
+                  :state="() => editor?.featureState(o.active.feature.id) ?? null"
+                  :document="openDocument"
+                  :asks="o.asks"
+                  @close="closePanel(o.active.feature.id, o.panel.id)"
+                />
+              </template>
+            </Editor>
           </div>
           <PastVersion
             v-if="viewing"
@@ -1013,20 +1077,8 @@ function useSettings(s: Settings) {
         :viewing="viewing?.commit?.hash ?? null"
         @view="view"
       />
-      <RenderPanel
-        v-if="sidePanel === 'preview' && path && type"
-        :api="api"
-        :path="path"
-        :by="{ name: settings.name, email: settings.email, color: settings.color }"
-        :trigger="renderAsked"
-        :written-at="status?.lastFlushAt ?? null"
-        :unsynced="status?.unsynced ?? 0"
-        :tools-key="toolsKey"
-        @close="sidePanel = null"
-      />
-      <SearchPanel v-else-if="sidePanel === 'search'" :api="api" :focus-key="searchAsked" @open="openMatch" @close="sidePanel = null" />
       <FeaturePanel
-        v-else-if="shownFeaturePanel"
+        v-if="shownFeaturePanel"
         :key="`${shownFeaturePanel.active.feature.id}:${shownFeaturePanel.panel.id}`"
         :active="shownFeaturePanel.active"
         :panel="shownFeaturePanel.panel"
@@ -1034,6 +1086,8 @@ function useSettings(s: Settings) {
         :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
         :view="() => editor?.view ?? null"
         :state="() => editor?.featureState(shownFeaturePanel!.active.feature.id) ?? null"
+        :document="openDocument"
+        :asks="shownFeaturePanel.asks"
         @close="featurePanel = null"
       />
     </div>
@@ -1054,12 +1108,10 @@ function useSettings(s: Settings) {
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
-      @outline="editor?.toggleOutline()"
       @insert-table="editor?.command('insertTable')"
       @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @preview="preview"
       @help="toggleHelp"
       @settings="openSettings('document')"
       @permissions="openPermissions(path!)"

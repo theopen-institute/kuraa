@@ -1,42 +1,37 @@
 <script setup lang="ts">
 // The Preview panel: the open document rendered to HTML by the host (where code
 // runs), shown in a frame that runs nothing; and Word, PDF and HTML files to
-// save. It renders when asked (Render, ⇧⌘R), and, if chosen, each time the
-// document is written to its file. A render that needs a tool this computer
-// lacks (LaTeX, for a PDF) offers to download it, and renders again once it is
-// there (decision 0045).
-import { computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue';
-import type { HostApi, RenderFormat, RenderInfo, RenderState } from './api.js';
-import { outputName, previewDocument, saveFile } from './preview.js';
-import { megabytes, time } from './labels.js';
-import { APP_KEYS, keyLabel } from './keys.js';
-import { S } from './strings.js';
-import { useReturnFocus } from './vue.js';
-import ErrorBanner from './ErrorBanner.vue';
+// save. It renders when asked (Render, ⇧⌘R, the ⋯ menu), and, if chosen, each
+// time the document is written to its file. A render that needs a tool this
+// computer lacks (LaTeX, for a PDF) offers to download it, and renders again
+// once it is there (decision 0045). A component (0089): the rendering is the
+// host's, asked through the core.
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import type { FeaturePanelContext, RenderFormat, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
+import { megabytes, outputName, previewDocument, saveFile, time } from './preview.js';
+import { KEYS, S } from './strings.js';
 
-const props = defineProps<{
-  api: HostApi;
-  path: string;
-  by: { name: string; email: string; color: string };
-  /** Goes up each time a render is asked for from outside (the menu, ⇧⌘R). */
-  trigger: number;
-  /** When the document was last written to its file: with "update on save", a render follows. */
-  writtenAt: string | null;
-  /** Edits made here that have not reached the host yet: a render waits for them (briefly). */
-  unsynced: number;
-  /** Goes up when the host says a tool changed. */
-  toolsKey?: number;
-}>();
-const emit = defineEmits<{ close: [] }>();
+const props = defineProps<{ ctx: FeaturePanelContext }>();
+const ctx = props.ctx;
 
-const LABELS = S.render.formats;
-const root = useTemplateRef<HTMLElement>('root');
-useReturnFocus(root);
+/** The open document as the client follows it: its path, when it was last written to its file, edits not yet at the host. */
+const doc = shallowRef(ctx.document());
+const stopDocument = ctx.onDocument(() => {
+  const next = ctx.document();
+  const was = doc.value;
+  if (next?.path !== was?.path || next?.writtenAt !== was?.writtenAt || next?.unsynced !== was?.unsynced) doc.value = next;
+});
+const path = computed(() => doc.value?.path ?? '');
+const writtenAt = computed(() => doc.value?.writtenAt ?? null);
+const unsynced = computed(() => doc.value?.unsynced ?? 0);
+
+const LABELS = S.formats;
 const ON_SAVE_KEY = 'kuraa:preview-on-save';
 
 const info = shallowRef<RenderInfo | null>(null);
 const html = ref<string | null>(null);
 const error = shallowRef<unknown>(null);
+const explained = computed(() => (error.value ? ctx.explain(error.value) : null));
 /** The render whose progress and outcome are shown. */
 const shown = shallowRef<RenderState | null>(null);
 /** Formats being rendered to be saved once done. */
@@ -48,12 +43,17 @@ watch(onSave, (v) => {
 });
 
 let asked = 0;
-let opened = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let toolTimer: ReturnType<typeof setTimeout> | undefined;
+const stopTools = ctx.host.onToolsChanged(() => {
+  if (fetching.value) void followTool();
+});
 onBeforeUnmount(() => {
   clearTimeout(timer);
   clearTimeout(toolTimer);
+  stopDocument();
+  stopTools();
+  stopAsk();
 });
 
 /** A tool being downloaded for a render: which, what it is doing, and the render to make once it is there. */
@@ -64,7 +64,7 @@ async function download(needs: NonNullable<RenderState['needs']>, format: Render
   fetching.value = { tool: needs.tool, label: needs.label, progress: null, format, save };
   error.value = null;
   try {
-    await props.api.downloadTool(needs.tool);
+    await ctx.host.downloadTool(needs.tool);
   } catch (e) {
     fetching.value = null;
     error.value = e;
@@ -79,14 +79,14 @@ async function followTool() {
   const f = fetching.value;
   if (!f) return;
   try {
-    const t = (await props.api.tools()).tools.find((x) => x.id === f.tool);
+    const t = (await ctx.host.tools()).tools.find((x) => x.id === f.tool);
     if (fetching.value !== f) return;
     if (t?.state === 'ready') {
       fetching.value = null;
       void render(f.format, f.save);
     } else if (!t || (t.state === 'absent' && t.error)) {
       fetching.value = null;
-      error.value = new Error(S.render.downloadFailed(f.label, t?.error ?? ''));
+      error.value = new Error(S.downloadFailed(f.label, t?.error ?? ''));
     } else {
       fetching.value = { ...f, progress: t.progress };
       toolTimer = setTimeout(() => void followTool(), 700);
@@ -99,30 +99,30 @@ async function followTool() {
 
 const busy = computed(() => !!info.value?.renders.some((r) => r.state === 'rendering'));
 
-async function loadPreview(path: string) {
+async function loadPreview(p: string) {
   try {
-    const text = await (await props.api.renderOutput(path, 'html')).text();
-    if (path === props.path) html.value = previewDocument(text);
+    const text = await (await ctx.host.renderOutput(p, 'html')).text();
+    if (p === path.value) html.value = previewDocument(text);
   } catch {
-    if (path === props.path) html.value = null;
+    if (p === path.value) html.value = null;
   }
 }
 
 /** Ask the host how the document's renders stand; follow them while any is under way. */
 async function refresh(first = false) {
-  const path = props.path;
+  const p = path.value;
   const n = asked;
   clearTimeout(timer);
   try {
-    const next = await props.api.renders(path);
-    if (n !== asked || path !== props.path) return;
+    const next = await ctx.host.renders(p);
+    if (n !== asked || p !== path.value) return;
     const before = info.value;
     info.value = next;
     error.value = null;
     for (const r of next.renders) {
       const was = before?.renders.find((x) => x.format === r.format);
       const finished = r.state !== 'rendering' && (first || was?.state === 'rendering' || was?.finishedAt !== r.finishedAt);
-      if (r.format === 'html' && r.state === 'done' && (first || finished)) void loadPreview(path);
+      if (r.format === 'html' && r.state === 'done' && (first || finished)) void loadPreview(p);
       if (finished && !first && toSave.has(r.format)) {
         toSave.delete(r.format);
         if (r.state === 'done') void save(r.format);
@@ -138,9 +138,9 @@ async function refresh(first = false) {
 
 /** Until what was typed here has reached the host (at most a few seconds): it renders the document as the host has it. */
 function synced(ms = 3000): Promise<void> {
-  if (!props.unsynced) return Promise.resolve();
+  if (!unsynced.value) return Promise.resolve();
   return new Promise((resolve) => {
-    const stop = watch(() => props.unsynced, (n) => {
+    const stop = watch(unsynced, (n) => {
       if (n) return;
       stop();
       clearTimeout(t);
@@ -157,7 +157,7 @@ async function render(format: RenderFormat, thenSave = false) {
   if (thenSave) toSave.add(format);
   try {
     await synced();
-    const state = await props.api.render(props.path, format, props.by);
+    const state = await ctx.host.render(path.value, format);
     shown.value = state;
     if (state.state === 'failed') toSave.delete(format);
     await refresh();
@@ -168,7 +168,7 @@ async function render(format: RenderFormat, thenSave = false) {
 
 async function save(format: RenderFormat) {
   try {
-    saveFile(await props.api.renderOutput(props.path, format), outputName(props.path, format));
+    saveFile(await ctx.host.renderOutput(path.value, format), outputName(path.value, format));
   } catch (e) {
     error.value = e;
   }
@@ -176,8 +176,8 @@ async function save(format: RenderFormat) {
 
 async function saveMadeFrom(format: RenderFormat) {
   try {
-    const name = `${outputName(props.path, format).replace(/\.[^.]*$/, '')}-${format}-made-from.zip`;
-    saveFile(await props.api.renderMadeFrom(props.path, format), name);
+    const name = `${outputName(path.value, format).replace(/\.[^.]*$/, '')}-${format}-made-from.zip`;
+    saveFile(await ctx.host.renderMadeFrom(path.value, format), name);
   } catch (e) {
     error.value = e;
   }
@@ -187,74 +187,69 @@ async function saveMadeFrom(format: RenderFormat) {
 const madeFrom = computed(() => (shown.value?.state === 'done' && !fetching.value ? shown.value.output?.madeFrom ?? null : null));
 const unsaved = computed(() => (madeFrom.value ? madeFrom.value.uncommitted.length + (madeFrom.value.more ?? 0) : 0));
 
-watch(() => props.toolsKey, () => {
-  if (fetching.value) void followTool();
-});
-watch(() => props.path, () => {
+/** What is known of the open document's renders, asked again for each document opened. */
+let known: Promise<void> = Promise.resolve();
+watch(path, () => {
   asked++;
   fetching.value = null;
   info.value = null;
   html.value = null;
   shown.value = null;
   toSave.clear();
-  const opening = !opened;
-  opened = true;
-  // Opened by asking for a render (the menu, ⇧⌘R): render now, once what is there is known.
-  void refresh(true).then(() => {
-    if (opening && props.trigger) void render('html');
-  });
+  known = refresh(true);
 }, { immediate: true });
-watch(() => props.trigger, () => void render('html'));
-watch(() => props.writtenAt, (at, before) => {
+// Asked for (opened by ⇧⌘R or the menu, or asked again while open): render now, once what is there is known.
+const stopAsk = ctx.onAsk(() => void known.then(() => render('html')));
+watch(writtenAt, (at, before) => {
   if (onSave.value && at && at !== before && !busy.value) void render('html');
 });
 
 const status = computed(() => {
   const s = shown.value;
-  if (fetching.value) return S.render.downloading(fetching.value.label, fetching.value.progress);
+  if (fetching.value) return S.downloading(fetching.value.label, fetching.value.progress);
   if (!s) return null;
-  if (s.state === 'rendering') return S.render.rendering(LABELS[s.format]!, s.progress);
+  if (s.state === 'rendering') return S.rendering(LABELS[s.format]!, s.progress);
   if (s.state === 'failed') return s.message;
-  return S.render.done(s.message, time(s.finishedAt), s.by);
+  return S.done(s.message, time(s.finishedAt), s.by);
 });
 </script>
 
 <template>
-  <aside ref="root" class="pane pane-right side-panel render-panel" :aria-label="S.render.title" data-testid="preview-panel" @keydown.esc="emit('close')">
-    <div class="pane-header">
-      <span>{{ S.render.title }}</span>
-      <div class="pane-header-actions">
-        <button type="button" :title="S.render.close" :aria-label="S.render.close" @click="emit('close')">×</button>
-      </div>
-    </div>
+  <div class="render-panel" data-testid="preview-panel">
     <p v-if="info?.unavailable" class="banner warn" data-testid="render-unavailable">{{ info.unavailable }}</p>
-    <ErrorBanner v-if="error" :error="error" />
+    <div v-if="explained" class="banner warn" role="alert" data-testid="error">
+      <span>{{ explained.text }}</span>
+      <details v-if="explained.details" class="error-details">
+        <summary>{{ S.details }}</summary>
+        <pre>{{ explained.details }}</pre>
+      </details>
+    </div>
     <div v-if="info && info.formats.length" class="render-actions">
-      <button type="button" class="primary" :disabled="!!info.unavailable" :title="info.unavailable ?? S.render.renderTitle(keyLabel(APP_KEYS.preview))" data-testid="render-button" @click="render('html')">{{ S.render.render }}</button>
-      <span class="muted">{{ S.render.saveAs }}</span>
+      <button type="button" class="primary" :disabled="!!info.unavailable" :title="info.unavailable ?? S.renderTitle(ctx.keyLabel(KEYS.open))" data-testid="render-button" @click="render('html')">{{ S.render }}</button>
+      <span class="muted">{{ S.saveAs }}</span>
       <button
         v-for="f in info.formats"
         :key="f"
         type="button"
         :disabled="!!info.unavailable"
-        :title="info.unavailable ?? S.render.saveTitle(LABELS[f]!)"
+        :title="info.unavailable ?? S.saveTitle(LABELS[f]!)"
         :data-testid="`save-${f}`"
         @click="render(f, true)"
       >{{ LABELS[f] }}…</button>
-      <label class="render-on-save"><input v-model="onSave" type="checkbox" :disabled="!!info.unavailable" data-testid="render-on-save"> {{ S.render.onSave }}</label>
+      <label class="render-on-save"><input v-model="onSave" type="checkbox" :disabled="!!info.unavailable" data-testid="render-on-save"> {{ S.onSave }}</label>
     </div>
-    <p v-else-if="info" class="muted pad">{{ S.render.cannot }}</p>
+    <p v-else-if="info" class="muted pad">{{ S.cannot }}</p>
     <div v-if="status" :class="['render-status', fetching ? 'rendering' : shown?.state]" data-testid="render-status" role="status">
       {{ status }}
       <div v-if="shown?.state === 'failed' && shown.needs && !fetching" class="render-needs">
-        <button type="button" class="primary" data-testid="render-download-tool" @click="download(shown.needs, shown.format)">{{ S.render.download(shown.needs.label, megabytes(shown.needs.downloadBytes)) }}</button>
+        <button type="button" class="primary" data-testid="render-download-tool" @click="download(shown.needs, shown.format)">{{ S.download(shown.needs.label, megabytes(shown.needs.downloadBytes)) }}</button>
       </div>
       <div v-if="madeFrom && shown" class="render-made-from">
-        <button type="button" :title="S.render.madeFromTitle" data-testid="render-made-from" @click="saveMadeFrom(shown.format)">{{ S.render.madeFrom }}</button>
-        <span v-if="unsaved" class="muted" data-testid="render-made-from-unsaved"> {{ S.render.madeFromUnsaved(unsaved) }}</span>
+        <button type="button" :title="S.madeFromTitle" data-testid="render-made-from" @click="saveMadeFrom(shown.format)">{{ S.madeFrom }}</button>
+        <span v-if="unsaved" class="muted" data-testid="render-made-from-unsaved"> {{ S.madeFromUnsaved(unsaved) }}</span>
       </div>
       <details v-if="shown?.log && shown.state !== 'rendering'" class="render-log">
-        <summary>{{ S.common.details }}</summary>
+        <summary>{{ S.details }}</summary>
         <pre data-testid="render-log">{{ shown.log }}</pre>
       </details>
     </div>
@@ -263,10 +258,25 @@ const status = computed(() => {
       class="render-frame"
       sandbox=""
       referrerpolicy="no-referrer"
-      :title="S.render.frame"
+      :title="S.frame"
       data-testid="render-frame"
       :srcdoc="html"
     />
-    <p v-else-if="info?.formats.length && !busy && !info.unavailable" class="muted pad">{{ S.render.nothingYet }}</p>
-  </aside>
+    <p v-else-if="info?.formats.length && !busy && !info.unavailable" class="muted pad">{{ S.nothingYet }}</p>
+  </div>
 </template>
+
+<style>
+.render-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.render-needs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.render-made-from { margin-top: 6px; }
+.render-made-from button { font-size: inherit; }
+.render-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.render-actions .muted { margin-left: 6px; font-size: 12px; }
+.render-on-save { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-left: auto; }
+.render-status { padding: 7px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.render-status.failed { background: var(--warn-soft); color: var(--warn); }
+.render-log summary { cursor: pointer; margin-top: 4px; color: var(--muted); }
+.render-log pre { max-height: 260px; overflow: auto; font: 11px/1.4 var(--mono); white-space: pre-wrap; color: var(--text); background: var(--surface); padding: 6px; border: 1px solid var(--border); border-radius: 4px; }
+.render-frame { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
+</style>

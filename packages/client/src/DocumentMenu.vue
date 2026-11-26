@@ -38,9 +38,7 @@ const emit = defineEmits<{
   toggleSource: [];
   toggleHistory: [];
   saveVersion: [];
-  preview: [];
   find: [];
-  outline: [];
   insertTable: [];
   nextConflict: [];
   packages: [runner: ChunkRunner, engine: string];
@@ -80,12 +78,10 @@ const groups = computed<Item[][]>(() => {
   const view: Item[] = [];
   if (!layout.value) view.push({ label: S.menu.source, checked: props.showSource, testid: 'toggle-source', run: () => then(() => emit('toggleSource')) });
   view.push({ label: S.menu.history, checked: props.historyOpen, testid: 'menu-history', run: () => then(() => emit('toggleHistory')) });
-  if (!layout.value) view.push({ label: S.menu.preview, keys: APP_KEYS.preview, title: S.menu.previewTitle(keyLabel(APP_KEYS.preview)), testid: 'menu-preview', run: () => then(() => emit('preview')) });
   const writing: Item[] = [];
   if (!layout.value && !props.showSource) {
     writing.push(
       { label: S.menu.find, keys: APP_KEYS.find, testid: 'menu-find', run: () => then(() => emit('find')) },
-      { label: S.menu.outline, keys: APP_KEYS.outline, testid: 'menu-outline', run: () => then(() => emit('outline')) },
       { label: S.menu.insertTable, testid: 'menu-insert-table', run: () => then(() => emit('insertTable')) },
     );
     if (props.conflicts) writing.push({ label: S.menu.nextConflict, keys: 'Mod-Alt-n', testid: 'menu-next-conflict', run: () => then(() => emit('nextConflict')) });

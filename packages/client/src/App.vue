@@ -2,9 +2,7 @@
 // The client: a file tree, one live editor, and a history sidebar that starts
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
-import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
-import type { CoreHost, FeatureClientContext, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
-import type { Node as PMNode } from 'prosemirror-model';
+import { TypeRegistry } from '@kuraa/kernel';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
@@ -42,9 +40,7 @@ import InviteDialog from './InviteDialog.vue';
 import { connectionInfo, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
 import { workspaceMenuItems } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
-import { explain } from './errors.js';
-import type { ContextItem } from './ContextMenu.vue';
-import { activeFeatures, FeatureMessages, loadHiddenFeatures, saveHiddenFeatures, type ActiveFeature, type FeatureApp } from './features.js';
+import { useFeatureHost } from './featureHost.js';
 import type { ContextItem as MenuItem } from './ContextMenu.vue';
 import FeaturePanel from './FeaturePanel.vue';
 
@@ -137,198 +133,40 @@ const shownFiles = computed(() => {
   });
 });
 
-// Features (0082): how each the host has stands for the open workspace, which
-// this person hid (in this browser), and the client halves in use, each with
-// what the app gives it. Their panels, menu items, settings and help are drawn
-// here; what they do in the document, in the editor.
-const featureStatus = shallowRef<FeatureStatus[]>([]);
-const hiddenFeatures = ref(loadHiddenFeatures());
-const featureMessages = new FeatureMessages();
-let featuresAsked = 0;
-async function loadFeatures() {
-  const asked = api.value;
-  const n = ++featuresAsked;
-  let list: FeatureStatus[];
-  try {
-    list = await asked.features();
-  } catch {
-    list = [];
-  }
-  // Only a change is taken: the same answer keeps what is drawn from it.
-  if (asked === api.value && n === featuresAsked && JSON.stringify(list) !== JSON.stringify(featureStatus.value)) featureStatus.value = list;
-  if (asked === api.value && n === featuresAsked) featuresKnown.value = true;
-}
-watch([api, ready], () => {
-  featureStatus.value = [];
-  featuresKnown.value = false;
-  if (ready.value) void loadFeatures();
-}, { immediate: true });
-const featureNotice = (text: string, kind: 'info' | 'warn' = 'info') => {
-  notice.value = { kind, text };
-};
-/** Told when the host says a tool changed (downloaded, removed): components that follow tools (0089). */
-const toolListeners = new Set<() => void>();
-watch(toolsKey, () => {
-  for (const fn of [...toolListeners]) {
-    try {
-      fn();
-    } catch (e) {
-      console.error('[kuraa] a component failed on a tool changing', e);
-    }
-  }
-});
+// Features (0082, 0091): how each the host has stands for the open workspace,
+// which this person hid, the client halves in use with what each is given, their
+// panels, menu items, help, layouts and views: the features' runtime (featureHost.ts).
+// Here they are only placed.
 const person = () => ({ name: settings.value.name, email: settings.value.email, color: settings.value.color });
-/** The host's own calls, offered to components (0089): always the open workspace's. */
-const coreHost: CoreHost = {
-  search: (q, caseSensitive) => api.value.search(q, caseSensitive),
-  renders: (p) => api.value.renders(p),
-  render: (p, format) => api.value.render(p, format, person()),
-  renderOutput: (p, format) => api.value.renderOutput(p, format),
-  renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
-  tools: () => api.value.tools(),
-  downloadTool: async (id) => {
-    await api.value.downloadTool(id);
-  },
-  onToolsChanged: (fn) => {
-    toolListeners.add(fn);
-    return () => toolListeners.delete(fn);
-  },
-};
-const featureApp: FeatureApp = {
-  api: () => api.value,
+const fh = useFeatureHost({
+  clients: () => props.features,
+  api,
+  ready,
   person,
-  notify: featureNotice,
-  ui: { askText, askConfirm, notify: featureNotice },
-  openPanel: (feature, panel) => askPanel(feature, panel),
+  notify: (text, kind = 'info') => (notice.value = { kind, text }),
+  ui: { askText, askConfirm, notify: (text, kind = 'info') => (notice.value = { kind, text }) },
   openFile: (p, at) => void openAtText(p, at),
   openMatch: (p, target) => void openMatch(p, target),
-  host: coreHost,
-  explain,
-  keyLabel,
   moveFile: async (from, to) => {
     await api.value.renameFile(from, to);
     // The open file follows: itself moved, or inside a folder that moved.
     const open = path.value;
     await refreshTree(open === from ? to : open?.startsWith(`${from}/`) ? to + open.slice(from.length) : undefined);
   },
-  changed: () => void loadFeatures(),
-};
-/** The client halves in use: on for the workspace, and not hidden by this person. */
-const features = computed(() => activeFeatures(props.features, featureStatus.value, hiddenFeatures.value, featureApp, featureMessages, () => featureStatus.value));
-/** Every client half on for the workspace, hidden or not: for their parts of Settings. */
-const featuresForSettings = computed(() => activeFeatures(props.features, featureStatus.value, [], featureApp, featureMessages, () => featureStatus.value));
-/** Turn a feature on or off for the workspace (Settings › Workspace), and follow it once it is. */
-async function turnFeature(id: string, on: boolean) {
-  const asked = api.value;
-  const status = await asked.setFeature(id, { on }, featureApp.person());
-  if (asked !== api.value) return;
-  notice.value = { kind: 'info', text: on ? S.features.turnedOn(status.label) : S.features.turnedOff(status.label) };
-  await loadFeatures();
-}
-function setHiddenFeatures(ids: string[]) {
-  hiddenFeatures.value = ids;
-  saveHiddenFeatures(ids);
-}
-/**
- * The panels open (0082, 0089): one beside the document at a time, and any
- * over it (the Outline), each with how many times it has been asked for.
- */
-type OpenPanel = { feature: string; panel: string; asks: number };
-const featurePanel = shallowRef<OpenPanel | null>(null);
-const overPanels = shallowRef<OpenPanel[]>([]);
-/** A panel open, with its feature in use and its spec, if it can be shown now (a document's needs the live document). */
-function shownPanel(open: OpenPanel | null) {
-  if (!open) return null;
-  const active = features.value.find((f) => f.feature.id === open.feature);
-  const panel = active?.feature.panels?.find((p) => p.id === open.panel);
-  if (!active || !panel || (panel.about === 'document' && !(path.value && type.value && !viewing.value))) return null;
-  return { active, panel, asks: open.asks };
-}
-const shownFeaturePanel = computed(() => shownPanel(featurePanel.value));
-const shownOverPanels = computed(() => overPanels.value.map(shownPanel).filter((p) => !!p));
-const findPanel = (feature: string, panel: string) => features.value.find((f) => f.feature.id === feature)?.feature.panels?.find((p) => p.id === panel);
-/** Whether a panel is open and shown. */
-function panelOpen(feature: string, panel: string): boolean {
-  const same = (o: { active: { feature: { id: string } }; panel: FeaturePanelSpec } | null) => o?.active.feature.id === feature && o.panel.id === panel;
-  return same(shownFeaturePanel.value) || shownOverPanels.value.some(same);
-}
-/** Ask for a panel: open it (beside the document, in place of the one there, or over it), or ask it again if it is open. */
-function askPanel(feature: string, panel: string) {
-  docMenu.value = null;
-  const spec = findPanel(feature, panel);
-  if (!spec) return;
-  const same = (o: OpenPanel | null) => o?.feature === feature && o.panel === panel;
-  if (spec.over) {
-    const was = overPanels.value.find(same);
-    overPanels.value = was ? overPanels.value.map((o) => (o === was ? { ...o, asks: o.asks + 1 } : o)) : [...overPanels.value, { feature, panel, asks: 1 }];
-  } else {
-    const was = featurePanel.value;
-    featurePanel.value = was && same(was) && shownFeaturePanel.value ? { ...was, asks: was.asks + 1 } : { feature, panel, asks: 1 };
-  }
-}
-function closePanel(feature: string, panel: string) {
-  if (featurePanel.value?.feature === feature && featurePanel.value.panel === panel) featurePanel.value = null;
-  overPanels.value = overPanels.value.filter((o) => !(o.feature === feature && o.panel === panel));
-}
-/** The workspace's panels with an icon (Search's): offered as buttons beside ＋ (0089). */
-const panelButtons = computed(() => features.value.flatMap((f) => (f.feature.panels ?? []).filter((p) => p.about === 'workspace' && p.icon).map((panel) => ({ feature: f.feature.id, panel }))));
+  documentShown: () => !!(path.value && type.value && !viewing.value),
+  panelAsked: () => (docMenu.value = null),
+});
+const features = fh.features;
+const sidePanel = fh.sidePanel;
+const overPanels = fh.overPanels;
+watch(toolsKey, () => fh.toolsChanged());
 
 // Navigation (0087): a layout places it, views show the files; the core draws
 // none, only its own menu at the upper left while no layout gives navigation.
-// Until the host has said how features stand for the workspace (and with none
-// open), the client's own layouts and views are used, as on by default, so the
-// page does not start without them and then change.
-const LAYOUT_KEY = 'kuraa:layout';
-let storedLayout: string | null = null;
-try { storedLayout = localStorage.getItem(LAYOUT_KEY); } catch { /* storage unavailable */ }
-const featuresKnown = ref(false);
-const navFeatures = computed<ActiveFeature[]>(() => {
-  if (featuresKnown.value && ready.value) return features.value;
-  const assumed: FeatureStatus[] = Object.values(props.features)
-    .filter((f) => f.layout || f.views?.length)
-    .map((f) => ({ id: f.id, label: f.id, description: '', on: true, host: true, workspace: true, settings: {}, mayChange: false, companions: [], me: null }));
-  return activeFeatures(props.features, assumed, hiddenFeatures.value, featureApp, featureMessages);
-});
-const layouts = computed(() => navFeatures.value.filter((f) => f.feature.layout));
-/** The layout in use: the one this person chose (in this browser), else the first. */
-const layout = computed(() => layouts.value.find((f) => f.feature.layout!.id === storedLayout) ?? layouts.value[0] ?? null);
-/** No layout gives navigation: the core's own menu at the upper left. */
-const fallback = computed(() => !layout.value?.feature.layout?.navigation);
-const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
-/**
- * A feature's context for navigation that is always its current one: how
- * features stand changes (one turned on, a merge), and their contexts are made
- * anew, but a layout or view drawn stays drawn, asking through this.
- */
-const liveContexts = new Map<string, FeatureClientContext>();
-function liveContext(id: string): FeatureClientContext {
-  let ctx = liveContexts.get(id);
-  if (!ctx) {
-    const current = () => {
-      const c = (navFeatures.value.find((f) => f.feature.id === id) ?? features.value.find((f) => f.feature.id === id))?.ctx;
-      if (!c) throw new Error(`the feature ${id} is not in use`);
-      return c;
-    };
-    ctx = {
-      status: () => current().status(),
-      person: () => current().person(),
-      request: (method, path, body) => current().request(method, path, body),
-      saveSettings: (settings) => current().saveSettings(settings),
-      notify: (text, kind) => current().notify(text, kind),
-      ui: featureApp.ui,
-      openPanel: (panel) => current().openPanel(panel),
-      openFile: (path, at) => current().openFile(path, at),
-      onMessage: (fn) => current().onMessage(fn),
-      openMatch: (path, target) => current().openMatch(path, target),
-      host: coreHost,
-      explain: (error) => current().explain(error),
-      keyLabel: (keys) => current().keyLabel(keys),
-      moveFile: (from, to) => current().moveFile(from, to),
-    };
-    liveContexts.set(id, ctx);
-  }
-  return ctx;
-}
+// Which layout and views are in use is the features' runtime's (featureHost.ts).
+const layout = fh.layout;
+const fallback = fh.fallback;
+const views = fh.views;
 const navEvents = navigationEvents();
 const prefetcher = new Prefetcher();
 onBeforeUnmount(() => prefetcher.stop());
@@ -362,12 +200,12 @@ const navApp: NavigationApp = {
   },
   newMenu: (at) => fileActions.value?.newMenu(at),
   newMenuOpen: () => !!fileActions.value?.newMenuOpen,
-  panelButtons: () => panelButtons.value.map((b) => ({ feature: b.feature, id: b.panel.id, label: b.panel.label, keys: b.panel.keys, icon: b.panel.icon! })),
-  askPanel: (feature, id) => askPanel(feature, id),
+  panelButtons: () => fh.panelButtons.value,
+  askPanel: (feature, id) => fh.askPanel(feature, id),
   views: () => views.value.map(({ active, view }) => ({
     key: `${active.feature.id}:${view.id}`,
     label: view.label,
-    mount: (el: HTMLElement) => view.mount(el, navigationContext(liveContext(active.feature.id), navApp, navEvents)),
+    mount: (el: HTMLElement) => view.mount(el, navigationContext(active.ctx, navApp, navEvents)),
   })),
   workspaceName: () => workspace.value?.name ?? S.app.files,
   files: () => shownFiles.value,
@@ -385,7 +223,7 @@ const navApp: NavigationApp = {
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
 };
 /** What the views add to ＋. */
-const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(liveContext(active.feature.id), navApp, navEvents))));
+const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(active.ctx, navApp, navEvents))));
 const layoutKey = computed(() => (layout.value ? `${layout.value.feature.id}:${layout.value.feature.layout!.id}` : ''));
 /** The layout drawn: anew only for another layout, never because how features stand changed. */
 let drawnLayout: { key: string; mount: (el: HTMLElement) => () => void } | null = null;
@@ -395,7 +233,7 @@ const layoutMount = computed(() => {
   if (!key || !l) return null;
   if (drawnLayout?.key !== key) {
     const feature = l.feature;
-    drawnLayout = { key, mount: (el: HTMLElement) => feature.layout!.mount(el, layoutContext(liveContext(feature.id), navApp, navEvents)) };
+    drawnLayout = { key, mount: (el: HTMLElement) => feature.layout!.mount(el, layoutContext(l.ctx, navApp, navEvents)) };
   }
   return drawnLayout.mount;
 });
@@ -409,57 +247,9 @@ async function openAtText(p: string, at?: { from: number; to: number }) {
   editor.value?.revealText(at);
 }
 /** Items features add to the open document's ⋯ menu. */
-const featureMenu = computed(() => {
-  const p = path.value;
-  const t = type.value;
-  if (!p || !t) return [];
-  return features.value.flatMap((f) => {
-    try {
-      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t, source: showSource.value }) ?? [];
-    } catch (e) {
-      console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
-      return [];
-    }
-  });
-});
-/** Items features add to a file's right-click menu. */
-function featureFileMenu(p: string): ContextItem[] {
-  return features.value.flatMap((f) => {
-    try {
-      return (f.feature.fileMenu?.(p, f.ctx) ?? []).map((i) => ({ label: i.label, run: i.run, testid: i.testid }));
-    } catch (e) {
-      console.error(`[kuraa] the feature ${f.feature.id} could not add to a file's menu`, e);
-      return [];
-    }
-  });
-}
+const featureMenu = computed(() => (path.value && type.value ? fh.documentMenu(path.value, type.value, showSource.value) : []));
 /** What features show on a past version, with what was kept beside the document then. */
-const pastFeatures = computed(() => {
-  const v = viewing.value;
-  const p = path.value;
-  const t = type.value;
-  const list: ActiveFeature[] = features.value.filter((f) => f.feature.editor);
-  if (!v?.commit || !p || !t || !list.length) return undefined;
-  const commit = v.commit;
-  const at = commit.path || p;
-  const asked = api.value;
-  return (_doc: PMNode) => {
-    const made = list.flatMap((f) => {
-      try {
-        return [f.feature.editor!({
-          ...f.ctx, path: at, type: t, schema: t.schema, readOnly: true, state: null,
-          companions: async (suffix) => (await asked.companions(at, suffix, commit.hash).catch(() => [])).map((c) => ({ person: c.person, text: c.text })),
-          sourceMap: (d) => sourceMapOf(t, d, t.parse(t.serialize(d))),
-          redraw: () => undefined,
-        })];
-      } catch (e) {
-        console.error(`[kuraa] the feature ${f.feature.id} could not show a past version`, e);
-        return [];
-      }
-    });
-    return { plugins: made.flatMap((e) => e.plugins?.() ?? []), destroy: () => made.forEach((e) => e.destroy?.()) };
-  };
-});
+const pastFeatures = computed(() => (viewing.value?.commit && path.value && type.value ? fh.pastEditors(path.value, type.value, viewing.value.commit) : undefined));
 function openDocMenu(e: MouseEvent) {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
   docMenu.value = { top: r.bottom + 4, right: window.innerWidth - r.right };
@@ -678,10 +468,7 @@ const header = computed(() => {
 /** The editor modules that are on: their cues and keys are on the Markdown and shortcuts sheet. */
 const editorsOn = computed(() => Object.fromEntries(Object.entries(props.editors).filter(([id]) => !editorsOff.value.includes(id))));
 /** The sheet's lines: the editor modules', and those of the features in use (0082). */
-const helpEditors = computed(() => ({
-  ...editorsOn.value,
-  ...Object.fromEntries(features.value.filter((f) => f.feature.help?.length).map((f) => [`feature:${f.feature.id}`, { help: f.feature.help }])),
-}));
+const helpEditors = computed(() => ({ ...editorsOn.value, ...fh.help.value }));
 function setEditorsOff(ids: string[]) {
   editorsOff.value = ids;
   saveEditorsOff(ids);
@@ -709,17 +496,8 @@ const onKey = (e: KeyboardEvent) => {
     e.preventDefault();
     openSettings();
   } else {
-    // A feature's panel, by its keys (0082): opened; if it is open, closed, or asked again where it does not toggle (0089).
-    for (const f of features.value) {
-      const panel = f.feature.panels?.find((p) => p.keys && k(p.keys));
-      if (!panel) continue;
-      // A document's panel waits for a document (the keys do nothing without one).
-      if (panel.about === 'document' && !(path.value && type.value && !viewing.value)) return;
-      e.preventDefault();
-      if (panelOpen(f.feature.id, panel.id) && panel.toggle !== false) closePanel(f.feature.id, panel.id);
-      else askPanel(f.feature.id, panel.id);
-      return;
-    }
+    // A feature's panel, by its keys (0082, 0089).
+    fh.panelKey(e);
   }
 };
 onMounted(() => {
@@ -775,7 +553,7 @@ async function refreshTree(selectPath?: string | null) {
       folderMarks.value = tree.folders ?? [];
       error.value = null;
       // Which features are on may have come with the files (a merge): asked again.
-      void loadFeatures();
+      void fh.load();
     }
     if (selectPath !== undefined) select(selectPath);
   } catch (e) {
@@ -1021,37 +799,11 @@ function useSettings(s: Settings) {
   settings.value = s;
 }
 
-// Features in use are started (activate), and stopped when they go out of use or another workspace opens.
-const activated = new Map<string, { ctx: object; stop: (() => void) | void }>();
-watch(features, (list) => {
-  const keep = new Set<string>();
-  for (const f of list) {
-    if (!f.feature.activate) continue;
-    keep.add(f.feature.id);
-    const was = activated.get(f.feature.id);
-    if (was && was.ctx === f.ctx) continue;
-    try { was?.stop?.(); } catch (e) { console.error(`[kuraa] the feature ${f.feature.id} did not stop cleanly`, e); }
-    try {
-      activated.set(f.feature.id, { ctx: f.ctx, stop: f.feature.activate(f.ctx) });
-    } catch (e) {
-      console.error(`[kuraa] the feature ${f.feature.id} could not start`, e);
-      activated.delete(f.feature.id);
-    }
-  }
-  for (const [id, was] of [...activated]) {
-    if (keep.has(id)) continue;
-    activated.delete(id);
-    try { was.stop?.(); } catch (e) { console.error(`[kuraa] the feature ${id} did not stop cleanly`, e); }
-  }
-}, { immediate: true });
-onBeforeUnmount(() => {
-  for (const was of activated.values()) {
-    try { was.stop?.(); } catch { /* going */ }
-  }
-});
+// The features' runtime stops what it started as the page goes.
+onBeforeUnmount(() => fh.dispose());
 
 // What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
-watch([workspaceTitle, connection, views, panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
+watch([workspaceTitle, connection, views, fh.panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
 watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
 </script>
 
@@ -1071,7 +823,7 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
     </div>
     <ErrorBanner v-if="error" :error="error"><button type="button" @click="error = null">{{ S.common.dismiss }}</button></ErrorBanner>
 
-    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!shownFeaturePanel, 'no-layout': !layoutMount }]">
+    <div :class="['panes', { 'history-open': historyOpen, 'side-open': !!sidePanel, 'no-layout': !layoutMount }]">
       <!-- Navigation (0087): the layout in use draws it here; with none that gives it, the core's menu at the upper left. -->
       <FeatureMount v-if="layoutMount" :key="layoutKey" class="layout-area" :mount="layoutMount" />
       <div v-else class="layout-none" data-testid="layout-none" />
@@ -1152,11 +904,11 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
               @tools-changed="toolsKey++"
               @committed="historyKey++"
               @outside-conflict="outsideConflict"
-              @feature-message="(f, m, p) => featureMessages.emit(f, m, p)"
+              @feature-message="(f, m, p) => fh.messages.emit(f, m, p)"
             >
               <template #over>
                 <FeaturePanel
-                  v-for="o in shownOverPanels"
+                  v-for="o in overPanels"
                   :key="`${o.active.feature.id}:${o.panel.id}`"
                   :active="o.active"
                   :panel="o.panel"
@@ -1166,7 +918,7 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
                   :state="() => editor?.featureState(o.active.feature.id) ?? null"
                   :document="openDocument"
                   :asks="o.asks"
-                  @close="closePanel(o.active.feature.id, o.panel.id)"
+                  @close="fh.closePanel(o.active.feature.id, o.panel.id)"
                 />
               </template>
             </Editor>
@@ -1199,17 +951,17 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
         @view="view"
       />
       <FeaturePanel
-        v-if="shownFeaturePanel"
-        :key="`${shownFeaturePanel.active.feature.id}:${shownFeaturePanel.panel.id}`"
-        :active="shownFeaturePanel.active"
-        :panel="shownFeaturePanel.panel"
+        v-if="sidePanel"
+        :key="`${sidePanel.active.feature.id}:${sidePanel.panel.id}`"
+        :active="sidePanel.active"
+        :panel="sidePanel.panel"
         :path="path && type && !viewing ? path : null"
         :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
         :view="() => editor?.view ?? null"
-        :state="() => editor?.featureState(shownFeaturePanel!.active.feature.id) ?? null"
+        :state="() => editor?.featureState(sidePanel!.active.feature.id) ?? null"
         :document="openDocument"
-        :asks="shownFeaturePanel.asks"
-        @close="featurePanel = null"
+        :asks="sidePanel.asks"
+        @close="fh.closePanel(sidePanel.active.feature.id, sidePanel.panel.id)"
       />
     </div>
 
@@ -1223,7 +975,7 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :selected="path"
       :registry="hostRegistry"
       :shared="sharedWithDevices"
-      :feature-items="featureFileMenu"
+      :feature-items="fh.fileMenu"
       :new-items="viewItems"
       @document-settings="openDocumentSettings"
       @created="(p) => (titleFocus = p)"
@@ -1288,10 +1040,10 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :editors="editors"
       :editors-off="editorsOff"
       :tools-key="toolsKey"
-      :features="featureStatus"
-      :feature-parts="featuresForSettings"
-      :hidden-features="hiddenFeatures"
-      :turn-feature="turnFeature"
+      :features="fh.status.value"
+      :feature-parts="fh.forSettings.value"
+      :hidden-features="fh.hidden.value"
+      :turn-feature="fh.turn"
       @save-settings="useSettings"
       @saved="hostSettingsSaved"
       @editors-off="setEditorsOff"
@@ -1300,8 +1052,8 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       @invite="invite"
       @permissions="openPermissions"
       @packages="(runner, engine) => (packages = { runner, engine })"
-      @hidden-features="setHiddenFeatures"
-      @close="settingsOpen = false; void checkShared(); void loadFeatures()"
+      @hidden-features="fh.setHidden"
+      @close="settingsOpen = false; void checkShared(); void fh.load()"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
     <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />

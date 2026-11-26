@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defineClientFeature, type FeatureStatus } from '@kuraa/feature-kit/client';
-import { activeFeatures, FeatureMessages, marginLayout, type FeatureApp } from '../src/features.js';
+import { activeFeatures, FeatureContexts, FeatureMessages, marginLayout, type FeatureApp } from '../src/features.js';
 
 const status = (id: string, on: boolean): FeatureStatus => ({ id, label: id, description: '', on, host: true, workspace: on, settings: {}, mayChange: true, companions: [], me: null });
 const app = { api: () => { throw new Error('no host'); }, person: () => ({ name: 'Ada', email: '', color: '#000' }), notify: () => undefined, ui: {} as FeatureApp['ui'], openPanel: () => undefined, openFile: () => undefined, openMatch: () => undefined, host: {} as FeatureApp['host'], explain: () => ({ text: '', details: null }), keyLabel: (k: string) => k, moveFile: async () => undefined, changed: () => undefined } as FeatureApp;
@@ -10,13 +10,30 @@ describe('features in the client', () => {
     const a = defineClientFeature({ id: 'a' });
     const b = defineClientFeature({ id: 'b' });
     const old = { ...defineClientFeature({ id: 'c' }), apiVersion: 0 };
-    const list = activeFeatures({ a, b, c: old }, [status('a', true), status('b', true), status('c', true), status('d', true), status('e', false)], ['b'], app, new FeatureMessages());
+    const all = [status('a', true), status('b', true), status('c', true), status('d', true), status('e', false)];
+    const list = activeFeatures({ a, b, c: old }, all, ['b'], new FeatureContexts(app, new FeatureMessages(), () => all));
     expect(list.map((f) => f.feature.id)).toEqual(['a']);
     // What they are told of how they stand is as it is now.
     let now = [status('a', true)];
-    const [f] = activeFeatures({ a }, now, [], app, new FeatureMessages(), () => now);
+    const [f] = activeFeatures({ a }, now, [], new FeatureContexts(app, new FeatureMessages(), () => now));
     now = [{ ...status('a', true), settings: { label: 'x' } }];
     expect(f!.ctx.status().settings).toEqual({ label: 'x' });
+    expect(f!.status.settings).toEqual({ label: 'x' });
+  });
+
+  it('keep one context each while how they stand changes (0091)', () => {
+    const a = defineClientFeature({ id: 'a' });
+    let now = [status('a', true)];
+    const contexts = new FeatureContexts(app, new FeatureMessages(), () => now);
+    const [first] = activeFeatures({ a }, now, [], contexts);
+    now = [{ ...status('a', true), settings: { more: true } }, status('b', true)];
+    const [again] = activeFeatures({ a }, now, [], contexts);
+    expect(again).toBe(first);
+    expect(again!.ctx).toBe(first!.ctx);
+    // Assumed (the host has not said yet): what it was assumed to be, until the host says.
+    const assumed = new FeatureContexts(app, new FeatureMessages(), () => []);
+    const [x] = activeFeatures({ a }, [{ ...status('a', true), label: 'assumed' }], [], assumed);
+    expect(x!.status.label).toBe('assumed');
   });
 
   it('hear what their host halves tell them, each its own', () => {

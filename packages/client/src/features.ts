@@ -67,11 +67,40 @@ export class FeatureMessages {
   }
 }
 
-/** A client half in use, with how its feature stands and its context. */
+/**
+ * A client half in use: the feature, how it stands now (read anew each time),
+ * and what it is given. The same object, and the same context, for as long as
+ * the page is open (0091): how features stand changing (one turned on, a
+ * feature's settings saved, a merge) never draws a panel or view again, nor
+ * starts a feature again.
+ */
 export interface ActiveFeature {
-  feature: ClientFeature;
-  status: FeatureStatus;
-  ctx: FeatureClientContext;
+  readonly feature: ClientFeature;
+  readonly status: FeatureStatus;
+  readonly ctx: FeatureClientContext;
+}
+
+/** Each feature's one ActiveFeature and context, made once and kept. */
+export class FeatureContexts {
+  private readonly made = new Map<string, { feature: ClientFeature; active: ActiveFeature; last: FeatureStatus }>();
+
+  /** `live`: how features stand as the host says now (none: what each was last said to be, as assumed). */
+  constructor(private readonly app: FeatureApp, private readonly messages: FeatureMessages, private readonly live: () => FeatureStatus[]) {}
+
+  /** The feature in use, `status` being how it stands where the host has not said (yet). */
+  of(feature: ClientFeature, status: FeatureStatus): ActiveFeature {
+    let m = this.made.get(feature.id);
+    if (!m || m.feature !== feature) {
+      const entry: { feature: ClientFeature; active?: ActiveFeature; last: FeatureStatus } = { feature, last: status };
+      const current = () => this.live().find((s) => s.id === feature.id) ?? entry.last;
+      const ctx = clientContext(feature, current, this.app, this.messages);
+      entry.active = { feature, ctx, get status() { return current(); } };
+      m = entry as { feature: ClientFeature; active: ActiveFeature; last: FeatureStatus };
+      this.made.set(feature.id, m);
+    }
+    m.last = status;
+    return m.active;
+  }
 }
 
 /**
@@ -79,12 +108,12 @@ export interface ActiveFeature {
  * loaded and on for the workspace, and not hidden by this person. In the order
  * the host lists them.
  */
-export function activeFeatures(clients: Record<string, ClientFeature>, status: FeatureStatus[], hidden: string[], app: FeatureApp, messages: FeatureMessages, live: () => FeatureStatus[] = () => status): ActiveFeature[] {
+export function activeFeatures(clients: Record<string, ClientFeature>, status: FeatureStatus[], hidden: string[], contexts: FeatureContexts): ActiveFeature[] {
   const out: ActiveFeature[] = [];
   for (const s of status) {
     const feature = clients[s.id];
     if (!feature || feature.apiVersion !== FEATURE_API_VERSION || !s.on || hidden.includes(s.id)) continue;
-    out.push({ feature, status: s, ctx: clientContext(feature, () => live().find((x) => x.id === s.id) ?? s, app, messages) });
+    out.push(contexts.of(feature, s));
   }
   return out;
 }

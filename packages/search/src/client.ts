@@ -8,6 +8,7 @@ import { KEYS, S } from './strings.js';
 
 export const searchClient = defineClientFeature({
   id: 'search',
+  uses: ['search'],
   panels: [{
     id: 'search',
     label: S.title,

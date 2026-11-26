@@ -5,7 +5,7 @@
 // gives: the host's API, you, notices, dialogs, and opening panels and files.
 // The editor (Editor.vue) adds the open document's part; App.vue draws panels,
 // menus and settings from what the features contribute.
-import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
+import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type CoreService, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
 import type { EditorUi } from '@kuraa/editor-kit';
 import type { HostApi } from './api.js';
 
@@ -134,11 +134,31 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     openFile: (path, at) => app.openFile(path, at),
     onMessage: (fn) => messages.on(feature.id, fn),
     openMatch: (path, target) => app.openMatch(path, target),
-    host: app.host,
+    host: servicesFor(feature, app.host),
     explain: (error) => app.explain(error),
     keyLabel: (keys) => app.keyLabel(keys),
     moveFile: (from, to) => app.moveFile(from, to),
   };
+}
+
+/**
+ * The host's services a feature is given (0091): those it says it uses. Using
+ * one it did not say throws, saying so, so what each feature asks of the host
+ * is in its definition.
+ */
+export function servicesFor(feature: ClientFeature, host: CoreHost): CoreHost {
+  const uses = new Set<CoreService>(feature.uses ?? []);
+  const out = {} as CoreHost;
+  for (const name of Object.keys(host) as CoreService[]) {
+    Object.defineProperty(out, name, {
+      enumerable: true,
+      get: () => {
+        if (!uses.has(name)) throw new Error(`The feature ${feature.id} uses the host's ${name} without saying so (uses: ['${name}']).`);
+        return host[name];
+      },
+    });
+  }
+  return out;
 }
 
 /**

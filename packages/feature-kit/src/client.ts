@@ -38,6 +38,8 @@ export interface ClientFeature {
    * workspace is opened.
    */
   activate?(ctx: FeatureClientContext): (() => void) | void;
+  /** The host's services it uses (CoreHost, 0091): only these are given it. */
+  uses?: CoreService[];
   /** Where navigation goes in the window (0087): one layout is used at a time. */
   layout?: FeatureLayout;
   /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */
@@ -189,7 +191,10 @@ export interface FeatureClientContext {
   onMessage(fn: (message: Json, path: string | null) => void): () => void;
   /** Open a file at a match (0089): a line, where on it, and the words, found again in an open document as it has been typed since. */
   openMatch(path: string, target: MatchTarget): void;
-  /** The host's own calls a component may make (0089): the core's routes, not the feature's. */
+  /**
+   * The host's own services (0089, 0091): the core's routes, not the feature's.
+   * Only those the feature says it uses (`uses`) are given it.
+   */
   host: CoreHost;
   /** An error in plain words, and what was actually said, as the client says errors everywhere. */
   explain(error: unknown): { text: string; details: string | null };
@@ -256,24 +261,47 @@ export interface ToolState {
   error: string | null;
 }
 
-/** The host's calls offered to components (0089). Each rejects as the client's own calls do. */
+/**
+ * The host's own services offered to components (0089, 0091), each a group of
+ * the core's calls: what a component may ask of the host besides its own
+ * routes. A feature says which it uses (`ClientFeature.uses`); one it did not
+ * say it uses is not given it (using it throws, saying so). Each call rejects
+ * as the client's own calls do.
+ */
 export interface CoreHost {
+  search: SearchService;
+  renders: RenderService;
+  tools: ToolService;
+}
+
+/** A service of the host's (CoreHost), by name. */
+export type CoreService = keyof CoreHost;
+
+/** Searching the workspace (0042). */
+export interface SearchService {
   /** Search the workspace's text files, and open documents as they are now. */
-  search(query: string, caseSensitive: boolean): Promise<SearchResult>;
+  run(query: string, caseSensitive: boolean): Promise<SearchResult>;
+}
+
+/** Rendering documents (0041), and what their outputs were made from (0081). */
+export interface RenderService {
   /** A document's renders: what it can be rendered to, and how its latest ones stand. */
-  renders(path: string): Promise<RenderInfo>;
+  info(path: string): Promise<RenderInfo>;
   /** Render a document (as you, for the record); a render that cannot start says why, as a failed one. */
   render(path: string, format: RenderFormat): Promise<RenderState>;
   /** A document's latest output in a format. */
-  renderOutput(path: string, format: RenderFormat): Promise<Blob>;
+  output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
-  renderMadeFrom(path: string, format: RenderFormat): Promise<Blob>;
-  /** The tools this computer has or may download. */
-  tools(): Promise<{ tools: ToolState[] }>;
-  /** Download a tool; follow it with tools(). */
-  downloadTool(id: string): Promise<void>;
+  madeFrom(path: string, format: RenderFormat): Promise<Blob>;
+}
+
+/** The tools this computer has or may download (0045). */
+export interface ToolService {
+  list(): Promise<{ tools: ToolState[] }>;
+  /** Download a tool; follow it with list(). */
+  download(id: string): Promise<void>;
   /** Be told when the host says a tool changed (downloaded, removed). Returns how to stop. */
-  onToolsChanged(fn: () => void): () => void;
+  onChanged(fn: () => void): () => void;
 }
 
 /**

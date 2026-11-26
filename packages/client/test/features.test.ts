@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defineClientFeature, type FeatureStatus } from '@kuraa/feature-kit/client';
-import { activeFeatures, FeatureContexts, FeatureMessages, marginLayout, type FeatureApp } from '../src/features.js';
+import { activeFeatures, FeatureContexts, FeatureMessages, marginLayout, servicesFor, type FeatureApp } from '../src/features.js';
+import type { CoreHost } from '@kuraa/feature-kit/client';
 
 const status = (id: string, on: boolean): FeatureStatus => ({ id, label: id, description: '', on, host: true, workspace: on, settings: {}, mayChange: true, companions: [], me: null });
 const app = { api: () => { throw new Error('no host'); }, person: () => ({ name: 'Ada', email: '', color: '#000' }), notify: () => undefined, ui: {} as FeatureApp['ui'], openPanel: () => undefined, openFile: () => undefined, openMatch: () => undefined, host: {} as FeatureApp['host'], explain: () => ({ text: '', details: null }), keyLabel: (k: string) => k, moveFile: async () => undefined, changed: () => undefined } as FeatureApp;
@@ -34,6 +35,13 @@ describe('features in the client', () => {
     const assumed = new FeatureContexts(app, new FeatureMessages(), () => []);
     const [x] = activeFeatures({ a }, [{ ...status('a', true), label: 'assumed' }], [], assumed);
     expect(x!.status.label).toBe('assumed');
+  });
+
+  it('are given only the host services they say they use (0091)', async () => {
+    const host = { search: { run: async () => ({ files: [], truncated: false }) }, renders: {}, tools: {} } as unknown as CoreHost;
+    const given = servicesFor(defineClientFeature({ id: 'finder', uses: ['search'] }), host);
+    expect(await given.search.run('x', false)).toEqual({ files: [], truncated: false });
+    expect(() => given.renders).toThrow(/finder uses the host's renders without saying so/);
   });
 
   it('hear what their host halves tell them, each its own', () => {

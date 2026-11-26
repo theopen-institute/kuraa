@@ -85,20 +85,24 @@ export function useFeatureHost(o: FeatureHostOptions) {
       }
     }
   }
-  /** The host's own calls, offered to components (0089): always the open workspace's. */
+  /** The host's own services, offered to components (0089, 0091): always the open workspace's. */
   const coreHost: CoreHost = {
-    search: (q, caseSensitive) => api.value.search(q, caseSensitive),
-    renders: (p) => api.value.renders(p),
-    render: (p, format) => api.value.render(p, format, o.person()),
-    renderOutput: (p, format) => api.value.renderOutput(p, format),
-    renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
-    tools: () => api.value.tools(),
-    downloadTool: async (id) => {
-      await api.value.downloadTool(id);
+    search: { run: (q, caseSensitive) => api.value.search(q, caseSensitive) },
+    renders: {
+      info: (p) => api.value.renders(p),
+      render: (p, format) => api.value.render(p, format, o.person()),
+      output: (p, format) => api.value.renderOutput(p, format),
+      madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
     },
-    onToolsChanged: (fn) => {
-      toolListeners.add(fn);
-      return () => toolListeners.delete(fn);
+    tools: {
+      list: () => api.value.tools(),
+      download: async (id) => {
+        await api.value.downloadTool(id);
+      },
+      onChanged: (fn) => {
+        toolListeners.add(fn);
+        return () => toolListeners.delete(fn);
+      },
     },
   };
   const app: FeatureApp = {

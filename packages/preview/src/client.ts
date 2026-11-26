@@ -9,6 +9,7 @@ import { KEYS, S } from './strings.js';
 
 export const previewClient = defineClientFeature({
   id: 'preview',
+  uses: ['renders', 'tools'],
   panels: [{
     id: 'preview',
     label: S.title,

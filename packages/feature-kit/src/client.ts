@@ -195,6 +195,13 @@ export interface FeatureClientContext {
   explain(error: unknown): { text: string; details: string | null };
   /** Keys, as key bindings write them ('Mod-Shift-f'), as this system shows them (⇧⌘F, Ctrl+Shift+F). */
   keyLabel(keys: string): string;
+  /**
+   * Move or rename a file (or folder), as the file tree's rename does: what is
+   * kept beside it goes with it, it is committed, and anyone with it open
+   * follows it (0090: a manuscript that keeps its files in place). Rejects,
+   * saying why, where it cannot be (someone may not, a file is there already).
+   */
+  moveFile(from: string, to: string): Promise<void>;
 }
 
 /** A match to open a file at (0089). */

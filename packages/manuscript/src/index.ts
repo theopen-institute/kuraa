@@ -2,8 +2,8 @@
 // by 0090-manuscripts-apart-from-folders.md): documents in an order of the
 // writer's choosing, kept as a Quarto book. Its host half: the workspace's
 // manuscripts, read from their files; their order changed, documents added and
-// taken out (a document may be in several), new ones made, each with a home
-// folder where its new chapters go; renames and deletions followed.
+// taken out (a document is in one manuscript at most), new ones made, each
+// with a home folder where its new chapters go; renames and deletions followed.
 //
 //   its routes   GET manuscripts; POST order, add, remove, make, home
 //   it writes    files named _quarto.yml and _quarto-*.yml (`names`), never while
@@ -80,7 +80,7 @@ const shown = (m: Known): Json => ({ file: m.file, folder: m.folder, profile: m.
 export const manuscriptFeature = defineFeature({
   id: 'manuscript',
   label: 'Manuscript',
-  description: 'Documents in an order of your choosing, kept as a Quarto book: any of the workspace’s, in as many manuscripts as you like.',
+  description: 'Documents in an order of your choosing, from anywhere in the workspace, kept as Quarto books.',
   names: BOOK_NAMES,
   files: () => [HOMES_FILE],
   open(ctx) {
@@ -100,8 +100,13 @@ export const manuscriptFeature = defineFeature({
     };
     /** A request's manuscript, by its file. */
     const find = async (file: unknown) => (isText(file) ? (await manuscripts(ctx)).find((m) => m.file === file) : undefined);
-    /** Why a path cannot be one of a manuscript's chapters, if it cannot. */
-    const refuse = (m: Known, path: string) => (!isBookDocument(path) ? `${path} is not a document a book can have` : !path.startsWith(m.folder) ? `${path} is outside ${m.folder}, where this book’s chapters are` : null);
+    /** Why a path cannot be one of a manuscript's chapters, if it cannot: not a document, outside its project, or in another manuscript (0090: one at most). */
+    const refuse = (m: Known, path: string, all: Known[]) => {
+      if (!isBookDocument(path)) return `${path} is not a document a book can have`;
+      if (!path.startsWith(m.folder)) return `${path} is outside ${m.folder}, where this book’s chapters are`;
+      const other = all.find((x) => x.file !== m.file && pathsOf(x).includes(path));
+      return other ? `${path} is in ${other.title ?? other.file} already: a document is in one manuscript` : null;
+    };
 
     const routes: FeatureRoute[] = [
       {
@@ -117,12 +122,13 @@ export const manuscriptFeature = defineFeature({
           const b = (req.body ?? {}) as { file?: unknown; chapters?: unknown; appendices?: unknown };
           const chapters = asEntries(b.chapters);
           if (!chapters || !Array.isArray(b.appendices) || !b.appendices.every(isText)) return bad('An order is a manuscript’s file, its chapters and its appendices');
-          const m = await find(b.file);
+          const all = await manuscripts(ctx);
+          const m = all.find((x) => x.file === b.file);
           if (!m) return { status: 404, body: { message: `No manuscript in ${String(b.file)}` } };
           const paths = pathsOf({ chapters, appendices: b.appendices });
-          const why = paths.map((p) => refuse(m, p)).find(Boolean);
-          if (why) return bad(why);
-          // Once in a manuscript at most (in several manuscripts, as many times as there are).
+          // Those it has already stay, wherever else they are listed (a book made elsewhere may share them).
+          const why = paths.filter((p) => !pathsOf(m).includes(p)).map((p) => refuse(m, p, all)).find(Boolean);
+          if (why) return { status: 409, body: { message: why } };
           if (new Set(paths).size !== paths.length) return bad('A document is in a manuscript once');
           try {
             await save(m, { chapters, appendices: b.appendices }, req.person);
@@ -139,11 +145,12 @@ export const manuscriptFeature = defineFeature({
         handle: async (req: FeatureRequest): Promise<FeatureResponse> => {
           const b = (req.body ?? {}) as { path?: unknown; file?: unknown; after?: unknown };
           if (!isText(b.path)) return bad('A document is added to a manuscript');
-          const m = await find(b.file);
+          const all = await manuscripts(ctx);
+          const m = all.find((x) => x.file === b.file);
           if (!m) return { status: 404, body: { message: `No manuscript in ${String(b.file)}` } };
-          const why = refuse(m, b.path);
-          if (why) return bad(why);
           if (pathsOf(m).includes(b.path)) return { body: { ok: true } };
+          const why = refuse(m, b.path, all);
+          if (why) return { status: isBookDocument(b.path) && b.path.startsWith(m.folder) ? 409 : 400, body: { message: why } };
           const path = b.path;
           let placed = false;
           const after = isText(b.after) ? b.after : null;
@@ -183,7 +190,7 @@ export const manuscriptFeature = defineFeature({
         },
       },
       {
-        // A document taken out of a manuscript (the file stays, and in any other manuscript).
+        // A document taken out of a manuscript (the file stays where it is).
         method: 'POST',
         path: 'remove',
         handle: async (req: FeatureRequest): Promise<FeatureResponse> => {
@@ -218,7 +225,9 @@ export const manuscriptFeature = defineFeature({
           const name = profileName(title, [...profiles, ...all.filter((p) => !p.includes('/')).map((p) => PROFILE.exec(p)?.[1]).filter((n): n is string => !!n)]);
           const file = `_quarto-${name}.yml`;
           const home = isText(b.home) ? asFolder(b.home) : folder ?? `${name}/`;
-          const chapters = folder ? all.filter((p) => p.startsWith(folder) && isBookDocument(p) && !p.slice(folder.length).split('/').some((s) => s.startsWith('.') || s.startsWith('_'))).sort() : [];
+          // A folder's documents, but those in a manuscript already (one each).
+          const listed = new Set((await manuscripts(ctx)).flatMap((x) => pathsOf(x)));
+          const chapters = folder ? all.filter((p) => p.startsWith(folder) && isBookDocument(p) && !listed.has(p) && !p.slice(folder.length).split('/').some((s) => s.startsWith('.') || s.startsWith('_'))).sort() : [];
           try {
             await ctx.write(file, newProfileBook('', title, chapters), { by: req.person });
             await ctx.write(BOOK_FILE, withProfiles(base, [...profiles, name], profiles), { by: req.person });
@@ -251,8 +260,8 @@ export const manuscriptFeature = defineFeature({
       },
     ];
 
-    // A chapter renamed or moved here is renamed in every book it is in, and a home folder with it;
-    // one deleted is taken out of all of them; a profile's book deleted, out of its project's group.
+    // A chapter renamed or moved here is renamed in its book, and a home folder with it; one deleted
+    // is taken out; a profile's book deleted, out of its project's group.
     const follow = async (to: (p: string) => string | null, folderTo: (p: string) => string | null, gone: string | null) => {
       for (const m of await manuscripts(ctx)) {
         // A chapter moved out of its book's project is taken out: Quarto renders only what is in it.

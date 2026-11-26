@@ -4,9 +4,8 @@
 // after them, and below, documents not in it: its home folder's, or any of the
 // workspace's. Drag a row to reorder it, into a part or out of one, into the
 // appendices or out of the manuscript (or Alt+↑ and Alt+↓ on a row); click to
-// open, right-click for the file's menu. A chapter in other manuscripts too is
-// marked so. New chapter makes a document in the home folder, in place. The
-// order is the book's file, written by the host.
+// open, right-click for the file's menu. New chapter makes a document in the
+// home folder, in place. The order is the book's file, written by the host.
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { NavigationContext } from '@kuraa/feature-kit/client';
 import { isBookDocument, pathsOf } from './book.js';
@@ -80,7 +79,8 @@ const home = computed(() => book.value?.home ?? book.value?.folder ?? '');
 const outside = computed(() => {
   const m = book.value;
   if (!m) return [];
-  const listed = new Set(pathsOf(m));
+  // Nor in another manuscript: a document is in one at most (0090).
+  const listed = new Set(list.value.flatMap((x) => pathsOf(x)));
   const from = everywhere.value ? m.folder : home.value;
   // Not in folders the app or Quarto keep apart (`.` and `_`).
   return files.value
@@ -88,8 +88,7 @@ const outside = computed(() => {
     .map((f) => f.path)
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
 });
-/** The other manuscripts a chapter is in, by name. */
-const alsoIn = (path: string | null) => (path ? books.containing(path).filter((m) => m.file !== book.value?.file).map(Books.titleOf) : []);
+
 /** Send the new order; shown at once. */
 function apply(next: Order) {
   const m = book.value;
@@ -210,7 +209,6 @@ async function changeHome() {
           @contextmenu="menu($event, r.path)"
         >
           <span class="manuscript-name">{{ r.title }}</span>
-          <span v-if="r.kind === 'chapter' && alsoIn(r.path).length" class="manuscript-also" :title="S.alsoInTitle(alsoIn(r.path))" data-testid="manuscript-also">{{ S.alsoIn(alsoIn(r.path).length) }}</span>
           <template v-if="r.path && !exists(r.path)">
             <span class="manuscript-missing" :title="S.missingTitle(r.path)">{{ S.missing }}</span>
             <button type="button" class="manuscript-take-out" @click.stop="takeOut(r.path)">{{ S.removeMissing }}</button>
@@ -240,7 +238,7 @@ async function changeHome() {
           @keydown.enter="open(r.path)"
           @keydown="onKey($event, r)"
           @contextmenu="menu($event, r.path)"
-        ><span class="manuscript-name">{{ r.title }}</span><span v-if="alsoIn(r.path).length" class="manuscript-also" :title="S.alsoInTitle(alsoIn(r.path))">{{ S.alsoIn(alsoIn(r.path).length) }}</span></li>
+        ><span class="manuscript-name">{{ r.title }}</span></li>
       </ol>
       <h4 class="manuscript-section">{{ S.notIn }}</h4>
       <div class="manuscript-scope">
@@ -296,7 +294,6 @@ async function changeHome() {
 .manuscript-actions button, .manuscript-new-book, .manuscript-home { font-size: 12px; border-color: transparent; background: none; color: var(--muted); padding: 2px 0; }
 .manuscript-actions button:hover, .manuscript-new-book:hover, .manuscript-home:hover { color: var(--text); }
 .manuscript-new-book { margin: 14px 12px 0; }
-.manuscript-also { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
 .manuscript-where { margin-left: auto; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manuscript-scope { display: flex; gap: 4px; align-items: center; margin: 2px 12px 4px; }
 .manuscript-scope button:not(.manuscript-home) { font-size: 11px; padding: 1px 6px; border-radius: 4px; border-color: transparent; background: none; color: var(--muted); white-space: nowrap; }

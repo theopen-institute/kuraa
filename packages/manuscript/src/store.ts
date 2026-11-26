@@ -4,6 +4,7 @@
 // and the file menu's items, which must be ready before a right-click.
 import type { FeatureClientContext, Json, NavigationContext } from '@kuraa/feature-kit/client';
 import { isBookDocument, pathsOf, placeIn, type Entry } from './book.js';
+import { movesFor } from './places.js';
 
 export interface ClientManuscript {
   file: string;
@@ -75,14 +76,48 @@ export class Books {
     this.tell();
   }
 
-  /** The manuscripts a document is in. */
-  containing(path: string): ClientManuscript[] {
-    return this.list.filter((m) => pathsOf(m).includes(path));
+  /** The manuscript a document is in (one at most: 0090). */
+  containing(path: string): ClientManuscript | undefined {
+    return this.list.find((m) => pathsOf(m).includes(path));
   }
 
-  /** The manuscripts a document could be added to: those whose project has it, and that do not list it yet. */
+  /** The manuscripts a document could be added to: none, if it is in one; else those whose project has it. */
   addable(path: string): ClientManuscript[] {
-    return isBookDocument(path) ? this.list.filter((m) => path.startsWith(m.folder) && !pathsOf(m).includes(path)) : [];
+    if (!isBookDocument(path) || this.containing(path)) return [];
+    return this.list.filter((m) => path.startsWith(m.folder));
+  }
+
+  /** The workspace has manuscripts keep their files where they say (its setting, 0090). */
+  managesFiles(): boolean {
+    try {
+      return this.ctx.status().settings.manageFiles === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Where the workspace has manuscripts keep their files: the files of the
+   * manuscripts named (by file; all, if none is) moved where they belong, each
+   * as the file tree moves it; then known again. What cannot be moved (a file
+   * there already, someone may not) is said once, and left.
+   */
+  async tidy(files?: string[], on = this.managesFiles()): Promise<void> {
+    if (!on) return;
+    let moved = false;
+    let failed: string | null = null;
+    for (const m of this.list.filter((x) => !files || files.includes(x.file))) {
+      for (const [from, to] of movesFor(m)) {
+        try {
+          await this.ctx.moveFile(from, to);
+          moved = true;
+        } catch (e) {
+          failed ??= `${from}: ${this.ctx.explain(e).text}`;
+        }
+      }
+    }
+    if (failed) this.ctx.notify(failed, 'warn');
+    if (moved) await this.load();
   }
 
   /** What a manuscript is called. */
@@ -96,14 +131,17 @@ export class Books {
       this.list = optimistic(this.list);
       this.tell();
     }
+    let answer: Json = null;
     try {
-      return await this.ctx.request('POST', route, body);
+      answer = await this.ctx.request('POST', route, body);
     } catch (e) {
       this.ctx.notify(this.ctx.explain(e).text, 'warn');
-      return null;
-    } finally {
-      await this.load();
     }
+    await this.load();
+    // Its files where it keeps them, where the workspace has manuscripts do so.
+    const file = (answer as { file?: unknown } | null)?.file ?? (body as { file?: unknown } | null)?.file;
+    if (answer !== null && typeof file === 'string') await this.tidy([file]);
+    return answer;
   }
 
   /** A new manuscript, by its title, or of a folder; shown once made. */

@@ -205,6 +205,12 @@ const featureApp: FeatureApp = {
   host: coreHost,
   explain,
   keyLabel,
+  moveFile: async (from, to) => {
+    await api.value.renameFile(from, to);
+    // The open file follows: itself moved, or inside a folder that moved.
+    const open = path.value;
+    await refreshTree(open === from ? to : open?.startsWith(`${from}/`) ? to + open.slice(from.length) : undefined);
+  },
   changed: () => void loadFeatures(),
 };
 /** The client halves in use: on for the workspace, and not hidden by this person. */
@@ -317,6 +323,7 @@ function liveContext(id: string): FeatureClientContext {
       host: coreHost,
       explain: (error) => current().explain(error),
       keyLabel: (keys) => current().keyLabel(keys),
+      moveFile: (from, to) => current().moveFile(from, to),
     };
     liveContexts.set(id, ctx);
   }

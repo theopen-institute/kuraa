@@ -1,6 +1,6 @@
 // The manuscript (docs/decisions/0088-a-manuscript-is-a-quarto-book.md, 0090) on a
 // host: manuscripts made as Quarto profiles' books at the top of the
-// workspace, their chapters any of its documents, a document in several; the
+// workspace, their chapters any of its documents, a document in one at most; the
 // order changed, documents added (in place) and taken out, each written and
 // committed; home folders kept; renames and deletions followed; a book of a
 // project of its own (a folder's _quarto.yml) read and changed as before.
@@ -63,7 +63,7 @@ describe('the manuscript', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('makes manuscripts as profiles’ books, their chapters anywhere, a document in several', async () => {
+  it('makes manuscripts as profiles’ books, their chapters anywhere, a document in one at most', async () => {
     expect(await list()).toEqual([]);
     // Of a folder: its documents, its home that folder.
     expect(await post('make', { folder: 'novel/' })).toEqual({ status: 200, body: { file: '_quarto-novel.yml' } });
@@ -78,19 +78,19 @@ describe('the manuscript', () => {
     expect(novel).toMatchObject({ file: '_quarto-novel.yml', folder: '', profile: 'novel', title: 'novel', home: 'novel/' });
     expect(thesis).toMatchObject({ file: '_quarto-a-thesis.yml', profile: 'a-thesis', title: 'A Thesis', home: 'a-thesis/', chapters: [] });
 
-    // Any document, in several manuscripts; in one only once.
+    // Any document, from anywhere; but in one manuscript only (0090), and in it once.
     expect((await post('add', { file: '_quarto-a-thesis.yml', path: 'field/tides.md' })).status).toBe(200);
-    expect((await post('add', { file: '_quarto-a-thesis.yml', path: 'novel/notes.md' })).status).toBe(200);
-    expect(read('_quarto-a-thesis.yml')).toContain('    - field/tides.md\n    - novel/notes.md\n');
-    expect(read('_quarto-novel.yml')).toContain('    - novel/notes.md\n');
-    // In place: after a chapter.
+    expect(read('_quarto-a-thesis.yml')).toContain('    - field/tides.md\n');
+    const taken = await post('add', { file: '_quarto-a-thesis.yml', path: 'novel/notes.md' });
+    expect(taken.status).toBe(409);
+    expect(taken.body.message).toMatch(/novel\/notes\.md is in novel already/);
+    expect((await post('order', { file: '_quarto-a-thesis.yml', chapters: [{ chapter: 'field/tides.md' }, { chapter: 'novel/notes.md' }], appendices: [] })).status).toBe(409);
+    expect((await post('order', { file: '_quarto-novel.yml', chapters: [{ chapter: 'novel/notes.md' }, { chapter: 'novel/notes.md' }], appendices: [] })).status).toBe(400);
+    // Taken out of one, it may go in another; in place, after a chapter.
+    expect((await post('remove', { file: '_quarto-a-thesis.yml', path: 'field/tides.md' })).status).toBe(200);
+    expect(read('_quarto-a-thesis.yml')).not.toContain('tides.md');
     expect((await post('add', { file: '_quarto-novel.yml', path: 'field/tides.md', after: 'novel/chapters/a-arrival.md' })).status).toBe(200);
     expect(read('_quarto-novel.yml')).toContain('    - novel/chapters/a-arrival.md\n    - field/tides.md\n    - novel/chapters/b-harbour.md\n');
-    expect((await post('order', { file: '_quarto-novel.yml', chapters: [{ chapter: 'novel/notes.md' }, { chapter: 'novel/notes.md' }], appendices: [] })).status).toBe(400);
-    // Taken out of one, kept in the other.
-    expect((await post('remove', { file: '_quarto-a-thesis.yml', path: 'novel/notes.md' })).status).toBe(200);
-    expect(read('_quarto-a-thesis.yml')).not.toContain('notes.md');
-    expect(read('_quarto-novel.yml')).toContain('notes.md');
 
     // Its home changed.
     expect((await post('home', { file: '_quarto-a-thesis.yml', home: 'field' })).status).toBe(200);
@@ -98,16 +98,18 @@ describe('the manuscript', () => {
     expect(git(dir, 'status', '--porcelain')).toBe('');
   });
 
-  it('follows renames and deletions into every manuscript, and homes with them', async () => {
+  it('follows renames and deletions into the manuscripts, and homes with them', async () => {
     await post('make', { folder: 'novel/' });
     await post('make', { title: 'Thesis' });
-    await post('add', { file: '_quarto-thesis.yml', path: 'novel/chapters/a-arrival.md' });
+    await post('add', { file: '_quarto-thesis.yml', path: 'field/tides.md' });
     const r = await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'novel', to: 'story' }) });
     expect(r.status).toBe(200);
-    await until(() => read('_quarto-novel.yml').includes('story/chapters/a-arrival.md') && read('_quarto-thesis.yml').includes('story/chapters/a-arrival.md'), 10_000, 'both books to follow the rename');
+    await until(() => read('_quarto-novel.yml').includes('story/chapters/a-arrival.md'), 10_000, 'the book to follow the rename');
     await until(() => JSON.parse(read('.kuraa/manuscripts.json')).homes['_quarto-novel.yml'] === 'story/', 10_000, 'the home to follow');
+    expect((await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'field/tides.md', to: 'story/tides.md' }) })).status).toBe(200);
+    await until(() => read('_quarto-thesis.yml').includes('story/tides.md'), 10_000, 'a chapter moved into another’s folder stays in its book');
     expect((await api(`/api/files?path=${encodeURIComponent('story/chapters/a-arrival.md')}`, { method: 'DELETE' })).status).toBe(200);
-    await until(() => !read('_quarto-novel.yml').includes('a-arrival') && !read('_quarto-thesis.yml').includes('a-arrival'), 10_000, 'both books to follow the deletion');
+    await until(() => !read('_quarto-novel.yml').includes('a-arrival'), 10_000, 'the book to follow the deletion');
     // A manuscript's file deleted: out of the project's group.
     expect((await api(`/api/files?path=${encodeURIComponent('_quarto-thesis.yml')}`, { method: 'DELETE' })).status).toBe(200);
     await until(() => !read('_quarto.yml').includes('thesis'), 10_000, 'the group to follow');

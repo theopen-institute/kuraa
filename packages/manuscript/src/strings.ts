@@ -2,7 +2,7 @@
 
 export const S = {
   label: 'Manuscript',
-  none: 'No manuscript here yet. A manuscript is documents in an order of your choosing, from anywhere in the workspace, kept as a Quarto book; a document may be in several.',
+  none: 'No manuscript here yet. A manuscript is documents in an order of your choosing, from anywhere in the workspace, kept as a Quarto book.',
   noneHow: 'Make a new one, or right-click a folder and choose Make a manuscript.',
   newManuscript: 'New manuscript…',
   newManuscriptTitle: 'The new manuscript’s title',
@@ -17,8 +17,6 @@ export const S = {
   everywhere: 'All',
   homeFolder: 'Home folder',
   notInNoneAnywhere: 'Every document is in it.',
-  alsoIn: (n: number) => `+${n}`,
-  alsoInTitle: (names: string[]) => `Also in ${names.join(', ')}`,
   addToNamed: (title: string) => `Add to ${title}`,
   removeFromNamed: (title: string) => `Remove from ${title}`,
   choose: 'Manuscript',
@@ -39,4 +37,8 @@ export const S = {
   addTo: 'Add to manuscript',
   removeFrom: 'Remove from manuscript',
   moveHint: 'Drag to reorder, or Alt+↑ and Alt+↓',
+  manageFiles: 'Manuscripts keep their files',
+  manageFilesAbout: 'Each chapter is moved into its manuscript’s home folder, a part’s chapters into a folder of the part’s name, appendices into appendices/, as they are added and moved. Off: files stay wherever they are.',
+  manageFilesOn: 'Manuscripts keep their files: they are moved into their home folders now.',
+  manageFilesOff: 'Manuscripts no longer move files: they stay where they are.',
 };

@@ -72,3 +72,30 @@ test('a feature’s commands, view, item in ＋ and layout', async ({ page }) =>
 
   await marksOn(page, false);
 });
+
+// Running code is a component (0092): the code session's lines in the document's menu, and its
+// Packages dialog, opened from Settings › Workspace over the Settings window, which stays beneath it.
+test('Running code: the session in the document’s menu, and Packages over Settings', async ({ page }) => {
+  const path = `runs/code-${Date.now().toString(36)}.Rmd`;
+  expect((await api('/api/files', { method: 'POST', body: JSON.stringify({ path, content: '# Code\n\n```{r}\n1 + 1\n```\n' }) })).status).toBe(201);
+  await page.goto(`/?token=${E2E.token}&name=Ada`);
+  await page.getByTestId(`file:${path}`).click();
+  await expect(page.getByTestId('status')).toContainText('Connected');
+
+  await page.getByTestId('document-menu-button').click();
+  await expect(page.getByTestId('r-state')).toContainText('R ');
+  await expect(page.getByTestId('menu-run-all')).toBeVisible();
+  await expect(page.getByTestId('menu-packages')).toHaveText('Packages…');
+  await page.keyboard.press('Escape');
+
+  await openSettings(page);
+  await page.getByTestId('settings-packages').click();
+  const dialog = page.getByTestId('packages');
+  await expect(dialog.getByRole('heading')).toHaveText('R packages');
+  await expect(page.getByTestId('settings-window')).toBeVisible();
+  // Escape closes the dialog, not the window beneath it.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByTestId('settings-window')).toBeVisible();
+  await page.getByTestId('settings-close').click();
+});

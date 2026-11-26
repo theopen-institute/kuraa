@@ -9,8 +9,8 @@
 // panel, layout or view drawn stays drawn and a feature started stays started.
 import { computed, ref, shallowRef, watch, type Ref } from 'vue';
 import { sourceMapOf, type DocumentType } from '@kuraa/kernel';
-import type { ClientFeature, CoreHost, FeatureMenuEntry, FeatureMenuItem, FeaturePanel as FeaturePanelSpec, FeatureStatus, MatchTarget, Person } from '@kuraa/feature-kit/client';
-import { claimKeys, commandHelp, commandsOf, menuItem, type BoundCommand, type KeyOwner } from './commands.js';
+import type { ClientFeature, CodeSession, CoreHost, FeatureMenuEntry, FeatureMenuItem, FeaturePanel as FeaturePanelSpec, FeatureStatus, MatchTarget, Person } from '@kuraa/feature-kit/client';
+import { claimKeys, commandHelp, commandsOf, isMenuNote, menuItem, type BoundCommand, type KeyOwner, type MenuLine } from './commands.js';
 import type { EditorUi } from '@kuraa/editor-kit';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Plugin } from 'prosemirror-state';
@@ -41,6 +41,8 @@ export interface FeatureHostOptions {
   takenKeys?(): KeyOwner[];
   /** Do a feature's `editor` command in the open document (its FeatureEditor's `commands`). */
   runEditorCommand?(feature: string, id: string): void;
+  /** The open document's code session (0092), if it runs code. */
+  codeSession?(): CodeSession | null;
 }
 
 /** A panel open, and how many times it has been asked for (0089). */
@@ -81,15 +83,19 @@ export function useFeatureHost(o: FeatureHostOptions) {
 
   /** Told when the host says a tool changed (downloaded, removed): components that follow tools (0089). */
   const toolListeners = new Set<() => void>();
-  function toolsChanged() {
-    for (const fn of [...toolListeners]) {
+  /** Told when the open document's code session is another (0092). */
+  const codeListeners = new Set<() => void>();
+  const tell = (set: Set<() => void>, what: string) => {
+    for (const fn of [...set]) {
       try {
         fn();
       } catch (e) {
-        console.error('[kuraa] a component failed on a tool changing', e);
+        console.error(`[kuraa] a component failed on ${what}`, e);
       }
     }
-  }
+  };
+  const toolsChanged = () => tell(toolListeners, 'a tool changing');
+  const codeChanged = () => tell(codeListeners, 'the code session changing');
   /** The host's own services, offered to components (0089, 0091): always the open workspace's. */
   const coreHost: CoreHost = {
     search: { run: (q, caseSensitive) => api.value.search(q, caseSensitive) },
@@ -98,6 +104,13 @@ export function useFeatureHost(o: FeatureHostOptions) {
       render: (p, format) => api.value.render(p, format, o.person()),
       output: (p, format) => api.value.renderOutput(p, format),
       madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
+    },
+    code: {
+      session: () => o.codeSession?.() ?? null,
+      onSession: (fn) => {
+        codeListeners.add(fn);
+        return () => codeListeners.delete(fn);
+      },
     },
     tools: {
       list: () => api.value.tools(),
@@ -183,10 +196,12 @@ export function useFeatureHost(o: FeatureHostOptions) {
     return { active, panel, asks: open.asks };
   }
   const sidePanel = computed(() => shown(side.value));
-  const overPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p));
+  const overPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place !== 'dialog'));
+  /** Dialogs (0092): over the whole page, each as it was asked for. */
+  const dialogPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place === 'dialog'));
   function panelOpen(feature: string, panel: string): boolean {
     const same = (s: ShownPanel | null) => s?.active.feature.id === feature && s.panel.id === panel;
-    return same(sidePanel.value) || overPanels.value.some(same);
+    return same(sidePanel.value) || overPanels.value.some(same) || dialogPanels.value.some(same);
   }
   /** Ask for a panel: open it (beside the document, in place of the one there, or over it), or ask it again if it is open. */
   function askPanel(feature: string, panel: string) {
@@ -194,7 +209,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     const spec = findPanel(feature, panel);
     if (!spec) return;
     const same = (x: OpenPanel | null) => x?.feature === feature && x.panel === panel;
-    if (spec.place === 'over') {
+    if (spec.place === 'over' || spec.place === 'dialog') {
       const was = over.value.find(same);
       over.value = was ? over.value.map((x) => (x === was ? { ...x, asks: x.asks + 1 } : x)) : [...over.value, { feature, panel, asks: 1 }];
     } else {
@@ -260,21 +275,35 @@ export function useFeatureHost(o: FeatureHostOptions) {
     }
     return false;
   }
-  /** A feature's menu entries as items to draw: a command named by its label, keys and what it does (0091). */
-  function menuItems(feature: string, entries: FeatureMenuEntry[]): FeatureMenuItem[] {
+  /** A feature's menu entries as lines to draw: a command named by its label, keys and what it does (0091); notes as they are. */
+  function menuLines(feature: string, entries: FeatureMenuEntry[]): MenuLine[] {
     return entries.flatMap((e) => menuItem(e, (id) => commands.value.find((c) => c.feature === feature && c.id === id), runCommand) ?? []);
   }
+  /** A feature's menu entries as items, where a menu has no lines of words (a file's, ＋). */
+  function menuItems(feature: string, entries: FeatureMenuEntry[]): FeatureMenuItem[] {
+    return menuLines(feature, entries).filter((l): l is FeatureMenuItem => !isMenuNote(l));
+  }
 
-  /** Items features add to the open document's ⋯ menu. */
-  function documentMenu(path: string, type: DocumentType, source: boolean): FeatureMenuItem[] {
-    return features.value.flatMap((f) => {
+  /**
+   * What features add to the open document's ⋯ menu: each feature's lines in a
+   * group of their own, those of features with one heading on the shortcuts
+   * sheet (Preview's and the Outline's) together.
+   */
+  function documentMenu(path: string, type: DocumentType, source: boolean): MenuLine[][] {
+    const groups = new Map<string, MenuLine[]>();
+    for (const f of features.value) {
+      let lines: MenuLine[];
       try {
-        return menuItems(f.feature.id, f.feature.documentMenu?.({ ...f.ctx, path, type, source }) ?? []);
+        lines = menuLines(f.feature.id, f.feature.documentMenu?.({ ...f.ctx, path, type, source }) ?? []);
       } catch (e) {
         console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
-        return [];
+        continue;
       }
-    });
+      if (!lines.length) continue;
+      const key = f.feature.helpGroup ?? `feature:${f.feature.id}`;
+      groups.set(key, [...(groups.get(key) ?? []), ...lines]);
+    }
+    return [...groups.values()];
   }
   /** Items features add to a file's right-click menu. */
   function fileMenu(path: string): ContextItem[] {
@@ -340,10 +369,10 @@ export function useFeatureHost(o: FeatureHostOptions) {
   const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
 
   return {
-    status, known, hidden, setHidden, load, turn, messages, coreHost, toolsChanged,
+    status, known, hidden, setHidden, load, turn, messages, coreHost, toolsChanged, codeChanged,
     features, forSettings, dispose,
-    sidePanel, overPanels, askPanel, closePanel, panelOpen, panelButtons,
-    commands, editorCommands, commandKey, menuItems, runCommand,
+    sidePanel, overPanels, dialogPanels, askPanel, closePanel, panelOpen, panelButtons,
+    commands, editorCommands, commandKey, menuItems, menuLines, runCommand,
     documentMenu, fileMenu, help, pastEditors,
     layout, fallback, views,
   };

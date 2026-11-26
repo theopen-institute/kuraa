@@ -2,7 +2,7 @@
 // From them the core binds keys (refusing keys something else already has),
 // fills menu items that name a command, and lists the keys on the Markdown and
 // shortcuts sheet. Pure: featureHost.ts and Editor.vue use these.
-import type { ClientFeature, FeatureClientContext, FeatureCommandItem, FeatureMenuEntry, FeatureMenuItem } from '@kuraa/feature-kit/client';
+import type { ClientFeature, FeatureClientContext, FeatureCommandItem, FeatureMenuEntry, FeatureMenuItem, FeatureMenuNote } from '@kuraa/feature-kit/client';
 import type { FormatEditor, HelpItem } from '@kuraa/editor-kit';
 import { APP_KEYS } from './keys.js';
 
@@ -107,13 +107,18 @@ export function commandHelp(commands: BoundCommand[]): HelpItem[] {
 }
 
 export const isCommandItem = (e: FeatureMenuEntry): e is FeatureCommandItem => 'command' in e;
+export const isMenuNote = (e: FeatureMenuEntry | FeatureMenuItem): e is FeatureMenuNote => 'note' in e;
+
+/** What a menu draws: an item, or (in the document's menu) a line of words. */
+export type MenuLine = FeatureMenuItem | FeatureMenuNote;
 
 /**
- * A menu entry as an item to draw: a command's label (unless the entry gives
- * one), keys and what it does; an item of the feature's own as it is. An entry
- * naming a command the feature does not have is left out (said in the console).
+ * A menu entry as a line to draw: a command's label (unless the entry gives
+ * one), keys and what it does; an item or note of the feature's own as it is.
+ * An entry naming a command the feature does not have is left out (said in the
+ * console).
  */
-export function menuItem(entry: FeatureMenuEntry, find: (id: string) => BoundCommand | undefined, run: (c: BoundCommand) => void): FeatureMenuItem | null {
+export function menuItem(entry: FeatureMenuEntry, find: (id: string) => BoundCommand | undefined, run: (c: BoundCommand) => void): MenuLine | null {
   if (!isCommandItem(entry)) return entry;
   const c = find(entry.command);
   if (!c) {

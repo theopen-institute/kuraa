@@ -253,6 +253,9 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .ask-message { font-size: 14px; color: var(--text); }
 button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* A feature's dialog (0092): the window is the client's, all in it the feature's (its own padding, width and layout). */
+.modal.feature-dialog { padding: 0; width: auto; max-width: 94vw; display: block; }
+.feature-dialog-body { display: contents; }
 
 @media (max-width: 900px) {
   .panes, .panes.history-open, .panes.side-open, .panes.history-open.side-open { grid-template-columns: 200px minmax(0, 1fr); }
@@ -317,9 +320,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .out-type { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
 .out-table td.na { color: var(--muted); font-style: italic; }
 .out-table-foot { font: 11px var(--font); color: var(--muted); padding-top: 3px; }
-.r-state { color: var(--muted); }
-.r-busy, .r-starting { color: var(--accent); }
-.r-failed, .r-state.unavailable { color: var(--warn); }
 
 /* Notes. References are superscript labels; inline notes are small chips with their text;
    note definitions sit in a block with their label in the margin. */
@@ -338,31 +338,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .inline-note::before { content: none; }
 .note-label.unused { color: var(--muted); }
 
-/* The Packages dialog: its own width, never taller than the window; the list scrolls. */
-.modal.packages {
-  width: min(560px, 94vw); max-height: min(720px, 90vh);
-  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
-}
-.modal.packages > * { min-width: 0; }
-.packages-install { display: flex; gap: 8px; min-width: 0; }
-.packages-install input { flex: 1; min-width: 0; font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
-.packages-result { font-size: 13px; overflow-wrap: anywhere; }
-.packages-result.warn { color: var(--warn); }
-.packages-result pre { font: 11px/1.4 var(--mono); max-height: 160px; overflow: auto; white-space: pre-wrap; }
-.packages-progress { font: 12px var(--mono); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.packages-list { min-height: 0; overflow: auto; border-top: 1px solid var(--border); padding-top: 8px; display: grid; gap: 10px; align-content: start; }
-.packages-list h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.packages-list p { margin: 0; font-size: 13px; }
-.packages-list table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-.packages-list td { padding: 4px 6px; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.packages-list td.pkg-version { width: 30%; }
-.packages-list td.pkg-action { width: 84px; text-align: right; }
-.packages-list summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-.packages-env-note { margin: 6px 0 !important; font-size: 12px !important; }
-.pkg-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; }
-.pkg-name { font-family: var(--mono); }
-.pkg-version { font-family: var(--mono); color: var(--muted); }
-.packages-note { font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+/* The Packages dialog and the code session's line in the menu are Running code's (@kuraa/code, 0092). */
 
 /* Components: one row per component, a box to turn it on, what it is beneath its name. */
 .components-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
@@ -379,7 +355,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component.tool { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
 .component.tool .component-text { cursor: default; }
 .tool-actions { display: flex; gap: 6px; align-items: start; }
-.r-state.unsandboxed::after { content: ' · not sandboxed'; color: var(--warn); }
 .component-warn { font-weight: 400; color: var(--warn); }
 .components-note code { font-size: 12px; }
 .components-note { margin: 0; font-size: 12.5px; }
@@ -684,7 +659,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .menu-details summary { cursor: pointer; width: fit-content; }
 
 /* Code that cannot run here now: why, beside a Run that cannot be pressed. */
-.run-unavailable { color: var(--warn); }
 
 /* Choosing a folder on the host's computer (FolderPicker.vue). */
 .modal.folder-picker { width: min(520px, 94vw); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defineClientFeature } from '@kuraa/feature-kit/client';
+import { defineClientFeature, type FeatureMenuItem } from '@kuraa/feature-kit/client';
 import { claimKeys, commandHelp, commandsOf, menuItem, normalKeys } from '../src/commands.js';
 
 const feature = defineClientFeature({
@@ -45,11 +45,13 @@ describe('features’ commands (0091)', () => {
     const list = commandsOf(feature, 'Notes');
     const ran: string[] = [];
     const find = (id: string) => list.find((c) => c.id === id);
-    const item = menuItem({ command: 'panel:notes', testid: 'menu-notes' }, find, (c) => ran.push(c.id))!;
+    const item = menuItem({ command: 'panel:notes', testid: 'menu-notes' }, find, (c) => ran.push(c.id)) as FeatureMenuItem;
     expect([item.label, item.keys, item.testid]).toEqual(['Notes', 'Alt-Mod-K', 'menu-notes']);
     item.run();
     expect(ran).toEqual(['panel:notes']);
-    expect(menuItem({ command: 'note', label: 'Note this' }, find, () => undefined)!.label).toBe('Note this');
+    expect((menuItem({ command: 'note', label: 'Note this' }, find, () => undefined) as FeatureMenuItem).label).toBe('Note this');
+    const note = { note: 'R ready' };
+    expect(menuItem(note, find, () => undefined)).toBe(note);
     expect(menuItem({ command: 'missing' }, find, () => undefined)).toBeNull();
     const own = { label: 'Own', run: () => undefined };
     expect(menuItem(own, find, () => undefined)).toBe(own);

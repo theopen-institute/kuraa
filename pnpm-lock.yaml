@@ -406,6 +406,15 @@ importers:
         specifier: workspace:*
         version: link:../format-pandoc
 
+  packages/code:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
   packages/editor-kit:
     dependencies:
       prosemirror-model:
@@ -483,6 +492,9 @@ importers:
       '@kuraa/annotations':
         specifier: workspace:*
         version: link:../annotations
+      '@kuraa/code':
+        specifier: workspace:*
+        version: link:../code
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit

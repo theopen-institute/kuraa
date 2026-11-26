@@ -5,7 +5,6 @@ import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRe
 import { TypeRegistry } from '@kuraa/kernel';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
-import type { ChunkRunner } from './runs.js';
 import { askConfirm, askText } from './ask.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
 import { loadEditorsOff, saveEditorsOff } from './editor-choices.js';
@@ -27,7 +26,6 @@ import HelpSheet from './HelpSheet.vue';
 import HistoryPanel from './HistoryPanel.vue';
 import DocumentMenu from './DocumentMenu.vue';
 import NoticeToast from './NoticeToast.vue';
-import PackagesDialog from './PackagesDialog.vue';
 import PastVersion from './PastVersion.vue';
 import AccessBar from './AccessBar.vue';
 import PermissionsDialog from './PermissionsDialog.vue';
@@ -42,6 +40,7 @@ import { workspaceMenuItems } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
 import { useFeatureHost } from './featureHost.js';
 import { takenKeys } from './commands.js';
+import { codeSessionOf } from './code.js';
 import type { ContextItem as MenuItem } from './ContextMenu.vue';
 import FeaturePanel from './FeaturePanel.vue';
 
@@ -110,7 +109,6 @@ const showSource = ref(false);
 /** The document's ⋯ menu, if open: where it opens (under its button). */
 const docMenu = shallowRef<{ top: number; right: number } | null>(null);
 const helpOpen = ref(false);
-const packages = shallowRef<{ runner: ChunkRunner; engine: string } | null>(null);
 /** Goes up when the host says a tool changed (downloaded, removed): Settings › Components and the preview ask again. */
 const toolsKey = ref(0);
 const addingWorkspace = ref(false);
@@ -159,7 +157,10 @@ const fh = useFeatureHost({
   // The app's keys, and those the editor modules list, are never a feature's (0091).
   takenKeys: () => takenKeys(props.editors),
   runEditorCommand: (feature, id) => editor.value?.runFeatureCommand(feature, id),
+  // The open document's code session (0092): what @kuraa/code offers, through the contract.
+  codeSession: () => (status.value?.runner ? codeSessionOf(status.value.runner) : null),
 });
+watch(() => status.value?.runner, () => fh.codeChanged());
 const features = fh.features;
 const sidePanel = fh.sidePanel;
 const overPanels = fh.overPanels;
@@ -251,7 +252,7 @@ async function openAtText(p: string, at?: { from: number; to: number }) {
   editor.value?.revealText(at);
 }
 /** Items features add to the open document's ⋯ menu. */
-const featureMenu = computed(() => (path.value && type.value ? fh.documentMenu(path.value, type.value, showSource.value) : []));
+const featureMenu = () => (path.value && type.value ? fh.documentMenu(path.value, type.value, showSource.value) : []);
 /** What features show on a past version, with what was kept beside the document then. */
 const pastFeatures = computed(() => (viewing.value?.commit && path.value && type.value ? fh.pastEditors(path.value, type.value, viewing.value.commit) : undefined));
 function openDocMenu(e: MouseEvent) {
@@ -1003,14 +1004,13 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :show-source="showSource"
       :history-open="historyOpen"
       :conflicts="file?.conflicts ?? 0"
-      :feature-items="featureMenu"
+      :feature-groups="featureMenu()"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"
       @insert-table="editor?.command('insertTable')"
       @next-conflict="editor?.command('nextConflict')"
       @save-version="saveVersion"
-      @packages="(runner, engine) => (packages = { runner, engine })"
       @help="toggleHelp"
       @settings="openSettings('document')"
       @permissions="openPermissions(path!)"
@@ -1041,7 +1041,6 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :header="header"
       :opening="!!path && !editor?.view"
       :workspace="workspace"
-      :runner="status?.runner ?? null"
       :can-remove-workspace="canAdd && !!chosen"
       :editors="editors"
       :editors-off="editorsOff"
@@ -1057,12 +1056,24 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       @remove-workspace="chosen && removeWorkspace(chosen)"
       @invite="invite"
       @permissions="openPermissions"
-      @packages="(runner, engine) => (packages = { runner, engine })"
       @hidden-features="fh.setHidden"
       @close="settingsOpen = false; void checkShared(); void fh.load()"
     />
     <FolderPicker v-if="pickingFolder" :hub="hubApi" :title="S.openFolder.choose" @chosen="(p) => pickingFolder?.(p)" @cancel="pickingFolder?.(null)" />
-    <PackagesDialog v-if="packages" :runner="packages.runner" :engine="packages.engine" @close="packages = null" />
+    <!-- Features' dialogs (0092): over the whole page, Settings among it. -->
+    <FeaturePanel
+      v-for="d in fh.dialogPanels.value"
+      :key="`${d.active.feature.id}:${d.panel.id}`"
+      :active="d.active"
+      :panel="d.panel"
+      :path="path && type && !viewing ? path : null"
+      :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
+      :view="() => editor?.view ?? null"
+      :state="() => editor?.featureState(d.active.feature.id) ?? null"
+      :document="openDocument"
+      :asks="d.asks"
+      @close="fh.closePanel(d.active.feature.id, d.panel.id)"
+    />
 
     <SettingsDialog
       v-if="editingSettings"

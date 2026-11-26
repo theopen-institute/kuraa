@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@kuraa/annotations": "workspace:*",
+    "@kuraa/code": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",
     "@kuraa/files": "workspace:*",
     "@kuraa/manuscript": "workspace:*",

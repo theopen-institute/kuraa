@@ -285,6 +285,7 @@ export interface CoreHost {
   search: SearchService;
   renders: RenderService;
   tools: ToolService;
+  code: CodeService;
 }
 
 /** A service of the host's (CoreHost), by name. */
@@ -306,6 +307,75 @@ export interface RenderService {
   output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
   madeFrom(path: string, format: RenderFormat): Promise<Blob>;
+}
+
+/**
+ * The open document's code session (0011, 0092), where its type runs code: the
+ * session on the host that runs its chunks, as this client follows it. Running
+ * a chunk from the document is the core's (its node views); a component offers
+ * the rest: running everything, stopping, starting again, the packages.
+ */
+export interface CodeService {
+  /** The open document's session, or null (none open, or its type runs no code). */
+  session(): CodeSession | null;
+  /** Be told when the open document's session is another (a document opened, closed). Returns how to stop. */
+  onSession(fn: () => void): () => void;
+}
+
+export interface CodeSession {
+  /** How it stands now (read anew when onChange says). */
+  status(): CodeSessionStatus;
+  /** Be told when how it stands changes. Returns how to stop. */
+  onChange(fn: () => void): () => void;
+  /** Run every chunk, top to bottom. */
+  runAll(): Promise<void>;
+  /** Interrupt, and drop queued runs. */
+  interrupt(): Promise<unknown>;
+  /** A fresh session: everything defined so far is gone. */
+  restart(): Promise<unknown>;
+  /** The workspace's packages for an engine (0014). */
+  listPackages(engine: string): Promise<PackageInfo[]>;
+  installPackages(engine: string, refs: string[]): Promise<PackageResult>;
+  removePackages(engine: string, names: string[]): Promise<PackageResult>;
+}
+
+export interface CodeSessionStatus {
+  /** The language, as people call it: 'R'. */
+  engine: string;
+  /** The session's state: 'none', 'starting', 'ready', 'busy', 'stopped', 'failed'. */
+  state: string;
+  /** What it says as it starts, if anything. */
+  message: string | null;
+  /** Where code runs (0019), if the host says. */
+  environment: { label: string; sandboxed: boolean; available: boolean; message?: string } | null;
+  /** Why code cannot run now (Podman missing, say), or null. */
+  unavailable: string | null;
+  /** Something is running or queued. */
+  busy: boolean;
+  /** The document has chunks this host can run. */
+  runnable: boolean;
+  /** The engine whose packages the workspace keeps (null: none). */
+  packageEngine: string | null;
+  /** The engines, by id and label. */
+  engines: { id: string; label: string }[];
+  /** Whether people may install packages here (the host's choice). */
+  allowInstalls: boolean;
+  /** The latest the host said of packages being changed: for an engine, what it says, and when. */
+  packageNews: { engine: string; message: string; at: number } | null;
+}
+
+/** A package as the workspace has it (0014). */
+export interface PackageInfo {
+  name: string;
+  version: string;
+  /** In the workspace's own library, or the environment's. */
+  source: 'workspace' | 'environment';
+}
+
+export interface PackageResult {
+  ok: boolean;
+  message: string;
+  log?: string;
 }
 
 /** The tools this computer has or may download (0045). */
@@ -414,6 +484,23 @@ export interface FeatureMenuItem {
   /** Its keys, as key bindings write them ('Mod-Alt-m'): shown beside it, not bound by the client (a command's are). */
   keys?: string;
   testid?: string;
+  /** Shown, but not to be chosen now (0092). */
+  disabled?: boolean;
+  /** What it says when pointed at. */
+  title?: string;
+}
+
+/**
+ * A line of words in a menu, not to be chosen (0092): how something stands
+ * ("R ready · in a Podman container"). In the document's ⋯ menu; other menus
+ * leave it out.
+ */
+export interface FeatureMenuNote {
+  note: string;
+  title?: string;
+  testid?: string;
+  /** Classes for its look (its feature styles them). */
+  className?: string;
 }
 
 /** A menu item that is one of the feature's commands (0091): its label (unless given), its keys and what it does are the command's. */
@@ -425,7 +512,7 @@ export interface FeatureCommandItem {
 }
 
 /** What a feature puts in a menu: an item of its own, or one of its commands. */
-export type FeatureMenuEntry = FeatureMenuItem | FeatureCommandItem;
+export type FeatureMenuEntry = FeatureMenuItem | FeatureCommandItem | FeatureMenuNote;
 
 /**
  * Something a feature does, by name (0091). Its keys are bound by the core,
@@ -462,7 +549,7 @@ export interface FeatureDocumentContext extends FeatureClientContext {
 }
 
 /** Where a panel is drawn (FeaturePanel.place). */
-export type PanelPlace = 'side' | 'over';
+export type PanelPlace = 'side' | 'over' | 'dialog';
 
 /** A panel the feature draws: beside the open document, or about the workspace. */
 export interface FeaturePanel {
@@ -485,6 +572,10 @@ export interface FeaturePanel {
    * - `over`: a document's panel over the document's top left, all of it the
    *   panel's own (no heading of the client's); it stays open beside any other
    *   panel. Over the rich view only (0089).
+   * - `dialog`: over the whole page, modal (0092): the client draws the window
+   *   (its backdrop, keeping the focus in it, Escape and a click outside closing
+   *   it, unless held open: holdOpen); all inside it is the panel's own. Over
+   *   any other window (Settings), which stays beneath it.
    *
    * A place added later (a bar below the document, say) is a value added here;
    * a client that does not know a panel's place draws it beside the document.
@@ -516,6 +607,8 @@ export interface FeaturePanelContext extends FeatureClientContext {
   /** Be told each time the panel is asked for (its keys, a menu, openPanel): once as it opens by being asked, and again while open where it does not toggle. Returns how to stop. */
   onAsk(fn: () => void): () => void;
   close(): void;
+  /** A dialog's (0092): while held, Escape and a click outside do not close it (something it started is under way). */
+  holdOpen(hold: boolean): void;
 }
 
 /** A part of Settings the feature draws. */

@@ -1,4 +1,4 @@
-// Compile's client half (0091): Compile… on every folder's menu, opening its
+// Compile's client half (0093): Compile… on every folder's menu, opening its
 // panel for that folder, and No heading in Compile (or Heading in Compile);
 // Leave out of Compile (or Put back in) on a document's or folder's. Its marks
 // in the file tree: what is left out, faded; a folder with a title or format

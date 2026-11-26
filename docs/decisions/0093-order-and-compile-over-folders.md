@@ -1,4 +1,4 @@
-# 0091 · Order and Compile over folders
+# 0093 · Order and Compile over folders
 
 **Status: built.** Replaces [0090](0090-manuscripts-apart-from-folders.md), and the Quarto storage of
 [0088](0088-a-manuscript-is-a-quarto-book.md): there is no manuscript beside the file tree any more.

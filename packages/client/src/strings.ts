@@ -283,7 +283,7 @@ export const S = {
     space: 'New file or folder…',
     newFolderMenu: (where: string) => `New folder${where}…`,
     inFolder: (name: string) => ` in ${name}`,
-    /** A folder arranged by hand (0091): its order forgotten. */
+    /** A folder arranged by hand (0093): its order forgotten. */
     sortByName: 'Sort by name',
     documentSettings: 'Document settings…',
     /** What a new document's file is called until it has a title. */

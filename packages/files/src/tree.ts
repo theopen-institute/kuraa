@@ -19,7 +19,7 @@ export interface Folder {
   path: string;
   folders: Map<string, Folder>;
   files: TreeFile[];
-  /** What is in it, in the order shown (0091): as arranged, where it has an order; then by name, folders first. */
+  /** What is in it, in the order shown (0093): as arranged, where it has an order; then by name, folders first. */
   children: Child[];
 }
 
@@ -53,7 +53,7 @@ export function buildTree(files: TreeFile[], orders: Orders = () => null): Folde
     if (parts[parts.length - 1] !== PLACEHOLDER) dir.files.push(f);
   }
   // By name: folders first, then files in the order people read them, by title (or filename), numbers in order.
-  // Where the folder has an order (0091), what it names comes first, as it names it.
+  // Where the folder has an order (0093), what it names comes first, as it names it.
   const sort = (dir: Folder) => {
     dir.files.sort((a, b) => shownName(a).localeCompare(shownName(b), undefined, { numeric: true, sensitivity: 'base' }) || a.path.localeCompare(b.path));
     const byName: Child[] = [
@@ -130,7 +130,7 @@ export type TreeAction =
  * folder, or goes into an open one; ← closes it, or goes up to the folder
  * around; Enter (or Space) opens a file or opens and closes a folder; F2
  * renames; Delete deletes; Shift+F10 (or the menu key) shows its menu; Alt+↑
- * and Alt+↓ move it up and down its folder (0091). Null if the key does nothing here.
+ * and Alt+↓ move it up and down its folder (0093). Null if the key does nothing here.
  */
 export function treeKey(items: readonly TreeItem[], current: string, key: string, shift = false, alt = false): TreeAction | null {
   const i = items.findIndex((x) => x.path === current);
@@ -177,7 +177,7 @@ export interface TreeContext {
   /** What is being dragged, and the folder it would land in ('' for the top level). */
   dragging: Ref<string | null>;
   over: Ref<string | null>;
-  /** The row it would land beside (0091), and on which side: a line there. */
+  /** The row it would land beside (0093), and on which side: a line there. */
   beside: Ref<{ path: string; side: 'before' | 'after' } | null>;
   /** Features' marks on a file or folder (its path ending in `/`). */
   marksOf(path: string): FileMark[];

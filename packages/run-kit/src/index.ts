@@ -338,7 +338,7 @@ export interface RenderRequest {
   /**
    * Folders on the host (inside the workspace) where what the document refers
    * to (images, a bibliography) is found, besides its own: a folder compiled
-   * from documents in several (0091). Renderers that cannot use them leave them.
+   * from documents in several (0093). Renderers that cannot use them leave them.
    */
   resources?: string[];
 }

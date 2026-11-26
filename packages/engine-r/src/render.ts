@@ -80,7 +80,7 @@ async function render(ctx: RenderContext, req: RenderRequest): Promise<RenderRes
       mounts,
       image: imageRecipe(ctx.requirements, ctx.workspace, ctx.options),
       command: (view) => ({
-        // Folders where what it refers to is found, besides its own (a compiled folder's documents': 0091), as pandoc's resource path.
+        // Folders where what it refers to is found, besides its own (a compiled folder's documents': 0093), as pandoc's resource path.
         argv: ['Rscript', '--no-save', '--no-restore', `${view.files}/render.R`, view.inside(req.input), req.format, view.scratch, (req.resources ?? []).map((r) => view.inside(r)).join(':')],
         // In scratch: pandoc writes beside where it runs, and the workspace is read-only.
         cwd: view.scratch,

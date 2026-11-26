@@ -42,7 +42,7 @@ describe('search', () => {
     writeFileSync(join(dir, 'latin.txt'), Buffer.from('tide at the caf\xe9\n', 'latin1'));
     writeFileSync(join(dir, 'data.bin'), Buffer.concat([Buffer.from('tide'), Buffer.alloc(64), Buffer.from('tide')]));
     writeFileSync(join(dir, 'big.csv'), `tide\n${'x'.repeat(3 * 1024 * 1024)}\n`);
-    // The app's own, about a folder (0091).
+    // The app's own, about a folder (0093).
     writeFileSync(join(dir, '.kuraa-order'), 'tide.md\n');
     writeFileSync(join(outside, 'secret.txt'), 'tide secret\n');
     symlinkSync(outside, join(dir, 'elsewhere'));

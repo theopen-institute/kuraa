@@ -467,7 +467,7 @@ export class HostFeatures {
   describe(changes: { path: string; before: string | null; after: string | null }[]): string[] {
     const lines: string[] = [];
     for (const ch of changes) {
-      // Its companions, or the files it writes by their name (0091: a manuscript's).
+      // Its companions, or the files it writes by their name (0093: a manuscript's).
       const name = ch.path.slice(ch.path.lastIndexOf('/') + 1);
       const f = [...this.loaded.values()].find((x) => documentOf(ch.path, x.companions ?? []) !== null || (x.names ?? []).some((n) => nameMatches(n, name)));
       if (!f?.describe) continue;

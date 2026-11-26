@@ -4,7 +4,7 @@
 //   Rscript render.R <document> <html|docx|pdf> <scratch> [<folders>]
 //
 // <folders>: where what the document refers to is found besides its own folder,
-// separated by colons (a compiled folder's documents', 0091).
+// separated by colons (a compiled folder's documents', 0093).
 //
 // An R Markdown document is knitted by rmarkdown::render; a Markdown document
 // goes to pandoc directly. Either way the workspace is only read: intermediate

@@ -1,4 +1,4 @@
-// What Compile's client half knows of the open workspace (0091): each folder's
+// What Compile's client half knows of the open workspace (0093): each folder's
 // settings, asked of its host half as it comes into use and again whenever
 // that says one changed; and the folder the panel is to compile.
 import { ref, shallowRef } from 'vue';

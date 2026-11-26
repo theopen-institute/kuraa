@@ -3,7 +3,7 @@ import { afterDelete, afterRename, compileFolder, excludedBy, noHeadingPaths, re
 
 const folder = (f: string, more: Partial<FolderCompile> = {}): FolderCompile => ({ folder: f, title: null, format: null, heading: true, exclude: [], ...more });
 
-describe('Compile’s file in a folder (0091)', () => {
+describe('Compile’s file in a folder (0093)', () => {
   it('says the book’s title and format, whether its name is a heading, and what in it is left out, by name', () => {
     const c = readCompile('novel', 'title: The Coast\nformat: pdf\nheading: false\nexclude:\n  - notes.md\n  - research\n  - a/b.md\n  - 3\n');
     expect(c).toEqual(folder('novel', { title: 'The Coast', format: 'pdf', heading: false, exclude: ['notes.md', 'research'] }));

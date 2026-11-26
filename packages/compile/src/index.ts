@@ -1,4 +1,4 @@
-// Compile (docs/decisions/0091-order-and-compile-over-folders.md): any
+// Compile (docs/decisions/0093-order-and-compile-over-folders.md): any
 // folder compiled into one book, its documents in the file tree's order, by
 // the host's render; any document or folder left out. Its host half keeps what
 // Compile knows of each folder (a `.kuraa-compile.yml` in it: the book's title

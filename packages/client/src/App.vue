@@ -88,9 +88,9 @@ const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
 /** Folders with permissions of their own, for the file list to mark (0069). */
 const folderMarks = shallowRef<{ path: string; readers?: string; writers?: string }[]>([]);
-/** Folders' orders, as people arranged them (0091), by folder ('' the top). */
+/** Folders' orders, as people arranged them (0093), by folder ('' the top). */
 const orders = shallowRef<Record<string, string[]>>({});
-/** Features said their marks on files changed (0091): asked again. */
+/** Features said their marks on files changed (0093): asked again. */
 const marksAsked = ref(0);
 const path = ref<string | null>(null);
 const status = shallowRef<EditorStatus | null>(null);
@@ -131,7 +131,7 @@ const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;
-  // The app's own files in folders (`.kuraa-order`, a manuscript's: 0091) are not shown: they are about the folder.
+  // The app's own files in folders (`.kuraa-order`, a manuscript's: 0093) are not shown: they are about the folder.
   const listed = files.value.filter((f) => !f.of && !f.path.slice(f.path.lastIndexOf('/') + 1).startsWith('.kuraa-'));
   if (!live && !c) return listed;
   return listed.map((f) => {
@@ -444,7 +444,7 @@ function featureFileMenu(p: string): ContextItem[] {
     }
   });
 }
-/** Features' marks on a file or folder (0091), for navigation. */
+/** Features' marks on a file or folder (0093), for navigation. */
 function fileMarks(p: string): FileMark[] {
   return features.value.flatMap((f) => {
     try {

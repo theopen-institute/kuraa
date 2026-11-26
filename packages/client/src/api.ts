@@ -266,7 +266,7 @@ export class HostApi {
     return (await this.json<{ name: string }>('/api/workspace/name', { method: 'PATCH', body: JSON.stringify({ name, by }) })).name;
   }
   tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[]; orders?: Record<string, string[]> }>('/api/tree'); }
-  /** A folder's order (0091): its files' and folders' names as arranged ('' the top level; none: by name). */
+  /** A folder's order (0093): its files' and folders' names as arranged ('' the top level; none: by name). */
   setOrder(folder: string, names: string[]) { return this.json<{ folder: string; names: string[] }>('/api/order', { method: 'POST', body: JSON.stringify({ folder, names }) }); }
   /** A file's or folder's permissions (0069). */
   permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }

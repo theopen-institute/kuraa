@@ -73,14 +73,14 @@ export const MIME: Record<RenderFormat, string> = {
   pdf: 'application/pdf',
 };
 
-/** A folder's compile, as asked (0091): what to leave out and which folders have no heading (workspace paths), and the book's title. */
+/** A folder's compile, as asked (0093): what to leave out and which folders have no heading (workspace paths), and the book's title. */
 export interface CompileOptions {
   exclude: string[];
   noHeading: string[];
   title: string;
 }
 
-/** What renders a path: a folder (ending in `/`: 0091) is compiled to Markdown, and rendered as that. */
+/** What renders a path: a folder (ending in `/`: 0093) is compiled to Markdown, and rendered as that. */
 const asRendered = (path: string): string => (path.endsWith('/') ? `${path === '/' ? '' : path}book.md` : path);
 
 /** What a compiled folder's book is called (its output's name): the folder's name. */
@@ -100,12 +100,12 @@ export class Renders {
     flush(path: string): Promise<void>;
     /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
     madeFrom(path: string): Promise<MadeFrom>;
-    /** A folder's documents joined, to compile it (0091: '' the top level); a string says why not. */
+    /** A folder's documents joined, to compile it (0093: '' the top level); a string says why not. */
     compile(folder: string, o: CompileOptions): Promise<{ text: string; resources: string[] } | string>;
     log(m: string): void;
   }) {}
 
-  /** What a render of a folder (a path ending in `/`, the top level `/`: 0091) compiles, as it was asked. */
+  /** What a render of a folder (a path ending in `/`, the top level `/`: 0093) compiles, as it was asked. */
   private readonly compiling = new Map<string, CompileOptions>();
 
   private dir(path: string): string {
@@ -207,7 +207,7 @@ export class Renders {
   private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>, person: PresenceUser | null): Promise<void> {
     const { path, format } = state;
     state.message = 'Rendering…';
-    // A folder (0091): its documents joined, each as it is now, into one in scratch.
+    // A folder (0093): its documents joined, each as it is now, into one in scratch.
     const compile = this.compiling.get(`${path}\0${format}`);
     let joined: { text: string; resources: string[] } | null = null;
     if (compile) {

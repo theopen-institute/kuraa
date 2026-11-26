@@ -1,4 +1,4 @@
-// The order of a folder's files and folders, as people arrange them (0091): a
+// The order of a folder's files and folders, as people arrange them (0093): a
 // plain file in the folder, `.kuraa-order`, one name per line, read by anyone
 // and by any tool. It lives where what it orders lives, so it moves with its
 // folder, is read by those who read the folder (in the folder's space, 0069),

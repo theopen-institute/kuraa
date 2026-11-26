@@ -145,7 +145,7 @@ menu makes one book of its folders and documents, in that order (Word, PDF or HT
 where code runs): folders' names and documents' titles become headings, one level deeper for each folder
 down (**No heading in Compile** on a folder's menu skips one that only organises). Any document or folder can be
 **left out of Compile** from its menu (shown faded); the choices and the book's title are kept in a
-`.kuraa-compile.yml` in the folder ([0091](docs/decisions/0091-order-and-compile-over-folders.md)).
+`.kuraa-compile.yml` in the folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

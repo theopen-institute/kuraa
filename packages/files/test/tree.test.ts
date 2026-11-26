@@ -56,7 +56,7 @@ describe('the file tree for the keyboard', () => {
   });
 });
 
-describe('the file tree in an order of its own (0091)', () => {
+describe('the file tree in an order of its own (0093)', () => {
   const file = (path: string, title?: string): TreeFile => ({ path, type: 'pandoc-markdown', title: title ?? null });
   const files = [file('b.md', 'Beta'), file('a.md', 'Alpha'), file('notes/x.md', 'X'), file('notes/w.md', 'W'), file('c.md', 'Gamma')];
 

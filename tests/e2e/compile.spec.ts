@@ -1,4 +1,4 @@
-// Order and Compile over folders (docs/decisions/0091-order-and-compile-over-folders.md):
+// Order and Compile over folders (docs/decisions/0093-order-and-compile-over-folders.md):
 // a folder arranged in the file tree by hand (Alt+↓, and by dragging between
 // rows), kept in its .kuraa-order; a document dragged in from another folder,
 // to a place; back to by name. A document left out of Compile (faded) and put

@@ -10,7 +10,7 @@ import { searchWorkspace } from './search.js';
 
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
 
-/** A document's path, or a folder's to compile it (0091): ending in `/`, the top level `/`. */
+/** A document's path, or a folder's to compile it (0093): ending in `/`, the top level `/`. */
 const pathOf = (c: Context, v: unknown) => {
   if (typeof v !== 'string' || !v) throw new HttpError(400, 'Missing path');
   if (!v.endsWith('/')) return c.host.relPath(v);
@@ -20,7 +20,7 @@ const pathOf = (c: Context, v: unknown) => {
   return `${folder}/`;
 };
 
-/** What a folder's compile leaves out (workspace paths) and its title, as asked (0091). */
+/** What a folder's compile leaves out (workspace paths) and its title, as asked (0093). */
 const compileOf = (c: Context, path: string, body: Record<string, unknown>) => {
   if (!path.endsWith('/')) return undefined;
   const paths = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : []);

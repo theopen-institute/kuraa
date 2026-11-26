@@ -1,4 +1,4 @@
-// What Compile keeps of a folder (0091), in a file in it, `.kuraa-compile.yml`,
+// What Compile keeps of a folder (0093), in a file in it, `.kuraa-compile.yml`,
 // plain YAML that moves with the folder and is read by whoever reads it:
 //
 //   # Kuraa's Compile: …

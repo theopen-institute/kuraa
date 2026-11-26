@@ -1,4 +1,4 @@
-// Compile (docs/decisions/0091-order-and-compile-over-folders.md) on a host:
+// Compile (docs/decisions/0093-order-and-compile-over-folders.md) on a host:
 // on by default; documents and folders left out of compiles and put back, each
 // written to their folder's .kuraa-compile.yml and committed; a folder's title
 // and format kept; what is left out following renames, moves and deletions;

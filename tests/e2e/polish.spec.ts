@@ -239,7 +239,7 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   await page.keyboard.press('Shift+F10');
   const menu = page.getByTestId('context-menu');
   await expect(menu).toBeVisible();
-  // The core's, then Compile's (on by default: 0091).
+  // The core's, then Compile's (on by default: 0093).
   await expect(menu.getByRole('menuitem')).toHaveText(['Document settings…', 'Rename…', 'Delete…', 'Leave out of Compile']);
   for (let i = 0; i < 10 && !(await menu.getByTestId('context:document-settings').evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');

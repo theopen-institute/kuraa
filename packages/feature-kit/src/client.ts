@@ -29,7 +29,7 @@ export interface ClientFeature {
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
   /**
    * A mark it puts on a file or a folder (its path ending in `/`) wherever
-   * navigation shows them (0091: a manuscript's folder, a document left out of
+   * navigation shows them (0093: a manuscript's folder, a document left out of
    * it), or null. Asked again when it says its marks changed (`marksChanged`).
    */
   marks?(path: string, ctx: FeatureClientContext): FileMark | null;
@@ -168,7 +168,7 @@ export interface NavigationContext extends FeatureClientContext {
   /** Move a file or folder into a folder ('' for the top). */
   move(path: string, folder: string): void;
   /**
-   * A folder's order (0091), as people arranged it: the names of its files and
+   * A folder's order (0093), as people arranged it: the names of its files and
    * folders ('' for the top level); null where it has none (shown by name).
    * What it does not name follows what it does.
    */
@@ -182,7 +182,7 @@ export interface NavigationContext extends FeatureClientContext {
   place(path: string, folder: string, names: string[]): Promise<boolean>;
   /** A folder's order forgotten: shown by name again. */
   sortByName(folder: string): void;
-  /** Features' marks on a file or a folder (`path` ending in `/`), as they are now (0091). */
+  /** Features' marks on a file or a folder (`path` ending in `/`), as they are now (0093). */
   marks(path: string): FileMark[];
   /** The core's menu for a file, a folder (`path` ending in `/`) or the top level (''), at a point. */
   fileMenu(path: string, at: { x: number; y: number }): void;
@@ -225,11 +225,11 @@ export interface FeatureClientContext {
    * saying why, where it cannot be (someone may not, a file is there already).
    */
   moveFile(from: string, to: string): Promise<void>;
-  /** Its marks on files changed (0091): navigation asks for them again. */
+  /** Its marks on files changed (0093): navigation asks for them again. */
   marksChanged(): void;
 }
 
-/** A feature's mark on a file or folder in navigation (0091). */
+/** A feature's mark on a file or folder in navigation (0093). */
 export interface FileMark {
   /** What it means, in words: shown on pointing, and said to screen readers. */
   label: string;
@@ -297,12 +297,12 @@ export interface ToolState {
 export interface CoreHost {
   /** Search the workspace's text files, and open documents as they are now. */
   search(query: string, caseSensitive: boolean): Promise<SearchResult>;
-  /** A document's renders, or a folder's (its path ending in `/`, the top level `/`: 0091): what it can be rendered to, and how its latest ones stand. */
+  /** A document's renders, or a folder's (its path ending in `/`, the top level `/`: 0093): what it can be rendered to, and how its latest ones stand. */
   renders(path: string): Promise<RenderInfo>;
   /**
    * Render a document (as you, for the record); a render that cannot start says
    * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
-   * is compiled (0091): its folders and documents in the file tree's order,
+   * is compiled (0093): its folders and documents in the file tree's order,
    * but those `exclude` names (paths; a folder's, all in it), joined under
    * `title`, how deep each is its heading's level; the folders `noHeading`
    * names (paths) with no heading, nor a level, of their own.

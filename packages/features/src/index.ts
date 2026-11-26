@@ -6,7 +6,7 @@
 //
 //   @kuraa/sidebar       navigation down the left (0087; on by default)
 //   @kuraa/files         the file tree, a navigation view (0087; on by default)
-//   @kuraa/compile       any folder compiled into one book, its documents in the file tree's order (0091)
+//   @kuraa/compile       any folder compiled into one book, its documents in the file tree's order (0093)
 //   @kuraa/annotations   comments and coding on documents, kept beside them
 //   @kuraa/preview       the document rendered beside it, and saved (0089; on by default)
 //   @kuraa/search        every file searched (0089; on by default)

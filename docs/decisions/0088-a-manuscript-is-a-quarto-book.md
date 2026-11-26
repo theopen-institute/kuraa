@@ -1,6 +1,6 @@
 # 0088 · A manuscript is a Quarto book (proposed)
 
-**Status: replaced** by [0091](0091-order-and-compile-over-folders.md): folders are arranged by hand (a `.kuraa-order` file) and compiled through pandoc, not kept as Quarto books (Quarto comes back as an export). As it was built: It adds a feature, `@kuraa/manuscript`:
+**Status: replaced** by [0093](0093-order-and-compile-over-folders.md): folders are arranged by hand (a `.kuraa-order` file) and compiled through pandoc, not kept as Quarto books (Quarto comes back as an export). As it was built: It adds a feature, `@kuraa/manuscript`:
 documents in an order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`,
 shown as a navigation view ([0087](0087-navigation-is-made-of-components.md)), in whatever layout is
 on.

@@ -89,7 +89,7 @@ onBeforeUnmount(() => {
   stopOpening();
 });
 
-// Moving and arranging (0091): drag a file or folder between two rows to put
+// Moving and arranging (0093): drag a file or folder between two rows to put
 // it there (in that folder, moved if it was elsewhere), onto a folder to put
 // it in at the end, or onto the space below the files for the top level.
 // A move is a rename; a place, the folder's order (both saved, as everything is).
@@ -356,14 +356,14 @@ revealFolderOf(selected.value);
 .tree-dir.drop-target > ul { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
 .tree-scroll.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
 .tree .dragging { opacity: 0.45; }
-/* Where a dragged row would land (0091): a line at the row's edge, from its indent. */
+/* Where a dragged row would land (0093): a line at the row's edge, from its indent. */
 .tree li.drop-before::before, .tree li.drop-after::after {
   content: ''; position: absolute; left: var(--drop-indent, 8px); right: 4px; height: 2px; border-radius: 1px;
   background: var(--accent); pointer-events: none; z-index: 1;
 }
 .tree li.drop-before::before { top: -1px; }
 .tree li.drop-after::after { bottom: -1px; }
-/* Features' marks (0091): a small icon by the name; a file left out of something, faded. */
+/* Features' marks (0093): a small icon by the name; a file left out of something, faded. */
 .tree-mark { flex: none; display: inline-flex; align-items: center; color: var(--muted); }
 .tree-mark .file-icon { margin: 0; }
 .tree-file.muted > .tree-row .tree-name, .tree-dir.muted > .tree-dir-row .tree-name { opacity: 0.5; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }

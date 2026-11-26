@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Compile's panel (0091): the folder chosen (Compile… on its menu), the book's
+// Compile's panel (0093): the folder chosen (Compile… on its menu), the book's
 // title and format; Compile renders it through the host (its documents in the
 // file tree's order, but those left out), follows it, and saves what it made.
 // The title and format are kept for the folder, for next time.

@@ -237,7 +237,7 @@ const runRoutes: Route[] = [
 ];
 
 /**
- * Folders' orders after a rename or deletion (0091), written in a commit of
+ * Folders' orders after a rename or deletion (0093), written in a commit of
  * their own. What was done is done: an order that cannot be written is said in
  * the log, and its stale name passed over when it is read.
  */
@@ -269,12 +269,12 @@ const fileRoutes: Route[] = [
       const m = marks.files.get(f.path);
       if (m) Object.assign(f, m);
     }
-    // Folders in the order people arranged them (0091), by folder ('' for the top).
+    // Folders in the order people arranged them (0093), by folder ('' for the top).
     const orders = Object.fromEntries(await readOrders(host, paths));
     send(res, 200, { files, folders: marks.folders, orders });
   }),
 
-  // A folder's order (0091): the names of its files and folders, in the order
+  // A folder's order (0093): the names of its files and folders, in the order
   // people arranged them; none, the folder's own order file removed.
   route('POST', '/api/order', async ({ host, req, res }) => {
     const body = await readBody(req);
@@ -414,7 +414,7 @@ const fileRoutes: Route[] = [
       return host.commitPaths([from, to, ...companions.flat()], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
     if (host.peers) await host.peers.moved(from, to, isFolder);
-    // The orders follow (0091): the new name where the old was, or out of one folder's and at the end of another's.
+    // The orders follow (0093): the new name where the old was, or out of one folder's and at the end of another's.
     await followOrders(host, (orders) => ordersAfterRename(orders, from, to), `Order after renaming ${from}`);
     void host.features.emit('rename', { from, to, folder: isFolder });
     send(res, 200, { from, to, commit });

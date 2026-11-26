@@ -28,7 +28,7 @@ const props = defineProps<{
   featureItems?: (path: string) => ContextItem[];
   /** What the navigation views add to ＋ (0087), after New file and New folder. */
   newItems?: () => FeatureMenuItem[];
-  /** Folders' orders, as people arranged them (0091), by folder ('' the top). */
+  /** Folders' orders, as people arranged them (0093), by folder ('' the top). */
   orders?: Record<string, string[]>;
 }>();
 const emit = defineEmits<{
@@ -99,7 +99,7 @@ async function create(folder = ''): Promise<string | null> {
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   emit('reveal', path);
   emit('created', path);
-  // In a folder arranged by hand (0091): after the open file, where it is in it, else at the end.
+  // In a folder arranged by hand (0093): after the open file, where it is in it, else at the end.
   const order = props.orders?.[folder];
   const after = props.selected && folderOf(props.selected) === folder ? nameOf(props.selected) : null;
   const name = nameOf(path);
@@ -197,7 +197,7 @@ async function remove(path: string) {
 }
 
 /**
- * Put a file or folder in a folder ('' the top) at a place (0091): moved
+ * Put a file or folder in a folder ('' the top) at a place (0093): moved
  * there if it is elsewhere, and the folder's order made `names`. Whether it was.
  */
 async function place(from: string, folder: string, names: string[]): Promise<boolean> {
@@ -225,7 +225,7 @@ async function place(from: string, folder: string, names: string[]): Promise<boo
   }
 }
 
-/** A folder's order forgotten (0091): by name again. */
+/** A folder's order forgotten (0093): by name again. */
 async function sortByName(folder: string) {
   await act(() => props.api.setOrder(folder.replace(/\/+$/, ''), []), props.selected);
 }
@@ -268,7 +268,7 @@ function menuItems(path: string, plus = false): ContextItem[] {
   return [
     { label: S.tree.newFileMenu(where), run: () => void create(folder), testid: 'context:new-file' },
     { label: S.tree.newFolderMenu(where), run: () => void newFolder(folder), testid: 'context:new-folder' },
-    // Arranged by hand (0091): back to by name. Not in ＋, which is for making.
+    // Arranged by hand (0093): back to by name. Not in ＋, which is for making.
     ...(!plus && props.orders?.[folder] ? [{ label: S.tree.sortByName, run: () => void sortByName(folder), testid: 'context:sort-by-name' }] : []),
     ...(kind === 'folder' ? [
       ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', `${folder}/`), testid: 'context:folder-permissions' }] : []),

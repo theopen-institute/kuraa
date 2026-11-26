@@ -49,6 +49,20 @@ test('New file makes an untitled document at once: its title is typed in the pag
   expect(existsSync(join(E2E.dir, untitled))).toBe(false);
   expect(readFileSync(join(E2E.dir, named), 'utf8')).toBe(`---\ntitle: "Tidal notes: Café ${stamp}"\n---\n\nBody.\n`);
 
+  // Given its title, then the app closed and opened again (it forgets what it made): still named after its title when left.
+  await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
+  await page.getByTestId('context:new-file').click();
+  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
+  const second = (await current.getAttribute('data-path'))!;
+  await expect(title).toBeFocused();
+  await page.keyboard.type(`Ebb tables ${stamp}`);
+  await expect.poll(() => readFileSync(join(E2E.dir, second), 'utf8')).toContain(`title: Ebb tables ${stamp}`);
+  await page.reload();
+  await expect(current).toHaveAttribute('data-path', second);
+  await page.getByTestId(`file:${other}`).click();
+  await expect(page.getByTestId(`file:ebb-tables-${stamp}.md`)).toContainText(`Ebb tables ${stamp}`);
+  expect(existsSync(join(E2E.dir, second))).toBe(false);
+
   // Rename… has the file's kind: another kind changes the extension.
   const rename = page.getByTestId('rename');
   const type = rename.getByLabel('File type');

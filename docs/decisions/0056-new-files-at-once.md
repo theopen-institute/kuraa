@@ -20,3 +20,12 @@ Now that the title is typed in the page ([0055](0055-title-in-the-page.md)), New
 - **A text file renamed to a document gets its first title**: the host checks the title against
   the kind the file will be (`checkTitle(path, title, as)`), and writes it into the header after
   the rename, as it does for any title.
+
+## Named after its title whenever it is left (revision)
+
+A document New file made kept its `untitled-…` name for good if the app was closed (or the page
+loaded again) while it was open: which documents it had made was kept only while the window was.
+Now **any document with a name New file gives** (`untitled-` and five letters or digits, a number
+added if taken) is renamed to the filename its title makes when it is left for another file of the
+same workspace, if it has a title: made in this window or before the app was last opened, here or
+on another device. One named by hand (Rename…), even to such a name, is kept as named.

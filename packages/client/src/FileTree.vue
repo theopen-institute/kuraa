@@ -10,7 +10,7 @@ import type { TypeRegistry } from '@kuraa/kernel';
 import type { HostApi, TreeFile } from './api.js';
 import { askConfirm, askText } from './ask.js';
 import { buildTree, fileTypeChoices, TREE, treeKey, visibleItems } from './tree.js';
-import { pathForTitle } from './filenames.js';
+import { pathForTitle, slugify } from './filenames.js';
 import { S } from './strings.js';
 import RenameDialog from './RenameDialog.vue';
 import TreeFolder from './TreeFolder.vue';
@@ -78,15 +78,21 @@ const here = () => (props.selected?.includes('/') ? props.selected.slice(0, prop
 
 // New files: an untitled Markdown document, made at once and opened, its title
 // typed in the page. Its filename follows the title it is given (when it is
-// left), as long as it has the name it was made with. Another kind of file is
-// a Rename… away (the dialog has the file's type).
+// left), as long as it has the name it was made with: here or on another
+// device, in this window or before the app was last closed. Another kind of
+// file is a Rename… away (the dialog has the file's type).
 const paths = computed(() => props.files.map((f) => f.path));
 const typeChoices = computed(() => fileTypeChoices(props.registry));
 const typeOf = (p: string) => props.registry.resolve(p)?.id ?? null;
 /** The kind of document New file makes. */
 const NEW_TYPE = 'pandoc-markdown';
-/** Documents New file made here, by path: their title as last seen while open, and the workspace they are in. */
-const fresh = new Map<string, { title: string | null; api: HostApi }>();
+/** A name New file gives (`untitled-` and five letters or digits, a number added if taken), whatever the extension. */
+const madeName = new RegExp(`^${slugify(S.tree.untitledName)}-[a-z0-9]{5}(?:-\\d+)?\\.[^./]+$`);
+const named = (p: string) => madeName.test(p.slice(p.lastIndexOf('/') + 1));
+/** The document open, while it has a name New file gave it: its title as last seen, and the workspace it is in. */
+let open: { path: string; title: string | null; api: HostApi } | null = null;
+/** Documents given their name by hand (Rename…), in this window: kept as named, even a name New file would give. */
+const byHand = new Set<string>();
 
 /** Five letters or digits, by chance (getRandomValues: there in pages served over plain http too). */
 const freshLetters = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => (b % 36).toString(36)).join('');
@@ -104,25 +110,26 @@ async function create(folder = '') {
   if (!type) return;
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   if (dir) expand(dir.replace(/\/$/, ''));
-  if (type.titled) fresh.set(path, { title: null, api: props.api });
   emit('created', path);
   await act(() => props.api.createFile(path, ''), path);
 }
 defineExpose({ create });
 
 // A new document's title, while it is open; once it is left, its filename is made from that title.
-watch(() => [props.selected, props.files] as const, ([selected, files], [before]) => {
-  const made = selected ? fresh.get(selected) : undefined;
-  if (made?.api === props.api) made.title = files.find((f) => f.path === selected)?.title ?? null;
-  if (before && before !== selected && fresh.has(before)) void nameAfterTitle(before);
+watch(() => [props.selected, props.files] as const, ([selected, files]) => {
+  const left = open && open.path !== selected ? open : null;
+  const file = selected ? files.find((f) => f.path === selected) : undefined;
+  if (selected && file && 'title' in file && named(selected) && !byHand.has(selected)) {
+    open = open?.path === selected && open.api === props.api ? open : { path: selected, title: null, api: props.api };
+    open.title = file.title ?? null;
+  } else if (left || selected !== open?.path) open = null;
+  if (left) void nameAfterTitle(left);
 });
 
-async function nameAfterTitle(path: string) {
-  const made = fresh.get(path);
-  // Left for another workspace: it keeps its name (this list is the other workspace's now).
-  if (!made?.title || made.api !== props.api) return;
-  const title = made.title;
-  fresh.delete(path);
+async function nameAfterTitle(made: { path: string; title: string | null; api: HostApi }) {
+  const { path, title } = made;
+  // Left for another workspace: it keeps its name for now (this list is the other workspace's), until it is left there.
+  if (!title || made.api !== props.api || byHand.has(path)) return;
   const folder = path.slice(0, path.lastIndexOf('/') + 1);
   const name = path.slice(folder.length);
   const extension = name.slice(name.lastIndexOf('.'));
@@ -158,7 +165,8 @@ async function renamed(change: { to: string; title?: string }) {
   const file = renaming.value!;
   renaming.value = null;
   // Named by hand: no longer named after its title when it is left.
-  fresh.delete(file.path);
+  byHand.add(change.to);
+  if (open?.path === file.path) open = null;
   const title = change.title !== undefined && change.title !== file.title ? change.title : undefined;
   if (change.to === file.path && title === undefined) return;
   await act(() => props.api.renameFile(file.path, change.to, title), props.selected === file.path ? change.to : props.selected);

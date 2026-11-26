@@ -72,7 +72,7 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
       >
         <span class="tree-row tree-folder" :style="indent">
           <FileIcon class="tree-icon" :icon="collapsed.has(c.folder.path) ? FOLDER : FOLDER_OPEN" /><span class="tree-name">{{ c.folder.name }}</span>
-          <span v-for="m in t.marksOf(c.folder.path + '/')" :key="m.label" class="tree-mark" :title="m.label" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /></span>
+          <span v-for="m in t.marksOf(c.folder.path + '/')" :key="m.label" class="tree-mark" :title="m.label" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /><span v-else-if="m.color" class="tree-mark-dot" :style="{ background: m.color }" /></span>
           <template v-if="t.folderMarks.value.has(c.folder.path)">
             <svg v-if="markOf(c.folder.path).readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers(markOf(c.folder.path).readers ?? '')" :data-testid="`readers:${c.folder.path + '/'}`"><title>{{ S.readers(markOf(c.folder.path).readers ?? '') }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
             <svg v-if="markOf(c.folder.path).writers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.writers(markOf(c.folder.path).writers ?? '')" :data-testid="`writers:${c.folder.path + '/'}`"><title>{{ S.writers(markOf(c.folder.path).writers ?? '') }}</title><path d="M2 10l.6-2.4L8 2.2 9.8 4 4.4 9.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M2 10.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
@@ -109,7 +109,7 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
     >
       <div class="tree-row" :style="indent" :title="tip(c.file, t.marksOf(c.file.path))" :data-testid="`file:${c.file.path}`">
         <FileIcon class="tree-icon" :icon="t.iconFor(c.file)" /><span class="tree-name">{{ shownName(c.file) }}</span>
-        <span v-for="m in t.marksOf(c.file.path)" :key="m.label" class="tree-mark" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /></span>
+        <span v-for="m in t.marksOf(c.file.path)" :key="m.label" class="tree-mark" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /><span v-else-if="m.color" class="tree-mark-dot" :style="{ background: m.color }" /></span>
         <svg v-if="c.file.readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers(c.file.readers)" :data-testid="`readers:${c.file.path}`"><title>{{ S.readers(c.file.readers) }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
         <svg v-if="c.file.writers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.writers(c.file.writers)" :data-testid="`writers:${c.file.path}`"><title>{{ S.writers(c.file.writers) }}</title><path d="M2 10l.6-2.4L8 2.2 9.8 4 4.4 9.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M2 10.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
         <span

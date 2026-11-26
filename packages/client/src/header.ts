@@ -220,3 +220,36 @@ export function today(): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/**
+ * The open document's header as components are given it (0094): fields read
+ * as YAML has them, and set on the header as it is now, as one edit, the rest
+ * of it (comments, order) as it was. A header that does not parse is read as
+ * empty, and is not written over.
+ */
+export function documentHeader(view: EditorView, spec: HeaderSpec): { get(key: string): unknown; set(fields: Record<string, unknown>): void } {
+  const read = () => {
+    const parsed = parse(headerText(view.state.doc, spec) ?? '');
+    return 'error' in parsed ? null : parsed.doc;
+  };
+  return {
+    get: (key) => {
+      const doc = read();
+      const v = doc?.contents && isMap(doc.contents) ? (doc.toJS() as Record<string, unknown>)[key] : undefined;
+      return v === null ? undefined : v;
+    },
+    set: (fields) => {
+      const text = headerText(view.state.doc, spec);
+      const parsed = parse(text ?? '');
+      if ('error' in parsed) return;
+      const doc = parsed.doc.contents ? parsed.doc : new Document({});
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) doc.delete(key);
+        else doc.set(key, value);
+      }
+      const map = doc.contents;
+      const next = !map || (isMap(map) && map.items.length === 0) ? null : doc.toString(YAML_OPTIONS).replace(/\n$/, '');
+      if (next !== text) writeHeader(view, spec, next);
+    },
+  };
+}

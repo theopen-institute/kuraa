@@ -11,6 +11,8 @@
 //   @kuraa/preview       the document rendered beside it, and saved (0089; on by default)
 //   @kuraa/search        every file searched (0089; on by default)
 //   @kuraa/outline       the document's headings, over it (0089; on by default)
+//   @kuraa/words         the open document's words, live, and targets (0094; on by default)
+//   @kuraa/details       a synopsis, label, status and keywords for each document (0094; on by default)
 import type { HostFeature } from '@kuraa/feature-kit/host';
 import { annotationsFeature } from '@kuraa/annotations';
 import { filesFeature } from '@kuraa/files';
@@ -19,5 +21,7 @@ import { sidebarFeature } from '@kuraa/sidebar';
 import { outlineFeature } from '@kuraa/outline';
 import { previewFeature } from '@kuraa/preview';
 import { searchFeature } from '@kuraa/search';
+import { wordsFeature } from '@kuraa/words';
+import { detailsFeature } from '@kuraa/details';
 
-export const standardFeatures: HostFeature[] = [sidebarFeature, filesFeature, compileFeature, previewFeature, searchFeature, outlineFeature, annotationsFeature];
+export const standardFeatures: HostFeature[] = [sidebarFeature, filesFeature, compileFeature, previewFeature, searchFeature, outlineFeature, wordsFeature, detailsFeature, annotationsFeature];

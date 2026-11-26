@@ -24,7 +24,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 15_000, what =
   throw new Error(`Timed out waiting for ${what}`);
 }
 
-type Folder = { folder: string; title: string | null; format: string | null; heading: boolean; exclude: string[] };
+type Folder = { folder: string; title: string | null; format: string | null; heading: boolean; target: number | null; exclude: string[] };
 
 describe('Compile', () => {
   let dir: string;
@@ -69,7 +69,15 @@ describe('Compile', () => {
     expect((await post('include', { path: 'novel/gone.md', include: false })).status).toBe(404);
 
     expect((await post('settings', { folder: 'novel', title: 'The Coast', format: 'pdf' })).status).toBe(200);
-    expect(await folders()).toEqual([{ folder: 'novel', title: 'The Coast', format: 'pdf', heading: true, exclude: ['notes.md', 'research'] }]);
+    expect(await folders()).toEqual([{ folder: 'novel', title: 'The Coast', format: 'pdf', heading: true, target: null, exclude: ['notes.md', 'research'] }]);
+
+    // The book's target in words (0094), and none again.
+    expect((await post('target', { folder: 'novel', target: 80000 })).status).toBe(200);
+    expect(read('novel/.kuraa-compile.yml')).toContain('target-words: 80000\n');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('A target of 80,000 words for novel/');
+    expect((await folders())[0]!.target).toBe(80000);
+    expect((await post('target', { folder: 'novel', target: 0 })).status).toBe(400);
+    expect((await post('target', { folder: 'novel', target: null })).status).toBe(200);
 
     // A folder's name no heading where it is compiled inside another, and a heading again.
     expect((await post('heading', { folder: 'novel/research', heading: false })).status).toBe(200);
@@ -116,9 +124,9 @@ describe('Compile', () => {
     expect(r.status).toBe(200);
     expect(((await r.json()) as { items: unknown[] }).items).toEqual([
       { kind: 'folder', path: 'novel/research', title: 'research', depth: 1 },
-      { kind: 'document', path: 'novel/research/sources.md', title: 'sources.md', depth: 2 },
-      { kind: 'document', path: 'novel/arrival.md', title: 'Arrival', depth: 1 },
-      { kind: 'document', path: 'novel/notes.md', title: 'notes.md', depth: 1 },
+      { kind: 'document', path: 'novel/research/sources.md', title: 'sources.md', depth: 2, words: 1 },
+      { kind: 'document', path: 'novel/arrival.md', title: 'Arrival', depth: 1, words: 2 },
+      { kind: 'document', path: 'novel/notes.md', title: 'notes.md', depth: 1, words: 1 },
     ]);
     expect((await contents('novel/arrival.md')).status).toBe(400);
     expect((await contents('nowhere/')).status).toBe(404);

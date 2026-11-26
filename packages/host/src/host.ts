@@ -5,7 +5,7 @@ import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, r
 import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { markdownWords, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { COMPANIONS_FILE, FEATURES_FILE, type HostFeature } from '@kuraa/feature-kit/host';
@@ -2749,16 +2749,17 @@ export class Host {
    * file tree's order, each at how deep it is (1: in the folder itself), with
    * its title or name, for Compile's outline.
    */
-  async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number }[]> {
+  async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number; words?: number }[]> {
     const paths = await this.listFiles();
     const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
-    return bookItems(folder, entries, await readOrders(this, paths), []).map((i) => ({
-      kind: i.kind,
-      path: i.path,
-      title: i.kind === 'folder' ? i.name : titles.get(i.path) || basename(i.path),
-      depth: i.level,
-    }));
+    const out = [];
+    for (const i of bookItems(folder, entries, await readOrders(this, paths), [])) {
+      // A document's words (0094), as its file has them.
+      const words = i.kind === 'document' ? markdownWords(await readFile(this.resolvePath(i.path), 'utf8').catch(() => '')) : undefined;
+      out.push({ kind: i.kind, path: i.path, title: i.kind === 'folder' ? i.name : titles.get(i.path) || basename(i.path), depth: i.level, ...(words !== undefined ? { words } : {}) });
+    }
+    return out;
   }
 
   /**

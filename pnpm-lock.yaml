@@ -418,6 +418,18 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  packages/details:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
   packages/editor-kit:
     dependencies:
       prosemirror-model:
@@ -489,6 +501,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/details':
+        specifier: workspace:*
+        version: link:../details
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
@@ -507,6 +522,9 @@ importers:
       '@kuraa/sidebar':
         specifier: workspace:*
         version: link:../sidebar
+      '@kuraa/words':
+        specifier: workspace:*
+        version: link:../words
 
   packages/files:
     dependencies:
@@ -708,6 +726,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/details':
+        specifier: workspace:*
+        version: link:../details
       '@kuraa/env-podman':
         specifier: workspace:*
         version: link:../env-podman
@@ -852,6 +873,21 @@ importers:
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit
+
+  packages/words:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
 
 packages:
 

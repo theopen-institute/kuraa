@@ -237,8 +237,18 @@ export interface FileMark {
   icon?: FileIcon;
   /** The file shown faded (left out of something). */
   muted?: boolean;
+  /** A colour (CSS), drawn as a dot by the name where there is no icon (0094: a document's label). */
+  color?: string;
   /** For tests. */
   testid?: string;
+}
+
+/** The open document's header fields (0094), as YAML has them. */
+export interface DocumentHeader {
+  /** A field's value (a string, a number, a list, …), or undefined where it has none. */
+  get(key: string): unknown;
+  /** Set fields (undefined or null takes one away), as one edit; the rest of the header, its comments among it, as it is. */
+  set(fields: { [key: string]: unknown }): void;
 }
 
 /** A folder or document a folder's book could have (0093). */
@@ -249,6 +259,8 @@ export interface BookContent {
   title: string;
   /** How deep it is in the folder compiled: 1 in the folder itself. */
   depth: number;
+  /** A document's words, as its file has them (0094). */
+  words?: number;
 }
 
 /** A match to open a file at (0089). */
@@ -458,6 +470,12 @@ export interface FeaturePanel {
   over?: boolean;
   /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */
   icon?: FileIcon;
+  /**
+   * A document's panel always drawn, small, in the strip along the foot of the
+   * open document (0094: its word count), not opened or closed: a line of its
+   * own at most. It may open another panel (`openPanel`) for more.
+   */
+  status?: boolean;
   /** Draw it into `element`; returns how to take it down. */
   mount(element: HTMLElement, ctx: FeaturePanelContext): () => void;
 }
@@ -479,6 +497,12 @@ export interface FeaturePanelContext extends FeatureClientContext {
   document(): { path: string; writtenAt: string | null; unsynced: number } | null;
   /** Be told each time the panel is asked for (its keys, a menu, openPanel): once as it opens by being asked, and again while open where it does not toggle. Returns how to stop. */
   onAsk(fn: () => void): () => void;
+  /**
+   * The open document's header (its front matter: 0094), where its format has
+   * one and it is open and ready; null otherwise. Changing it is an edit like
+   * any other, everyone in the document sees it, and it can be undone.
+   */
+  header(): DocumentHeader | null;
   close(): void;
 }
 

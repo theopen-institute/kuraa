@@ -6,7 +6,7 @@
 // The compiling is the core's (a folder rendered: renders.ts); the panel that
 // asks for it is the client half's.
 //
-//   its routes   GET folders; POST include, settings, heading
+//   its routes   GET folders; POST include, settings, heading, target
 //   it writes    files named .kuraa-compile.yml (`names`), in their folders
 import { defineFeature, type FeatureContext, type FeatureRequest, type FeatureResponse, type FeatureRoute, type Json, type Person } from '@kuraa/feature-kit/host';
 import { afterDelete, afterRename, COMPILE_FILE, compileFileOf, compileFolder, FORMATS, isBookDocument, readCompile, withIncluded, writeCompile, type CompileFormat, type FolderCompile } from './settings.js';
@@ -42,7 +42,7 @@ const answer = async (fn: () => Promise<Json>): Promise<FeatureResponse> => {
 
 const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
-const empty = (folder: string): FolderCompile => ({ folder, title: null, format: null, heading: true, exclude: [] });
+const empty = (folder: string): FolderCompile => ({ folder, title: null, format: null, heading: true, target: null, exclude: [] });
 
 export const compileFeature = defineFeature({
   id: 'compile',
@@ -61,6 +61,7 @@ export const compileFeature = defineFeature({
     if (out.length && !back.length) return `Leave ${out.join(', ')} in ${where} out of Compile`;
     if (back.length && !out.length) return `Put ${back.join(', ')} in ${where} back in Compile`;
     if (was.heading !== now.heading && !out.length && !back.length) return now.heading ? `A heading for ${where} in Compile` : `No heading for ${where} in Compile`;
+    if (was.target !== now.target && !out.length && !back.length) return now.target ? `A target of ${now.target.toLocaleString('en')} words for ${where}` : `No target for ${where}`;
     return `Compile settings for ${where}`;
   },
   open(ctx) {
@@ -106,6 +107,24 @@ export const compileFeature = defineFeature({
           const was = (await folders(ctx)).get(folder) ?? empty(folder);
           if (was.title !== title || was.format !== format) {
             await save({ ...was, title, format }, req.person);
+            ctx.tell({ changed: folder });
+          }
+          return { folder };
+        }),
+      },
+      {
+        // The book's target in words (0094); none: null.
+        method: 'POST',
+        path: 'target',
+        handle: (req: FeatureRequest) => answer(async () => {
+          const body = (req.body ?? {}) as { folder?: unknown; target?: unknown };
+          if (typeof body.folder !== 'string' || !(body.target === null || (typeof body.target === 'number' && body.target >= 1))) throw new Refused(400, 'folder and target: which folder, and its words (or null)');
+          const folder = body.folder.replace(/^\/+|\/+$/g, '');
+          if (folder && !(await ctx.list()).some((p) => p.startsWith(`${folder}/`))) throw new Refused(404, `No folder ${folder}`);
+          const target = body.target === null ? null : Math.round(body.target);
+          const was = (await folders(ctx)).get(folder) ?? empty(folder);
+          if (was.target !== target) {
+            await save({ ...was, target }, req.person);
             ctx.tell({ changed: folder });
           }
           return { folder };

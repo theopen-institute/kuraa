@@ -8,6 +8,8 @@
 import { computed, onBeforeUnmount, useTemplateRef, watch } from 'vue';
 import type { FeaturePanel, FeaturePanelContext, FeatureState } from '@kuraa/feature-kit/client';
 import type { EditorView } from 'prosemirror-view';
+import type { HeaderSpec } from '@kuraa/editor-kit';
+import { documentHeader } from './header.js';
 import type { ActiveFeature } from './features.js';
 import { S } from './strings.js';
 import { useReturnFocus } from './vue.js';
@@ -26,6 +28,8 @@ const props = defineProps<{
   document: { path: string; writtenAt: string | null; unsynced: number } | null;
   /** Goes up each time the panel is asked for (its keys, a menu, openPanel). */
   asks: number;
+  /** How the open document's format keeps its header, if it has one (0094). */
+  headerSpec?: HeaderSpec | null;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -66,6 +70,10 @@ const mount = computed(() => {
       return () => askers.delete(fn);
     },
     close: () => emit('close'),
+    header: () => {
+      const view = props.view();
+      return view && props.headerSpec ? documentHeader(view, props.headerSpec) : null;
+    },
   };
   return (el: HTMLElement) => {
     const down = panel.mount(el, ctx);
@@ -82,7 +90,8 @@ const mount = computed(() => {
 </script>
 
 <template>
-  <FeatureMount v-if="panel.over" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
+  <FeatureMount v-if="panel.status" :key="`${active.feature.id}:${panel.id}`" class="feature-status" :testid="`feature-status-${active.feature.id}-${panel.id}`" :mount="mount" />
+  <FeatureMount v-else-if="panel.over" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
   <aside v-else ref="root" class="pane pane-right side-panel feature-panel" :aria-label="panel.label" :data-testid="`feature-panel-${active.feature.id}-${panel.id}`" @keydown.esc="emit('close')">
     <div class="pane-header">
       <span>{{ panel.label }}</span>

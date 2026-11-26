@@ -5,6 +5,7 @@
 //   title: The Coast        the book's title, when this folder is compiled
 //   format: docx            how it was last compiled
 //   heading: false          compiled inside another, its name is no heading
+//   target-words: 80000     the book's target in words (0094)
 //   exclude:                what in this folder is left out of any compile
 //     - notes.md
 //     - research
@@ -31,6 +32,8 @@ export interface FolderCompile {
   title: string | null;
   /** Whether its name is a heading where it is compiled inside another (false: no heading, nor a level, of its own). */
   heading: boolean;
+  /** The book's target in words, when this folder is compiled (0094). */
+  target: number | null;
   format: CompileFormat | null;
   /** Names in the folder left out of any compile. */
   exclude: string[];
@@ -60,7 +63,8 @@ export function readCompile(folder: string, text: string): FolderCompile {
   const title = typeof o.title === 'string' && o.title.trim() ? o.title.trim() : null;
   const format = FORMATS.includes(o.format as CompileFormat) ? (o.format as CompileFormat) : null;
   const exclude = Array.isArray(o.exclude) ? o.exclude.filter((x): x is string => typeof x === 'string' && !!x.trim() && !x.includes('/')).map((x) => x.trim()) : [];
-  return { folder, title, format, heading: o.heading !== false, exclude: [...new Set(exclude)] };
+  const target = typeof o['target-words'] === 'number' && o['target-words'] >= 1 ? Math.round(o['target-words']) : null;
+  return { folder, title, format, heading: o.heading !== false, target, exclude: [...new Set(exclude)] };
 }
 
 /** A folder's Compile file; null (none) where it says nothing. */
@@ -69,6 +73,7 @@ export function writeCompile(c: FolderCompile): string | null {
   if (c.title) body.title = c.title;
   if (c.format) body.format = c.format;
   if (!c.heading) body.heading = false;
+  if (c.target) body['target-words'] = c.target;
   if (c.exclude.length) body.exclude = [...c.exclude].sort();
   return Object.keys(body).length ? HEADER + stringify(body) : null;
 }
@@ -99,7 +104,7 @@ export function afterRename(byFolder: ReadonlyMap<string, FolderCompile>, from: 
   if (!was?.exclude.includes(nameOf(from))) return [];
   const [fromDir, toDir] = [folderOf(from), folderOf(to)];
   if (fromDir === toDir) return [{ ...was, exclude: was.exclude.map((n) => (n === nameOf(from) ? nameOf(to) : n)) }];
-  const into = byFolder.get(toDir) ?? { folder: toDir, title: null, format: null, heading: true, exclude: [] };
+  const into = byFolder.get(toDir) ?? { folder: toDir, title: null, format: null, heading: true, target: null, exclude: [] };
   return [withIncluded(was, nameOf(from), true), withIncluded(into, nameOf(to), false)];
 }
 

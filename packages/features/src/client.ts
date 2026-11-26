@@ -8,6 +8,8 @@ import { sidebarClient } from '@kuraa/sidebar/client';
 import { outlineClient } from '@kuraa/outline/client';
 import { previewClient } from '@kuraa/preview/client';
 import { searchClient } from '@kuraa/search/client';
+import { wordsClient } from '@kuraa/words/client';
+import { detailsClient } from '@kuraa/details/client';
 
 export const standardFeatureClients: Record<string, ClientFeature> = {
   sidebar: sidebarClient,
@@ -16,5 +18,7 @@ export const standardFeatureClients: Record<string, ClientFeature> = {
   preview: previewClient,
   search: searchClient,
   outline: outlineClient,
+  words: wordsClient,
+  details: detailsClient,
   annotations: annotationsClient,
 };

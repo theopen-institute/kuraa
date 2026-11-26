@@ -89,6 +89,26 @@ const leftOut = computed(() => {
   return excludedPaths(known.value).filter((p) => !f || p.startsWith(`${f}/`));
 });
 const busy = computed(() => state.value?.state === 'rendering');
+/** The book's words (0094): its documents' that are in it. */
+const total = computed(() => outline.value.reduce((n, r) => n + (r.kind === 'document' && r.included ? r.words ?? 0 : 0), 0));
+/** The book's target, as kept for the folder; the field as typed, saved when left. */
+const bookTarget = computed(() => (folder.value === null ? null : settingsOf(folder.value)?.target ?? null));
+const targetField = ref('');
+watch(bookTarget, (t) => (targetField.value = t ? String(t) : ''), { immediate: true });
+async function saveTarget() {
+  const f = folder.value;
+  if (f === null) return;
+  const n = Number(targetField.value.replace(/[,_ ]/g, ''));
+  const target = Number.isFinite(n) && n >= 1 ? Math.round(n) : null;
+  if (target === bookTarget.value) return;
+  try {
+    await ctx.request('POST', 'target', { folder: f, target });
+  } catch (e) {
+    error.value = ctx.explain(e).text;
+  }
+  await load(ctx);
+}
+
 const outputName = (f: CompileFormat) => `${(folder.value ? folder.value.split('/').pop() : 'book') || 'book'}.${f}`;
 
 // Another folder chosen: its title and format as last compiled, and how its renders stand.
@@ -189,7 +209,11 @@ onBeforeUnmount(() => {
         <label v-for="f in FORMATS" :key="f"><input v-model="format" type="radio" name="compile-format" :value="f" :data-testid="`compile-format:${f}`" /> {{ S.formats[f] }}</label>
       </fieldset>
       <div class="compile-contents">
-        <span class="compile-contents-head">{{ S.contents }}</span>
+        <div class="compile-contents-head">
+          <span>{{ S.contents }}</span>
+          <span class="compile-total" data-testid="compile-total">{{ S.total(total, bookTarget) }}</span>
+        </div>
+        <div v-if="bookTarget" class="compile-progress"><span :style="{ width: `${Math.min(100, Math.round((total / bookTarget) * 100))}%` }" /></div>
         <p v-if="!outline.length" class="compile-about">{{ S.empty }}</p>
         <ul v-else class="compile-outline" data-testid="compile-outline">
           <li
@@ -210,6 +234,7 @@ onBeforeUnmount(() => {
             />
             <span class="compile-level" :title="r.headed ? S.levelTitle(Math.min(6, r.level)) : S.noHeadingTitle">{{ r.headed ? '#'.repeat(Math.min(6, Math.max(1, r.level))) : '–' }}</span>
             <span class="compile-name">{{ r.title }}</span>
+            <span v-if="r.words !== undefined" class="compile-words" :data-testid="`compile-words:${r.path}`">{{ r.words.toLocaleString() }}</span>
             <label v-if="r.kind === 'folder'" class="compile-heading" :title="S.headingTitle">
               <input
                 type="checkbox"
@@ -222,6 +247,10 @@ onBeforeUnmount(() => {
           </li>
         </ul>
       </div>
+      <label class="compile-field compile-target">
+        <span>{{ S.target }}</span>
+        <input v-model="targetField" type="text" inputmode="numeric" :placeholder="S.noTarget" :disabled="busy" data-testid="compile-target" @change="saveTarget" @keydown.enter="saveTarget" />
+      </label>
       <p class="compile-about">{{ S.about }}</p>
       <p v-if="info?.unavailable" class="compile-warn" data-testid="compile-unavailable">{{ info.unavailable }}</p>
       <div class="compile-actions">
@@ -248,7 +277,13 @@ onBeforeUnmount(() => {
 .compile-formats legend { padding: 0; margin-bottom: 3px; }
 .compile-about { margin: 0; color: var(--muted); font-size: 12px; }
 .compile-contents { display: grid; gap: 3px; }
-.compile-contents-head { color: var(--muted); font-size: 12px; }
+.compile-contents-head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.compile-total { font-variant-numeric: tabular-nums; }
+.compile-progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.compile-progress > span { display: block; height: 100%; background: var(--accent); }
+.compile-words { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.compile-row.out > .compile-words { opacity: 0.5; }
+.compile-target > input { max-width: 10em; }
 .compile-outline { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
 .compile-row { display: flex; align-items: center; gap: 6px; padding-top: 2px; padding-bottom: 2px; padding-right: 6px; font-size: 13px; }
 .compile-row > input { margin: 0 0 0 6px; flex: none; }

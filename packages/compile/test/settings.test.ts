@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { afterDelete, afterRename, compileFolder, excludedBy, noHeadingPaths, readCompile, withIncluded, writeCompile, type FolderCompile } from '../src/settings.js';
 
-const folder = (f: string, more: Partial<FolderCompile> = {}): FolderCompile => ({ folder: f, title: null, format: null, heading: true, exclude: [], ...more });
+const folder = (f: string, more: Partial<FolderCompile> = {}): FolderCompile => ({ folder: f, title: null, format: null, heading: true, target: null, exclude: [], ...more });
 
 describe('Compile’s file in a folder (0093)', () => {
   it('says the book’s title and format, whether its name is a heading, and what in it is left out, by name', () => {

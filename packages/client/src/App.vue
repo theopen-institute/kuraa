@@ -253,6 +253,10 @@ function shownPanel(open: OpenPanel | null) {
 }
 const shownFeaturePanel = computed(() => shownPanel(featurePanel.value));
 const shownOverPanels = computed(() => overPanels.value.map(shownPanel).filter((p) => !!p));
+/** Panels always drawn along the document's foot, while one is open (0094). */
+const statusPanels = computed(() => (path.value && type.value && !viewing.value
+  ? features.value.flatMap((active) => (active.feature.panels ?? []).filter((p) => p.status && p.about === 'document').map((panel) => ({ active, panel })))
+  : []));
 const findPanel = (feature: string, panel: string) => features.value.find((f) => f.feature.id === feature)?.feature.panels?.find((p) => p.id === panel);
 /** Whether a panel is open and shown. */
 function panelOpen(feature: string, panel: string): boolean {
@@ -263,7 +267,8 @@ function panelOpen(feature: string, panel: string): boolean {
 function askPanel(feature: string, panel: string) {
   docMenu.value = null;
   const spec = findPanel(feature, panel);
-  if (!spec) return;
+  // Along the document's foot, always: never opened beside it.
+  if (!spec || spec.status) return;
   const same = (o: OpenPanel | null) => o?.feature === feature && o.panel === panel;
   if (spec.over) {
     const was = overPanels.value.find(same);
@@ -1191,10 +1196,27 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
                   :state="() => editor?.featureState(o.active.feature.id) ?? null"
                   :document="openDocument"
                   :asks="o.asks"
+                  :header-spec="editorFor(type.id)?.header ?? null"
                   @close="closePanel(o.active.feature.id, o.panel.id)"
                 />
               </template>
             </Editor>
+            <!-- What components keep in view along the document's foot (0094: its words). -->
+            <div v-if="statusPanels.length" class="doc-status" data-testid="doc-status">
+              <FeaturePanel
+                v-for="o in statusPanels"
+                :key="`${o.active.feature.id}:${o.panel.id}`"
+                :active="o.active"
+                :panel="o.panel"
+                :path="path"
+                :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
+                :view="() => editor?.view ?? null"
+                :state="() => editor?.featureState(o.active.feature.id) ?? null"
+                :document="openDocument"
+                :asks="0"
+                :header-spec="editorFor(type.id)?.header ?? null"
+              />
+            </div>
           </div>
           <PastVersion
             v-if="viewing"
@@ -1234,6 +1256,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
         :state="() => editor?.featureState(shownFeaturePanel!.active.feature.id) ?? null"
         :document="openDocument"
         :asks="shownFeaturePanel.asks"
+        :header-spec="type && !viewing ? editorFor(type.id)?.header ?? null : null"
         @close="featurePanel = null"
       />
     </div>

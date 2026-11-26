@@ -366,6 +366,7 @@ revealFolderOf(selected.value);
 /* Features' marks (0093): a small icon by the name; a file left out of something, faded. */
 .tree-mark { flex: none; display: inline-flex; align-items: center; color: var(--muted); }
 .tree-mark .file-icon { margin: 0; }
+.tree-mark-dot { width: 7px; height: 7px; border-radius: 50%; margin: 0 2px; }
 .tree-file.muted > .tree-row .tree-name, .tree-dir.muted > .tree-dir-row .tree-name { opacity: 0.5; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .tree [draggable='true'] { cursor: grab; }
 .tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions,

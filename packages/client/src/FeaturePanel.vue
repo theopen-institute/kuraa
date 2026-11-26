@@ -82,7 +82,7 @@ const mount = computed(() => {
 </script>
 
 <template>
-  <FeatureMount v-if="panel.over" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
+  <FeatureMount v-if="panel.place === 'over'" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
   <aside v-else ref="root" class="pane pane-right side-panel feature-panel" :aria-label="panel.label" :data-testid="`feature-panel-${active.feature.id}-${panel.id}`" @keydown.esc="emit('close')">
     <div class="pane-header">
       <span>{{ panel.label }}</span>

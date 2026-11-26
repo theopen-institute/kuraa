@@ -185,7 +185,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     const spec = findPanel(feature, panel);
     if (!spec) return;
     const same = (x: OpenPanel | null) => x?.feature === feature && x.panel === panel;
-    if (spec.over) {
+    if (spec.place === 'over') {
       const was = over.value.find(same);
       over.value = was ? over.value.map((x) => (x === was ? { ...x, asks: x.asks + 1 } : x)) : [...over.value, { feature, panel, asks: 1 }];
     } else {

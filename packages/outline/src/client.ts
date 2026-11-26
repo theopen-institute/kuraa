@@ -13,7 +13,7 @@ export const outlineClient = defineClientFeature({
     label: S.title,
     about: 'document',
     keys: KEYS.open,
-    over: true,
+    place: 'over',
     mount(element, ctx) {
       const app = createApp(OutlinePanel, { ctx });
       app.mount(element);

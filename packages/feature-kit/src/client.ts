@@ -377,6 +377,9 @@ export interface FeatureDocumentContext extends FeatureClientContext {
   source: boolean;
 }
 
+/** Where a panel is drawn (FeaturePanel.place). */
+export type PanelPlace = 'side' | 'over';
+
 /** A panel the feature draws: beside the open document, or about the workspace. */
 export interface FeaturePanel {
   id: string;
@@ -391,11 +394,18 @@ export interface FeaturePanel {
    */
   toggle?: boolean;
   /**
-   * A document's panel drawn over the document's top left, all of it the
-   * panel's own (no heading of the client's), not in the place beside it: it
-   * stays open beside any other panel. Over the rich view only (0089).
+   * Where it is drawn (0091), the core arranging each place:
+   *
+   * - `side` (the default): beside the document, one panel at a time, under a
+   *   heading of the client's (its label, and closing it).
+   * - `over`: a document's panel over the document's top left, all of it the
+   *   panel's own (no heading of the client's); it stays open beside any other
+   *   panel. Over the rich view only (0089).
+   *
+   * A place added later (a bar below the document, say) is a value added here;
+   * a client that does not know a panel's place draws it beside the document.
    */
-  over?: boolean;
+  place?: PanelPlace;
   /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */
   icon?: FileIcon;
   /** Draw it into `element`; returns how to take it down. */

@@ -19,7 +19,12 @@ export class Books {
   private readonly listeners = new Set<() => void>();
   private asked = 0;
 
-  constructor(private readonly ctx: FeatureClientContext) {}
+  constructor(private ctx: FeatureClientContext) {}
+
+  /** In use for a workspace (again, or another): asked of it from now on. */
+  use(ctx: FeatureClientContext): void {
+    this.ctx = ctx;
+  }
 
   async load(): Promise<void> {
     const n = ++this.asked;
@@ -82,13 +87,9 @@ export class Books {
   }
 }
 
-/** The store of each feature context in use (the same `request` is in every context made from it). */
-const stores = new WeakMap<object, Books>();
+/** The page's store: one workspace is open at a time, and the feature's activation points it at it. */
+let store: Books | null = null;
 export function booksFor(ctx: FeatureClientContext): Books {
-  let b = stores.get(ctx.request);
-  if (!b) {
-    b = new Books(ctx);
-    stores.set(ctx.request, b);
-  }
-  return b;
+  if (!store) store = new Books(ctx);
+  return store;
 }

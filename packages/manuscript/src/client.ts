@@ -12,6 +12,7 @@ export const manuscriptClient = defineClientFeature({
   id: 'manuscript',
   activate(ctx) {
     const books = booksFor(ctx);
+    books.use(ctx);
     void books.load();
     return ctx.onMessage(() => void books.load());
   },

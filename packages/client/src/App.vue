@@ -298,14 +298,26 @@ const liveContexts = new Map<string, FeatureClientContext>();
 function liveContext(id: string): FeatureClientContext {
   let ctx = liveContexts.get(id);
   if (!ctx) {
-    const current = () => (navFeatures.value.find((f) => f.feature.id === id) ?? features.value.find((f) => f.feature.id === id))?.ctx;
-    ctx = new Proxy({} as FeatureClientContext, {
-      get: (_, key) => {
-        const c = current();
-        if (!c) throw new Error(`the feature ${id} is not in use`);
-        return c[key as keyof FeatureClientContext];
-      },
-    });
+    const current = () => {
+      const c = (navFeatures.value.find((f) => f.feature.id === id) ?? features.value.find((f) => f.feature.id === id))?.ctx;
+      if (!c) throw new Error(`the feature ${id} is not in use`);
+      return c;
+    };
+    ctx = {
+      status: () => current().status(),
+      person: () => current().person(),
+      request: (method, path, body) => current().request(method, path, body),
+      saveSettings: (settings) => current().saveSettings(settings),
+      notify: (text, kind) => current().notify(text, kind),
+      ui: featureApp.ui,
+      openPanel: (panel) => current().openPanel(panel),
+      openFile: (path, at) => current().openFile(path, at),
+      onMessage: (fn) => current().onMessage(fn),
+      openMatch: (path, target) => current().openMatch(path, target),
+      host: coreHost,
+      explain: (error) => current().explain(error),
+      keyLabel: (keys) => current().keyLabel(keys),
+    };
     liveContexts.set(id, ctx);
   }
   return ctx;

@@ -40,6 +40,12 @@ export interface HostFeature {
   companions?: string[];
   /** Files of its own besides companions (a codebook), by the workspace's settings: the only others it may write. */
   files?(settings: FeatureSettings): string[];
+  /**
+   * Names of files it may write wherever they are in the workspace (0088: a
+   * manuscript's `_quarto.yml`), besides those `files` declares. Never while
+   * one is open in a room: it is then the room's (a write is refused, 409).
+   */
+  names?: string[];
   /** What it keeps in each document's room, live, written to a companion with the document. */
   room?: FeatureRoom;
   /** A line for an automatic commit that changed one of its files ("2 marks added"); null to say nothing. */

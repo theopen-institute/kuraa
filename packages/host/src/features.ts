@@ -61,6 +61,7 @@ export function checkFeatures(list: unknown[]): HostFeature[] {
     if (!f || typeof f !== 'object' || typeof f.apiVersion !== 'number') throw new Error(`${from} is not a Kuraa feature: it should be made with defineFeature().`);
     if (f.apiVersion !== FEATURE_API_VERSION) throw new Error(`${from} was written for version ${f.apiVersion} of the feature API; this host speaks version ${FEATURE_API_VERSION}.`);
     if (typeof f.id !== 'string' || !FEATURE_ID.test(f.id)) throw new Error(`${from} needs an id of lower-case letters, digits and dashes, starting with a letter.`);
+    if (f.names !== undefined && (!Array.isArray(f.names) || f.names.some((n) => typeof n !== 'string' || !n || n.includes('/') || n.startsWith('@') || n === '.' || n === '..'))) throw new Error(`${from}: the names of files it writes are plain file names (no folders, not @ files).`);
     if (seen.has(f.id)) throw new Error(`Two features are called "${f.id}".`);
     seen.add(f.id);
     if (typeof f.label !== 'string' || !f.label) throw new Error(`${from} needs a label.`);
@@ -500,7 +501,9 @@ export class HostFeatures {
     const own = (path: string) => {
       const doc = documentOf(path, f.companions ?? []);
       if (doc !== null) return this.me && ownerOf(path) === this.me ? { doc } : null;
-      return (f.files?.(this.settings(f.id)) ?? []).includes(path) ? { doc: null } : null;
+      if ((f.files?.(this.settings(f.id)) ?? []).includes(path)) return { doc: null };
+      // A file by its name, wherever it is (0088).
+      return (f.names ?? []).includes(path.slice(path.lastIndexOf('/') + 1)) ? { doc: null } : null;
     };
     return {
       id: f.id,
@@ -511,6 +514,7 @@ export class HostFeatures {
         if (!mine) throw new HttpError(403, `${f.label} writes only your own files and those it keeps, not ${path}`);
         if (mine.doc !== null && text !== null && (await readPlain(this.port.resolvePath(mine.doc))) === null) throw new HttpError(404, `No document ${mine.doc} for ${path} to be beside`);
         if (mine.doc !== null && this.port.roomOpen(mine.doc)) throw new HttpError(409, `${mine.doc} is open: what is kept beside it is changed in its room`);
+        if (mine.doc === null && this.port.roomOpen(path)) throw new HttpError(409, `${path} is open: close it to change it from here`);
         if (!(await this.port.canWrite(path))) throw new NotAllowed(`You may not change ${path}`);
         await this.port.serial(async () => {
           await this.port.requireWritable();

@@ -222,6 +222,8 @@ function menuItems(path: string): ContextItem[] {
     ...(kind === 'folder' ? [
       ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', `${folder}/`), testid: 'context:folder-permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void renameFolder(folder), testid: 'context:rename-folder' },
+      // What features add to a folder's menu (its path ending in /: 0088's Make a manuscript).
+      ...(props.featureItems?.(`${folder}/`) ?? []).map((item, i) => ({ ...item, divided: i === 0 })),
     ] : []),
   ];
 }

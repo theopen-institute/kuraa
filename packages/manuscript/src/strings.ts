@@ -1,0 +1,27 @@
+// The manuscript's words.
+
+export const S = {
+  label: 'Manuscript',
+  none: 'No manuscript here yet. A manuscript is a folder’s documents in an order of your choosing, kept as a Quarto book.',
+  noneHow: 'Right-click a folder and choose Make a manuscript, or make one of the whole workspace.',
+  makeTop: 'Make a manuscript of the workspace',
+  choose: 'Manuscript',
+  untitled: 'Untitled manuscript',
+  needsIndex: 'Quarto wants index.qmd as the first chapter.',
+  appendices: 'Appendices',
+  notIn: 'Not in the manuscript',
+  notInNone: 'Every document in this folder is in it.',
+  empty: 'Nothing in it yet: drag documents here from below.',
+  missing: 'Not found',
+  missingTitle: (path: string) => `${path} is listed, but there is no such file: renamed or deleted outside the app?`,
+  removeMissing: 'Take it out',
+  addPart: 'Add a part…',
+  partTitle: 'The part’s title',
+  add: 'Add',
+  part: 'Part',
+  make: 'Make a manuscript',
+  made: (file: string) => `${file} made: this folder’s documents are its chapters.`,
+  addTo: 'Add to manuscript',
+  removeFrom: 'Remove from manuscript',
+  moveHint: 'Drag to reorder, or Alt+↑ and Alt+↓',
+};

@@ -3,6 +3,7 @@
 import type { ClientFeature } from '@kuraa/feature-kit/client';
 import { annotationsClient } from '@kuraa/annotations/client';
 import { filesClient } from '@kuraa/files/client';
+import { manuscriptClient } from '@kuraa/manuscript/client';
 import { sidebarClient } from '@kuraa/sidebar/client';
 import { outlineClient } from '@kuraa/outline/client';
 import { previewClient } from '@kuraa/preview/client';
@@ -11,6 +12,7 @@ import { searchClient } from '@kuraa/search/client';
 export const standardFeatureClients: Record<string, ClientFeature> = {
   sidebar: sidebarClient,
   files: filesClient,
+  manuscript: manuscriptClient,
   preview: previewClient,
   search: searchClient,
   outline: outlineClient,

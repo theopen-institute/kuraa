@@ -1,8 +1,9 @@
 # 0088 · A manuscript is a Quarto book (proposed)
 
-**Status: proposed; nothing is built.** It adds a feature, `@kuraa/manuscript`: documents in an
-order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`, shown as a navigation view
-([0087](0087-navigation-is-made-of-components.md)), in whatever layout is on.
+**Status: built**, as revised under *Built* below. It adds a feature, `@kuraa/manuscript`:
+documents in an order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`,
+shown as a navigation view ([0087](0087-navigation-is-made-of-components.md)), in whatever layout is
+on.
 
 The owner, comparing Kuraa with Scrivener, chose first what the rest of Scrivener's way of working
 rests on: a long work kept as many documents in an order of one's own, which the file list (always
@@ -70,9 +71,9 @@ package's documents, as the header is kept, [0021](0021-document-header.md)), so
 settings are the writer's and Quarto's.
 
 **Making a manuscript** (a folder's menu: *Make a manuscript*) writes a `_quarto.yml` with the
-folder's documents as chapters, in the order the file list has them, and an `index.qmd` first where
-there is none. Kuraa shows a manuscript without an index file as it is, and says that Quarto will
-want one.
+folder's documents as chapters, in the order of their paths (*revised*: no `index.qmd` is made, as
+a feature writes no document). Kuraa shows a manuscript without an index file as it is, and says
+that Quarto will want one.
 
 ### The view
 
@@ -111,3 +112,29 @@ What the contract lacks, to be added as it is built:
 - **A synopsis, a status and labels** for each document, in its header, and views that show them (an
   outliner, a corkboard); several documents edited as one (Scrivener's Scrivenings).
 - Reading bookdown's `_bookdown.yml` and pandoc defaults files as manuscripts.
+
+## Built
+
+- **Off until a workspace turns it on** (Settings › Workspace, under Features), as annotations are:
+  a workspace with no book would otherwise have an empty Manuscript beside its file tree. With it on,
+  the sidebar shows **Files** and **Manuscript** in a row above them.
+- **The view**: the manuscript's chapters by title, each part a heading over its chapters, the
+  appendices, then **Not in the manuscript** (the folder's documents not listed, outside folders
+  starting `.` or `_`). Drag a row before another, onto a part's heading (into it), onto the
+  appendices, or down to Not in the manuscript (out); **Alt+↑** and **Alt+↓** move a row where it
+  is. **Add a part…** asks for its title. A chapter listed but not found is struck through, with
+  **Take it out**. With several manuscripts, a list above chooses one (remembered in this browser).
+  Click opens; right-click is the core's file menu.
+- **The menus**: a folder's **Make a manuscript** (where it has none; features now add to folders'
+  menus too, their paths ending in `/`); a document's **Add to manuscript** or **Remove from
+  manuscript**, where it is in a manuscript's folder. So the menus know the manuscripts before a
+  right-click, a client half may now **activate** when it comes into use for a workspace (and stop
+  when it goes), to start what it keeps; the manuscript asks for its books then, and again when the
+  host says one changed.
+- **The host half** writes files **named** `_quarto.yml` wherever they are (`names`, a contract
+  addition), committed as whoever asked; follows renames, moves and deletions made in the app; tells
+  the views when a book changes, here or in a merge. **While a `_quarto.yml` is open in a room, a
+  feature's write to it is refused** (409, "close it to change it from here"), rather than written
+  past the room: reaching the room as an outside edit does is left for later.
+- **Not yet**: **New chapter** in ＋ (made after the one selected), a part's title changed or a
+  part removed from the view (edit `_quarto.yml` for now), renaming a part's file into a title.

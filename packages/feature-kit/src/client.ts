@@ -25,12 +25,19 @@ export interface ClientFeature {
   panels?: FeaturePanel[];
   /** Items for the open document's ⋯ menu, in a group of their own. */
   documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
-  /** Items for a file's right-click menu in the file list. */
+  /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
   /** Its parts of Settings: the workspace's (its settings, while it is on there) and yours. */
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
   /** Lines for the Markdown and shortcuts sheet: what it adds to typing and keys. */
   help?: HelpItem[];
+  /**
+   * Called once it is in use for the open workspace (on there, and not hidden),
+   * to start what it keeps while it is (what it knows of the workspace, for its
+   * menus, say). Returns how to stop: when it goes out of use, or another
+   * workspace is opened.
+   */
+  activate?(ctx: FeatureClientContext): (() => void) | void;
   /** Where navigation goes in the window (0087): one layout is used at a time. */
   layout?: FeatureLayout;
   /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */

@@ -211,7 +211,8 @@ export const marksClient = defineClientFeature({
     },
   }],
   documentMenu: (ctx) => [{ label: 'Marks', keys: 'Mod-Alt-j', testid: 'menu-example-marks', run: () => ctx.openPanel('marks') }],
-  fileMenu: (path, ctx) => [{
+  // A file's menu (a folder's path ends in /: nothing there).
+  fileMenu: (path, ctx) => (path.endsWith('/') ? [] : [{
     label: 'Clear your marks…',
     testid: 'context:example-clear-marks',
     run: async () => {
@@ -223,7 +224,7 @@ export const marksClient = defineClientFeature({
         ctx.notify((e as Error).message, 'warn');
       }
     },
-  }],
+  }]),
   settings: {
     workspace: {
       label: 'Marks',

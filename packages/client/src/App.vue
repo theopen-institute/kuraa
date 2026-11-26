@@ -975,6 +975,35 @@ function useSettings(s: Settings) {
   settings.value = s;
 }
 
+// Features in use are started (activate), and stopped when they go out of use or another workspace opens.
+const activated = new Map<string, { ctx: object; stop: (() => void) | void }>();
+watch(features, (list) => {
+  const keep = new Set<string>();
+  for (const f of list) {
+    if (!f.feature.activate) continue;
+    keep.add(f.feature.id);
+    const was = activated.get(f.feature.id);
+    if (was && was.ctx === f.ctx) continue;
+    try { was?.stop?.(); } catch (e) { console.error(`[kuraa] the feature ${f.feature.id} did not stop cleanly`, e); }
+    try {
+      activated.set(f.feature.id, { ctx: f.ctx, stop: f.feature.activate(f.ctx) });
+    } catch (e) {
+      console.error(`[kuraa] the feature ${f.feature.id} could not start`, e);
+      activated.delete(f.feature.id);
+    }
+  }
+  for (const [id, was] of [...activated]) {
+    if (keep.has(id)) continue;
+    activated.delete(id);
+    try { was.stop?.(); } catch (e) { console.error(`[kuraa] the feature ${id} did not stop cleanly`, e); }
+  }
+}, { immediate: true });
+onBeforeUnmount(() => {
+  for (const was of activated.values()) {
+    try { was.stop?.(); } catch { /* going */ }
+  }
+});
+
 // What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
 watch([workspaceTitle, connection, views, panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
 watch([shownFiles, folderMarks, path], () => navEvents.files.tell());

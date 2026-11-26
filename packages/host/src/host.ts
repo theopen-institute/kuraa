@@ -27,6 +27,8 @@ import type { Peers, PeerOptions } from './peers/peers.js';
 import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './peers/gate.js';
 import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
+import { documentsInOrder, joinBook } from './compile.js';
+import { readOrders } from './order.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 /** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
@@ -408,19 +410,9 @@ export class Host {
       root: this.dir,
       stateDir: join(await this.git.gitDir(), 'kuraa'),
       runner: this.runner,
-      flush: async (path) => {
-        // Not while git is busy outside the app: the file may be half-way through it.
-        await this.requireWritable();
-        const rec = this.records.get(`${await this.git.branch()}:${path}`);
-        // Written and committed (where this device leads the room), so the commit it is rendered from holds it (0081).
-        if (rec) {
-          await this.serial(async () => {
-            await this.flushNow(rec);
-            await this.commitNow(rec);
-          });
-        }
-      },
+      flush: (path) => this.writeForRender(path),
       madeFrom: (path) => this.madeFrom(path),
+      compile: (folder, exclude, title) => this.compileFolder(folder, exclude, title),
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) {
@@ -2735,6 +2727,42 @@ export class Host {
     this.records.delete(rec.key);
     this.byRoom.delete(rec.room);
     this.relay.release(rec.room);
+  }
+
+  /** A document's open room, if it has one, written to its file and committed, to be rendered as it is now. */
+  private async writeForRender(path: string): Promise<void> {
+    // Not while git is busy outside the app: the file may be half-way through it.
+    await this.requireWritable();
+    const rec = this.records.get(`${await this.git.branch()}:${path}`);
+    // Written and committed (where this device leads the room), so the commit it is rendered from holds it (0081).
+    if (rec) {
+      await this.serial(async () => {
+        await this.flushNow(rec);
+        await this.commitNow(rec);
+      });
+    }
+  }
+
+  /**
+   * A folder compiled (0091: '' the top level): its documents in the file
+   * tree's order, but those left out, each as it is now (its open room written
+   * first), joined into one Markdown document; with the folders they are in,
+   * where what they refer to is found. A string says why there is nothing.
+   */
+  async compileFolder(folder: string, exclude: string[], title: string): Promise<{ text: string; resources: string[] } | string> {
+    const paths = await this.listFiles();
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const orders = await readOrders(this, paths);
+    const docs = documentsInOrder(folder, entries, orders, exclude);
+    if (!docs.length) return `${folder ? `${folder}/` : 'The workspace'} has no documents to compile${exclude.length ? ' that are not left out' : ''}.`;
+    const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
+    const parts: { title: string | null; text: string }[] = [];
+    for (const p of docs) {
+      await this.writeForRender(p);
+      parts.push({ title: titles.get(p) ?? null, text: await readFile(this.resolvePath(p), 'utf8') });
+    }
+    const resources = [...new Set(docs.map((p) => resolve(this.dir, p, '..')))];
+    return { text: joinBook(title, parts), resources };
   }
 
   /** The workspace's files this device holds: git's, untracked ones as .gitignore leaves them, and those of the spaces it holds. */

@@ -350,9 +350,9 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: { exclude?: string[]; title?: string }): Promise<RenderState> {
     try {
-      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by }) });
+      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) return { path, format, state: 'failed', message: e.message, progress: null, log: '', by: by.name, startedAt: '', finishedAt: null, output: null };
       throw e;

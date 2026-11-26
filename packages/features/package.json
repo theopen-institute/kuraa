@@ -11,7 +11,7 @@
     "@kuraa/annotations": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",
     "@kuraa/files": "workspace:*",
-    "@kuraa/manuscript": "workspace:*",
+    "@kuraa/compile": "workspace:*",
     "@kuraa/outline": "workspace:*",
     "@kuraa/preview": "workspace:*",
     "@kuraa/search": "workspace:*",

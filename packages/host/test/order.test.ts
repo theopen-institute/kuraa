@@ -1,4 +1,4 @@
-// Folders' orders (docs/decisions/0091-order-and-manuscripts-over-folders.md):
+// Folders' orders (docs/decisions/0091-order-and-compile-over-folders.md):
 // a `.kuraa-order` file in each folder arranged by hand, read with the tree,
 // written and committed when someone arranges it, and following renames,
 // moves and deletions of what it names.

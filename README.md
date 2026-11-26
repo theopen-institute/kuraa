@@ -140,10 +140,11 @@ workspaces, **New file**, **Files…** and **Settings…**:
 Any folder can be **arranged by hand**: drag a file or folder between two rows of the file tree (a line
 shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is kept in a plain
 `.kuraa-order` file in the folder (one name per line), which moves with it; whatever it does not name
-follows by name, and **Sort by name** on the folder's menu forgets it. **Manuscript**, turned on by a
-workspace, makes a folder a manuscript (**Make a manuscript** on its menu, marked with a book): its
-documents, in the folder's order, are one book, and any of them, or a folder of them, can be **left
-out** (shown faded) from its menu ([0091](docs/decisions/0091-order-and-manuscripts-over-folders.md)).
+follows by name, and **Sort by name** on the folder's menu forgets it. **Compile…** on any folder's
+menu makes one book of its documents, in that order (Word, PDF or HTML, rendered as documents are,
+where code runs): each document's title becomes a chapter heading. Any document or folder can be
+**left out of Compile** from its menu (shown faded); the choices and the book's title are kept in a
+`.kuraa-compile.yml` in the folder ([0091](docs/decisions/0091-order-and-compile-over-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

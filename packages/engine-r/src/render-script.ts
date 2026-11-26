@@ -1,7 +1,10 @@
 // The R side of rendering a document (render.ts). Started with Rscript in the
 // environment, once per render:
 //
-//   Rscript render.R <document> <html|docx|pdf> <scratch>
+//   Rscript render.R <document> <html|docx|pdf> <scratch> [<folders>]
+//
+// <folders>: where what the document refers to is found besides its own folder,
+// separated by colons (a compiled folder's documents', 0091).
 //
 // An R Markdown document is knitted by rmarkdown::render; a Markdown document
 // goes to pandoc directly. Either way the workspace is only read: intermediate
@@ -30,6 +33,7 @@ local({
   input <- args[[1]]
   format <- args[[2]]
   scratch <- args[[3]]
+  resources <- if (length(args) >= 4 && nzchar(args[[4]])) strsplit(args[[4]], ":", fixed = TRUE)[[1]] else character()
   out_dir <- file.path(scratch, "out")
   tmp_dir <- file.path(scratch, "tmp")
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -172,7 +176,7 @@ local({
     body <- paste(readLines(input, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
     reads_files <- grepl("!\\[|<img|<embed|<object|<video|<audio|<source|<link|src\\s*=", body, ignore.case = TRUE) ||
       any(names(header) %in% c("csl", "include-in-header", "include-before-body", "include-after-body", "css", "reference-doc", "template", "logo", "header-includes"))
-    args <- c(input, "--standalone", "--citeproc", paste0("--resource-path=", dir), "-o", out_file)
+    args <- c(input, "--standalone", "--citeproc", paste0("--resource-path=", paste(c(dir, resources), collapse = ":")), "-o", out_file)
     if (format == "html") {
       args <- c(args, "--embed-resources", "--mathml")
       if (is.null(header[["title"]]) && is.null(header[["pagetitle"]])) args <- c(args, "--metadata", paste0("pagetitle=", sub("\\.[^.]*$", "", basename(input))))

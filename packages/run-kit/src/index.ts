@@ -332,9 +332,15 @@ export type ToolUse =
   };
 
 export interface RenderRequest {
-  /** The document, on the host (inside the workspace). */
+  /** The document, on the host (inside the workspace, or, joined from several, inside scratch). */
   input: string;
   format: RenderFormat;
+  /**
+   * Folders on the host (inside the workspace) where what the document refers
+   * to (images, a bibliography) is found, besides its own: a folder compiled
+   * from documents in several (0091). Renderers that cannot use them leave them.
+   */
+  resources?: string[];
 }
 
 export interface RenderResult {

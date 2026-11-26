@@ -406,6 +406,18 @@ importers:
         specifier: workspace:*
         version: link:../format-pandoc
 
+  packages/compile:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
   packages/editor-kit:
     dependencies:
       prosemirror-model:
@@ -474,15 +486,15 @@ importers:
       '@kuraa/annotations':
         specifier: workspace:*
         version: link:../annotations
+      '@kuraa/compile':
+        specifier: workspace:*
+        version: link:../compile
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
       '@kuraa/files':
         specifier: workspace:*
         version: link:../files
-      '@kuraa/manuscript':
-        specifier: workspace:*
-        version: link:../manuscript
       '@kuraa/outline':
         specifier: workspace:*
         version: link:../outline
@@ -693,6 +705,9 @@ importers:
       '@kuraa/annotations':
         specifier: workspace:*
         version: link:../annotations
+      '@kuraa/compile':
+        specifier: workspace:*
+        version: link:../compile
       '@kuraa/env-podman':
         specifier: workspace:*
         version: link:../env-podman
@@ -708,9 +723,6 @@ importers:
       '@kuraa/format-text':
         specifier: workspace:*
         version: link:../format-text
-      '@kuraa/manuscript':
-        specifier: workspace:*
-        version: link:../manuscript
       '@kuraa/sync-git':
         specifier: workspace:*
         version: link:../sync-git
@@ -726,15 +738,6 @@ importers:
       prosemirror-model:
         specifier: ^1.25.13
         version: 1.25.13
-
-  packages/manuscript:
-    dependencies:
-      '@kuraa/feature-kit':
-        specifier: workspace:*
-        version: link:../feature-kit
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
 
   packages/outline:
     dependencies:

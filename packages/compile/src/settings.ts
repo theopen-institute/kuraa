@@ -1,0 +1,103 @@
+// What Compile keeps of a folder (0091), in a file in it, `.kuraa-compile.yml`,
+// plain YAML that moves with the folder and is read by whoever reads it:
+//
+//   # Kuraa's Compile: …
+//   title: The Coast        the book's title, when this folder is compiled
+//   format: docx            how it was last compiled
+//   exclude:                what in this folder is left out of any compile
+//     - notes.md
+//     - research
+//
+// What is left out is named as the folder's order names it: by name, in its
+// own folder. A document left out is left out of every compile that would
+// have it, as Scrivener's Include in Compile is the document's own.
+import { parseDocument, stringify } from 'yaml';
+
+export const COMPILE_FILE = '.kuraa-compile.yml';
+
+export const FORMATS = ['docx', 'pdf', 'html'] as const;
+export type CompileFormat = (typeof FORMATS)[number];
+
+const HEADER = '# Kuraa’s Compile for this folder: the book’s title and format when it is compiled,\n# and what in it (by name) is left out of any compile.\n';
+
+/** The documents a book is made of (as the host's compile has them). */
+const BOOK_DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
+export const isBookDocument = (path: string): boolean => BOOK_DOCUMENT.test(path);
+
+export interface FolderCompile {
+  /** The folder ('' the top level), without a trailing `/`. */
+  folder: string;
+  title: string | null;
+  format: CompileFormat | null;
+  /** Names in the folder left out of any compile. */
+  exclude: string[];
+}
+
+const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+const inFolder = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
+
+/** The folder a Compile file is about ('' the top), or null if the path is not one. */
+export function compileFolder(path: string): string | null {
+  if (path === COMPILE_FILE) return '';
+  return path.endsWith(`/${COMPILE_FILE}`) ? path.slice(0, -COMPILE_FILE.length - 1) : null;
+}
+
+export const compileFileOf = (folder: string): string => inFolder(folder, COMPILE_FILE);
+
+/** A folder's Compile settings as its file says; what it does not say well is passed over. */
+export function readCompile(folder: string, text: string): FolderCompile {
+  let v: unknown;
+  try {
+    v = parseDocument(text).toJS();
+  } catch {
+    v = null;
+  }
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  const title = typeof o.title === 'string' && o.title.trim() ? o.title.trim() : null;
+  const format = FORMATS.includes(o.format as CompileFormat) ? (o.format as CompileFormat) : null;
+  const exclude = Array.isArray(o.exclude) ? o.exclude.filter((x): x is string => typeof x === 'string' && !!x.trim() && !x.includes('/')).map((x) => x.trim()) : [];
+  return { folder, title, format, exclude: [...new Set(exclude)] };
+}
+
+/** A folder's Compile file; null (none) where it says nothing. */
+export function writeCompile(c: FolderCompile): string | null {
+  const body: Record<string, unknown> = {};
+  if (c.title) body.title = c.title;
+  if (c.format) body.format = c.format;
+  if (c.exclude.length) body.exclude = [...c.exclude].sort();
+  return Object.keys(body).length ? HEADER + stringify(body) : null;
+}
+
+/** Every path left out, from every folder's settings (a folder's: all in it). */
+export const excludedPaths = (all: readonly FolderCompile[]): string[] => all.flatMap((c) => c.exclude.map((n) => inFolder(c.folder, n)));
+
+/** What leaves a path out: it, or a folder it is in; null where nothing does. */
+export function excludedBy(all: readonly FolderCompile[], path: string): string | null {
+  return excludedPaths(all).find((x) => path === x || path.startsWith(`${x}/`)) ?? null;
+}
+
+/** The settings with a path left out of compiles, or put back (in its folder's). */
+export function withIncluded(c: FolderCompile, name: string, include: boolean): FolderCompile {
+  return { ...c, exclude: include ? c.exclude.filter((n) => n !== name) : [...new Set([...c.exclude, name])] };
+}
+
+/**
+ * The folders' settings that change when a file or folder is renamed or moved:
+ * left out, it stays left out, under its new name in its new folder (the
+ * document's own, as in Scrivener). A folder moving takes its own file along.
+ */
+export function afterRename(byFolder: ReadonlyMap<string, FolderCompile>, from: string, to: string): FolderCompile[] {
+  const was = byFolder.get(folderOf(from));
+  if (!was?.exclude.includes(nameOf(from))) return [];
+  const [fromDir, toDir] = [folderOf(from), folderOf(to)];
+  if (fromDir === toDir) return [{ ...was, exclude: was.exclude.map((n) => (n === nameOf(from) ? nameOf(to) : n)) }];
+  const into = byFolder.get(toDir) ?? { folder: toDir, title: null, format: null, exclude: [] };
+  return [withIncluded(was, nameOf(from), true), withIncluded(into, nameOf(to), false)];
+}
+
+/** The folder's settings that change when a file or folder is deleted: it is no longer named. */
+export function afterDelete(byFolder: ReadonlyMap<string, FolderCompile>, path: string): FolderCompile[] {
+  const was = byFolder.get(folderOf(path));
+  return was?.exclude.includes(nameOf(path)) ? [withIncluded(was, nameOf(path), true)] : [];
+}

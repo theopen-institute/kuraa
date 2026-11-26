@@ -297,10 +297,15 @@ export interface ToolState {
 export interface CoreHost {
   /** Search the workspace's text files, and open documents as they are now. */
   search(query: string, caseSensitive: boolean): Promise<SearchResult>;
-  /** A document's renders: what it can be rendered to, and how its latest ones stand. */
+  /** A document's renders, or a folder's (its path ending in `/`, the top level `/`: 0091): what it can be rendered to, and how its latest ones stand. */
   renders(path: string): Promise<RenderInfo>;
-  /** Render a document (as you, for the record); a render that cannot start says why, as a failed one. */
-  render(path: string, format: RenderFormat): Promise<RenderState>;
+  /**
+   * Render a document (as you, for the record); a render that cannot start says
+   * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
+   * is compiled (0091): its documents in the file tree's order, but those
+   * `exclude` names (paths; a folder's, all in it), joined under `title`.
+   */
+  render(path: string, format: RenderFormat, compile?: { exclude?: string[]; title?: string }): Promise<RenderState>;
   /** A document's latest output in a format. */
   renderOutput(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */

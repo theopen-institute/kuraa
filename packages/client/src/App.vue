@@ -187,7 +187,7 @@ const person = () => ({ name: settings.value.name, email: settings.value.email, 
 const coreHost: CoreHost = {
   search: (q, caseSensitive) => api.value.search(q, caseSensitive),
   renders: (p) => api.value.renders(p),
-  render: (p, format) => api.value.render(p, format, person()),
+  render: (p, format, compile) => api.value.render(p, format, person(), compile),
   renderOutput: (p, format) => api.value.renderOutput(p, format),
   renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
   tools: () => api.value.tools(),

@@ -108,15 +108,21 @@ describe('a coding', () => {
 
 describe('a new code', () => {
   it('has a colour at random, plain #rrggbb, dark enough to read', () => {
+    // Above all where it is brightest: yellow-green, at the top of the lightness and saturation drawn.
+    for (const r of [[60 / 360, 1, 1], [90 / 360, 1, 1], [0.15, 0.99, 0.99]]) {
+      const c = randomColour(((i) => () => r[i++ % 3]!)(0));
+      const [cr, cg, cb] = [1, 3, 5].map((n) => parseInt(c.slice(n, n + 2), 16));
+      expect(0.2126 * cr! + 0.7152 * cg! + 0.0722 * cb!).toBeLessThan(190);
+    }
     const seen = new Set<string>();
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 2000; i++) {
       const c = randomColour();
       expect(c).toMatch(/^#[0-9a-f]{6}$/);
       const [r, g, b] = [1, 3, 5].map((n) => parseInt(c.slice(n, n + 2), 16));
       expect(0.2126 * r! + 0.7152 * g! + 0.0722 * b!).toBeLessThan(190);
       seen.add(c);
     }
-    expect(seen.size).toBeGreaterThan(40);
+    expect(seen.size).toBeGreaterThan(1500);
     expect(randomColour(() => 0)).toBe(randomColour(() => 0));
   });
 });

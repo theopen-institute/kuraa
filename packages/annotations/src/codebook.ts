@@ -274,11 +274,17 @@ export function randomId(): string {
 export function randomColour(random: () => number = Math.random): string {
   const h = random() * 360;
   const s = 0.55 + random() * 0.25;
-  const l = 0.38 + random() * 0.1;
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const c = l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-    return Math.round(c * 255).toString(16).padStart(2, '0');
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
+  let l = 0.38 + random() * 0.1;
+  const rgb = () =>
+    [0, 8, 4].map((n) => {
+      const k = (n + h / 30) % 12;
+      return Math.round((l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255);
+    });
+  // Yellows and greens are bright at a lightness where blues are dark: those made darker until they read on white.
+  let c = rgb();
+  while (0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]! >= 180 && l > 0.2) {
+    l -= 0.02;
+    c = rgb();
+  }
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }

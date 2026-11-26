@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deleted, isBook, mapPaths, newBook, pathsOf, readBook, relative, renamed, resolve, writeBook } from '../src/book.js';
+import { deleted, hasChapters, isBook, mapPaths, newBook, newProfileBook, pathsOf, profileName, profilesOf, readBook, relative, renamed, resolve, withProfiles, writeBook } from '../src/book.js';
 
 const BOOK = `# The book's settings: Quarto's, and the writer's.
 project:
@@ -82,5 +82,32 @@ describe('a manuscript is a Quarto book (0088)', () => {
     expect(relative('novel/', 'novel/chapters/a.md')).toBe('chapters/a.md');
     expect(relative('novel/', 'other/a.md')).toBe('../other/a.md');
     expect(relative('', 'a.md')).toBe('a.md');
+  });
+
+  it('keeps manuscripts apart from folders as profiles’ books beside one project (0090)', () => {
+    const base = withProfiles(null, ['novel']);
+    expect(base).toBe('project:\n  type: book\nprofile:\n  group:\n    - [ novel ]\n');
+    expect(isBook(base)).toBe(true);
+    expect(hasChapters(base)).toBe(false);
+    const both = withProfiles(base, ['novel', 'thesis']);
+    expect(profilesOf(both)).toEqual(['novel', 'thesis']);
+    expect(profilesOf(withProfiles(both, ['thesis'], ['novel', 'thesis']))).toEqual(['thesis']);
+    expect(withProfiles(both, [], ['novel', 'thesis'])).not.toContain('group');
+    // A book of its own, kept: profiles beside it are not wanted.
+    expect(hasChapters(BOOK)).toBe(true);
+
+    const yaml = newProfileBook('', 'A thesis', ['field/notes.md', 'novel/a.md']);
+    expect(yaml).toBe('book:\n  title: "A thesis"\n  chapters:\n    - field/notes.md\n    - novel/a.md\n');
+    const m = readBook('_quarto-thesis.yml', yaml, both)!;
+    expect(m).toMatchObject({ file: '_quarto-thesis.yml', folder: '', profile: 'thesis', title: 'A thesis' });
+    expect(pathsOf(m)).toEqual(['field/notes.md', 'novel/a.md']);
+    // The title the base gives, where the profile gives none; else the profile's name.
+    expect(readBook('_quarto-x.yml', 'book:\n  chapters: []\n', 'project:\n  type: book\nbook:\n  title: Shared\n')!.title).toBe('Shared');
+    expect(readBook('_quarto-x.yml', 'book:\n  chapters: []\n', base)!.title).toBe('x');
+    expect(readBook('_quarto-x.yml', 'format: html\n', base)).toBeNull();
+
+    expect(profileName('Tidal Notes: Café', [])).toBe('tidal-notes-cafe');
+    expect(profileName('Novel', ['novel', 'novel-2'])).toBe('novel-3');
+    expect(profileName('???', [])).toBe('manuscript');
   });
 });

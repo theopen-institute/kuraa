@@ -1,6 +1,6 @@
 # 0088 · A manuscript is a Quarto book (proposed)
 
-**Status: built**, as revised under *Built* below. It adds a feature, `@kuraa/manuscript`:
+**Status: built**, as revised under *Built* below, and by [0090](0090-manuscripts-apart-from-folders.md): manuscripts are no longer tied to a folder. It adds a feature, `@kuraa/manuscript`:
 documents in an order of the writer's choosing, kept as a Quarto book's chapters in `_quarto.yml`,
 shown as a navigation view ([0087](0087-navigation-is-made-of-components.md)), in whatever layout is
 on.

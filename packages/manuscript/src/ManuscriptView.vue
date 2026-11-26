@@ -1,15 +1,17 @@
 <script setup lang="ts">
-// The Manuscript (0088): a navigation view of a manuscript's documents in its
-// order, by title; each part a heading over its chapters, the appendices after
-// them, and below, the folder's documents not in it. Drag a row to reorder it,
-// into a part or out of one, into the appendices or out of the manuscript (or
-// Alt+↑ and Alt+↓ on a row); click to open, right-click for the file's menu.
-// The order is the book's `_quarto.yml`, written by the host.
+// The Manuscript (0088, 0090): a navigation view of a manuscript's documents in
+// its order, by title; each part a heading over its chapters, the appendices
+// after them, and below, documents not in it: its home folder's, or any of the
+// workspace's. Drag a row to reorder it, into a part or out of one, into the
+// appendices or out of the manuscript (or Alt+↑ and Alt+↓ on a row); click to
+// open, right-click for the file's menu. A chapter in other manuscripts too is
+// marked so. New chapter makes a document in the home folder, in place. The
+// order is the book's file, written by the host.
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { NavigationContext } from '@kuraa/feature-kit/client';
 import { isBookDocument, pathsOf } from './book.js';
 import { addPart, moveTo, type Item, type Order, type Place } from './order.js';
-import { booksFor } from './store.js';
+import { Books, booksFor } from './store.js';
 import { S } from './strings.js';
 
 const props = defineProps<{ ctx: NavigationContext }>();
@@ -17,10 +19,14 @@ const ctx = props.ctx;
 const books = booksFor(ctx);
 
 const list = shallowRef(books.list);
+const book = shallowRef(books.chosen());
 const files = shallowRef(ctx.files());
 const selected = ref(ctx.selected());
 const stops = [
-  books.subscribe(() => (list.value = books.list)),
+  books.subscribe(() => {
+    list.value = books.list;
+    book.value = books.chosen();
+  }),
   ctx.onChange(() => {
     files.value = ctx.files();
     selected.value = ctx.selected();
@@ -29,15 +35,7 @@ const stops = [
 onBeforeUnmount(() => stops.forEach((s) => s()));
 if (!books.known) void books.load();
 
-// The manuscript shown: the one chosen (in this browser), else the first.
-const CHOSEN_KEY = 'kuraa:manuscript';
-const chosen = ref<string | null>(null);
-try { chosen.value = localStorage.getItem(CHOSEN_KEY); } catch { /* storage unavailable */ }
-const book = computed(() => list.value.find((m) => m.file === chosen.value) ?? list.value[0] ?? null);
-function choose(file: string) {
-  chosen.value = file;
-  try { localStorage.setItem(CHOSEN_KEY, file); } catch { /* storage unavailable */ }
-}
+const choose = (file: string) => books.choose(file);
 
 const byPath = computed(() => new Map(files.value.map((f) => [f.path, f])));
 const nameOf = (path: string) => {
@@ -76,16 +74,22 @@ const rows = computed<Row[]>(() => {
   return out;
 });
 const appendixRows = computed<Row[]>(() => (order.value?.appendices ?? []).map((c, i) => ({ key: `a:${c}`, kind: 'chapter', path: c, title: nameOf(c), item: { chapter: c }, place: { list: 'appendices' }, index: i })));
-/** The folder's documents not in the manuscript (nor in folders the app or Quarto keep apart, `.` and `_`). */
+/** Not in the manuscript: its home folder's documents, or (asked) any its book may have. */
+const everywhere = ref(false);
+const home = computed(() => book.value?.home ?? book.value?.folder ?? '');
 const outside = computed(() => {
   const m = book.value;
   if (!m) return [];
   const listed = new Set(pathsOf(m));
+  const from = everywhere.value ? m.folder : home.value;
+  // Not in folders the app or Quarto keep apart (`.` and `_`).
   return files.value
-    .filter((f) => f.path.startsWith(m.folder) && isBookDocument(f.path) && !listed.has(f.path) && !f.path.slice(m.folder.length).split('/').some((s) => s.startsWith('.') || s.startsWith('_')))
+    .filter((f) => f.path.startsWith(from) && f.path.startsWith(m.folder) && isBookDocument(f.path) && !listed.has(f.path) && !f.path.slice(m.folder.length).split('/').some((s) => s.startsWith('.') || s.startsWith('_')))
     .map((f) => f.path)
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
 });
+/** The other manuscripts a chapter is in, by name. */
+const alsoIn = (path: string | null) => (path ? books.containing(path).filter((m) => m.file !== book.value?.file).map(Books.titleOf) : []);
 /** Send the new order; shown at once. */
 function apply(next: Order) {
   const m = book.value;
@@ -158,9 +162,18 @@ async function newPart() {
   if (title && order.value) apply(addPart(order.value, title));
 }
 
-async function makeTop() {
-  const r = (await books.change('make', { folder: '' })) as { file?: string } | null;
-  if (r?.file) ctx.notify(S.made(r.file));
+async function newManuscript() {
+  const title = (await ctx.ui.askText(S.newManuscriptTitle, '', S.create))?.trim();
+  if (title) await books.make({ title });
+}
+
+const newChapter = () => void books.newChapter(ctx);
+
+async function changeHome() {
+  const m = book.value;
+  if (!m) return;
+  const next = (await ctx.ui.askText(S.homeAsk, home.value.replace(/\/$/, ''), S.change))?.trim();
+  if (next !== undefined && next !== home.value.replace(/\/$/, '')) await books.change('home', { file: m.file, home: next });
 }
 </script>
 
@@ -169,13 +182,13 @@ async function makeTop() {
     <div v-if="!book" class="manuscript-none">
       <p>{{ S.none }}</p>
       <p class="muted">{{ S.noneHow }}</p>
-      <button type="button" data-testid="manuscript-make-top" @click="makeTop">{{ S.makeTop }}</button>
+      <button type="button" data-testid="manuscript-new" @click="newManuscript">{{ S.newManuscript }}</button>
     </div>
     <template v-else>
       <!-- With several manuscripts, which is shown; with one, nothing above its chapters. -->
       <div v-if="list.length > 1" class="manuscript-head">
         <select :value="book.file" :aria-label="S.choose" data-testid="manuscript-choose" @change="choose(($event.target as HTMLSelectElement).value)">
-          <option v-for="m in list" :key="m.file" :value="m.file">{{ m.title || m.folder || S.untitled }}</option>
+          <option v-for="m in list" :key="m.file" :value="m.file">{{ Books.titleOf(m) }}</option>
         </select>
       </div>
       <ol class="manuscript-list" :title="S.moveHint" @dragover="dragOver($event, 'end:top')" @drop="dropAt($event, { list: 'top' }, order!.chapters.length)">
@@ -197,6 +210,7 @@ async function makeTop() {
           @contextmenu="menu($event, r.path)"
         >
           <span class="manuscript-name">{{ r.title }}</span>
+          <span v-if="r.kind === 'chapter' && alsoIn(r.path).length" class="manuscript-also" :title="S.alsoInTitle(alsoIn(r.path))" data-testid="manuscript-also">{{ S.alsoIn(alsoIn(r.path).length) }}</span>
           <template v-if="r.path && !exists(r.path)">
             <span class="manuscript-missing" :title="S.missingTitle(r.path)">{{ S.missing }}</span>
             <button type="button" class="manuscript-take-out" @click.stop="takeOut(r.path)">{{ S.removeMissing }}</button>
@@ -204,7 +218,10 @@ async function makeTop() {
         </li>
         <li v-if="!rows.length" class="muted manuscript-empty">{{ S.empty }}</li>
       </ol>
-      <button type="button" class="manuscript-add-part" data-testid="manuscript-add-part" @click="newPart">{{ S.addPart }}</button>
+      <div class="manuscript-actions">
+        <button type="button" data-testid="manuscript-new-chapter" @click="newChapter">{{ S.newChapter }}</button>
+        <button type="button" data-testid="manuscript-add-part" @click="newPart">{{ S.addPart }}</button>
+      </div>
       <h4 class="manuscript-section" @dragover="dragOver($event, 'end:appendices')" @drop="dropAt($event, { list: 'appendices' }, order!.appendices.length)">{{ S.appendices }}</h4>
       <ol class="manuscript-list" data-testid="manuscript-appendices" @dragover="dragOver($event, 'end:appendices')" @drop="dropAt($event, { list: 'appendices' }, order!.appendices.length)">
         <li
@@ -223,9 +240,14 @@ async function makeTop() {
           @keydown.enter="open(r.path)"
           @keydown="onKey($event, r)"
           @contextmenu="menu($event, r.path)"
-        ><span class="manuscript-name">{{ r.title }}</span></li>
+        ><span class="manuscript-name">{{ r.title }}</span><span v-if="alsoIn(r.path).length" class="manuscript-also" :title="S.alsoInTitle(alsoIn(r.path))">{{ S.alsoIn(alsoIn(r.path).length) }}</span></li>
       </ol>
       <h4 class="manuscript-section">{{ S.notIn }}</h4>
+      <div class="manuscript-scope">
+        <button type="button" :class="{ active: !everywhere }" :aria-pressed="!everywhere" :title="`${S.homeTitle}: ${home ? home.replace(/\/$/, '') : S.top}`" data-testid="manuscript-scope-home" @click="everywhere = false">{{ S.homeFolder }}</button>
+        <button type="button" :class="{ active: everywhere }" :aria-pressed="everywhere" data-testid="manuscript-scope-all" @click="everywhere = true">{{ S.everywhere }}</button>
+        <button type="button" class="manuscript-home" :title="S.homeTitle" data-testid="manuscript-home" @click="changeHome">{{ S.changeHome }}</button>
+      </div>
       <ul class="manuscript-list manuscript-out" data-testid="manuscript-out" @dragover="dragOver($event, 'out')" @drop="dropAt($event, { list: 'out' }, 0)">
         <li
           v-for="p in outside"
@@ -239,9 +261,10 @@ async function makeTop() {
           @click="open(p)"
           @keydown.enter="open(p)"
           @contextmenu="menu($event, p)"
-        ><span class="manuscript-name">{{ nameOf(p) }}</span></li>
-        <li v-if="!outside.length" class="muted manuscript-empty">{{ S.notInNone }}</li>
+        ><span class="manuscript-name">{{ nameOf(p) }}</span><span v-if="everywhere && p.includes('/')" class="muted manuscript-where">{{ p.slice(0, p.lastIndexOf('/')) }}</span></li>
+        <li v-if="!outside.length" class="muted manuscript-empty">{{ everywhere ? S.notInNoneAnywhere : S.notInNone }}</li>
       </ul>
+      <button type="button" class="manuscript-new-book" data-testid="manuscript-new" @click="newManuscript">{{ S.newManuscript }}</button>
     </template>
   </div>
 </template>
@@ -269,8 +292,16 @@ async function makeTop() {
 .manuscript-missing { color: var(--warn); font-size: 11px; }
 .manuscript-take-out { margin-left: auto; font-size: 11px; padding: 0 5px; }
 .manuscript-empty { padding: 3px 12px; font-size: 12px; }
-.manuscript-add-part { margin: 0 12px 6px; font-size: 12px; border-color: transparent; background: none; color: var(--muted); padding: 2px 0; }
-.manuscript-add-part:hover { color: var(--text); }
+.manuscript-actions { display: flex; gap: 12px; margin: 0 12px 6px; }
+.manuscript-actions button, .manuscript-new-book, .manuscript-home { font-size: 12px; border-color: transparent; background: none; color: var(--muted); padding: 2px 0; }
+.manuscript-actions button:hover, .manuscript-new-book:hover, .manuscript-home:hover { color: var(--text); }
+.manuscript-new-book { margin: 14px 12px 0; }
+.manuscript-also { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
+.manuscript-where { margin-left: auto; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manuscript-scope { display: flex; gap: 4px; align-items: center; margin: 2px 12px 4px; }
+.manuscript-scope button:not(.manuscript-home) { font-size: 11px; padding: 1px 6px; border-radius: 4px; border-color: transparent; background: none; color: var(--muted); white-space: nowrap; }
+.manuscript-scope button.active { background: var(--selected); color: var(--text); }
+.manuscript-home { margin-left: auto; font-size: 11px; }
 .manuscript-section { margin: 10px 12px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .manuscript-out .manuscript-row { color: var(--muted); }
 </style>

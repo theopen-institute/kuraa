@@ -136,10 +136,12 @@ navigation, only what is done to files, and with no layout on, a menu at the upp
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
 [0089](docs/decisions/0089-preview-search-and-outline-are-components.md)). **Manuscript**, turned on
-by a workspace, keeps a folder's documents in an order of your choosing as a Quarto book's chapters
-in its `_quarto.yml`: **Make a manuscript** on a folder's right-click menu, then reorder them, in parts
-and appendices, in the Manuscript beside the file tree
-([0088](docs/decisions/0088-a-manuscript-is-a-quarto-book.md)).
+by a workspace, keeps documents in an order of your choosing, from anywhere in the workspace and in as
+many manuscripts as you like, as Quarto books (a `_quarto-<name>.yml` profile each, beside a top-level
+`_quarto.yml`): **New manuscript…** in the Manuscript beside the file tree, or **Make a manuscript** on a
+folder's right-click menu; then reorder, in parts and appendices, and add chapters with **New chapter**
+(made in the manuscript's home folder)
+([0088](docs/decisions/0088-a-manuscript-is-a-quarto-book.md), [0090](docs/decisions/0090-manuscripts-apart-from-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

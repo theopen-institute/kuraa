@@ -51,6 +51,13 @@ export interface FeaturePort {
   person(): Promise<string | null>;
 }
 
+/** A file's name against a name a feature writes, where `*` is any characters but `/` (0090). */
+export function nameMatches(pattern: string, name: string): boolean {
+  if (!pattern.includes('*')) return pattern === name;
+  const re = new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`);
+  return re.test(name);
+}
+
 /** Check features handed to the host against the contract: refused, saying why, as run components are. */
 export function checkFeatures(list: unknown[]): HostFeature[] {
   const seen = new Set<string>();
@@ -503,7 +510,8 @@ export class HostFeatures {
       if (doc !== null) return this.me && ownerOf(path) === this.me ? { doc } : null;
       if ((f.files?.(this.settings(f.id)) ?? []).includes(path)) return { doc: null };
       // A file by its name, wherever it is (0088).
-      return (f.names ?? []).includes(path.slice(path.lastIndexOf('/') + 1)) ? { doc: null } : null;
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      return (f.names ?? []).some((n) => nameMatches(n, name)) ? { doc: null } : null;
     };
     return {
       id: f.id,

@@ -27,7 +27,7 @@ export interface NavigationApp {
   open(path: string): void;
   openConflicts(path: string): void;
   prefetch(path: string | null, now?: boolean): void;
-  newFile(folder?: string): void;
+  newFile(folder?: string): Promise<string | null>;
   newFolder(parent?: string): void;
   rename(path: string): void;
   remove(path: string): void;

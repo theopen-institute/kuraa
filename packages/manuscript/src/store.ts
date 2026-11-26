@@ -1,25 +1,35 @@
-// What the client knows of the workspace's manuscripts (0088), asked of the
-// host when the feature comes into use, again when the host says a book
-// changed, and after each change made here: shared by the Manuscript view and
-// the file menu's items, which must be ready before a right-click.
-import type { FeatureClientContext, Json } from '@kuraa/feature-kit/client';
-import { isBookDocument, pathsOf, type Entry } from './book.js';
+// What the client knows of the workspace's manuscripts (0088, 0090), asked of
+// the host when the feature comes into use, again when the host says a book
+// changed, and after each change made here: shared by the Manuscript view, ＋
+// and the file menu's items, which must be ready before a right-click.
+import type { FeatureClientContext, Json, NavigationContext } from '@kuraa/feature-kit/client';
+import { isBookDocument, pathsOf, placeIn, type Entry } from './book.js';
 
 export interface ClientManuscript {
-  folder: string;
   file: string;
+  /** Its project's folder: its chapters are in it ('' for any of the workspace's). */
+  folder: string;
+  profile: string | null;
   title: string | null;
+  /** Where its new chapters go. */
+  home: string | null;
   chapters: Entry[];
   appendices: string[];
 }
 
+const CHOSEN_KEY = 'kuraa:manuscript';
+
 export class Books {
   list: ClientManuscript[] = [];
   known = false;
+  /** The manuscript shown (its file), as this browser last chose. */
+  chosenFile: string | null = null;
   private readonly listeners = new Set<() => void>();
   private asked = 0;
 
-  constructor(private ctx: FeatureClientContext) {}
+  constructor(private ctx: FeatureClientContext) {
+    try { this.chosenFile = localStorage.getItem(CHOSEN_KEY); } catch { /* storage unavailable */ }
+  }
 
   /** In use for a workspace (again, or another): asked of it from now on. */
   use(ctx: FeatureClientContext): void {
@@ -54,13 +64,34 @@ export class Books {
     }
   }
 
-  /** The manuscript a path is in: the nearest folder up that has one. */
-  bookOf(path: string): ClientManuscript | undefined {
-    return this.list.filter((m) => path.startsWith(m.folder)).sort((a, b) => b.folder.length - a.folder.length)[0];
+  /** The manuscript shown: the one chosen, else the first. */
+  chosen(): ClientManuscript | null {
+    return this.list.find((m) => m.file === this.chosenFile) ?? this.list[0] ?? null;
   }
 
-  /** Ask the host for a change (the order, a document added or taken out, a folder made a manuscript); then know again. */
-  async change(route: 'order' | 'add' | 'remove' | 'make', body: Json, optimistic?: (list: ClientManuscript[]) => ClientManuscript[]): Promise<Json> {
+  choose(file: string): void {
+    this.chosenFile = file;
+    try { localStorage.setItem(CHOSEN_KEY, file); } catch { /* storage unavailable: for this page only */ }
+    this.tell();
+  }
+
+  /** The manuscripts a document is in. */
+  containing(path: string): ClientManuscript[] {
+    return this.list.filter((m) => pathsOf(m).includes(path));
+  }
+
+  /** The manuscripts a document could be added to: those whose project has it, and that do not list it yet. */
+  addable(path: string): ClientManuscript[] {
+    return isBookDocument(path) ? this.list.filter((m) => path.startsWith(m.folder) && !pathsOf(m).includes(path)) : [];
+  }
+
+  /** What a manuscript is called. */
+  static titleOf(m: ClientManuscript): string {
+    return m.title || m.profile || m.folder || m.file;
+  }
+
+  /** Ask the host for a change; then know again. Shown at once where `optimistic` says how. */
+  async change(route: 'order' | 'add' | 'remove' | 'make' | 'home', body: Json, optimistic?: (list: ClientManuscript[]) => ClientManuscript[]): Promise<Json> {
     if (optimistic) {
       this.list = optimistic(this.list);
       this.tell();
@@ -75,15 +106,25 @@ export class Books {
     }
   }
 
-  /** Whether a document is listed in its manuscript. */
-  listed(path: string): boolean {
-    const m = this.bookOf(path);
-    return !!m && pathsOf(m).includes(path);
+  /** A new manuscript, by its title, or of a folder; shown once made. */
+  async make(body: { title?: string; folder?: string }): Promise<string | null> {
+    const r = (await this.change('make', body)) as { file?: string } | null;
+    if (r?.file) this.choose(r.file);
+    return r?.file ?? null;
   }
 
-  /** Whether a path is a document a manuscript could have. */
-  static document(path: string): boolean {
-    return isBookDocument(path);
+  /**
+   * New chapter (0090): a document made in the shown manuscript's home folder,
+   * put after the chapter open (where it is in it), else at its end, and opened
+   * with the cursor in its title.
+   */
+  async newChapter(ctx: NavigationContext): Promise<void> {
+    const m = this.chosen();
+    if (!m) return;
+    const open = ctx.selected();
+    const after = open && placeIn(m, open) ? open : null;
+    const path = await ctx.newFile((m.home ?? m.folder).replace(/\/$/, ''));
+    if (path) await this.change('add', { path, file: m.file, after });
   }
 }
 

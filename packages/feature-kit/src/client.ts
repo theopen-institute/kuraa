@@ -151,8 +151,8 @@ export interface NavigationContext extends FeatureClientContext {
   openConflicts(path: string): void;
   /** The pointer rests on a file (null: it left): it is got ready ahead, to open sooner. */
   prefetch(path: string | null, now?: boolean): void;
-  /** A new document, in a folder (none: the top level), opened with the cursor in its title. */
-  newFile(folder?: string): void;
+  /** A new document, in a folder (none: the top level), opened with the cursor in its title: its path once made, or null if it was not. */
+  newFile(folder?: string): Promise<string | null>;
   /** A new folder, its name asked for, in a folder (none: the top level). */
   newFolder(parent?: string): void;
   /** Rename a file (its title and name, for a document) or a folder (`path` ending in `/`). */

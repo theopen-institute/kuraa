@@ -42,8 +42,9 @@ export interface HostFeature {
   files?(settings: FeatureSettings): string[];
   /**
    * Names of files it may write wherever they are in the workspace (0088: a
-   * manuscript's `_quarto.yml`), besides those `files` declares. Never while
-   * one is open in a room: it is then the room's (a write is refused, 409).
+   * manuscript's `_quarto.yml`), besides those `files` declares; `*` stands for
+   * any characters but `/` (0090: `_quarto-*.yml`). Never while one is open in
+   * a room: it is then the room's (a write is refused, 409).
    */
   names?: string[];
   /** What it keeps in each document's room, live, written to a companion with the document. */

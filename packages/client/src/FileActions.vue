@@ -43,12 +43,15 @@ const emit = defineEmits<{
   reveal: [path: string, from?: string];
 }>();
 
-async function act(fn: () => Promise<unknown>, select?: string | null) {
+/** Do something to files, then refresh (opening `select`, if given); whether it was done. */
+async function act(fn: () => Promise<unknown>, select?: string | null): Promise<boolean> {
   try {
     await fn();
     emit('changed', select);
+    return true;
   } catch (e) {
     emit('error', e);
+    return false;
   }
 }
 
@@ -83,15 +86,15 @@ const freshLetters = () => Array.from(crypto.getRandomValues(new Uint8Array(5)),
  * given back to a new file could meet the session another device still has of
  * the file that had it last.
  */
-async function create(folder = '') {
+async function create(folder = ''): Promise<string | null> {
   folder = folder.replace(/\/+$/, '');
   const dir = folder ? `${folder}/` : '';
   const type = typeChoices.value.find((t) => t.id === NEW_TYPE) ?? typeChoices.value.find((t) => t.titled) ?? typeChoices.value[0];
-  if (!type) return;
+  if (!type) return null;
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   emit('reveal', path);
   emit('created', path);
-  await act(() => props.api.createFile(path, ''), path);
+  return (await act(() => props.api.createFile(path, ''), path)) ? path : null;
 }
 
 // A new document's title, while it is open; once it is left, its filename is made from that title.

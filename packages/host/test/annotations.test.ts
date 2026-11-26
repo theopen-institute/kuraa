@@ -73,9 +73,16 @@ describe('comments', () => {
     return c;
   };
   const file = (p: string) => (existsSync(join(dir, p)) ? readFileSync(join(dir, p), 'utf8') : null);
+  // What the host said, told where a wait times out (a failure on CI alone says why).
+  const said: string[] = [];
   const start = async () => {
-    running = await startHost({ dir, timings: FAST, features: [annotationsFeature] });
+    said.length = 0;
+    running = await startHost({ dir, timings: FAST, features: [annotationsFeature], log: (m: string) => said.push(m) });
   };
+  const waitFor = (cond: () => boolean | Promise<boolean>, ms: number, what: string) =>
+    until(cond, ms, what).catch((e: Error) => {
+      throw new Error(`${e.message}. The host said:\n${said.join('\n') || '(nothing)'}\ngit status:\n${git(dir, 'status', '--porcelain') || '(clean)'}\nlast commit: ${git(dir, 'log', '-1', '--format=%s')}`);
+    });
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'kuraa-annotations-'));
@@ -224,7 +231,7 @@ describe('comments', () => {
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'A codebook, as 0.6.0 kept it');
     await start();
-    await until(() => file('codebook.jsonld') === null && file('.kuraa/codebook.jsonld') !== null && git(dir, 'status', '--porcelain') === '', 10_000, 'the codebook moved');
+    await waitFor(() => file('codebook.jsonld') === null && file('.kuraa/codebook.jsonld') !== null && git(dir, 'status', '--porcelain') === '', 10_000, 'the codebook moved');
     expect(file('.kuraa/codebook.jsonld')).toBe(top(['Trust']));
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('Move codebook.jsonld to .kuraa/codebook.jsonld');
     // One commit, a rename: its history follows it.
@@ -238,7 +245,7 @@ describe('comments', () => {
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'From 0.6.0');
     await start();
-    await until(() => file('codebook.jsonld') === null && git(dir, 'status', '--porcelain') === '', 10_000, 'the top one merged in');
+    await waitFor(() => file('codebook.jsonld') === null && git(dir, 'status', '--porcelain') === '', 10_000, 'the top one merged in');
     expect(readCodebook(file('.kuraa/codebook.jsonld')).codes.map((c) => c.label).sort()).toEqual(['Fear', 'Trust']);
   });
 

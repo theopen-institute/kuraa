@@ -136,21 +136,19 @@ function editor(ctx: FeatureEditorContext) {
       title: `${m.by || 'Someone'} marked “${m.quote}”`,
       run: () => select(view, m),
     })),
-    // Yours to mark, in a document you may change or not: what you mark is yours (0082).
-    selectionActions: (view: EditorView) => {
-      const state = ctx.state;
-      if (!state) return [];
-      return [{
-        label: 'Mark',
-        testid: 'example-mark-selection',
-        run: () => {
-          const { from, to } = view.state.selection;
-          const quote = view.state.doc.textBetween(from, to, ' ');
-          if (!quote.trim()) return;
-          const me = ctx.person();
-          state.update({ set: { [newId()]: { from: state.anchorAt(from, 1), to: state.anchorAt(to, -1), quote, by: me.name, color: me.color } } });
-        },
-      }];
+    // Yours to mark, in a document you may change or not: what you mark is yours (0082). A command (0091):
+    // its label and keys are the feature's `commands`; what it does in this document, here.
+    selectionActions: () => (ctx.state ? [{ command: 'mark', testid: 'example-mark-selection' }] : []),
+    commands: {
+      mark: (view: EditorView) => {
+        const state = ctx.state;
+        const { from, to } = view.state.selection;
+        const quote = view.state.doc.textBetween(from, to, ' ');
+        if (!state || !quote.trim()) return false;
+        const me = ctx.person();
+        state.update({ set: { [newId()]: { from: state.anchorAt(from, 1), to: state.anchorAt(to, -1), quote, by: me.name, color: me.color } } });
+        return true;
+      },
     },
   };
 }
@@ -158,11 +156,19 @@ function editor(ctx: FeatureEditorContext) {
 export const marksClient = defineClientFeature({
   id: 'marks',
   editor,
+  helpGroup: 'Marks (example)',
+  // Commands (0091): one done in the open document by its editor, with keys the core binds there; one done
+  // anywhere, offered in ＋ by the view below.
+  commands: [
+    { id: 'mark', label: 'Mark', keys: 'Mod-Alt-y', about: 'editor', help: 'Mark the selected text' },
+    { id: 'hello', label: 'Say hello (example)', run: (ctx) => ctx.notify(`Hello from ${ctx.status().label}.`) },
+  ],
   panels: [{
     id: 'marks',
     label: 'Marks',
     about: 'document',
     keys: 'Mod-Alt-j',
+    help: 'Show the marks in this document',
     mount(el, ctx) {
       const list = document.createElement('ul');
       list.className = 'example-marks';
@@ -210,7 +216,79 @@ export const marksClient = defineClientFeature({
       return () => off();
     },
   }],
-  documentMenu: (ctx) => [{ label: 'Marks', keys: 'Mod-Alt-j', testid: 'menu-example-marks', run: () => ctx.openPanel('marks') }],
+  documentMenu: () => [{ command: 'panel:marks', testid: 'menu-example-marks' }],
+  // A navigation view (0087): the workspace's documents, as a plain list, drawn wherever the layout in use puts views.
+  views: [{
+    id: 'marked',
+    label: 'Documents (example)',
+    mount(el, ctx) {
+      const list = document.createElement('ul');
+      list.dataset.testid = 'example-view';
+      el.append(list);
+      const draw = () => {
+        list.replaceChildren(...ctx.files().filter((f) => f.type && 'title' in f).map((f) => {
+          const li = document.createElement('li');
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.textContent = f.title || f.path;
+          open.dataset.testid = `example-view:${f.path}`;
+          open.onclick = () => ctx.open(f.path);
+          li.append(open);
+          return li;
+        }));
+      };
+      draw();
+      const off = ctx.onChange(draw);
+      return () => {
+        off();
+        el.replaceChildren();
+      };
+    },
+    newItems: () => [{ command: 'hello', testid: 'context:example-hello' }],
+  }],
+  // A layout (0087) that gives no navigation of its own (the core's menu at the upper left stays): a bar of
+  // the views' names, the one chosen drawn below it. Used where this browser names it (kuraa:layout).
+  layout: {
+    id: 'example-bar',
+    label: 'Bar (example)',
+    navigation: false,
+    mount(el, ctx) {
+      const bar = document.createElement('nav');
+      bar.dataset.testid = 'example-layout';
+      const body = document.createElement('div');
+      el.append(bar, body);
+      let chosen: string | null = null;
+      let down: (() => void) | null = null;
+      const draw = () => {
+        const views = ctx.views();
+        const view = views.find((v) => v.key === chosen) ?? views[0];
+        bar.replaceChildren(...views.map((v) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = v.label;
+          b.dataset.testid = `example-layout-view:${v.key}`;
+          b.onclick = () => {
+            chosen = v.key;
+            draw();
+          };
+          return b;
+        }));
+        if (view && body.dataset.view !== view.key) {
+          down?.();
+          body.replaceChildren();
+          body.dataset.view = view.key;
+          down = view.mount(body);
+        }
+      };
+      draw();
+      const off = ctx.onChange(draw);
+      return () => {
+        off();
+        down?.();
+        el.replaceChildren();
+      };
+    },
+  },
   // A file's menu (a folder's path ends in /: nothing there).
   fileMenu: (path, ctx) => (path.endsWith('/') ? [] : [{
     label: 'Clear your marks…',
@@ -253,7 +331,6 @@ export const marksClient = defineClientFeature({
       },
     },
   },
-  help: [{ group: 'Marks (example)', keys: ['Mod-Alt-j'], does: 'Show the marks in this document' }],
 });
 
 export const clients = { marks: marksClient };

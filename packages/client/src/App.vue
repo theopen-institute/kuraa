@@ -41,6 +41,7 @@ import { connectionInfo, layoutContext, navigationContext, navigationEvents, Pre
 import { workspaceMenuItems } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
 import { useFeatureHost } from './featureHost.js';
+import { takenKeys } from './commands.js';
 import type { ContextItem as MenuItem } from './ContextMenu.vue';
 import FeaturePanel from './FeaturePanel.vue';
 
@@ -155,6 +156,9 @@ const fh = useFeatureHost({
   },
   documentShown: () => !!(path.value && type.value && !viewing.value),
   panelAsked: () => (docMenu.value = null),
+  // The app's keys, and those the editor modules list, are never a feature's (0091).
+  takenKeys: () => takenKeys(props.editors),
+  runEditorCommand: (feature, id) => editor.value?.runFeatureCommand(feature, id),
 });
 const features = fh.features;
 const sidePanel = fh.sidePanel;
@@ -223,7 +227,7 @@ const navApp: NavigationApp = {
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
 };
 /** What the views add to ＋. */
-const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => view.newItems!(navigationContext(active.ctx, navApp, navEvents))));
+const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => fh.menuItems(active.feature.id, view.newItems!(navigationContext(active.ctx, navApp, navEvents)))));
 const layoutKey = computed(() => (layout.value ? `${layout.value.feature.id}:${layout.value.feature.layout!.id}` : ''));
 /** The layout drawn: anew only for another layout, never because how features stand changed. */
 let drawnLayout: { key: string; mount: (el: HTMLElement) => () => void } | null = null;
@@ -496,8 +500,8 @@ const onKey = (e: KeyboardEvent) => {
     e.preventDefault();
     openSettings();
   } else {
-    // A feature's panel, by its keys (0082, 0089).
-    fh.panelKey(e);
+    // A feature's command or panel, by its keys (0082, 0089, 0091).
+    fh.commandKey(e);
   }
 };
 onMounted(() => {
@@ -891,6 +895,8 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
               :format-editor="editorFor(type.id)"
               :read-only="access?.canWrite === false"
               :features="features"
+              :feature-commands="fh.editorCommands.value"
+              :feature-items="fh.menuItems"
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
               :focus-title="titleFocus === path"

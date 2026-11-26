@@ -23,13 +23,26 @@ export interface ClientFeature {
   editor?(ctx: FeatureEditorContext): FeatureEditor;
   /** Panels beside the document, its own or the workspace's. */
   panels?: FeaturePanel[];
+  /**
+   * What it does, by name (0091): each command's label and keys said once, for
+   * its menus (an item `{ command: id }`), the keys the core binds, and the
+   * shortcuts sheet. Each panel is a command too, made by the core
+   * (`panel:<id>`, opening it; its keys, if it has them).
+   */
+  commands?: FeatureCommand[];
+  /** The heading its commands (and its panels' keys) are listed under on the shortcuts sheet: its label, if not said. */
+  helpGroup?: string;
   /** Items for the open document's ⋯ menu, in a group of their own. */
-  documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
+  documentMenu?(ctx: FeatureDocumentContext): FeatureMenuEntry[];
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
-  fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
+  fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuEntry[];
   /** Its parts of Settings: the workspace's (its settings, while it is on there) and yours. */
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
-  /** Lines for the Markdown and shortcuts sheet: what it adds to typing and keys. */
+  /**
+   * Lines for the Markdown and shortcuts sheet that are not commands: what it
+   * adds to typing, and keys its own parts handle (a tree's arrows). Its
+   * commands' and panels' keys are listed from them, not here.
+   */
   help?: HelpItem[];
   /**
    * Called once it is in use for the open workspace (on there, and not hidden),
@@ -128,7 +141,7 @@ export interface NavigationView {
   label: string;
   mount(element: HTMLElement, ctx: NavigationContext): () => void;
   /** What it adds to the ＋ menu, after the core's New file and New folder (a manuscript's New chapter). */
-  newItems?(ctx: NavigationContext): FeatureMenuItem[];
+  newItems?(ctx: NavigationContext): FeatureMenuEntry[];
 }
 
 /** What the client gives a navigation view. */
@@ -361,7 +374,12 @@ export interface FeatureEditor {
   /** Marks for the margin beside the text, each at a place in the document. */
   margin?(view: EditorView): MarginItem[];
   /** What can be done with the selected text, offered beside it while there is a selection. */
-  selectionActions?(view: EditorView): FeatureMenuItem[];
+  selectionActions?(view: EditorView): FeatureMenuEntry[];
+  /**
+   * How this document does the feature's `editor` commands (0091), by id: true
+   * if it did. Their keys are bound in the editor, while it has the focus.
+   */
+  commands?: { [id: string]: (view: EditorView) => boolean };
   destroy?(): void;
 }
 
@@ -393,9 +411,47 @@ export interface MarginItem {
 export interface FeatureMenuItem {
   label: string;
   run(): void;
-  /** Its keys, as key bindings write them ('Mod-Alt-m'): shown beside it, not bound by the client. */
+  /** Its keys, as key bindings write them ('Mod-Alt-m'): shown beside it, not bound by the client (a command's are). */
   keys?: string;
   testid?: string;
+}
+
+/** A menu item that is one of the feature's commands (0091): its label (unless given), its keys and what it does are the command's. */
+export interface FeatureCommandItem {
+  /** The command's id: one of the feature's `commands`, or `panel:<id>` for one of its panels. */
+  command: string;
+  label?: string;
+  testid?: string;
+}
+
+/** What a feature puts in a menu: an item of its own, or one of its commands. */
+export type FeatureMenuEntry = FeatureMenuItem | FeatureCommandItem;
+
+/**
+ * Something a feature does, by name (0091). Its keys are bound by the core,
+ * once: keys another command or the app already has are refused (said in the
+ * console, and by the tests of the standard features), never bound twice.
+ */
+export interface FeatureCommand {
+  /** Its id within the feature ('comment'); `panel:` is the core's, for panels. */
+  id: string;
+  /** What it is called in menus: 'Comment'. */
+  label: string;
+  /** Its keys, as key bindings write them ('Mod-Alt-m'). */
+  keys?: string;
+  /**
+   * Where it is done:
+   * - `workspace` (the default): anywhere on the page, by `run`.
+   * - `document`: while a live document is open, by `run`.
+   * - `editor`: in the open document, its keys bound in the editor while it has
+   *   the focus, done by the document's FeatureEditor (`commands[id]`).
+   */
+  about?: 'workspace' | 'document' | 'editor';
+  run?(ctx: FeatureClientContext): void;
+  /** What the shortcuts sheet says it does, where it has keys: its label, if not said; false: not listed. */
+  help?: string | false;
+  /** A word more on the sheet, shown quietly after it. */
+  note?: string;
 }
 
 export interface FeatureDocumentContext extends FeatureClientContext {
@@ -436,6 +492,8 @@ export interface FeaturePanel {
   place?: PanelPlace;
   /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */
   icon?: FileIcon;
+  /** What the shortcuts sheet says its keys do: its label, if not said; false: not listed (0091). */
+  help?: string | false;
   /** Draw it into `element`; returns how to take it down. */
   mount(element: HTMLElement, ctx: FeaturePanelContext): () => void;
 }

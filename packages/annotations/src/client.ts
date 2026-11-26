@@ -26,8 +26,7 @@
 // Yours are in the room, changed live; everyone else's are in the room while a
 // device of theirs is, else read from their files and found again by quote.
 // Drawn with the DOM alone: a feature does not depend on the client's framework.
-import { keymap } from 'prosemirror-keymap';
-import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
+import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node, ResolvedPos } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
@@ -709,7 +708,9 @@ function editor(ctx: FeatureEditorContext) {
     },
   });
   return {
-    plugins: () => [plugin, keymap({ [COMMENT_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCommentBox(store, view), [CODE_KEYS]: (_state: EditorState, _dispatch?: unknown, view?: EditorView) => !!view && openCoding(store, view) })],
+    plugins: () => [plugin],
+    // Its commands (0091): their keys are bound by the core, in the editor.
+    commands: { comment: (view: EditorView) => openCommentBox(store, view), code: (view: EditorView) => openCoding(store, view) },
     margin: (view: EditorView) => {
       // Comments or coding turned on or off (the margin is drawn again then): the text's highlights drawn again too.
       const now = switches();
@@ -752,9 +753,9 @@ function editor(ctx: FeatureEditorContext) {
       });
       return [...items, ...tags];
     },
-    selectionActions: (view: EditorView) => (ctx.state ? [
-      ...(commenting(ctx) ? [{ label: 'Comment', keys: COMMENT_KEYS, testid: 'annotations-comment', run: () => void openCommentBox(store, view) }] : []),
-      ...(coding(ctx) ? [{ label: 'Code #', keys: CODE_KEYS, testid: 'annotations-code', run: () => void openCoding(store, view) }] : []),
+    selectionActions: () => (ctx.state ? [
+      ...(commenting(ctx) ? [{ command: 'comment', testid: 'annotations-comment' }] : []),
+      ...(coding(ctx) ? [{ command: 'code', testid: 'annotations-code' }] : []),
     ] : []),
     destroy: () => {
       closeOpen(store);
@@ -1468,28 +1469,29 @@ function injectStyle() {
 export const annotationsClient = defineClientFeature({
   id: 'annotations',
   editor,
+  helpGroup: 'Comments and coding',
+  // Done in the open document, by its editor (commands, in editor()), with the focus there.
+  commands: [
+    { id: 'comment', label: 'Comment', keys: COMMENT_KEYS, about: 'editor', help: 'Comment on the selected text, in a box beside it (↵ saves)' },
+    { id: 'code', label: 'Code #', keys: CODE_KEYS, about: 'editor', help: 'Code the selected text, or the point at the caret, as typing # does (where the workspace codes)' },
+  ],
   panels: [
-    { id: 'comments', label: 'Comments', about: 'document', keys: PANEL_KEYS, mount: mountComments },
+    { id: 'comments', label: 'Comments', about: 'document', keys: PANEL_KEYS, help: 'Show the document’s comments', mount: mountComments },
     { id: 'recent', label: 'Recent comments', about: 'workspace', mount: mountRecent },
     { id: 'codes', label: 'Codes', about: 'workspace', mount: mountCodes },
     { id: 'retrieve', label: 'Retrieve', about: 'workspace', mount: mountRetrieve },
   ],
   documentMenu: (ctx) => [
     ...(commenting(ctx) ? [
-      { label: 'Comments', keys: PANEL_KEYS, testid: 'menu-comments', run: () => ctx.openPanel('comments') },
-      { label: 'Recent comments', testid: 'menu-recent-comments', run: () => ctx.openPanel('recent') },
+      { command: 'panel:comments', testid: 'menu-comments' },
+      { command: 'panel:recent', testid: 'menu-recent-comments' },
     ] : []),
     ...(coding(ctx) ? [
-      { label: 'Codes', testid: 'menu-codes', run: () => ctx.openPanel('codes') },
-      { label: 'Retrieve coded passages', testid: 'menu-retrieve', run: () => ctx.openPanel('retrieve') },
+      { command: 'panel:codes', testid: 'menu-codes' },
+      { command: 'panel:retrieve', label: 'Retrieve coded passages', testid: 'menu-retrieve' },
     ] : []),
   ],
   settings: { workspace: { label: 'Annotations', inline: true, mount: mountSettings } },
-  help: [
-    { group: 'Comments and coding', keys: [COMMENT_KEYS], does: 'Comment on the selected text, in a box beside it (↵ saves)' },
-    { group: 'Comments and coding', keys: [PANEL_KEYS], does: 'Show the document’s comments' },
-    { group: 'Comments and coding', keys: [CODE_KEYS], does: 'Code the selected text, or the point at the caret, as typing # does (where the workspace codes)' },
-  ],
 });
 
 export const clients = { annotations: annotationsClient };

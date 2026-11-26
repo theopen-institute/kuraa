@@ -8,6 +8,7 @@ import { KEYS, S } from './strings.js';
 
 export const searchClient = defineClientFeature({
   id: 'search',
+  helpGroup: S.helpGroup,
   uses: ['search'],
   panels: [{
     id: 'search',
@@ -15,6 +16,7 @@ export const searchClient = defineClientFeature({
     about: 'workspace',
     keys: KEYS.open,
     toggle: false,
+    help: S.help,
     // A magnifying glass.
     icon: { paths: ['M11.5 7a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0z', 'M10.5 10.5 14 14'] },
     mount(element, ctx) {
@@ -23,5 +25,4 @@ export const searchClient = defineClientFeature({
       return () => app.unmount();
     },
   }],
-  help: [{ group: S.helpGroup, does: S.help, keys: [KEYS.open] }],
 });

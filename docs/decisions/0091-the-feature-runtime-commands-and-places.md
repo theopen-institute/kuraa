@@ -104,12 +104,37 @@ beside a selection; *Say hello*, done anywhere), a menu item naming a command, a
 no navigation of its own, so the core's menu at the upper left stays), used where the browser names
 it (`kuraa:layout`). `tests/e2e/feature-hooks.spec.ts` drives them.
 
-## Features come from this repository
+## Features come from this repository, for now
 
 The client's features are bundled with it (the shells pass `standardFeatureClients`); `--feature`
 turns loaded ones on and off, and loads none. Run components load at run time (`--component`), as
 they run on the host only. So `FEATURE_API_VERSION` (still 1: every change above was made with the
 features that use it) guards nothing today: both halves are always built together. **Features are
-first-party for now.** If features written elsewhere are to be loaded, the contract needs versions
-that mean something (each context's members, not one number), and the web client a way to load a
-client half the host serves; neither is designed here.
+first-party for now.**
+
+**The direction** (the owner): "For now, they're first party, but eventually I want all components to
+be addable by 3rd parties." Every kind (formats, engines, environments, tools, syncs, features), not
+only run components. Until that is designed, changes to the contracts keep it possible:
+
+- **What a component may do is said in its definition and checked when it runs**, not only by lint,
+  which never sees a third party's code. `uses` (above) is the first such check; others should follow
+  it rather than rely on the repository's import rules.
+- **The contracts stay free of any framework**, and **what a component may rely on is written down**
+  (the contexts in `feature-kit`, the look in `feature-ui`): both are what a third party builds
+  against, so a change to them is a change to a published interface.
+- **Nothing a component needs is reached around the contract** (the client's modules, the host's),
+  so that a component built elsewhere can do whatever a standard one does.
+
+What that design will have to decide, none of it decided here:
+
+- **Loading**: a client half served by the host and imported by the page at run time, as run
+  components are loaded by the host (`--component`); formats' editor modules likewise.
+- **Versions** that mean something: each contract and context versioned, a component saying which
+  it needs, and the host and client refusing (or adapting to) one they cannot give.
+- **Trust**: who may add a component (the host's owner, as for `--component`, whose code runs with
+  their rights), and what a client half may reach in the page (today, everything the page can: the
+  host's API with the access code, every document). Third parties' client halves may need to run
+  apart (an iframe, a worker) and reach the page only through the contract, which [0018](0018-untrusted-users.md)'s
+  trust in people, not code, does not cover.
+- **Keys and names** between components nobody coordinated: commands' keys are refused first come,
+  first served (above), which is order-dependent; ids may need a publisher's prefix.

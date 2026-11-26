@@ -120,7 +120,7 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .panes.history-open.side-open { grid-template-columns: 240px minmax(0, 1fr) 280px minmax(320px, 34%); }
 .pane { min-height: 0; overflow: auto; }
 .pane-left, .pane-right { background: var(--panel); }
-.pane-left { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+/* .pane-left is the sidebar's (@kuraa/sidebar), which styles the rest of it. */
 /* The space below the files: right-click for a new file or folder at the top level. */
 .pane-right { border-left: 1px solid var(--border); }
 .pane-header {
@@ -129,13 +129,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
   position: sticky; top: 0; background: var(--panel); z-index: 1;
 }
 .pane-header button { text-transform: none; letter-spacing: 0; font-size: 12px; }
-.pane-left .pane-header { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); gap: 8px; }
-.workspace-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-/* The workspace's name fills the header; its actions sit at the right. */
-.pane-left .pane-header > .workspace-name, .pane-left .pane-header > .workspace-switcher, .pane-left .pane-header > .workspace-title { flex: 1; }
-/* The connection's light, then the workspace's name and its menu. */
-.workspace-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.connection-light { display: inline-flex; align-items: center; flex: none; cursor: default; }
 .pane-header-actions { display: flex; gap: 2px; flex: none; margin-left: auto; }
 .pane-header-actions button { padding: 1px 7px; font-size: 14px; line-height: 1.2; border-color: transparent; background: none; color: var(--muted); }
 .pane-header-actions button:hover { color: var(--text); background: var(--selected); }
@@ -227,10 +220,6 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 
 /* The bottom of the sidebar: connection, who is here, and the menu. */
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-.dot.conn-connected { background: #30a46c; }
-.dot.conn-connecting { background: #f5a524; }
-.dot.conn-unauthorized, .dot.conn-disconnected { background: #e5484d; }
-.dot.conn-none { background: var(--border); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* The menu. */
@@ -546,10 +535,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .add-workspace textarea { font: 12px var(--mono); resize: vertical; }
 .add-workspace .segmented { justify-self: start; }
 /* The workspace switcher, in the sidebar's header. */
-.workspace-switcher { display: flex; align-items: center; gap: 4px; min-width: 0; border: 0; background: none; padding: 2px 6px; margin-left: -6px; font: inherit; font-weight: 600; color: inherit; border-radius: 5px; cursor: pointer; }
-.workspace-switcher:hover { background: var(--selected); }
-.workspace-switcher .workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-switcher .caret { color: var(--muted); font-size: 10px; }
 .no-workspace { display: grid; gap: 12px; justify-items: center; text-align: center; max-width: 380px; }
 .no-workspace p { margin: 0; color: var(--muted); }
 .no-workspace .actions { display: flex; gap: 8px; }

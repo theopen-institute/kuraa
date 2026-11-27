@@ -5,9 +5,9 @@
 // worktree, while your own `pnpm dev` and the desktop app go on as they are.
 //
 //   pnpm try                          the worktrees, to choose from (↑↓, Enter: pnpm dev, d: desktop)
-//   pnpm try <name>                   its pnpm dev, on a free port (never 5173), opened in the browser
+//   pnpm try <name>                   its pnpm dev, on a free port (never 5173), its address printed
 //   pnpm try <name> desktop           its desktop app, with data of its own
-//   --no-open                         the address said, the browser not opened
+//   --open                            the browser opened at it, once it is ready
 //
 // <name> is the worktree's folder (words-metadata), or its branch
 // (worktree-words-metadata), or the start of either, where only one has it.
@@ -26,9 +26,9 @@ import { basename, join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const given = process.argv.slice(2).filter((a) => a !== '--');
-/** --no-open: the address said, the browser not opened. */
-const noOpen = given.includes('--no-open');
-const args = given.filter((a) => a !== '--no-open');
+/** --open: the browser opened at its address; else the address is said, and nothing opened. */
+const openIt = given.includes('--open');
+const args = given.filter((a) => a !== '--open');
 const [name, modeArg, ...rest] = args;
 const mode = modeArg === 'desktop' ? 'desktop' : modeArg === 'dev' || modeArg === undefined ? 'dev' : null;
 const extra = modeArg === 'desktop' || modeArg === 'dev' ? rest : modeArg === undefined ? [] : [modeArg, ...rest];
@@ -198,7 +198,7 @@ if (chosenMode === 'dev') {
   child.stdout.on('data', (chunk: Buffer) => {
     process.stdout.write(chunk);
     // Opened once Vite is ready.
-    if (!opened && !noOpen && /ready in/.test(chunk.toString())) {
+    if (!opened && openIt && /ready in/.test(chunk.toString())) {
       opened = true;
       openInBrowser(url);
     }

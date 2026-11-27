@@ -409,7 +409,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
   /** No layout gives navigation: the core's own menu at the upper left. */
   const fallback = computed(() => !layout.value?.feature.layout?.navigation);
   const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
-  /** Views of a folder for the main area (0095), by `feature:view`, from the features in use. */
+  /** Views of a folder for the main area (0096), by `feature:view`, from the features in use. */
   const folderViews = computed(() => (ready.value ? features.value.flatMap((f) => (f.feature.folderViews ?? []).map((view) => ({ active: f, view, key: `${f.feature.id}:${view.id}` }))) : []));
 
   return {

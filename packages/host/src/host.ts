@@ -205,7 +205,7 @@ interface RoomRecord {
   companions: Set<string>;
   /** Companions' text kept with edits not written when the host last stopped: the room's features start from these. */
   keptCompanions: Record<string, string | null> | null;
-  /** A new document with no file yet (0096): its file made when there is first something in it. */
+  /** A new document with no file yet (0097): its file made when there is first something in it. */
   draft?: boolean;
   /** Its file just made, in a folder fewer read: committed into that space, not the workspace's own branch (0069). */
   madeInSpace?: string | null;
@@ -731,7 +731,7 @@ export class Host {
     const abs = this.resolvePath(path);
     if (!existsSync(abs)) {
       if (!draft) throw new HttpError(404, `No such file: ${path}`);
-      // A new document with no file yet (0096): empty, its file made when there is first something in it
+      // A new document with no file yet (0097): empty, its file made when there is first something in it
       // (flushNow writes only what differs from what it started with). Edits kept from before a restart, if any.
       const head = await this.git.head();
       const kept = await this.readUnsaved(key, type);
@@ -1155,7 +1155,7 @@ export class Host {
     const text = rec.type.serialize(doc, rec.previous);
     rec.dirty = false;
     if (text !== rec.previous.text || notText) {
-      // A draft's file is made now (0096): in its folder's space where that is one (as POST /api/files makes one).
+      // A draft's file is made now (0097): in its folder's space where that is one (as POST /api/files makes one).
       const making = rec.draft && !existsSync(abs);
       if (making) rec.madeInSpace = this.peers ? await this.peers.spaceForNew(rec.path) : null;
       try {
@@ -2705,7 +2705,7 @@ export class Host {
    * people editing it see the change, as anyone's edit. Call inside serial().
    */
   /**
-   * Set fields of a Markdown document's header (0095: a corkboard's synopsis,
+   * Set fields of a Markdown document's header (0096: a corkboard's synopsis,
    * an outline's status), open or not: written to the file, and where it is
    * open, the room takes it (everyone sees it at once). Not committed here.
    */

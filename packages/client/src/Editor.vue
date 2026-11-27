@@ -39,7 +39,7 @@ const props = defineProps<{
   api: HostApi;
   settings: Settings;
   path: string;
-  /** A new document with no file yet (0096): its room opens empty, its file made when there is first something in it. */
+  /** A new document with no file yet (0097): its room opens empty, its file made when there is first something in it. */
   draft?: boolean;
   type: DocumentType;
   /** Show the file's markdown source (editable) instead of the rich view. */
@@ -265,7 +265,7 @@ function open(carried: Carried | null = null): () => void {
   emit('status', status);
   const slowTimer = setTimeout(() => (slow.value = true), SLOW_MS);
   // The file from disk, apart from the room (which can wait behind the host's other work): shown until the room is ready.
-  // A draft (0096) has no file yet: nothing to read.
+  // A draft (0097) has no file yet: nothing to read.
   if (!props.draft) api.fileText(path).then((text) => {
     if (!cancelled && loading.value) preview.value = text;
   }, () => undefined);

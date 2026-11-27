@@ -116,7 +116,7 @@ describe('host', () => {
     expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown', title: 'Field notes' });
   });
 
-  it('a draft (0096): a new document with no file until something is written in it, then made and committed', async () => {
+  it('a draft (0097): a new document with no file until something is written in it, then made and committed', async () => {
     const draftRoom = (path: string) => api(`/api/rooms?path=${encodeURIComponent(path)}&draft=1`);
     expect((await draftRoom('a<b.md')).status).toBe(400);
     const { room } = (await (await draftRoom('drafts/harbour.md')).json()) as { room: string };

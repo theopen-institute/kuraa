@@ -71,7 +71,7 @@ export interface ClientFeature {
   /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */
   views?: NavigationView[];
   /**
-   * Views of a folder drawn in the main area, where a document is (0095: a
+   * Views of a folder drawn in the main area, where a document is (0096: a
    * corkboard, an outline): offered on a folder's menu, shown in place of the
    * open document until a document is opened.
    */
@@ -126,7 +126,7 @@ export interface LayoutContext extends FeatureClientContext {
   newMenu(at: HTMLElement): void;
   /** Whether ＋'s menu is open (for its button's aria-expanded). */
   newMenuOpen(): boolean;
-  /** A new document, at once (0096: ＋): opened with the cursor in its title, no file until something is written in it. */
+  /** A new document, at once (0097: ＋): opened with the cursor in its title, no file until something is written in it. */
   newDocument(): void;
   /** The workspace's panels with an icon (Search), to offer as buttons. */
   panelButtons(): { feature: string; id: string; label: string; keys?: string; icon: FileIcon }[];
@@ -187,7 +187,7 @@ export interface NavigationContext extends FeatureClientContext {
   openConflicts(path: string): void;
   /** The pointer rests on a file (null: it left): it is got ready ahead, to open sooner. */
   prefetch(path: string | null, now?: boolean): void;
-  /** Nothing open: a blank page, a new document with no file until something is written in it (0096: the space below the files clicked). */
+  /** Nothing open: a blank page, a new document with no file until something is written in it (0097: the space below the files clicked). */
   blank(): void;
   /** A new document, in a folder (none: the top level), opened with the cursor in its title: its path once made, or null if it was not. */
   newFile(folder?: string): Promise<string | null>;
@@ -220,12 +220,12 @@ export interface NavigationContext extends FeatureClientContext {
   fileMenu(path: string, at: { x: number; y: number }): void;
   /**
    * Show a folder ('' the top level) in the main area, in a folder view
-   * (0095: `feature:view`, as `'corkboard:outline'`; none: the one last
+   * (0096: `feature:view`, as `'corkboard:outline'`; none: the one last
    * shown, else the first there is). Whether it was: false where no
    * component gives a folder view.
    */
   showFolder(folder: string, view?: string): boolean;
-  /** The folder shown in the main area, if one is (0095), for navigation to mark it. */
+  /** The folder shown in the main area, if one is (0096), for navigation to mark it. */
   shownFolder(): string | null;
   /** A file's icon, as its type defines it (0023). */
   icon(file: NavigationFile): FileIcon | undefined;
@@ -302,7 +302,7 @@ export interface WordsDay {
   people: { name: string; email: string; net: number; added: number }[];
 }
 
-/** A view of a folder in the main area (0095). */
+/** A view of a folder in the main area (0096). */
 export interface FolderView {
   id: string;
   /** What it is called on a folder's menu ('Corkboard'). */
@@ -404,7 +404,7 @@ export interface CoreHost {
 /** A service of the host's (CoreHost), by name. */
 export type CoreService = keyof CoreHost;
 
-/** Documents, whether open or not (0095). */
+/** Documents, whether open or not (0096). */
 export interface DocumentService {
   /**
    * Set fields of a document's header (its front matter), as one change;

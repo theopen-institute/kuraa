@@ -39,7 +39,7 @@ const emit = defineEmits<{
   documentSettings: [path: string];
   /** A new document was made by New file: it opens with the cursor in its title. */
   created: [path: string];
-  /** A new document opened with no file yet (0096): made when there is first something in it. */
+  /** A new document opened with no file yet (0097): made when there is first something in it. */
   draft: [path: string];
   /** This file's permissions: who can read it, and who can change it (0066, 0067). */
   permissions: [path: string];
@@ -101,7 +101,7 @@ async function create(folder = ''): Promise<string | null> {
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   emit('reveal', path);
   emit('created', path);
-  // Nothing written yet (0096): opened as a draft, its file made when there is first something in it.
+  // Nothing written yet (0097): opened as a draft, its file made when there is first something in it.
   emit('draft', path);
   return path;
 }
@@ -277,7 +277,7 @@ function menuItems(path: string, plus = false): ContextItem[] {
 
 /** The menu for a file, a folder (ending in `/`) or the top level (''), at a point. */
 function fileMenu(path: string, at: { x: number; y: number }) {
-  // The top level's: what the views add to ＋ too (0096: ＋ itself makes a document at once).
+  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once).
   const extra = path === '' ? (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 })) : [];
   menu.value = { x: at.x, y: at.y, items: [...menuItems(path), ...extra] };
 }

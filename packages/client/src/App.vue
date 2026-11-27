@@ -550,7 +550,7 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
 function select(next: string | null) {
-  // A document opened: in place of a folder's view (0095).
+  // A document opened: in place of a folder's view (0096).
   if (next !== null) mainView.value = null;
   if (next === path.value) return;
   liveTitle.value = null;
@@ -563,7 +563,7 @@ function select(next: string | null) {
 }
 
 /**
- * What the main area shows instead of a document (0095): a folder, in one of
+ * What the main area shows instead of a document (0096): a folder, in one of
  * the folder views components give (a corkboard, an outline), until a
  * document is opened.
  */
@@ -640,7 +640,7 @@ function showMoved(from: string, folder: string, names: string[] | null) {
 }
 
 /**
- * New documents with no file yet (0096), by path: open in the editor, their
+ * New documents with no file yet (0097), by path: open in the editor, their
  * room empty, their file made by the host when there is first something in
  * them. One left untouched is never written. Gone from here once the file list
  * has the file.
@@ -656,11 +656,11 @@ watch(files, (list) => {
   const left = [...drafts.value].filter((p) => !made.has(p));
   if (left.length !== drafts.value.size) drafts.value = new Set(left);
 });
-/** ＋ (0096): a new document at once, in the folder shown, else at the top; the cursor in its title. */
+/** ＋ (0097): a new document at once, in the folder shown, else at the top; the cursor in its title. */
 function newDocument() {
   void fileActions.value?.create(shownFolderView.value?.folder ?? '');
 }
-/** Nothing open: a blank page, a new document with no file until something is written in it (0096). */
+/** Nothing open: a blank page, a new document with no file until something is written in it (0097). */
 function blankPage() {
   mainView.value = null;
   if (path.value && drafts.value.has(path.value)) return;
@@ -813,7 +813,7 @@ const openKey = () => `${OPEN_KEY}:${api.value.baseUrl}`;
 watch(api, () => {
   try { path.value = sessionStorage.getItem(openKey()); } catch { path.value = null; }
 }, { immediate: true });
-// A draft is not (0096): reloaded, a blank one again; once it has its file, it is.
+// A draft is not (0097): reloaded, a blank one again; once it has its file, it is.
 watch([path, drafts], ([p]) => {
   try {
     if (p && !drafts.value.has(p)) sessionStorage.setItem(openKey(), p);
@@ -826,11 +826,11 @@ const file = computed(() => shownFiles.value.find((f) => f.path === path.value) 
 const fileName = computed(() => (file.value?.title || path.value?.slice(path.value.lastIndexOf('/') + 1)) ?? null);
 
 watchEffect(() => {
-  // A draft (0096) has no name of its own yet: the workspace's alone.
+  // A draft (0097) has no name of its own yet: the workspace's alone.
   const own = path.value && drafts.value.has(path.value) ? null : fileName.value;
   document.title = [own, workspace.value?.name, S.app.title].filter(Boolean).join(' · ');
 });
-/** The open document's type: as the file list says it, or for a draft (no file yet, 0096), as its name says it. */
+/** The open document's type: as the file list says it, or for a draft (no file yet, 0097), as its name says it. */
 const typeId = computed(() => file.value?.type ?? (path.value && drafts.value.has(path.value) ? hostRegistry.value.resolve(path.value)?.id ?? null : null));
 const type = computed(() => (typeId.value ? registry.value.get(typeId.value) : undefined));
 const hostType = computed(() => workspace.value?.types.find((t) => t.id === typeId.value));
@@ -996,7 +996,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
             </div>
           </div>
         </div>
-        <!-- A folder, in a view of a component's (0095: a corkboard, an outline). -->
+        <!-- A folder, in a view of a component's (0096: a corkboard, an outline). -->
         <div v-else-if="!path && ready && shownFolderView && folderMount" class="folder-view-pane">
           <FeatureMount :key="`${shownFolderView.key}|${shownFolderView.folder}`" class="folder-view" testid="folder-view" :mount="folderMount" />
         </div>

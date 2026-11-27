@@ -1,4 +1,4 @@
-# 0095 · The corkboard and the outline
+# 0096 · The corkboard and the outline
 
 **Status: built.** A component, `@kuraa/corkboard` (on by default), and two things the core gives
 components for it: views of a folder in the main area, and a document's header fields set whether it

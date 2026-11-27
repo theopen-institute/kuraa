@@ -159,7 +159,7 @@ const workspaceRoutes: Route[] = [
   route('GET', '/api/components', async ({ host, res }) => send(res, 200, await host.components())),
 
   route('GET', '/api/rooms', async ({ host, res, q }) => {
-    // A new document with no file yet (draft=1, 0096): opened empty, its file made when there is first something
+    // A new document with no file yet (draft=1, 0097): opened empty, its file made when there is first something
     // in it; only where a file could be made by this person (a name that travels, a folder they may change).
     const draft = q.get('draft') === '1';
     if (draft) {
@@ -282,7 +282,7 @@ const fileRoutes: Route[] = [
     send(res, 200, { files, folders: marks.folders, orders });
   }),
 
-  // A document's header fields set (0095: a corkboard's synopsis, an outline's
+  // A document's header fields set (0096: a corkboard's synopsis, an outline's
   // status), open or not; committed, credited to whoever asked.
   route('POST', '/api/documents/header', async ({ host, req, res }) => {
     const body = await readBody(req);

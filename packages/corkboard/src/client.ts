@@ -1,4 +1,4 @@
-// The corkboard's and the outline's client half (0095): two views of a folder
+// The corkboard's and the outline's client half (0096): two views of a folder
 // for the main area, offered on a folder's menu; each switches to the other.
 import { createApp } from 'vue';
 import { defineClientFeature, type FolderViewContext } from '@kuraa/feature-kit/client';

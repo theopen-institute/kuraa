@@ -187,7 +187,7 @@ export interface TreeContext {
   /** The pointer rests on a file (null: it left): its room is asked for ahead, so it opens sooner. */
   prefetch(path: string | null, now?: boolean): void;
   toggle(folder: string): void;
-  /** A folder's name clicked (0095): shown in the main area (its corkboard, its outline); where nothing shows folders, opened or closed. */
+  /** A folder's name clicked (0096): shown in the main area (its corkboard, its outline); where nothing shows folders, opened or closed. */
   openFolder(folder: string): void;
   /** The folder shown in the main area, if one is. */
   shownFolder: Ref<string | null>;

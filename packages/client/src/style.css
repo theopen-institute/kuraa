@@ -809,6 +809,6 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .role-menu:hover { border-color: var(--muted); }
 /* Removing someone: apart, at the row's end, as removing a computer is. */
 .person-line button.danger { margin-left: auto; color: var(--warn); }
-/* A folder in a component's view, in the main area (0095: a corkboard, an outline). */
+/* A folder in a component's view, in the main area (0096: a corkboard, an outline). */
 .folder-view-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .folder-view-pane > .folder-view { flex: 1; min-height: 0; overflow: auto; }

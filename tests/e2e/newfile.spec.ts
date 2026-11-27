@@ -24,7 +24,7 @@ test('New file makes an untitled document at once: its title is typed in the pag
   })).status).toBe(201);
   await openApp(page);
 
-  // ＋, no menu: an untitled Markdown document, open, with the cursor in its title; no file yet (0096).
+  // ＋, no menu: an untitled Markdown document, open, with the cursor in its title; no file yet (0097).
   const untitledRows = page.locator('[role="treeitem"][data-path^="untitled-"]');
   const before = await untitledRows.count();
   await page.getByRole('button', { name: 'New document', exact: true }).click();
@@ -152,7 +152,7 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
 
   // A new folder: committed (with a placeholder git keeps), shown, and a place for new files.
   const folder = `runs/folder-${Date.now().toString(36)}`;
-  // ＋ in the header makes a document at once (0096); its menu, right-clicked: a new file or a new folder, at the
+  // ＋ in the header makes a document at once (0097); its menu, right-clicked: a new file or a new folder, at the
   // top level. Escape closes it.
   const plus = page.getByRole('button', { name: 'New document', exact: true });
   const menu = page.getByTestId('context-menu');
@@ -177,7 +177,7 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.locator('[data-testid$="/.gitkeep"]')).toHaveCount(0);
   await row.hover();
   await row.getByRole('button', { name: /^New file in/ }).click();
-  // In the folder, once something is written in it (0096).
+  // In the folder, once something is written in it (0097).
   await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
   await page.keyboard.type('Field day');
   await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', new RegExp(`^${folder}/untitled-[a-z0-9]{5}\\.md$`));

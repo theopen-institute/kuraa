@@ -1,4 +1,4 @@
-// A document's header (its YAML front matter) changed by its fields (0095): a
+// A document's header (its YAML front matter) changed by its fields (0096): a
 // corkboard's or an outline's edit to a document that may not be open. Only
 // the fields named change; the rest of the header (comments, order, how each
 // is written) and the document after it stay as they were.

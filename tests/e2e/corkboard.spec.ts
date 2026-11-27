@@ -1,4 +1,4 @@
-// The corkboard and the outline (docs/decisions/0095-corkboard-and-outline.md):
+// The corkboard and the outline (docs/decisions/0096-corkboard-and-outline.md):
 // a folder shown in the main area from its menu, as cards in the file tree's
 // order; a synopsis written on a card, into the document's header; a card
 // dragged before another, the folder's order following; the outline, a status

@@ -1,4 +1,4 @@
-// The corkboard and the outline (docs/decisions/0095-corkboard-and-outline.md):
+// The corkboard and the outline (docs/decisions/0096-corkboard-and-outline.md):
 // a folder's documents and folders, in the file tree's order, as index cards or
 // as rows, in the main area. Its host half gives what they show of each: a
 // document's synopsis, label and status (its header: Document details', 0094),

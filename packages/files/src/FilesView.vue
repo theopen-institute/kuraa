@@ -352,7 +352,7 @@ revealFolderOf(selected.value);
 .tree-file.selected .file-icon { color: var(--text); }
 .tree-folder { color: var(--muted); }
 .tree-file.selected > .tree-row { background: var(--selected); font-weight: 600; }
-/* The folder shown in the main area (0095): marked as the open file is; its icon opens and closes it. */
+/* The folder shown in the main area (0096): marked as the open file is; its icon opens and closes it. */
 .tree-dir.shown > .tree-dir-row { background: var(--selected); }
 .tree-dir.shown > .tree-dir-row .tree-folder { color: var(--text); font-weight: 600; }
 .tree-fold { display: inline-flex; align-items: center; border-radius: 3px; }

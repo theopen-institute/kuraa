@@ -1,4 +1,4 @@
-// A document's header changed by its fields (0095): only those named, the rest
+// A document's header changed by its fields (0096): only those named, the rest
 // of the header and the document as they were.
 import { describe, expect, it } from 'vitest';
 import { withHeaderFields } from '../src/header.js';

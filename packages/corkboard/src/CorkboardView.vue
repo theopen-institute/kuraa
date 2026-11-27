@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A folder in the main area (0095), as index cards (the corkboard) or as rows
+// A folder in the main area (0096), as index cards (the corkboard) or as rows
 // (the outline): what is in it, in the file tree's order (its .kuraa-order, then
 // by name), each document with its synopsis, label, status and words; each
 // folder with its documents and words. Drag a card or a row to arrange them

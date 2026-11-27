@@ -1,4 +1,4 @@
-# 0096 · Starting to write
+# 0097 · Starting to write
 
 **Status: built.** Starting a new document is made as plain as it can be: there is always a page to
 write on, and a file is made only when something is written in it. It revises 0086 (＋ a menu of a

@@ -1,4 +1,4 @@
-// The corkboard and the outline (docs/decisions/0095-corkboard-and-outline.md)
+// The corkboard and the outline (docs/decisions/0096-corkboard-and-outline.md)
 // on a host: what a folder's cards show (documents' details, words and targets;
 // folders' documents and words, all through them), and a document's header
 // fields set through the core, committed, credited to whoever asked.

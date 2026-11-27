@@ -40,7 +40,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await create(path, '');
   await openApp(page);
 
-  // Nothing open: a blank document (no file until something is written in it), the cursor in its title (0096).
+  // Nothing open: a blank document (no file until something is written in it), the cursor in its title (0097).
   await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
 
   await openFile(page, path);

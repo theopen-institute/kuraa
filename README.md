@@ -165,7 +165,7 @@ tree's order, as index cards (each document's title, synopsis, label, status and
 (the synopsis a second line under each). Write a synopsis on a card, or a synopsis, label, status or target in a row,
 and it goes into the document's header, open or not; drag a card or a row to arrange the folder (the
 file tree follows). A folder's card opens that folder; a document's title opens the document
-([0095](docs/decisions/0095-corkboard-and-outline.md)).
+([0096](docs/decisions/0096-corkboard-and-outline.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

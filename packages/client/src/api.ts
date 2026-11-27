@@ -268,14 +268,14 @@ export class HostApi {
   }
   tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[]; orders?: Record<string, string[]> }>('/api/tree'); }
   /** A folder's order (0093): its files' and folders' names as arranged ('' the top level; none: by name). */
-  /** A document's header fields set, open or not (0095). */
+  /** A document's header fields set, open or not (0096). */
   setHeader(path: string, fields: Record<string, unknown>, by: { name: string; email: string; color: string }) { return this.json<{ path: string; commit: string | null }>('/api/documents/header', { method: 'POST', body: JSON.stringify({ path, fields, by }) }); }
   setOrder(folder: string, names: string[]) { return this.json<{ folder: string; names: string[] }>('/api/order', { method: 'POST', body: JSON.stringify({ folder, names }) }); }
   /** A file's or folder's permissions (0069). */
   permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }
   /** Say a file's or folder's permissions: who may change it, who reads it (null: as its folder says; omitted: as it is). */
   setPermissions(path: string, change: { write?: string[] | null; read?: string[] | null }) { return this.json<PermissionsInfo>('/api/permissions', { method: 'POST', body: JSON.stringify({ path, ...change }) }); }
-  /** A document's room; with `draft`, one with no file yet may open, empty (0096). */
+  /** A document's room; with `draft`, one with no file yet may open, empty (0097). */
   room(path: string, draft = false) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}${draft ? '&draft=1' : ''}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
   /** A workspace file as it is (an image to show), with its type. */

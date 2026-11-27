@@ -119,7 +119,7 @@ export function navigationContext(base: FeatureClientContext, app: NavigationApp
   };
 }
 
-/** What a folder view is given (0095): navigation's, the folder it shows, and the views it may switch to. */
+/** What a folder view is given (0096): navigation's, the folder it shows, and the views it may switch to. */
 export function folderViewContext(base: FeatureClientContext, app: NavigationApp, events: NavigationEvents, shown: { folder: string; key: string; views: () => { key: string; label: string }[] }): FolderViewContext {
   return {
     ...navigationContext(base, app, events),

@@ -71,7 +71,7 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
         @click="t.openFolder(c.folder.path)"
       >
         <span class="tree-row tree-folder" :style="indent">
-          <!-- The icon opens and closes the folder; the rest of the row shows it (0095: its corkboard, its outline). -->
+          <!-- The icon opens and closes the folder; the rest of the row shows it (0096: its corkboard, its outline). -->
           <span class="tree-fold" :title="collapsed.has(c.folder.path) ? S.unfold : S.fold" :data-testid="`fold:${c.folder.path}`" @click.stop="t.toggle(c.folder.path)"><FileIcon class="tree-icon" :icon="collapsed.has(c.folder.path) ? FOLDER : FOLDER_OPEN" /></span><span class="tree-name">{{ c.folder.name }}</span>
           <span v-for="m in t.marksOf(c.folder.path + '/')" :key="m.label" class="tree-mark" :title="m.label" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /><span v-else-if="m.color" class="tree-mark-dot" :style="{ background: m.color }" /></span>
           <template v-if="t.folderMarks.value.has(c.folder.path)">

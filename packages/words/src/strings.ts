@@ -6,6 +6,7 @@ const signed = (x: number) => `${x > 0 ? '+' : ''}${n(x)}`;
 export const S = {
   panel: 'Words',
   /** The ⋯ menu's foot: the document's words, and your total today in every document (net). */
+  footerTitle: 'Targets, and the days before',
   footer: (words: number, today: number) => `Word count: ${n(words)} (Total today: ${today > 0 ? '+' : ''}${n(today)})`,
   thisDocument: 'This document',
   words: 'words',

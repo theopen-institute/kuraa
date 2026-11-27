@@ -24,7 +24,7 @@ menu", then "Put the word count in the footer, below the saved status. Keep it s
 count: xxx`. Then, in the same line: `(Words today: +xxx)`", and "Instead of words today do 'total
 today', to show it's across all documents"). Below when it was saved, one line, counted as the menu
 opens: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document. A
-component adds such a line with `documentFooter`. **Words…** in the menu opens the **Words** panel.
+component adds such a line with `documentFooter` (with `run`, it is chosen as an item is). Clicking it opens the **Words** panel ("Couldn't that be opened by clicking on the word count line?": there is no **Words…** item).
 (The core keeps the strip along the document's own foot, unused for now: a **status** panel, always
 drawn there, never opened or closed. What components add to the ⋯ menu is made as it opens, given the
 document's live view and its `header()`.) The panel has:

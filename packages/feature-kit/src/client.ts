@@ -27,9 +27,11 @@ export interface ClientFeature {
   documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
   /**
    * A line for the foot of the open document's ⋯ menu, below when it was
-   * saved (0094: its word count), made as the menu opens; null for none.
+   * saved (0094: its word count), made as the menu opens; null for none. With
+   * `run`, it is chosen as an item is (clicked, or Enter): the menu closes,
+   * then it runs (the Words panel opens).
    */
-  documentFooter?(ctx: FeatureDocumentContext): { text: string; testid?: string } | null;
+  documentFooter?(ctx: FeatureDocumentContext): { text: string; testid?: string; title?: string; run?(): void } | null;
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
   /**

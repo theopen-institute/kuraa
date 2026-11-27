@@ -44,9 +44,9 @@ test('words counted as typed, a document’s target and details kept in its head
   // Today, from the history and what is not committed yet: net and added, said apart.
   await expect.poll(menuWords, { timeout: 15_000 }).toBe('Word count: 7 (Total today: +2)');
 
-  // A target for it, from the Words panel (its item in the menu): kept in its header.
+  // A target for it, from the Words panel (the word count at the menu's foot, clicked): kept in its header.
   await page.getByTestId('document-menu-button').click();
-  await page.getByTestId('menu-words').click();
+  await page.getByTestId('words-footer').click();
   await expect(page.getByTestId('words-panel')).toBeVisible();
   await expect(page.getByTestId('words-panel-net')).toHaveText('+2 net');
   await expect(page.getByTestId('words-panel-added')).toHaveText('2 added');

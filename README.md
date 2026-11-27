@@ -146,7 +146,7 @@ where code runs): folders' names and documents' titles become headings, one leve
 down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. These choices and the book's title are kept in
 a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
 
-The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; **Words…** in the menu
+The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as
 `target-words`) and one for a day (yours, in this browser), and to see everyone's words today and
 yours for the last seven days. Words by day come from the workspace's history: every save but merges

@@ -34,7 +34,7 @@ const props = defineProps<{
   /** What features add (0082): a group of their own, after the versions. */
   featureItems?: FeatureMenuItem[];
   /** Lines features add to the foot, below when it was saved (0094: its word count). */
-  featureFooter?: { text: string; testid?: string }[];
+  featureFooter?: { text: string; testid?: string; title?: string; run?(): void }[];
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -148,7 +148,11 @@ function onKey(e: KeyboardEvent) {
         <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
         <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
       </p>
-      <p v-for="line in featureFooter ?? []" :key="line.text" class="menu-footer menu-footer-more" role="none" :data-testid="line.testid">{{ line.text }}</p>
+      <template v-for="line in featureFooter ?? []" :key="line.text">
+        <!-- A line that does something is chosen as an item is (click, Enter; the arrows reach it). -->
+        <button v-if="line.run" type="button" role="menuitem" class="menu-footer menu-footer-more menu-footer-action" :title="line.title" :data-testid="line.testid" @click="then(() => line.run!())">{{ line.text }}</button>
+        <p v-else class="menu-footer menu-footer-more" role="none" :title="line.title" :data-testid="line.testid">{{ line.text }}</p>
+      </template>
     </div>
   </div>
 </template>

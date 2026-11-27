@@ -18,8 +18,8 @@ key, which no person vouched for.
 | --- | --- | --- |
 | `genesis` | the workspace's first admin, its owner | no one: it is the root (below) |
 | `grant` | someone is in a group, as admin or member | an admin of the group, or of the workspace (a new group: the workspace's admins). Making or unmaking a workspace admin, only the owner. Into a group other than the workspace, only someone in it. Never the owner made a member |
-| `revoke` | someone is out of a group (`cutoff`: the commits the remover had) | an admin of the group, or the person themselves (leaving). A workspace admin, only the owner (or themselves). Never the owner |
-| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`); a key not a server already |
+| `revoke` | someone is out of a group (`cutoff`: the commits the remover had); or a server out of the workspace | an admin of the group, or the person themselves (leaving). A workspace admin, only the owner (or themselves). Never the owner. A server, only the owner |
+| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`); a key not a server already (one taken out may come back so, by a new link) |
 | `admit` | a device let the holder of a signing key in by an invite link (it checked, by its own clock, that the link had not expired nor been revoked) | anyone in the workspace |
 | `unlink` | an invite link lets no one into its group any more | an admin of the group |
 | `owner` | someone in the workspace is the owner now | the owner |
@@ -114,7 +114,9 @@ holds, and on all of them together:
   by a person's key.
 - **Servers.** Each server has a join of its own counting, by a link for one server, for the
   workspace, with someone in letting it in first. A server is in no group, its key is no person's
-  and not dropped; it may change no file, and reads a space only where its audience names it.
+  and not dropped; it may change no file, and reads a space only where its audience names it. One
+  taken out is a server again only by a join of its own after the taking out; out, its cutoff is on
+  record.
 - **Nothing after one is out.** Of someone out of the workspace, nothing counts that is not in the
   past of a removal of them that counts, but their leaving (or a ring of removals).
 - **Removals stand.** Nothing counts that a removal or drop counting at the same time beats, but in
@@ -136,9 +138,11 @@ itself by its own `join` (role `server`). It reads the workspace's own files, an
 audience names its key (never by `admins` or a group); it may change nothing, whatever the rules say
 or where they say nothing, not even a file named for it; it is in no group (a grant naming it counts
 for nothing, and its join takes it out of any a grant made at the same time put it in). Nothing else
-its key signs counts. A `drop` of its key, the owner's to make, takes it out for good. Restrictive
-wins as for anyone: a drop of its key at the same time as its join beats the join, as does an unlink
-of the link.
+its key signs counts. The owner takes it out as a person is taken out, a `revoke` of the workspace
+naming its key: it is out, with its cutoff on record, and may be invited back, its join by a new link
+counting again. A `drop` of its key (lost or stolen), the owner's too, is for good: no join by it
+counts again. Restrictive wins as for anyone: a taking out or a drop beats what its key did at the same
+time, its join included, as does an unlink of the link.
 
 ## A person's own files
 

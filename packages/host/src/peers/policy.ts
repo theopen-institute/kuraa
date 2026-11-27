@@ -62,8 +62,9 @@
 //   by its own `join` with an owner's invite link for a server (role `server`,
 //   for one). The only operation of a key that is no one's that counts. A
 //   server reads the workspace's own files and the spaces whose audiences name
-//   it, changes nothing, is in no group, and is taken out by a `drop` of its
-//   key, the owner's to make.
+//   it, changes nothing, and is in no group. The owner takes it out as a person
+//   is taken out (`revoke`, of the workspace): it may be invited back, by a new
+//   link. A `drop` of its key (lost or stolen) is for good, as a computer's.
 //
 // Two operations made at the same time that cannot both count: the one that
 // gives less counts (0078, clash). Each time that decides, it is on record.
@@ -763,6 +764,8 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       return may && (op.group === WORKSPACE || nested || ws.has(op.who));
     }
     case 'revoke': {
+      // A server (0099): taken out of the workspace by the owner, to be invited back if they choose.
+      if (s.servers.has(op.who)) return op.group === WORKSPACE && now.isOwner(by);
       const may = now.isAdmin(by, op.group) || op.who === by;
       // The owner does not leave, nor is taken out (they give the role first); an admin is taken out by the owner, or leaves (0070).
       if (op.group === WORKSPACE && op.who === s.owner) return false;
@@ -855,6 +858,11 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
       group(op.group).set(op.who, op.role);
       return true;
     case 'revoke':
+      // A server taken out (0099): no longer one of the servers; a join by a new link puts it back.
+      if (op.group === WORKSPACE && s.servers.has(op.who)) {
+        s.servers.delete(op.who);
+        return true;
+      }
       if (!s.groups.get(op.group)?.has(op.who)) return false;
       s.groups.get(op.group)!.delete(op.who);
       // Out of the workspace: out of every group.
@@ -1205,7 +1213,7 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   const appliedSet = new Set(state.applied);
   for (const e of ok) {
     const op = e.op;
-    if (op.t !== 'revoke' || op.group !== WORKSPACE || state.groups.get(WORKSPACE)!.has(op.who) || !appliedSet.has(e.id)) continue;
+    if (op.t !== 'revoke' || op.group !== WORKSPACE || state.groups.get(WORKSPACE)!.has(op.who) || state.servers.has(op.who) || !appliedSet.has(e.id)) continue;
     cutoffs.set(op.who, [...new Set([...(cutoffs.get(op.who) ?? []), ...(op.cutoff ?? [])])].sort());
   }
   return new Policy({

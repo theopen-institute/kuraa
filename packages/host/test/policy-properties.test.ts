@@ -49,7 +49,8 @@ type Step =
   | { k: 'forged'; device: number; by: number; op: OpSpec }
   | { k: 'replay'; device: number; by: number; pick: number }
   | { k: 'rival'; device: number; by: number }
-  | { k: 'server'; device: number; which: number; op: OpSpec; letIn: number | null };
+  | { k: 'server'; device: number; which: number; op: OpSpec; letIn: number | null }
+  | { k: 'out-and-back'; device: number; which: number; back: boolean; link: number };
 
 type OpSpec =
   | { t: 'grant'; group: number; who: number; role: Role }
@@ -65,6 +66,7 @@ type OpSpec =
   | { t: 'admit'; link: number; who: number }
   | { t: 'admit-server'; link: number; which: number }
   | { t: 'drop-server'; which: number }
+  | { t: 'out-server'; which: number }
   | { t: 'grant-server'; which: number; group: number }
   | { t: 'space-server'; id: number; audience: number[]; which: number };
 
@@ -89,6 +91,7 @@ const opSpec: fc.Arbitrary<OpSpec> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ t: fc.constant('admit' as const), link: fc.integer({ min: 0, max: LINKS.length - 1 }), who: anyone }) },
   { weight: 2, arbitrary: fc.record({ t: fc.constant('admit-server' as const), link, which }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('drop-server' as const), which }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant('out-server' as const), which }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('grant-server' as const), which, group }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('space-server' as const), id: fc.integer({ min: 0, max: SPACES.length - 1 }), audience: fc.uniqueArray(honest, { maxLength: 2 }), which }) },
 );
@@ -107,6 +110,7 @@ const honestStep: fc.Arbitrary<Step> = fc.oneof(
   { weight: 3, arbitrary: fc.record({ k: fc.constant('op' as const), device, by: honest, op: opSpec, back: fc.constant(0) }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant('sync' as const), from: device, to: device }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant('server' as const), device, which, op: serverSpec, letIn }) },
+  { weight: 1, arbitrary: fc.record({ k: fc.constant('out-and-back' as const), device, which, back: fc.boolean(), link }) },
 );
 const adversarialStep: fc.Arbitrary<Step> = fc.oneof(
   { weight: 6, arbitrary: fc.record({ k: fc.constant('op' as const), device, by: anyone, op: opSpec, back }) },
@@ -159,6 +163,7 @@ function toOp(spec: OpSpec, by: number, ctx: PolicyContext, server?: number): Po
     case 'admit': return { t: 'admit', link: LINKS[spec.link]!, key: people[spec.who]!.key.publicKey.toString('hex') };
     case 'admit-server': return { t: 'admit', link: SERVER_LINKS[spec.link]!, key: serverIds[spec.which]! };
     case 'drop-server': return { t: 'drop', key: serverIds[spec.which]! };
+    case 'out-server': return { t: 'revoke', group: WORKSPACE, who: serverIds[spec.which]! };
     case 'grant-server': return { t: 'grant', group: GROUPS[spec.group]!, who: serverIds[spec.which]!, role: 'member' };
     case 'space-server': return { t: 'space', id: SPACES[spec.id]!, audience: [...spec.audience.map((i) => ids[i]!), serverIds[spec.which]!].sort() };
     case 'join': {
@@ -227,6 +232,19 @@ function play(steps: Step[]) {
         parents = [admit.id];
       }
       put(s.device, makeOp(WS, op, parents, servers[s.which]!));
+    } else if (s.k === 'out-and-back') {
+      // As the owner does in the app (0099): takes a server out; and, at times, invites it back by a new link, which a
+      // device lets it in by and it joins by. Ada, the owner at first: once she has handed the role on, hers count not.
+      const key = serverIds[s.which]!;
+      const out = makeOp(WS, { t: 'revoke', group: WORKSPACE, who: key }, heads, ada.key);
+      put(s.device, out);
+      if (s.back) {
+        const spec: OpSpec = { t: 'join', group: 0, role: 'server', granter: 0, link: s.link, once: true, admitted: true };
+        const join = toOp(spec, 0, ctx, s.which);
+        const admit = makeOp(WS, { t: 'admit', link: (join as Extract<PolicyOp, { t: 'join' }>).link, key }, [out.id], ada.key);
+        put(s.device, admit);
+        put(s.device, makeOp(WS, join, [admit.id], servers[s.which]!));
+      }
     }
   }
   const all = new Map<string, PolicyEntry>();
@@ -369,6 +387,15 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
     const admitted = crypto.verify(admittedGrantMessage(WS, p.geneses[0]!, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer ?? ''), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
     if (admitted && !applied.some((a) => a.op.t === 'admit' && a.op.link === op.link && a.op.key === j.signer && past.get(j.id)!.has(a.id))) out.push('a join by a grant since counted with no one letting its maker in');
   }
+  // A server taken out (0099) is back only by a join of its own after (not before, nor at the same time as) every
+  // taking out of it that counts; taken out by the owner alone.
+  for (const r of applied) {
+    if (r.op.t !== 'revoke' || !serverIds.includes(r.op.who)) continue;
+    const who = r.op.who;
+    const rejoined = applied.some((j) => j.signer === who && j.op.t === 'join' && j.op.role === 'server' && past.get(j.id)!.has(r.id));
+    if (p.servers.has(who) && !rejoined) out.push('a server taken out is back with no join of its own after');
+    if (!p.servers.has(who) && !p.cutoffs.has(who)) out.push('a server taken out with no cutoff on record');
+  }
   // Servers (0099): each by a join of its own counting, by the owner's link for one, with someone in letting it in first;
   // in no group, never dropped; reading only the workspace's files and spaces naming it; changing nothing.
   for (const sv of p.servers) {
@@ -417,6 +444,8 @@ describe('the policy, over histories made at random', () => {
     let applied = 0;
     let withConcurrent = 0;
     let withServer = 0;
+    let serverOut = 0;
+    let serverBack = 0;
     const whys = new Set<string>();
     const samples = fc.sample(fc.array(fc.oneof(honestStep, adversarialStep), { minLength: 10, maxLength: 24 }), { numRuns: 300, seed: 7 });
     for (const steps of samples) {
@@ -428,11 +457,17 @@ describe('the policy, over histories made at random', () => {
       if (counted.some((a) => counted.some((b) => a !== b && !past.get(a)!.has(b) && !past.get(b)!.has(a)))) withConcurrent++;
       for (const c of p.clashes) whys.add(c.why);
       if (p.servers.size) withServer++;
+      const ops = all.filter((e) => p.applied.includes(e.id));
+      if (ops.some((r) => r.op.t === 'revoke' && serverIds.includes(r.op.who))) serverOut++;
+      if (ops.some((j) => j.op.t === 'join' && j.op.role === 'server' && ops.some((r) => r.op.t === 'revoke' && r.op.who === j.signer && past.get(j.id)!.has(r.id)))) serverBack++;
     }
     expect(applied / samples.length).toBeGreaterThan(2);
     expect(withConcurrent / samples.length).toBeGreaterThan(0.2);
     // Servers come in (0099), in enough histories to judge what they may do.
     expect(withServer / samples.length).toBeGreaterThan(0.1);
+    // Taken out, and some invited back (0099).
+    expect(serverOut).toBeGreaterThan(0);
+    expect(serverBack).toBeGreaterThan(0);
     // (Two handovers at once, and what was founded on what lost, rarer, are in policy.test.ts.)
     for (const why of ['removed', 'dropped', 'less', 'unlinked', 'narrower']) expect(whys).toContain(why);
   });

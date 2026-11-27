@@ -157,6 +157,59 @@ describe('servers in the policy (0099)', () => {
     expect(h.now().isServer(s.id)).toBe(false);
   });
 
+  it('takes a server out by the owner, as a person is taken out, and lets it back in by a new link; an admin may not', () => {
+    const h = history();
+    h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    const s = server();
+    const first = '0a0a0a0a0a0a0a0a';
+    h.join(s, ada, { link: first });
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, bo);
+    expect(h.now().isServer(s.id)).toBe(true);
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, ada);
+    expect(h.now().isServer(s.id)).toBe(false);
+    expect(h.now().dropped.has(s.id)).toBe(false);
+    // Out: its cutoff on record, as anyone's taken out.
+    expect(h.now().cutoffs.has(s.id)).toBe(true);
+    // Not by the link it came in by (used), but by a new one, of the owner's.
+    h.join(s, ada, { link: first });
+    expect(h.now().isServer(s.id)).toBe(false);
+    h.join(s, bo);
+    expect(h.now().isServer(s.id)).toBe(false);
+    h.join(s, ada);
+    const p = h.now();
+    expect(p.isServer(s.id)).toBe(true);
+    expect(p.cutoffs.has(s.id)).toBe(false);
+    expect(p.role(s.id)).toBeNull();
+    // The same from the operations in any order.
+    expect([...evaluate([...h.entries].reverse(), h.ctx()).servers]).toEqual([s.id]);
+  });
+
+  it('counts a taking out and a drop made at the same time both: out, and for good', () => {
+    const h = history();
+    const s = server();
+    h.join(s, ada);
+    const at = h.now().heads;
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, ada, at);
+    h.add({ t: 'drop', key: s.id }, ada, at);
+    const p = h.now();
+    expect(p.isServer(s.id)).toBe(false);
+    expect(p.dropped.has(s.id)).toBe(true);
+    expect(evaluate([...h.entries].reverse(), h.ctx()).dropped.has(s.id)).toBe(true);
+  });
+
+  it('keeps a drop for good, unlike a taking out: no link lets the key back in', () => {
+    const h = history();
+    const s = server();
+    h.join(s, ada);
+    h.add({ t: 'drop', key: s.id }, ada);
+    h.join(s, ada);
+    expect(h.now().isServer(s.id)).toBe(false);
+    // Nor taken out and back: a dropped key is no one's word.
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, ada);
+    h.join(s, ada);
+    expect(h.now().isServer(s.id)).toBe(false);
+  });
+
   it('lets a drop at the same time as a server’s join win, in any order', () => {
     const h = history();
     const s = server();

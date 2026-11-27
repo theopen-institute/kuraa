@@ -53,6 +53,9 @@ export const KURAA_SCHEME = 'kuraa://';
 /** At most this many records prove a device to be in (Identity.proof). */
 export const MAX_PROOF = 200;
 
+/** The records the policy is worked out from: its operations, and who people are (0099: its memo is keyed on these). */
+const POLICY_KINDS = new Set<RecordKind>(['policy', 'key-event', 'vouch', 'revoke-key']);
+
 /** At most this many invite links' topics are announced (the latest): each member announces every one (0099). */
 const MAX_LINK_TOPICS = 32;
 
@@ -902,7 +905,9 @@ export class Identity {
     const pin = await this.pin();
     // Worked out once for the same records (0071): it is asked for often, and costs more the more there are.
     // Nothing in it depends on this computer's clock.
-    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${pin ? '' : await this.stamp(this.legacyFile)}\0`).update(records.map((r) => r.sig).join('\n')).digest('hex');
+    // By the records it is worked out from alone (0099): operations, and who people are (their logs, vouches and
+    // revocations). Acknowledgements, names, links and the rest, which come often, change nothing of it.
+    const key = createHash('sha256').update(`${ws?.id ?? ''}\0${pin ?? ''}\0${pin ? '' : await this.stamp(this.legacyFile)}\0`).update(records.filter((r) => POLICY_KINDS.has(r.kind)).map((r) => r.sig).join('\n')).digest('hex');
     if (this.policyMemo?.key === key) return this.policyMemo.policy;
     const policy = this.evaluatePolicy(records, ws?.id ?? '', pin);
     this.policyMemo = { key, policy };

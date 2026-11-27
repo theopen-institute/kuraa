@@ -18,17 +18,37 @@ keys. The open document's are counted the same way from what is in the editor (p
 code nodes or marks, the header, or atoms such as citations), so the two agree but for such rarities as
 a word split by an atom.
 
-**The open document's words, along its foot.** A strip along the foot of the open document is where
-components keep small things in view: a panel may be a **status** panel, always drawn there while a
-document is open, never opened or closed. Words' shows the document's words as they are typed (counted
-a moment after each change), of its target with a bar where it has one, and the words written today.
-Clicking it, or **Words…** in the ⋯ menu, opens the **Words** panel:
+**The open document's words, in its ⋯ menu** (*revised*: at first along the document's foot; "Don't
+put wordcount the footer yet. Put it in the ... menu."). The menu's Words item says the document's
+words, counted as the menu opens (of its target, where it has one), and your words today, net and
+added: `7 / 1,000 words · today +2 net, 2 added…`. Choosing it opens the **Words** panel. (The core
+keeps what the footer needed, unused for now: a **status** panel, always drawn in a strip along the
+open document's foot, never opened or closed. ⋯ menu items are now made as the menu opens, and are
+given the document's live view and its `header()`.) The panel has:
 
 - **A target for the document**, kept in its header as `target-words: 2000`, for everyone who opens it.
-- **Today**: each document's words now, less its words when it was first open today, added up: a day's
-  change, not keystrokes (what someone else writes in it while it is open counts too). With **a target
-  for a day**. Kept in this browser (`localStorage`); a new day starts afresh; **Start counting again**
-  begins from now. Scrivener's session target is likewise the writer's, not the project's.
+- **Today, and the last seven days, from the history** (*revised*: at first a count kept in the
+  browser, of documents opened there, which saw nothing written on other devices or in other editors).
+  The owner asked: "Is there a reliable way to reconstruct words per day in git merges, even in multiuser
+  workspaces?" There is, because Kuraa saves often (30 seconds after typing stops, every 5 minutes
+  while it goes on) and never squashes: every commit on the branch **but merges** is counted on its own,
+  each document it changed (renames followed) compared with its parent; merges are passed over, as they
+  only bring together work counted in the commits on each side, so what was written on another device
+  counts **on the day it was written**, whenever it arrived. Its day is the commit's own (its author's
+  date, where it was made). "In sessions with several people, credit everyone credited on the commit":
+  each person named as a co-author (an automatic save names whoever changed the document since the
+  last one) is given all of it; a commit naming none, its author. "For words written, show net and
+  added as separate text": **net**, how many more words there are, and **added**, the words written,
+  each word counted as many more times as it appears now than before, so a rewrite counts and a move
+  does not (`wordChange` in the kernel). What is typed and not yet committed, in documents open on this
+  host, is added for today, for whoever typed it. A commit never changes, so what it counts is kept
+  (`.git/kuraa/words.json`) and counted once. The host gives it as `GET /api/words?since=`; components,
+  `host.wordsByDay(since)`. The menu says yours today ("today +312 net, 420 added"); the panel, yours
+  and everyone's today, and your last seven days. **A target for a day**, in words added, is yours,
+  kept in this browser, as Scrivener's session target is the writer's.
+  What it cannot see: a folder only some read is kept in its own space (0069), off the branch, and is
+  not counted; a file made through Kuraa is saved naming no one (it is empty until written in, in its
+  room, where saves name who typed).
 
 **A book's words, in Compile.** Compile's outline gives each document's words (`bookContents` gives
 them, counted from its file), the book's total (what is in it), and **a target for the book**, kept with

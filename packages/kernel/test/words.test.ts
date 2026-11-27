@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countWords, markdownWords } from '../src/index.js';
+import { countWords, markdownWords, wordChange } from '../src/index.js';
 
 describe('counting words (0094)', () => {
   it('counts runs of letters and digits, with apostrophes and hyphens inside them', () => {
@@ -32,5 +32,16 @@ describe('counting words (0094)', () => {
     ].join('\n');
     // The quay (2); We came by sea as planned (6); One two A note three a map (7); Its note (2).
     expect(markdownWords(md)).toBe(17);
+  });
+
+  it('says how words changed: net, and added (a rewrite counts, a move does not)', () => {
+    expect(wordChange(null, 'One two three.')).toEqual({ net: 3, added: 3 });
+    expect(wordChange('One two three.', null)).toEqual({ net: -3, added: 0 });
+    // A word rewritten: as many as before, one written.
+    expect(wordChange('The red boat.', 'The blue boat.')).toEqual({ net: 0, added: 1 });
+    // A paragraph moved: nothing written.
+    expect(wordChange('Alpha beta.\n\nGamma delta.', 'Gamma delta.\n\nAlpha beta.')).toEqual({ net: 0, added: 0 });
+    // Case aside; the header and code not prose.
+    expect(wordChange('---\ntitle: A\n---\n\nThe sea.', '---\ntitle: B C D\n---\n\nthe sea, the sea.\n\n```\nx\n```')).toEqual({ net: 2, added: 2 });
   });
 });

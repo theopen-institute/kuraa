@@ -1,5 +1,5 @@
 // Word counts and document details (docs/decisions/0094-word-counts-and-document-details.md):
-// the open document's words along its foot, counted as it is typed, and the
+// the open document's words in its ⋯ menu, counted as it opens, and the
 // day's; a target for it set in the Words panel, kept in its header; its
 // details set in the Details panel, kept in its header, its label's colour by
 // it in the file tree; its folder's words in Compile, against a book target.
@@ -30,20 +30,29 @@ test('words counted as typed, a document’s target and details kept in its head
   await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('status')).toContainText('Connected');
 
-  // Along its foot: its words (not its header's).
-  await expect(page.getByTestId('words-count')).toHaveText('5 words');
+  // In the ⋯ menu: its words (not its header's), counted as it opens.
+  const menuWords = async () => {
+    await page.getByTestId('document-menu-button').click();
+    const text = await page.getByTestId('menu-words').innerText();
+    await page.keyboard.press('Escape');
+    return text;
+  };
+  await expect.poll(menuWords).toBe('5 words…');
   await page.getByTestId('editor').locator('p', { hasText: 'One two' }).click();
   await page.keyboard.press(MAC ? 'Meta+ArrowRight' : 'End');
   await page.keyboard.type(' Six seven.');
-  await expect(page.getByTestId('words-count')).toHaveText('7 words');
-  await expect(page.getByTestId('words-today')).toContainText('+2 today');
+  // Today, from the history and what is not committed yet: net and added, said apart.
+  await expect.poll(menuWords, { timeout: 15_000 }).toBe('7 words · today +2 net, 2 added…');
 
-  // A target for it, from the Words panel: kept in its header, shown along its foot.
-  await page.getByTestId('words-status').click();
+  // A target for it, from the Words panel (its item in the menu): kept in its header.
+  await page.getByTestId('document-menu-button').click();
+  await page.getByTestId('menu-words').click();
   await expect(page.getByTestId('words-panel')).toBeVisible();
+  await expect(page.getByTestId('words-panel-net')).toHaveText('+2 net');
+  await expect(page.getByTestId('words-panel-added')).toHaveText('2 added');
   await page.getByTestId('words-document-target').fill('1,000');
   await page.getByTestId('words-document-target').press('Enter');
-  await expect(page.getByTestId('words-count')).toHaveText('7 / 1,000 words');
+  await expect(page.getByTestId('words-panel-count')).toHaveText('7 words');
   await expect.poll(() => readIn(path), { timeout: 10_000 }).toContain('target-words: 1000\n');
 
   // Its details, from the Details panel (the ⋯ menu): kept in its header; its label's colour by it in the tree.
@@ -60,7 +69,7 @@ test('words counted as typed, a document’s target and details kept in its head
   await expect(page.getByTestId(`mark:label:${path}`)).toBeAttached();
   await expect.poll(() => readIn(path), { timeout: 10_000 }).toMatch(/synopsis: They come by sea\.\n[\s\S]*label: Chapter\n[\s\S]*status: First draft\n[\s\S]*keywords:\n {2}- sea\n {2}- arrival\n/);
   // Still the document's words: details are in its header, not its text.
-  await expect(page.getByTestId('words-count')).toHaveText('7 / 1,000 words');
+  await expect.poll(menuWords).toBe('7 / 1,000 words · today +2 net, 2 added…');
 
   // Its folder's words in Compile: each document's, and the book's against a target.
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });

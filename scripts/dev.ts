@@ -23,7 +23,7 @@
 // set yourself), so it is not taken for the desktop app on the same computer.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -59,7 +59,20 @@ A workspace for trying the editor. Type markdown: **bold**, *italic*, \`code\`, 
 async function served(): Promise<{ flag: '--dir' | '--workspaces'; dir: string }> {
   if (values.dir) return { flag: '--dir', dir: resolve(values.dir) };
   const root = resolve(values.workspaces ?? join(ROOT, '.dev-workspaces'));
-  if (!existsSync(join(root, '.kuraa-workspaces.json'))) {
+  const list = join(root, '.kuraa-workspaces.json');
+  // A workspace that is this checkout itself (Scratch, added in a git worktree before the hub made it a
+  // repository of its own): taken off the list, and Scratch added again.
+  if (existsSync(list)) {
+    const entries = JSON.parse(readFileSync(list, 'utf8')) as { dir: string }[];
+    const real = (p: string) => (existsSync(p) ? realpathSync(p) : resolve(p));
+    const kept = entries.filter((e) => real(e.dir) !== real(ROOT));
+    if (kept.length !== entries.length) {
+      console.log('[dev] Scratch was this checkout itself: made again, as a workspace of its own');
+      if (kept.length) writeFileSync(list, `${JSON.stringify(kept, null, 2)}\n`);
+      else rmSync(list);
+    }
+  }
+  if (!existsSync(list)) {
     const hub = await startHub({ root, log: (m) => console.log(`[dev] ${m}`) });
     try {
       const scratch = join(root, 'scratch');

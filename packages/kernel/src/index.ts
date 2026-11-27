@@ -6,7 +6,7 @@ import type { MergeResult, MergeSide } from './merge.js';
 
 export { countMarkers, diff3, matches, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
 export { alignedSourceMap, sourceMapOf, type SourceMap } from './sourcemap.js';
-export { countWords, markdownWords } from './words.js';
+export { countWords, markdownWords, wordChange } from './words.js';
 import type { SourceMap } from './sourcemap.js';
 
 export interface ParsedDocument {

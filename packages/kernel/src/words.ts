@@ -23,6 +23,11 @@ const HEADER = /^\uFEFF?---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|
  * the marks Markdown is written with. A link's or an image's words count.
  */
 export function markdownWords(text: string): number {
+  return countWords(markdownProse(text));
+}
+
+/** A Markdown document's prose, as markdownWords counts it. */
+function markdownProse(text: string): string {
   const lines: string[] = [];
   let fence: string | null = null;
   for (const line of text.replace(HEADER, '').split('\n')) {
@@ -33,7 +38,7 @@ export function markdownWords(text: string): number {
     }
     if (!fence) lines.push(line);
   }
-  const prose = lines.join('\n')
+  return lines.join('\n')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/`[^`\n]*`/g, ' ')
     // ![words](address) and [words](address): the words.
@@ -44,5 +49,31 @@ export function markdownWords(text: string): number {
     .replace(/(^|\s)-?@[\p{L}\p{N}_:.#$%&+?<>~/-]+/gu, '$1 ')
     .replace(/<[^>\n]+>/g, ' ')
     .replace(/\{[^}\n]*\}/g, ' ');
-  return countWords(prose);
+}
+
+/**
+ * How a Markdown document's words changed from one text to another (0094):
+ * `net`, how many more there are (fewer, below nought); `added`, the words
+ * written, each word counted as many more times as it appears now than before
+ * (in any case), so a sentence rewritten counts though the length stays,
+ * and a paragraph moved counts nothing. A document that is new (before: null)
+ * or gone (after: null) is counted from or to nothing.
+ */
+export function wordChange(before: string | null, after: string | null): { net: number; added: number } {
+  const bag = (text: string | null) => {
+    const m = new Map<string, number>();
+    if (text) for (const [w] of markdownProse(text).matchAll(WORD)) m.set(w.toLowerCase(), (m.get(w.toLowerCase()) ?? 0) + 1);
+    return m;
+  };
+  const was = bag(before);
+  const now = bag(after);
+  let net = 0;
+  let added = 0;
+  for (const [w, n] of now) {
+    const old = was.get(w) ?? 0;
+    if (n > old) added += n - old;
+    net += n;
+  }
+  for (const n of was.values()) net -= n;
+  return { net, added };
 }

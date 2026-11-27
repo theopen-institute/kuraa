@@ -1,6 +1,6 @@
 // Git, called as a child process: the one on PATH, or one a shell bundles (useGit).
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 
@@ -197,6 +197,22 @@ export class Git {
 
   async isRepo(): Promise<boolean> {
     return (await this.run(['rev-parse', '--is-inside-work-tree'], { allowFail: true })).code === 0;
+  }
+
+  /**
+   * Whether the folder is a repository's top: not only inside one. A
+   * workspace made inside another repository (a dev workspace in a checkout
+   * of Kuraa, in a git worktree) is a repository of its own, never the one
+   * around it.
+   */
+  async isRepoTop(): Promise<boolean> {
+    const r = await this.run(['rev-parse', '--show-toplevel'], { allowFail: true });
+    if (r.code !== 0) return false;
+    try {
+      return realpathSync(r.stdout.trim()) === realpathSync(this.dir);
+    } catch {
+      return false;
+    }
   }
 
   async branch(): Promise<string> {

@@ -9,6 +9,7 @@ import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
 import type { ChunkRunner } from './runs.js';
 import { askConfirm, askText } from './ask.js';
+import { documentHeader } from './header.js';
 import { isComplete, loadSettings, saveSettings, type Settings } from './settings.js';
 import { loadEditorsOff, saveEditorsOff } from './editor-choices.js';
 import { webShell } from './shell.js';
@@ -149,6 +150,8 @@ const shownFiles = computed(() => {
 const featureStatus = shallowRef<FeatureStatus[]>([]);
 const hiddenFeatures = ref(loadHiddenFeatures());
 const featureMessages = new FeatureMessages();
+/** How features stand for the workspace has been asked, and answered (before then, navigation assumes the defaults). */
+const featuresKnown = ref(false);
 let featuresAsked = 0;
 async function loadFeatures() {
   const asked = api.value;
@@ -191,6 +194,7 @@ const coreHost: CoreHost = {
   renderOutput: (p, format) => api.value.renderOutput(p, format),
   renderMadeFrom: (p, format) => api.value.renderMadeFrom(p, format),
   bookContents: (folder) => api.value.bookContents(folder),
+  wordsByDay: (since) => api.value.wordsByDay(since),
   tools: () => api.value.tools(),
   downloadTool: async (id) => {
     await api.value.downloadTool(id);
@@ -293,7 +297,6 @@ const panelButtons = computed(() => features.value.flatMap((f) => (f.feature.pan
 const LAYOUT_KEY = 'kuraa:layout';
 let storedLayout: string | null = null;
 try { storedLayout = localStorage.getItem(LAYOUT_KEY); } catch { /* storage unavailable */ }
-const featuresKnown = ref(false);
 const navFeatures = computed<ActiveFeature[]>(() => {
   if (featuresKnown.value && ready.value) return features.value;
   const assumed: FeatureStatus[] = Object.values(props.features)
@@ -429,10 +432,17 @@ async function openAtText(p: string, at?: { from: number; to: number }) {
 const featureMenu = computed(() => {
   const p = path.value;
   const t = type.value;
-  if (!p || !t) return [];
+  // Made again each time the menu opens: an item may say how the document is now (0094: its words).
+  if (!p || !t || !docMenu.value) return [];
+  const view = () => editor.value?.view ?? null;
+  const header = () => {
+    const v = view();
+    const spec = editorFor(t.id)?.header;
+    return v && spec ? documentHeader(v, spec) : null;
+  };
   return features.value.flatMap((f) => {
     try {
-      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t, source: showSource.value }) ?? [];
+      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t, source: showSource.value, view, header }) ?? [];
     } catch (e) {
       console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
       return [];

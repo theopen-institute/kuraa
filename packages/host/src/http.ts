@@ -478,6 +478,12 @@ function sameFile(a: string, b: string): boolean {
 }
 
 const historyRoutes: Route[] = [
+  // Words written each day, by person, from a day on (0094): the history, and what is typed here not committed yet.
+  route('GET', '/api/words', async ({ host, res, q }) => {
+    const since = q.get('since') ?? '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new HttpError(400, 'since: a day, as YYYY-MM-DD');
+    send(res, 200, { days: await host.wordsByDay(since) });
+  }),
   route('GET', '/api/history', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
     // --follow crosses renames, so each entry also gives the path the file had in that commit

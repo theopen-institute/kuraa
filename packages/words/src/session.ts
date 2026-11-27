@@ -1,69 +1,83 @@
-// Today's writing (0094): the words written in each document since it was
-// first open today, in this browser, and a target of your own for a day.
-// Kept in this browser (localStorage); a new day starts afresh, keeping the
-// target. A document's words when it was first seen today are its start, so
-// what others write in it while it is open counts too: it is a day's change,
-// not a keystroke count.
-import { ref } from 'vue';
+// Words written by day (0094), as the host reads them from the history (every
+// commit but merges, credited to everyone credited on it, on its own day; and
+// what is typed and not committed yet): yours, today and the days before, and
+// everyone's today. Asked again a few seconds after typing, and every minute.
+// A target for a day is yours, kept in this browser.
+import { ref, shallowRef } from 'vue';
+import type { FeatureClientContext, WordsDay } from '@kuraa/feature-kit/client';
 
-const KEY = 'kuraa:words:session';
+const TARGET_KEY = 'kuraa:words:day-target';
+/** How many days back the panel shows. */
+export const DAYS = 7;
 
-interface Stored {
-  day: string;
-  target: number | null;
-  /** By document: its words when first seen today, and now. */
-  docs: { [path: string]: { start: number; now: number } };
+export const day = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** The days asked of the host, newest first; null until known. */
+export const days = shallowRef<WordsDay[] | null>(null);
+/** The day's target: yours, in this browser. */
+export const dayTarget = ref<number | null>(readTarget());
+
+function readTarget(): number | null {
+  try {
+    const n = Number(localStorage.getItem(TARGET_KEY));
+    return Number.isFinite(n) && n >= 1 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
-const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-function read(): Stored {
-  let v: Partial<Stored> = {};
+export function setDayTarget(target: number | null): void {
+  dayTarget.value = target;
   try {
-    v = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Stored>;
-  } catch { /* none, or unreadable: afresh */ }
-  const target = typeof v.target === 'number' && v.target > 0 ? v.target : null;
-  return v.day === today() && v.docs && typeof v.docs === 'object' ? { day: v.day, target, docs: v.docs } : { day: today(), target, docs: {} };
-}
-
-let stored = read();
-/** Goes up with every change, for what shows it. */
-export const sessionTick = ref(0);
-
-function save() {
-  sessionTick.value++;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(stored));
+    if (target) localStorage.setItem(TARGET_KEY, String(target));
+    else localStorage.removeItem(TARGET_KEY);
   } catch { /* storage unavailable: for this page only */ }
 }
 
-/** A document's words now: its start, the first time today. */
-export function note(path: string, words: number): void {
-  if (stored.day !== today()) stored = { day: today(), target: stored.target, docs: {} };
-  const was = stored.docs[path];
-  if (was?.now === words) return;
-  stored.docs[path] = was ? { ...was, now: words } : { start: words, now: words };
-  save();
+/** Whether a person credited is you: by email, else by name. */
+export function isYou(ctx: FeatureClientContext, p: { name: string; email: string }): boolean {
+  const me = ctx.person();
+  return me.email ? p.email.toLowerCase() === me.email.toLowerCase() : p.name === me.name;
 }
 
-/** The words written today, in every document (less where words were cut). */
-export function written(): number {
-  if (stored.day !== today()) return 0;
-  return Object.values(stored.docs).reduce((n, d) => n + (d.now - d.start), 0);
+/** A day's words for you (nought where none). */
+export function yours(ctx: FeatureClientContext, date: string): { net: number; added: number } {
+  const p = days.value?.find((d) => d.date === date)?.people.find((x) => isYou(ctx, x));
+  return { net: p?.net ?? 0, added: p?.added ?? 0 };
 }
 
-export const sessionTarget = (): number | null => stored.target;
+let asked = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
+let every: ReturnType<typeof setInterval> | undefined;
 
-export function setSessionTarget(target: number | null): void {
-  stored.target = target;
-  save();
+/** Ask the host for the days again. */
+export async function load(ctx: FeatureClientContext): Promise<void> {
+  const n = ++asked;
+  const since = new Date();
+  since.setDate(since.getDate() - (DAYS - 1));
+  try {
+    const r = await ctx.host.wordsByDay(day(since));
+    if (n === asked) days.value = r;
+  } catch {
+    // The host away, or older: what was known stays.
+  }
 }
 
-/** Start the day's count again from now. */
-export function restart(): void {
-  stored = { day: today(), target: stored.target, docs: Object.fromEntries(Object.entries(stored.docs).map(([p, d]) => [p, { start: d.now, now: d.now }])) };
-  save();
+/** Asked again a few seconds after a change (typing), not at every keystroke. */
+export function soon(ctx: FeatureClientContext): void {
+  clearTimeout(timer);
+  timer = setTimeout(() => void load(ctx), 3000);
+}
+
+/** In use: asked now and every minute; returns how to stop. */
+export function follow(ctx: FeatureClientContext): () => void {
+  void load(ctx);
+  clearInterval(every);
+  every = setInterval(() => void load(ctx), 60_000);
+  return () => {
+    clearInterval(every);
+    clearTimeout(timer);
+    asked++;
+    days.value = null;
+  };
 }

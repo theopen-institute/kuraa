@@ -23,7 +23,7 @@
 // workspace, browse its folders to choose one, manage their identity and the
 // online copy. On a hub open to the network those are off, and the app says why.
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -481,6 +481,10 @@ export class Hub {
     return this.serial(async () => {
       this.mayAdd();
       const info = await inspectFolder(folder);
+      // Asked to make it a repository (`init`), a folder inside another repository is made one of its own:
+      // pnpm dev's Scratch, in a checkout of Kuraa, is never the checkout (a git worktree's, above all).
+      const own = !!info.repoRoot && sameFolder(info.repoRoot, info.dir);
+      if (init && info.repoRoot && !own) info.repoRoot = null;
       const dir = info.repoRoot ?? info.dir;
       // Windows' folder names ignore case: C:\Users\Ann\notes is c:\users\ann\Notes.
       const same = (a: string) => (process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(dir).toLowerCase() : resolve(a) === resolve(dir));
@@ -760,4 +764,17 @@ export { isLoopback };
 export async function startHub(options: HubOptions): Promise<RunningHub> {
   const hub = new Hub(options);
   return { hub, url: localUrl(await hub.start()), token: hub.token, close: () => hub.close() };
+}
+
+/** Whether two paths are the same folder (links followed; on Windows, case aside). */
+function sameFolder(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const [x, y] = [real(a), real(b)];
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
 }

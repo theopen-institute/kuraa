@@ -29,6 +29,7 @@ import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
 import { bookItems, joinBook, type BookPart } from './compile.js';
 import { readOrders } from './order.js';
+import { WordLog, type DayWords, type Uncommitted } from './wordlog.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 /** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
@@ -296,6 +297,8 @@ export class Host {
   runner!: Runner;
   /** Documents rendered to HTML, Word and PDF (renders.ts). */
   renders!: Renders;
+  /** Words written by day and person, from the history (wordlog.ts, 0094). */
+  private wordLog: WordLog | null = null;
   private watcher: FSWatcher | null = null;
   private cacheDir = '';
   private watchTimers = new Map<string, NodeJS.Timeout>();
@@ -358,7 +361,9 @@ export class Host {
   readonly serial = serialQueue();
 
   async start(): Promise<AddressInfo> {
-    if (!(await this.git.isRepo())) {
+    // Where it may make one (a workspace of a hub's), the folder must be a repository's top, not only inside
+    // one: a workspace in a checkout of Kuraa (pnpm dev's, in a git worktree) is never the checkout itself.
+    if (!(await (this.options.init ? this.git.isRepoTop() : this.git.isRepo()))) {
       if (!this.options.init) throw new Error(`Not a git repository: ${this.dir}`);
       await initWorkspace(this.dir, this.options.label ?? this.workspace);
       this.log(`initialised a git repository in ${this.dir}`);
@@ -2727,6 +2732,27 @@ export class Host {
     this.records.delete(rec.key);
     this.byRoom.delete(rec.room);
     this.relay.release(rec.room);
+  }
+
+  /**
+   * Words written each day from `since` (YYYY-MM-DD), by person (0094): the
+   * branch's history, and what is typed in documents open here and not
+   * committed yet, credited to whoever typed it.
+   */
+  async wordsByDay(since: string): Promise<DayWords[]> {
+    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.features.documentOf(p) !== null });
+    const branch = await this.git.branch();
+    const uncommitted: Uncommitted[] = [];
+    for (const rec of this.records.values()) {
+      if (rec.branch !== branch || !rec.contributors.size || !/\.(md|markdown|qmd|rmd)$/i.test(rec.path)) continue;
+      const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
+      uncommitted.push({
+        before: before.code === 0 ? before.stdout : null,
+        after: rec.type.serialize(this.current(rec), rec.previous),
+        people: [...rec.contributors.values()].map((u) => ({ name: u.name, email: u.email })),
+      });
+    }
+    return this.wordLog.days(since, uncommitted);
   }
 
   /** A document's open room, if it has one, written to its file and committed, to be rendered as it is now. */

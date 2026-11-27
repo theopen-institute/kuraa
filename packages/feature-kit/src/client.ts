@@ -251,6 +251,13 @@ export interface DocumentHeader {
   set(fields: { [key: string]: unknown }): void;
 }
 
+/** A day's words, by person (0094): net (how many more) and added (written, a rewrite counting too). */
+export interface WordsDay {
+  /** YYYY-MM-DD. */
+  date: string;
+  people: { name: string; email: string; net: number; added: number }[];
+}
+
 /** A folder or document a folder's book could have (0093). */
 export interface BookContent {
   kind: 'folder' | 'document';
@@ -340,6 +347,13 @@ export interface CoreHost {
    * tree's order, each at how deep it is (1: in the folder itself).
    */
   bookContents(folder: string): Promise<BookContent[]>;
+  /**
+   * Words written each day from `since` (YYYY-MM-DD), by person, newest day
+   * first (0094): every commit on the branch but merges, each credited in full
+   * to everyone credited on it, on its own day; and what is typed here and not
+   * committed yet, today.
+   */
+  wordsByDay(since: string): Promise<WordsDay[]>;
   /** The tools this computer has or may download. */
   tools(): Promise<{ tools: ToolState[] }>;
   /** Download a tool; follow it with tools(). */
@@ -447,6 +461,10 @@ export interface FeatureDocumentContext extends FeatureClientContext {
   type: DocumentType;
   /** The Source view is shown, not the rich one. */
   source: boolean;
+  /** The open document's live view, while it is ready (0094: its words, counted as the menu opens). */
+  view(): EditorView | null;
+  /** The open document's header, as panels have it (0094). */
+  header(): DocumentHeader | null;
 }
 
 /** A panel the feature draws: beside the open document, or about the workspace. */

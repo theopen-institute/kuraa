@@ -61,6 +61,8 @@ export interface JoinProgress {
   slowNetwork: boolean;
   /** The device copied from, once there is one. */
   from?: string;
+  /** Copying: how far, as git says it (`Receiving objects:  45% (450/1000), 12.30 MiB | 1.20 MiB/s`). */
+  copied?: string;
 }
 
 export interface Joined {
@@ -153,7 +155,18 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
     const { branch, remote, from } = await welcomed;
     clearInterval(watch);
     tell({ step: 'copying', slowNetwork: node.slowNetwork, from });
-    if (!(await node.fetch(remote))) throw new Error(`Could not fetch from ${from}`);
+    // How far, as git says it; in the log at each tenth of each of its stages, so a long copy is not silent.
+    let logged = '';
+    const copying = (said: string) => {
+      tell({ step: 'copying', slowNetwork: node.slowNetwork, from, copied: said });
+      const m = /^([A-Za-z ]+):\s+(\d+)%/.exec(said);
+      const mark = m ? `${m[1]} ${Math.floor(Number(m[2]) / 10) * 10}` : '';
+      if (mark && mark !== logged) {
+        logged = mark;
+        log(`copying from ${from}: ${said}`);
+      }
+    };
+    if (!(await node.fetch(remote, { progress: copying }))) throw new Error(`Could not copy the workspace from ${from}: the copy stopped (see the log for why)`);
     await git.run(['checkout', '-q', '-B', branch, `refs/remotes/${remote}/${branch}`]);
     await node.identity.setJoinedLink(link);
     log(`joined: ${dir} on ${branch}, let in by ${from}`);

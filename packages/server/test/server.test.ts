@@ -123,6 +123,14 @@ describe('a server, run from its folder (0099)', () => {
     await until(listening, 20_000, `the server listening on ${port}`);
   });
 
+  it('waits for a server that is starting (just restarted), rather than saying none is running', async () => {
+    const data = tmp('data');
+    const asked = listServer(data);
+    await new Promise((r) => setTimeout(r, 1500));
+    await server(data);
+    expect(await asked).toEqual([]);
+  });
+
   it('makes no workspace of its own', async () => {
     const data = tmp('data');
     const s = await server(data);

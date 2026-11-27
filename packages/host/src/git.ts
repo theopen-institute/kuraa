@@ -6,6 +6,18 @@ import { basename, delimiter, dirname, join, resolve } from 'node:path';
 
 export interface GitResult { stdout: string; stderr: string; code: number; /** stdout as bytes (a blob may not be text). */ bytes: Buffer }
 
+export interface GitRunOptions {
+  input?: string | Buffer;
+  allowFail?: boolean;
+  env?: Record<string, string>;
+  /** Stopped after this long, whatever it is doing. */
+  timeoutMs?: number;
+  /** Stopped once it has said nothing for this long (a long fetch that is still going, is not). */
+  idleMs?: number;
+  /** What it writes to stderr, as it comes (a fetch's --progress). */
+  onStderr?(chunk: string): void;
+}
+
 // Git runs in its own process group, so Ctrl+C in the host's terminal (which goes
 // to the whole foreground group) cannot kill a commit half-way. The host stops
 // on that signal by finishing its git work first. (Not on Windows, where a
@@ -157,7 +169,7 @@ export class Git {
    * computer each try takes longer): git wrote nothing, and the lock is held only
    * for a moment.
    */
-  async run(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
+  async run(args: string[], opts: GitRunOptions = {}): Promise<GitResult> {
     const until = Date.now() + CONFIG_LOCK_WAIT_MS;
     for (;;) {
       const r = await this.runOnce(args, { ...opts, allowFail: true });
@@ -170,18 +182,33 @@ export class Git {
     }
   }
 
-  private runOnce(args: string[], opts: { input?: string | Buffer; allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): Promise<GitResult & { signal: NodeJS.Signals | null }> {
+  private runOnce(args: string[], opts: GitRunOptions): Promise<GitResult & { signal: NodeJS.Signals | null }> {
     return new Promise((resolve, reject) => {
       const child = spawnGit([...this.settings, ...args], { cwd: this.dir, env: gitEnv(this.env, opts.env) });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      child.stdout.on('data', (d: Buffer) => out.push(d));
-      child.stderr.on('data', (d: Buffer) => err.push(d));
-      child.on('error', reject);
-      // Past its time, the whole group goes (git, and the ssh or helper it started).
+      // Past its time, or quiet for too long, the whole group goes (git, and the ssh or helper it started).
       const timer = opts.timeoutMs ? setTimeout(() => killGroup(child), opts.timeoutMs) : undefined;
+      let idle: NodeJS.Timeout | undefined;
+      const stillGoing = () => {
+        if (!opts.idleMs) return;
+        clearTimeout(idle);
+        idle = setTimeout(() => killGroup(child), opts.idleMs);
+      };
+      stillGoing();
+      child.stdout.on('data', (d: Buffer) => {
+        out.push(d);
+        stillGoing();
+      });
+      child.stderr.on('data', (d: Buffer) => {
+        err.push(d);
+        stillGoing();
+        opts.onStderr?.(d.toString('utf8'));
+      });
+      child.on('error', reject);
       child.on('close', (exit, signal) => {
         clearTimeout(timer);
+        clearTimeout(idle);
         const bytes = Buffer.concat(out);
         const stdout = bytes.toString('utf8');
         const stderr = Buffer.concat(err).toString('utf8');

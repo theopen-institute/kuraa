@@ -62,7 +62,21 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
       const link = rest[0];
       if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (People and computers › Add a server…)`, 2);
       say('joining…');
-      const w = await joinServer(link, data);
+      // How it is going, as it changes: each step; while copying, each tenth of each of git's stages.
+      let last = '';
+      const w = await joinServer(link, data, {
+        progress: (p) => {
+          const m = p.copied ? /^([A-Za-z ]+):\s+(\d+)%/.exec(p.copied) : null;
+          const mark = `${p.step} ${m ? `${m[1]} ${Math.floor(Number(m[2]) / 10)}` : ''}`;
+          if (mark === last) return;
+          last = mark;
+          if (p.step === 'waiting') say('waiting for another join on this server to finish…');
+          else if (p.step === 'looking') say(`looking for a device of the workspace…${p.slowNetwork ? ' (this network makes connecting slow: it may take a minute or two)' : ''}`);
+          else if (p.step === 'letting-in') say('found a device of the workspace; being let in…');
+          else if (p.step === 'copying') say(`copying the workspace${p.from ? ` from ${p.from}` : ''}${p.copied ? `: ${p.copied}` : '…'}`);
+          else if (p.step === 'opening') say('opening it…');
+        },
+      });
       say(`holding ${w.name} (${w.id}) in ${w.path}`);
       say(w.in ? 'the workspace has taken this server in' : 'the workspace will take this server in once its join reaches a device of it');
       process.exit(0);

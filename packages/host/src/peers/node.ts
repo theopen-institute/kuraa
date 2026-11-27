@@ -1700,8 +1700,8 @@ export class PeerNode {
    * lets this one fetch (0066) into `refs/kuraa/peer-spaces/<its remote>/…`; one
    * fetch per device at a time. Returns whether it worked.
    */
-  fetch(remote: string): Promise<boolean> {
-    return this.queueFetch(remote, `+refs/heads/*:refs/remotes/${remote}/*`, `+${SPACES}*:${PEER_SPACES}${remote}/*`);
+  fetch(remote: string, o: { progress?: (said: string) => void } = {}): Promise<boolean> {
+    return this.queueFetch(remote, [`+refs/heads/*:refs/remotes/${remote}/*`, `+${SPACES}*:${PEER_SPACES}${remote}/*`], o.progress);
   }
 
   /**
@@ -1710,13 +1710,13 @@ export class PeerNode {
    * other refs, so the two never touch the same ones.
    */
   fetchOutputs(remote: string): Promise<boolean> {
-    return this.queueFetch(remote, outputsRefspec(remote));
+    return this.queueFetch(remote, [outputsRefspec(remote)]);
   }
 
-  private queueFetch(remote: string, ...refspecs: string[]): Promise<boolean> {
+  private queueFetch(remote: string, refspecs: string[], progress?: (said: string) => void): Promise<boolean> {
     const queue = `${remote}\0${refspecs.join('\0')}`;
     const before = this.fetches.get(queue) ?? Promise.resolve(true);
-    const run = before.catch(() => false).then(() => this.fetchNow(remote, refspecs));
+    const run = before.catch(() => false).then(() => this.fetchNow(remote, refspecs, progress));
     this.fetches.set(queue, run);
     // Its failure is the caller's to handle (run is returned): not this bookkeeping's, which would leave it unhandled.
     const forget = () => {
@@ -1726,12 +1726,24 @@ export class PeerNode {
     return run;
   }
 
-  private async fetchNow(remote: string, refspecs: string[]): Promise<boolean> {
+  /**
+   * One fetch. With `progress` (a whole workspace copied on joining, 0099): git's
+   * progress said as it goes (the last line of it), and stopped only once it has
+   * said nothing for 5 minutes, however long the copy takes; else stopped after
+   * 10 minutes, as a sync's fetch of what is new has always been.
+   */
+  private async fetchNow(remote: string, refspecs: string[], progress?: (said: string) => void): Promise<boolean> {
     if (this.closing) return false;
     const r = await this.o.git.run([
       '-c', `core.hooksPath=${devNull}`, '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
-      'fetch', '--prune', '--no-write-fetch-head', remote, ...refspecs,
-    ], { allowFail: true, timeoutMs: 10 * 60_000, env: { PATH: gitPath(this.bridge.binDir) } });
+      'fetch', '--prune', '--no-write-fetch-head', ...(progress ? ['--progress'] : []), remote, ...refspecs,
+    ], {
+      allowFail: true,
+      env: { PATH: gitPath(this.bridge.binDir) },
+      ...(progress
+        ? { idleMs: 5 * 60_000, onStderr: (chunk: string) => { const last = chunk.split(/[\r\n]/).map((l) => l.trim()).filter(Boolean).at(-1); if (last) progress(last); } }
+        : { timeoutMs: 10 * 60_000 }),
+    });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.code === 0;
   }

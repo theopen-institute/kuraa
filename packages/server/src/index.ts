@@ -14,7 +14,9 @@
 //   and `list` ask (the hub's serverApi);
 // - where it is reached (`server.json`: its address and access code, readable by
 //   whoever runs it alone), for those commands to ask it.
+import { randomBytes } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { standardFeatures } from '@kuraa/features';
@@ -115,42 +117,112 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
   };
 }
 
-/** How the server in a folder is reached, as it wrote it when it started. */
-export async function readAddress(data = defaultServerData()): Promise<ServerAddress> {
-  let text: string;
-  try {
-    text = await readFile(join(resolve(data), 'server.json'), 'utf8');
-  } catch {
-    throw new Error(`No server is running from ${resolve(data)}: start it with kuraa-server`);
+/**
+ * How the server in a folder is reached, as it wrote it when it started. `waitMs`:
+ * how long to wait for one that is starting (a restart takes a moment, its file
+ * gone meanwhile).
+ */
+export async function readAddress(data = defaultServerData(), o: { waitMs?: number } = {}): Promise<ServerAddress> {
+  const file = join(resolve(data), 'server.json');
+  const until = Date.now() + (o.waitMs ?? 0);
+  for (;;) {
+    let text: string | null = null;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch { /* not running, or starting */ }
+    if (text !== null) {
+      const a = JSON.parse(text) as Partial<ServerAddress>;
+      if (typeof a.url !== 'string' || typeof a.token !== 'string' || typeof a.key !== 'string') throw new Error(`${file} is damaged: start the server again`);
+      return a as ServerAddress;
+    }
+    if (Date.now() >= until) throw new Error(`No server is running from ${resolve(data)}: start it (as a service: systemctl --user start kuraa; by hand: kuraa-host server, or pnpm server)`);
+    await new Promise((r) => setTimeout(r, 500));
   }
-  const a = JSON.parse(text) as Partial<ServerAddress>;
-  if (typeof a.url !== 'string' || typeof a.token !== 'string' || typeof a.key !== 'string') throw new Error(`${join(resolve(data), 'server.json')} is damaged: start the server again`);
-  return a as ServerAddress;
 }
 
-/** Ask the running server: its API, with its access code; the answer, or why not. */
-async function ask<T>(a: ServerAddress, path: string, init: RequestInit = {}): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(a.url + path, { ...init, headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' } });
-  } catch {
-    throw new Error(`The server at ${a.url} does not answer: is it running?`);
-  }
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `The server answered ${res.status}`);
-  return body;
+/** How long a command waits for a server that is starting, or restarting. */
+const STARTING_MS = 20_000;
+
+/**
+ * Ask the running server: its API, with its access code; the answer, or why not.
+ * Over node:http, with no time limit of its own (a join copying a large workspace
+ * takes as long as it takes: fetch's would give up after five minutes). A server
+ * not answering yet (restarting) is asked again, for a while.
+ */
+function ask<T>(a: ServerAddress, path: string, o: { method?: string; body?: unknown } = {}): Promise<T> {
+  const until = Date.now() + STARTING_MS;
+  const once = () => new Promise<T>((done, fail) => {
+    const body = o.body === undefined ? undefined : JSON.stringify(o.body);
+    const req = request(a.url + path, { method: o.method ?? 'GET', headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json', ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) } }, (res) => {
+      const parts: Buffer[] = [];
+      res.on('data', (d: Buffer) => parts.push(d));
+      res.on('end', () => {
+        let answer: T & { error?: string };
+        try {
+          answer = JSON.parse(Buffer.concat(parts).toString('utf8')) as T & { error?: string };
+        } catch {
+          answer = {} as T & { error?: string };
+        }
+        if ((res.statusCode ?? 500) >= 400) fail(new Error(answer.error ?? `The server answered ${res.statusCode}`));
+        else done(answer);
+      });
+      res.on('error', fail);
+    });
+    req.on('error', (e: NodeJS.ErrnoException) => fail(Object.assign(new Error(`The server at ${a.url} does not answer: is it running?`), { code: e.code })));
+    req.end(body);
+  });
+  const attempt = async (): Promise<T> => {
+    try {
+      return await once();
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ECONNREFUSED' && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 500));
+        return attempt();
+      }
+      throw e;
+    }
+  };
+  return attempt();
 }
 
 /** A workspace the server holds, and whether the workspace has taken it in yet (its join reached the policy there). */
 export interface ServerWorkspace { id: string; name: string; path: string; in: boolean; error?: string }
 
-/** Bring a workspace onto the running server, by an invite link for a server (0099). */
-export async function joinServer(link: string, data = defaultServerData()): Promise<ServerWorkspace> {
-  const a = await readAddress(data);
-  const { workspace } = await ask<{ workspace: { id: string } }>(a, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link }) });
-  const held = (await listing(a)).find((w) => w.id === workspace.id);
-  if (!held) throw new Error('The server joined, but does not list the workspace: see its log');
-  return held;
+/** How a join is going, as the server says it (its steps, and how far a copy is). */
+export interface JoinStep { step: 'waiting' | 'looking' | 'letting-in' | 'copying' | 'opening'; slowNetwork: boolean; from?: string; copied?: string }
+
+/**
+ * Bring a workspace onto the running server, by an invite link for a server
+ * (0099). `progress`: how it is going, each time that changes (asked every
+ * second, while the join itself is asked once, and waited for however long).
+ */
+export async function joinServer(link: string, data = defaultServerData(), o: { progress?: (s: JoinStep) => void } = {}): Promise<ServerWorkspace> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  const id = randomBytes(12).toString('base64url');
+  let said = '';
+  let polling = true;
+  const poll = async () => {
+    while (polling) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!polling) return;
+      const now = await ask<JoinStep>(a, `/hub/api/joins/${id}`).catch(() => null);
+      const text = JSON.stringify(now);
+      if (now && polling && text !== said) {
+        said = text;
+        o.progress?.(now);
+      }
+    }
+  };
+  const watching = o.progress ? poll() : Promise.resolve();
+  try {
+    const { workspace } = await ask<{ workspace: { id: string } }>(a, '/hub/api/workspaces', { method: 'POST', body: { kind: 'join', invitation: link, progress: id } });
+    const held = (await listing(a)).find((w) => w.id === workspace.id);
+    if (!held) throw new Error('The server joined, but does not list the workspace: see its log');
+    return held;
+  } finally {
+    polling = false;
+    await watching;
+  }
 }
 
 /** What the running server holds (GET /hub/api/server): each workspace, and whether it has taken the server in. */
@@ -158,5 +230,5 @@ const listing = async (a: ServerAddress) => (await ask<{ workspaces: ServerWorks
 
 /** The workspaces the running server holds. */
 export async function listServer(data = defaultServerData()): Promise<ServerWorkspace[]> {
-  return listing(await readAddress(data));
+  return listing(await readAddress(data, { waitMs: STARTING_MS }));
 }

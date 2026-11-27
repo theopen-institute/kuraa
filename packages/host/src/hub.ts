@@ -138,6 +138,8 @@ export interface JoinStatus {
   step: 'waiting' | JoinProgress['step'] | 'opening';
   slowNetwork: boolean;
   from?: string;
+  /** Copying: how far, as git says it. */
+  copied?: string;
 }
 
 export interface HubWorkspace {

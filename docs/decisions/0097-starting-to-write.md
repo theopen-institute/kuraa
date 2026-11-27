@@ -17,7 +17,8 @@ file for that blank document.
 blank page) is given its name as before (`untitled-xxxxx.md`, in the folder shown or the one asked
 for) but nothing is written. It opens in a room the host makes for a file that does not exist
 (`GET /api/rooms?path=…&draft=1`; the name checked as a new file's is, and refused where the person
-may not write). The room starts empty, and is written to disk the first time its text is not empty:
+may not write). The room starts empty, and is written to disk the first time its text is not empty, at once (not after
+the pause in the typing other saves wait for, so the file list has it while the writing goes on):
 the folders it needs made, the file written (in the space new files go to, as a new file made any
 other way is), the file list told, then committed as any change is. Left untouched, it leaves nothing
 behind: no file, no commit, no row in the file tree. Its name follows its title when it is left, as

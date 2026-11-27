@@ -128,9 +128,18 @@ describe('host', () => {
     await new Promise((r) => setTimeout(r, 600));
     expect(existsSync(join(dir, 'drafts'))).toBe(false);
     expect((await (await api('/api/tree')).json()).files.map((f: { path: string }) => f.path)).not.toContain('drafts/harbour.md');
-    // Written in: the file (and its folder) made, then committed.
-    c.write(pandocMarkdown.parse('Harbour log\n').doc);
-    await until(() => existsSync(join(dir, 'drafts/harbour.md')) && file('drafts/harbour.md').includes('Harbour log'), 15_000, 'the file made');
+    // Written in: the file (and its folder) made at once, while the typing goes on (no pause as long as the save's wait), then committed.
+    const typed = 'Harbour log, day one';
+    let listed = false;
+    for (let n = 1; n <= typed.length; n += 2) {
+      c.write(pandocMarkdown.parse(`${typed.slice(0, n)}\n`).doc);
+      await new Promise((r) => setTimeout(r, FAST.flushMs / 3));
+      if (!listed) listed = ((await (await api('/api/tree')).json()) as { files: { path: string }[] }).files.some((f) => f.path === 'drafts/harbour.md');
+    }
+    expect(listed).toBe(true);
+    // The rest of what was typed follows as any edit does.
+    c.write(pandocMarkdown.parse(`${typed}\n`).doc);
+    await until(() => file('drafts/harbour.md').includes(typed), 15_000, 'the file written');
     await until(() => git(dir, 'log', '--format=%H', '--', 'drafts/harbour.md') !== '', 15_000, 'the file committed');
   });
 

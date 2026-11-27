@@ -43,6 +43,7 @@ async function openComponents(page: Page): Promise<void> {
   await openSettings(page);
   await page.getByTestId('settings-tab-you').click();
   await page.getByTestId('settings-tab-components').click();
+  await page.getByTestId('kind:tools').click();
   await expect(page.getByTestId('components')).toBeVisible();
 }
 

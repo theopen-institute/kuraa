@@ -60,26 +60,37 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('components')).toBeHidden();
     await page.getByTestId('settings-tab-components').click();
     await expect(page.getByTestId('settings-title')).toHaveText('Components');
-    await expect(page.getByTestId('settings-scope')).toContainText('Only whoever runs the host switches the Host column');
+    await expect(page.getByTestId('settings-scope')).toContainText('Whoever runs the host decides which it has on');
     await expect(page.getByTestId('components')).toContainText('--format');
     // Each component once, under its kind (0083).
     for (const kind of ['Document formats', 'Languages', 'Environments', 'Syncs']) await expect(page.getByTestId('component-kinds')).toContainText(kind);
+    // A tab for each (0104), the first shown; to anyone but the host's owner, no Host column for formats: what the
+    // host has off is said in its row, and formatting as you type is a column of its own (0105).
+    await expect(page.getByTestId('kind:formats')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('column:host')).toHaveCount(0);
+    await expect(page.getByTestId('column:editing')).toHaveText(/Formatting\s*as you type/);
     await expect(page.getByTestId('components-formats')).toContainText('R Markdown');
+    await page.getByTestId('kind:environments').click();
     await expect(page.getByTestId('components-environments').getByTestId('environment:podman')).toBeVisible();
+    await expect(page.getByTestId('components-formats')).toHaveCount(0);
     await expect(page.getByTestId('preferences-components')).toHaveCount(0);
+    await page.getByTestId('kind:engines').click();
     await expect(box(page, 'R')).not.toBeChecked();
     await expect(box(page, 'R')).toBeDisabled();
-    // Formats: shown, and not changed here (this page is not the host's owner).
-    await expect(box(page, 'R Markdown')).not.toBeChecked();
-    await expect(box(page, 'Pandoc markdown')).toBeChecked();
-    for (const name of ['R Markdown', 'Pandoc markdown', 'Text file']) await expect(box(page, name)).toBeDisabled();
+    // Formats: what the host has off, said in its row, and not changed here (this page is not the host's owner).
+    await page.getByTestId('kind:formats').click();
+    await expect(page.getByTestId('component:format:rmarkdown')).toContainText('Off on this host: its files open as Text files.');
+    await expect(page.getByTestId('component:format:pandoc-markdown')).not.toContainText('Off on this host');
+    for (const name of ['R Markdown', 'Pandoc markdown', 'Text file']) await expect(box(page, name)).toHaveCount(0);
     // Where code runs: the environments loaded (here only Podman), none in use while no engine is on.
+    await page.getByTestId('kind:environments').click();
     await expect(page.getByTestId('environment:podman')).toContainText('In a Podman container');
     await expect(page.getByTestId('environment:podman')).not.toContainText('not sandboxed');
     await expect(box(page, 'In a Podman container')).not.toBeChecked();
     await expect(box(page, 'In a Podman container')).toBeDisabled();
     // The online copy is a component too (0059), listed with the others; its settings, for the open workspace, a
     // subpanel of its own. On this host, not set up from the app.
+    await page.getByTestId('kind:syncs').click();
     await expect(page.getByTestId('component-sync:online')).toContainText('Online copy');
     await page.getByTestId('sync-settings:online').click();
     await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
@@ -150,10 +161,18 @@ test('on the shared host too, only your editing behaviour can change', async ({ 
   // No document open: Document says so beneath it, not quieter than the others.
   await expect(page.getByTestId('settings-tab-document')).toContainText('No document open');
   await expect(page.getByTestId('settings-tab-document')).not.toHaveClass(/\bidle\b/);
+  await page.getByTestId('kind:engines').click();
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
+  await page.getByTestId('kind:environments').click();
   await expect(box(page, 'In a Podman container')).toBeChecked();
-  await expect(box(page, 'R Markdown')).toBeDisabled();
+  await page.getByTestId('kind:formats').click();
+  await expect(page.getByTestId('component:format:rmarkdown')).not.toContainText('Off on this host');
+  // Features: Workspace and You, no Host column (0105).
+  await page.getByTestId('kind:features').click();
+  await expect(page.getByTestId('column:you')).toBeVisible();
+  await expect(page.getByTestId('column:host')).toHaveCount(0);
+  await page.getByTestId('kind:formats').click();
   // The You column is yours, wherever the host is.
   await expect(box(page, 'Markdown editing')).toBeEnabled();
 });

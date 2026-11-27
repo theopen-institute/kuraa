@@ -965,7 +965,9 @@ export class Host {
     }
     const t = rec.timers;
     if (t.flush) clearTimeout(t.flush);
-    t.flush = setTimeout(() => void this.serial(() => this.flushNow(rec)).catch((e) => this.log(`flush failed: ${e}`)), this.timings.flushMs);
+    // A draft's file is made as soon as something is written in it (0097), not after the usual wait from the last edit:
+    // the file list has it while the writing goes on.
+    t.flush = setTimeout(() => void this.serial(() => this.flushNow(rec)).catch((e) => this.log(`flush failed: ${e}`)), rec.draft ? 0 : this.timings.flushMs);
     if (t.commit) clearTimeout(t.commit);
     t.commit = setTimeout(() => void this.commitRoom(rec).catch((e) => this.log(`commit failed: ${e}`)), this.timings.idleCommitMs);
     if (rec.editingSince === null) {

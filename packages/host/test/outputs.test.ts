@@ -363,13 +363,19 @@ describe('run outputs as they happen (0062)', () => {
     connectWith({ publishMs: 20, gapMs: 400 }, a);
     a.cache = [{ path: DOC, runs: [run('r1', 'x')] }];
     a.out.publish();
-    await new Promise((r) => setTimeout(r, 300));
+    // Waited for, not timed: on a busy computer (all the tests at once) a publish takes longer than on an idle one.
+    const ref = () => (execFileSync('git', ['rev-parse', '-q', '--verify', `${OUTPUTS}${a.key}`], { cwd: a.dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null);
+    const settle = async (test: () => boolean) => {
+      for (const end = Date.now() + 5000; Date.now() < end && !test();) await new Promise((r) => setTimeout(r, 20));
+    };
+    await settle(() => { try { return !!ref(); } catch { return false; } });
     const first = git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`);
     a.cache[0]!.runs.push(run('r2', 'y', { chunk: { label: null, index: 1, codeHash: 'y' } }));
     a.out.publish();
+    // Not sooner than the gap after the last publish.
     await new Promise((r) => setTimeout(r, 30));
     expect(git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`)).toBe(first);
-    await new Promise((r) => setTimeout(r, 500));
+    await settle(() => git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`) !== first);
     expect(git(a.dir, 'rev-parse', `${OUTPUTS}${a.key}`)).not.toBe(first);
     a.out.close();
   });

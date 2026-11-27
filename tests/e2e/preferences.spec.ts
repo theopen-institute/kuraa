@@ -49,10 +49,19 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     const switches = page.getByTestId('preferences-components');
     await expect(switches).toBeHidden();
     // Beneath it in the list, how many there are at the highest level its owner switches them at: the host (0095).
-    await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · Host/);
+    await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · This computer/);
     await page.getByTestId('settings-tab-components').click();
-    await expect(page.getByTestId('settings-scope')).toContainText('Only you, the host’s owner, switch the Host column');
+    await expect(page.getByTestId('settings-scope')).toContainText('on this computer, for every workspace on it');
     await expect(switches.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeChecked();
+    // One kind at a time, a tab each (0104); the arrow keys move between them.
+    await page.getByTestId('kind:formats').press('ArrowRight');
+    await expect(page.getByTestId('kind:features')).toBeFocused();
+    await expect(page.getByTestId('kind:features')).toHaveAttribute('aria-selected', 'true');
+    // Its owner's columns (0105): This computer and Workspace; no You (hiding one for yourself, on your own host, is turning it off).
+    await expect(page.getByTestId('column:host')).toHaveText(/This computer/);
+    await expect(page.getByTestId('column:workspace')).toBeVisible();
+    await expect(page.getByTestId('column:you')).toHaveCount(0);
+    await page.getByTestId('kind:engines').click();
     await expect(switches.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
     await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();
     await page.getByTestId('settings-tab-host').click();
@@ -73,6 +82,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await prefs.getByTestId('pref-memory').fill('3g');
     // A component switched in Components, applied with Host's settings, together, as the window closes.
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await switches.getByTestId('pref-format-rmarkdown').uncheck();
     await page.getByTestId('settings-tab-host').click();
     // A relay to connect through, named by its key (kuraa-host relay prints it).
@@ -89,6 +99,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
@@ -96,6 +107,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     // Kept: the dialog opens with them, from the keyboard too (⌥⌘, as in the desktop app).
     await page.keyboard.press('ControlOrMeta+Alt+Comma');
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await expect(switches.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await page.getByTestId('settings-tab-host').click();
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();

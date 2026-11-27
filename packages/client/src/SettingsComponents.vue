@@ -1,6 +1,13 @@
+<script lang="ts">
+export type ComponentsAvailable = { n: number; level: 'host' | 'workspace' | 'you' };
+type Kind = 'formats' | 'features' | 'engines' | 'environments' | 'tools' | 'syncs';
+/** The kind shown last, kept while the window is open (Settings closed and opened again shows it). */
+let lastKind: Kind | null = null;
+</script>
+
 <script setup lang="ts">
-// Settings › Components (decisions 0083, 0084, 0095): every component, in one
-// table, grouped by kind (document formats, features, languages, environments,
+// Settings › Components (decisions 0083, 0084, 0095, 0104): every component,
+// a tab for each kind (document formats, features, languages, environments,
 // tools, syncs), with a column for each level a component is switched at:
 //
 // - Host: on or off for everyone using the host, and every workspace on it (its
@@ -54,7 +61,6 @@ const props = defineProps<{
   editors: Record<string, FormatEditor>;
   editorsOff: string[];
 }>();
-export type ComponentsAvailable = { n: number; level: 'host' | 'workspace' | 'you' };
 const emit = defineEmits<{ editorsOff: [ids: string[]]; hiddenFeatures: [ids: string[]]; available: [available: ComponentsAvailable | null] }>();
 const { view, f, editable, flagged } = props.form;
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
@@ -180,8 +186,7 @@ const inlineMounts = computed(() => {
   return out;
 });
 
-type Kind = 'formats' | 'features' | 'engines' | 'environments' | 'tools' | 'syncs';
-/** Each kind the host has any of, with how many, for the row of kinds at the top. */
+/** Each kind the host has any of, with how many, for its tab. */
 const kinds = computed(() => {
   const c = components.value;
   const all: [Kind, number][] = [
@@ -207,11 +212,49 @@ const available = computed<ComponentsAvailable | null>(() => {
 });
 watch(available, (a) => emit('available', a), { immediate: true });
 
+// ── One kind at a time (0104): a tab each; the one chosen last in this window, while the host has it, else the first.
 const root = ref<HTMLElement | null>(null);
-function goTo(kind: Kind) {
-  root.value?.querySelector(`[data-kind="${kind}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+const chosen = ref<Kind | null>(lastKind);
+const shown = computed<Kind | null>(() => (kinds.value.some((k) => k.id === chosen.value) ? chosen.value : kinds.value[0]?.id ?? null));
+/** The panel's test id, as each kind's part had it before (Languages: `components-run`). */
+const panelTestId = (kind: Kind) => `components-${kind === 'engines' ? 'run' : kind}`;
+function show(kind: Kind) {
+  if (kind !== shown.value) root.value?.closest('.settings-content')?.scrollTo({ top: 0 });
+  chosen.value = lastKind = kind;
+}
+/** Arrow keys, Home and End move between the tabs, showing each. */
+function tabKey(e: KeyboardEvent) {
+  const ids = kinds.value.map((k) => k.id);
+  const i = ids.indexOf(shown.value!);
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: ids.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  const kind = ids[(next + ids.length) % ids.length]!;
+  show(kind);
+  root.value?.querySelector<HTMLElement>(`[data-testid="kind:${kind}"]`)?.focus();
 }
 const L = S.components.levels;
+
+// ── The columns (0105): only the levels a kind is switched at, as this person switches them. The host's owner
+// (on their own computer, as a rule its only user) has This computer, not You: hiding a feature for yourself
+// on a host only you use is turning it off. Anyone else has You, not the host's: a note in a row says what
+// the host has off. Formatting as you type is a column of its own, not You.
+type Level = 'host' | 'workspace' | 'you' | 'editing';
+const owner = computed(() => props.canChangeSettings);
+const columns = computed<Level[]>(() => {
+  switch (shown.value) {
+    case 'formats': return owner.value ? ['host', 'editing'] : ['editing'];
+    case 'features': return owner.value ? ['host', 'workspace'] : ['workspace', 'you'];
+    case 'syncs': return ['workspace'];
+    default: return ['host'];
+  }
+});
+const heads = computed<Record<Level, { label: string; who: string; about: string }>>(() => ({
+  host: owner.value ? { label: L.thisComputer, who: L.thisComputerWho, about: L.thisComputerAbout } : { label: L.host, who: L.hostWho, about: L.hostAbout },
+  workspace: { label: L.workspace, who: L.workspaceWho, about: L.workspaceAbout },
+  you: { label: L.you, who: L.youWho, about: L.youAbout },
+  editing: { label: L.editing, who: L.editingWho, about: L.editingAbout },
+}));
 </script>
 
 <template>
@@ -234,287 +277,269 @@ const L = S.components.levels;
     <form v-show="!sub" :data-testid="canChangeSettings ? 'preferences-components' : undefined" novalidate @submit.prevent>
       <section class="settings-part components-part" data-testid="components">
         <ErrorBanner v-if="componentsError" :error="componentsError" inline />
-        <nav v-if="kinds.length" class="component-kinds" :aria-label="S.components.kindsLabel" data-testid="component-kinds">
-          <button v-for="k in kinds" :key="k.id" type="button" class="component-kind-chip" :data-testid="`kind:${k.id}`" @click="goTo(k.id)">
+        <!-- A tab for each kind (0104), kept in view as the kind scrolls. -->
+        <div v-if="kinds.length" class="component-kinds" role="tablist" :aria-label="S.components.kindsLabel" data-testid="component-kinds" @keydown="tabKey">
+          <button
+            v-for="k in kinds"
+            :id="`component-tab-${k.id}`"
+            :key="k.id"
+            type="button"
+            role="tab"
+            class="component-kind-tab"
+            :aria-selected="k.id === shown"
+            aria-controls="component-panel"
+            :tabindex="k.id === shown ? 0 : -1"
+            :data-testid="`kind:${k.id}`"
+            @click="show(k.id)"
+          >
             {{ k.label }} <span class="component-kind-n">{{ k.n }}</span>
           </button>
-        </nav>
+        </div>
 
-        <table class="component-table">
-          <thead>
-            <tr>
-              <th scope="col" class="component-col-name">{{ S.components.component }}</th>
-              <th scope="col" :title="L.hostAbout"><span>{{ L.host }}</span><span class="component-col-about">{{ L.hostWho }}</span></th>
-              <th scope="col" :title="L.workspaceAbout"><span>{{ L.workspace }}</span><span class="component-col-about">{{ L.workspaceWho }}</span></th>
-              <th scope="col" :title="L.youAbout"><span>{{ L.you }}</span><span class="component-col-about">{{ L.youWho }}</span></th>
-            </tr>
-          </thead>
+        <div
+          v-if="shown"
+          id="component-panel"
+          role="tabpanel"
+          class="component-panel"
+          :aria-labelledby="`component-tab-${shown}`"
+          :data-kind="shown"
+          :data-testid="panelTestId(shown)"
+        >
+          <!-- The kind: its name and how it stands, what it is, and its owner's switches for the whole kind. -->
+          <header class="component-kind-intro">
+            <div class="component-kind-head">
+              <h4>{{ S.components.kinds[shown] }}</h4>
+              <span v-if="shown === 'formats'" class="component-kind-state">{{ S.components.onOf(formatRows.filter(formatOn).length, formatRows.length) }}</span>
+              <span v-else-if="shown === 'features'" class="component-kind-state">{{ S.components.onOf(featureRows.filter(featureOn).length, featureRows.length) }}</span>
+              <span v-else-if="shown === 'engines' && components" class="component-kind-state">{{ S.components.onOf(components.engines.filter((e) => e.on).length, components.engines.length) }}</span>
+              <span v-else-if="shown === 'environments'" class="component-kind-state">{{ S.components.inUse(inUse ? envName(inUse.label) : null) }}</span>
+              <span v-else-if="shown === 'tools' && tools" class="component-kind-state">{{ S.components.downloadedOf(tools.tools.filter((t) => t.state === 'ready' || t.state === 'adding').length, tools.tools.length) }}</span>
+            </div>
+            <p class="component-kind-about">{{ S.components.kindAbout[shown] }}</p>
+            <span v-if="shown === 'formats' && flagged('formats')" class="pref-note flag">{{ S.preferences.fromFlag(FLAGS.formats!) }}</span>
+            <span v-if="shown === 'features' && flagged('features')" class="pref-note flag">{{ S.preferences.fromFlag(FLAGS.features!) }}</span>
+            <!-- Languages: whether documents' code runs at all, its owner's switch for the kind. -->
+            <div v-if="shown === 'engines' && editable" class="component-switches">
+              <label class="pref-check"><input v-model="f.runCode" type="checkbox" data-testid="pref-run"> {{ S.preferences.run }}
+                <span :class="['pref-status', shownEnvironment ? (shownEnvironment.available ? 'ok' : 'no') : '']" data-testid="pref-environments">
+                  {{ shownEnvironment ? (shownEnvironment.available ? S.preferences.runsIn(shownEnvironment.label) : shownEnvironment.message) : S.preferences.noEnvironment }}
+                </span>
+                <span v-if="flagged('runCode')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.runCode!) }}</span>
+              </label>
+            </div>
+            <!-- Environments: its owner's choice of one, where there is one to make. -->
+            <div v-if="shown === 'environments' && editable && view!.environments.length > 1" class="component-switches">
+              <label class="field">
+                <span>{{ S.preferences.where }}</span>
+                <select v-model="f.environment" data-testid="pref-environment">
+                  <option value="">{{ S.preferences.onlyOne }}</option>
+                  <option v-for="e in view!.environments" :key="e.id" :value="e.id">{{ e.label }}</option>
+                </select>
+                <span v-if="flagged('environment')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.environment!) }}</span>
+              </label>
+            </div>
+            <p v-if="shown === 'environments' && components && !components.environments.length" class="muted components-note">{{ S.components.noEnvironment }}</p>
+            <template v-if="shown === 'tools' && tools">
+              <ErrorBanner v-if="toolError" :error="toolError" inline />
+              <p v-if="!tools.allowInstalls" class="muted components-note">{{ S.components.toolsOff }}</p>
+            </template>
+          </header>
 
-          <!-- Document formats: on for the host; their editor, yours. -->
-          <tbody v-if="formatRows.length" data-kind="formats" data-testid="components-formats">
-            <tr class="component-kind-row">
-              <th colspan="4" scope="rowgroup">
-                <div class="component-kind-head">
-                  <h4>{{ S.components.kinds.formats }}</h4>
-                  <span class="component-kind-state">{{ S.components.onOf(formatRows.filter(formatOn).length, formatRows.length) }}</span>
-                </div>
-                <p class="component-kind-about">{{ S.components.kindAbout.formats }}</p>
-                <span v-if="flagged('formats')" class="pref-note flag">{{ S.preferences.fromFlag(FLAGS.formats!) }}</span>
-              </th>
-            </tr>
-            <tr v-for="t in formatRows" :key="t.id" class="component-row" :data-testid="`component:format:${t.id}`">
-              <td class="component-text">
-                <span class="component-name">{{ t.label }}</span>
-                <span class="component-about">{{ t.description || S.components.files(t.extensions.join(', ')) }}</span>
-              </td>
-              <td class="component-cell" :data-testid="editable ? 'pref-formats' : undefined">
-                <input v-if="editable" v-model="f.formats" type="checkbox" :value="t.id" :aria-label="t.label" :data-testid="`pref-format-${t.id}`">
-                <input v-else type="checkbox" :checked="t.on" disabled :aria-label="t.label">
-              </td>
-              <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-              <td class="component-cell">
-                <input
-                  v-if="editors[t.id]"
-                  type="checkbox"
-                  :checked="!editorsOff.includes(t.id)"
-                  :aria-label="editors[t.id]!.label ?? t.label"
-                  :title="S.components.editorTitle(editors[t.id]!.label ?? t.label, editors[t.id]!.description ?? '')"
-                  :data-testid="`editor-${t.id}`"
-                  @change="toggleEditor(t.id, checked($event))"
-                >
-                <span v-else class="component-none" :title="L.notHere">–</span>
-              </td>
-            </tr>
-          </tbody>
+          <table class="component-table">
+            <thead>
+              <tr>
+                <th scope="col" class="component-col-name">{{ S.components.component }}</th>
+                <th v-for="c in columns" :key="c" scope="col" :title="heads[c].about" :data-testid="`column:${c}`"><span>{{ heads[c].label }}</span><span class="component-col-about">{{ heads[c].who }}</span></th>
+              </tr>
+            </thead>
 
-          <!-- Features: on for the host, for the workspace, and shown for you. -->
-          <tbody v-if="featureRows.length" data-kind="features" data-testid="components-features">
-            <tr class="component-kind-row">
-              <th colspan="4" scope="rowgroup">
-                <div class="component-kind-head">
-                  <h4>{{ S.components.kinds.features }}</h4>
-                  <span class="component-kind-state">{{ S.components.onOf(featureRows.filter(featureOn).length, featureRows.length) }}</span>
-                </div>
-                <p class="component-kind-about">{{ S.components.kindAbout.features }}</p>
-                <span v-if="flagged('features')" class="pref-note flag">{{ S.preferences.fromFlag(FLAGS.features!) }}</span>
-              </th>
-            </tr>
-            <template v-for="x in featureRows" :key="x.id">
-              <tr class="component-row" :data-testid="`component:feature:${x.id}`">
+            <!-- Document formats: on for the host (its owner's column); formatting as you type, yours. -->
+            <tbody v-if="shown === 'formats'">
+              <tr v-for="t in formatRows" :key="t.id" class="component-row" :data-testid="`component:format:${t.id}`">
+                <td class="component-text">
+                  <span class="component-name">{{ t.label }}</span>
+                  <span class="component-about">{{ t.description || S.components.files(t.extensions.join(', ')) }}</span>
+                  <span v-if="!owner && !t.on" class="component-about component-unavailable">{{ S.components.formatOffOnHost }}</span>
+                </td>
+                <td v-if="owner" class="component-cell" :data-testid="editable ? 'pref-formats' : undefined">
+                  <input v-if="editable" v-model="f.formats" type="checkbox" :value="t.id" :aria-label="t.label" :data-testid="`pref-format-${t.id}`">
+                  <input v-else type="checkbox" :checked="t.on" disabled :aria-label="t.label">
+                </td>
+                <td class="component-cell">
+                  <input
+                    v-if="editors[t.id]"
+                    type="checkbox"
+                    :checked="!editorsOff.includes(t.id)"
+                    :aria-label="editors[t.id]!.label ?? t.label"
+                    :title="S.components.editorTitle(editors[t.id]!.label ?? t.label, editors[t.id]!.description ?? '')"
+                    :data-testid="`editor-${t.id}`"
+                    @change="toggleEditor(t.id, checked($event))"
+                  >
+                  <span v-else class="component-none" :title="L.notHere">–</span>
+                </td>
+              </tr>
+            </tbody>
+
+            <!-- Features: on for the host (its owner's column), for the workspace, and shown for you (anyone else's). -->
+            <tbody v-else-if="shown === 'features'">
+              <template v-for="x in featureRows" :key="x.id">
+                <tr class="component-row" :data-testid="`component:feature:${x.id}`">
+                  <td class="component-text">
+                    <span class="component-name">{{ x.label }}</span>
+                    <span v-if="x.description" class="component-about">{{ x.description }}</span>
+                    <span v-if="owner ? x.status?.workspace && !x.host : !x.host" class="component-about component-unavailable" :data-testid="`feature-off-on-host-${x.id}`">{{ owner ? S.components.featureOffHere : S.components.featureOffOnHost }}</span>
+                    <!-- Hidden in this browser before its owner's view had no You column: still said, and undone here. -->
+                    <span v-if="owner && x.status && hiddenFeatures.includes(x.id)" class="component-about">
+                      {{ S.components.hiddenHere }}
+                      <button type="button" class="link" :data-testid="`feature-unhide-${x.id}`" @click="toggleShown(x.id, true)">{{ S.components.showIt }}</button>
+                    </span>
+                    <span v-if="x.part && (x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline || x.part.feature.settings?.you)" class="component-links">
+                      <button
+                        v-if="x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline"
+                        type="button"
+                        class="link"
+                        :data-testid="`open-feature-${x.id}`"
+                        @click="sub = { kind: 'workspace', id: x.id }"
+                      >{{ x.part.feature.settings.workspace.label }} ›</button>
+                      <button
+                        v-if="x.part.feature.settings?.you"
+                        type="button"
+                        class="link"
+                        :data-testid="`open-feature-you-${x.id}`"
+                        @click="sub = { kind: 'you', id: x.id }"
+                      >{{ x.part.feature.settings.you.label }} ›</button>
+                    </span>
+                  </td>
+                  <td v-if="owner" class="component-cell" :data-testid="editable ? 'pref-features' : undefined">
+                    <input v-if="editable" v-model="f.features" type="checkbox" :value="x.id" :aria-label="x.label" :data-testid="`pref-feature-${x.id}`">
+                    <input v-else type="checkbox" :checked="x.host" disabled :aria-label="x.label">
+                  </td>
+                  <td class="component-cell">
+                    <input
+                      v-if="x.status && workspaceName"
+                      type="checkbox"
+                      :checked="x.status.workspace"
+                      :disabled="!x.status.mayChange || featureBusy !== null"
+                      :aria-label="S.components.forLevel(x.label, L.workspace)"
+                      :title="x.status.mayChange ? undefined : S.components.workspaceMayNot"
+                      :data-testid="`feature-${x.id}`"
+                      @change="setFeature(x, checked($event))"
+                    >
+                    <span v-else class="component-none" :title="workspaceName ? L.notHere : S.components.noWorkspace">–</span>
+                  </td>
+                  <td v-if="!owner" class="component-cell">
+                    <input
+                      v-if="x.status && workspaceName"
+                      type="checkbox"
+                      :checked="!hiddenFeatures.includes(x.id)"
+                      :disabled="!x.part"
+                      :aria-label="S.components.forLevel(x.label, L.you)"
+                      :title="x.part ? undefined : S.components.shownWhenOn"
+                      :data-testid="`feature-shown-${x.id}`"
+                      @change="toggleShown(x.id, checked($event))"
+                    >
+                    <span v-else class="component-none" :title="workspaceName ? L.notHere : S.components.noWorkspace">–</span>
+                  </td>
+                </tr>
+                <tr v-if="x.status?.workspace && inlineMounts.get(x.id)" class="component-more">
+                  <td :colspan="columns.length + 1">
+                    <FeatureMount class="feature-inline" :mount="inlineMounts.get(x.id)!" :testid="`feature-inline-${x.id}`" />
+                  </td>
+                </tr>
+              </template>
+              <tr v-if="featureError || (workspaceName && features.some((x) => !x.mayChange)) || !workspaceName" class="component-more">
+                <td :colspan="columns.length + 1">
+                  <p v-if="!workspaceName" class="muted components-note">{{ S.components.noWorkspace }}</p>
+                  <p v-else-if="features.some((x) => !x.mayChange)" class="muted components-note">{{ S.components.workspaceMayNot }}</p>
+                  <div v-if="featureError" class="components-error" role="alert">{{ featureError }}</div>
+                </td>
+              </tr>
+            </tbody>
+
+            <template v-else-if="components && (shown === 'engines' || shown === 'environments')">
+              <!-- Languages: loaded on the host. -->
+              <tbody v-if="shown === 'engines'">
+                <tr v-for="e in components.engines" :key="e.id" class="component-row">
+                  <td class="component-text">
+                    <span class="component-name">{{ e.label }}</span>
+                    <span class="component-about">{{ e.description }}</span>
+                  </td>
+                  <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="e.label"></td>
+                </tr>
+              </tbody>
+
+              <!-- Environments: the one in use on the host. -->
+              <tbody v-else>
+                <tr v-for="e in components.environments" :key="e.id" class="component-row" :data-testid="`environment:${e.id}`">
+                  <td class="component-text">
+                    <span class="component-name">{{ envName(e.label) }}<span v-if="!e.sandboxed" class="component-warn">{{ S.components.notSandboxed }}</span></span>
+                    <span class="component-about">{{ e.description }}</span>
+                    <span v-if="e.on && !e.available" class="component-about component-unavailable">{{ S.components.unavailable(e.message) }}</span>
+                  </td>
+                  <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="envName(e.label)"></td>
+                </tr>
+              </tbody>
+            </template>
+
+            <!-- Tools: downloaded to the host's computer, for every workspace on it. -->
+            <tbody v-else-if="shown === 'tools' && tools">
+              <tr v-for="t in tools.tools" :key="t.id" class="component-row" :data-testid="`tool:${t.id}`">
+                <td class="component-text">
+                  <span class="component-name">{{ t.label }}</span>
+                  <span class="component-about">{{ t.description }}</span>
+                  <span class="component-about" role="status" :data-testid="`tool-status:${t.id}`">{{ toolStatus(t) }}</span>
+                  <span v-if="t.unavailable" class="component-about component-unavailable">{{ t.unavailable }}</span>
+                  <span v-else-if="t.note" class="component-about">{{ t.note }}</span>
+                  <span v-if="t.error && !toolBusy(t)" class="component-about component-unavailable">{{ S.components.failed(t.error) }}</span>
+                </td>
+                <td class="component-cell">
+                  <template v-if="tools.allowInstalls">
+                    <button
+                      v-if="t.state === 'absent' || t.state === 'downloading'"
+                      type="button"
+                      class="component-action"
+                      :disabled="toolBusy(t) || !!t.unavailable"
+                      :title="S.components.downloadTitle(t.label, megabytes(t.downloadBytes))"
+                      :data-testid="`tool-download:${t.id}`"
+                      @click="toolAction(t, 'download')"
+                    >{{ S.components.download }}</button>
+                    <button
+                      v-else
+                      type="button"
+                      class="component-action"
+                      :disabled="toolBusy(t)"
+                      :title="S.components.removeTitle(t.label)"
+                      :data-testid="`tool-remove:${t.id}`"
+                      @click="toolAction(t, 'remove')"
+                    >{{ S.components.remove }}</button>
+                  </template>
+                  <input v-else type="checkbox" :checked="t.state === 'ready'" disabled :aria-label="t.label">
+                </td>
+              </tr>
+            </tbody>
+
+            <!-- Syncs (0059): each one's settings are the open workspace's, in a subpanel. -->
+            <tbody v-else-if="shown === 'syncs'">
+              <tr v-for="x in syncs" :key="x.id" class="component-row" :data-testid="`component-sync:${x.id}`">
                 <td class="component-text">
                   <span class="component-name">{{ x.label }}</span>
-                  <span v-if="x.description" class="component-about">{{ x.description }}</span>
-                  <span v-if="x.status?.workspace && !x.host" class="component-about component-unavailable">{{ S.components.featureOffOnHost }}</span>
-                  <span v-if="x.part && (x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline || x.part.feature.settings?.you)" class="component-links">
-                    <button
-                      v-if="x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline"
-                      type="button"
-                      class="link"
-                      :data-testid="`open-feature-${x.id}`"
-                      @click="sub = { kind: 'workspace', id: x.id }"
-                    >{{ x.part.feature.settings.workspace.label }} ›</button>
-                    <button
-                      v-if="x.part.feature.settings?.you"
-                      type="button"
-                      class="link"
-                      :data-testid="`open-feature-you-${x.id}`"
-                      @click="sub = { kind: 'you', id: x.id }"
-                    >{{ x.part.feature.settings.you.label }} ›</button>
-                  </span>
-                </td>
-                <td class="component-cell" :data-testid="editable ? 'pref-features' : undefined">
-                  <input v-if="editable" v-model="f.features" type="checkbox" :value="x.id" :aria-label="x.label" :data-testid="`pref-feature-${x.id}`">
-                  <input v-else type="checkbox" :checked="x.host" disabled :aria-label="x.label">
+                  <span class="component-about">{{ x.description }}</span>
+                  <span class="component-about">{{ x.targets.length ? S.components.syncTargets(x.targets.map((t) => t.url)) : S.components.syncNone }}</span>
                 </td>
                 <td class="component-cell">
-                  <input
-                    v-if="x.status && workspaceName"
-                    type="checkbox"
-                    :checked="x.status.workspace"
-                    :disabled="!x.status.mayChange || featureBusy !== null"
-                    :aria-label="S.components.forLevel(x.label, L.workspace)"
-                    :title="x.status.mayChange ? undefined : S.components.workspaceMayNot"
-                    :data-testid="`feature-${x.id}`"
-                    @change="setFeature(x, checked($event))"
-                  >
-                  <span v-else class="component-none" :title="workspaceName ? L.notHere : S.components.noWorkspace">–</span>
-                </td>
-                <td class="component-cell">
-                  <input
-                    v-if="x.status && workspaceName"
-                    type="checkbox"
-                    :checked="!hiddenFeatures.includes(x.id)"
-                    :disabled="!x.part"
-                    :aria-label="S.components.forLevel(x.label, L.you)"
-                    :title="x.part ? undefined : S.components.shownWhenOn"
-                    :data-testid="`feature-shown-${x.id}`"
-                    @change="toggleShown(x.id, checked($event))"
-                  >
-                  <span v-else class="component-none" :title="workspaceName ? L.notHere : S.components.noWorkspace">–</span>
-                </td>
-              </tr>
-              <tr v-if="x.status?.workspace && inlineMounts.get(x.id)" class="component-more">
-                <td colspan="4">
-                  <FeatureMount class="feature-inline" :mount="inlineMounts.get(x.id)!" :testid="`feature-inline-${x.id}`" />
-                </td>
-              </tr>
-            </template>
-            <tr v-if="featureError || (workspaceName && features.some((x) => !x.mayChange)) || !workspaceName" class="component-more">
-              <td colspan="4">
-                <p v-if="!workspaceName" class="muted components-note">{{ S.components.noWorkspace }}</p>
-                <p v-else-if="features.some((x) => !x.mayChange)" class="muted components-note">{{ S.components.workspaceMayNot }}</p>
-                <div v-if="featureError" class="components-error" role="alert">{{ featureError }}</div>
-              </td>
-            </tr>
-          </tbody>
-
-          <template v-if="components">
-            <!-- Languages: loaded on the host; whether documents' code runs at all, its owner's switch for the kind. -->
-            <tbody data-kind="engines" data-testid="components-run">
-              <tr class="component-kind-row">
-                <th colspan="4" scope="rowgroup">
-                  <div class="component-kind-head">
-                    <h4>{{ S.components.kinds.engines }}</h4>
-                    <span class="component-kind-state">{{ S.components.onOf(components.engines.filter((e) => e.on).length, components.engines.length) }}</span>
-                  </div>
-                  <p class="component-kind-about">{{ S.components.kindAbout.engines }}</p>
-                  <div v-if="editable" class="component-switches">
-                    <label class="pref-check"><input v-model="f.runCode" type="checkbox" data-testid="pref-run"> {{ S.preferences.run }}
-                      <span :class="['pref-status', shownEnvironment ? (shownEnvironment.available ? 'ok' : 'no') : '']" data-testid="pref-environments">
-                        {{ shownEnvironment ? (shownEnvironment.available ? S.preferences.runsIn(shownEnvironment.label) : shownEnvironment.message) : S.preferences.noEnvironment }}
-                      </span>
-                      <span v-if="flagged('runCode')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.runCode!) }}</span>
-                    </label>
-                  </div>
-                </th>
-              </tr>
-              <tr v-for="e in components.engines" :key="e.id" class="component-row">
-                <td class="component-text">
-                  <span class="component-name">{{ e.label }}</span>
-                  <span class="component-about">{{ e.description }}</span>
-                </td>
-                <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="e.label"></td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-              </tr>
-            </tbody>
-
-            <!-- Environments: the one in use on the host; its owner's choice of one, where there is one to make. -->
-            <tbody data-kind="environments" data-testid="components-environments">
-              <tr class="component-kind-row">
-                <th colspan="4" scope="rowgroup">
-                  <div class="component-kind-head">
-                    <h4>{{ S.components.kinds.environments }}</h4>
-                    <span class="component-kind-state">{{ S.components.inUse(inUse ? envName(inUse.label) : null) }}</span>
-                  </div>
-                  <p class="component-kind-about">{{ S.components.kindAbout.environments }}</p>
-                  <div v-if="editable && view!.environments.length > 1" class="component-switches">
-                    <label class="field">
-                      <span>{{ S.preferences.where }}</span>
-                      <select v-model="f.environment" data-testid="pref-environment">
-                        <option value="">{{ S.preferences.onlyOne }}</option>
-                        <option v-for="e in view!.environments" :key="e.id" :value="e.id">{{ e.label }}</option>
-                      </select>
-                      <span v-if="flagged('environment')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.environment!) }}</span>
-                    </label>
-                  </div>
-                  <p v-if="!components.environments.length" class="muted components-note">{{ S.components.noEnvironment }}</p>
-                </th>
-              </tr>
-              <tr v-for="e in components.environments" :key="e.id" class="component-row" :data-testid="`environment:${e.id}`">
-                <td class="component-text">
-                  <span class="component-name">{{ envName(e.label) }}<span v-if="!e.sandboxed" class="component-warn">{{ S.components.notSandboxed }}</span></span>
-                  <span class="component-about">{{ e.description }}</span>
-                  <span v-if="e.on && !e.available" class="component-about component-unavailable">{{ S.components.unavailable(e.message) }}</span>
-                </td>
-                <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="envName(e.label)"></td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-              </tr>
-            </tbody>
-          </template>
-
-          <!-- Tools: downloaded to the host's computer, for every workspace on it. -->
-          <tbody v-if="tools?.tools.length" data-kind="tools" data-testid="components-tools">
-            <tr class="component-kind-row">
-              <th colspan="4" scope="rowgroup">
-                <div class="component-kind-head">
-                  <h4>{{ S.components.kinds.tools }}</h4>
-                  <span class="component-kind-state">{{ S.components.downloadedOf(tools.tools.filter((t) => t.state === 'ready' || t.state === 'adding').length, tools.tools.length) }}</span>
-                </div>
-                <p class="component-kind-about">{{ S.components.kindAbout.tools }}</p>
-                <ErrorBanner v-if="toolError" :error="toolError" inline />
-                <p v-if="!tools.allowInstalls" class="muted components-note">{{ S.components.toolsOff }}</p>
-              </th>
-            </tr>
-            <tr v-for="t in tools.tools" :key="t.id" class="component-row" :data-testid="`tool:${t.id}`">
-              <td class="component-text">
-                <span class="component-name">{{ t.label }}</span>
-                <span class="component-about">{{ t.description }}</span>
-                <span class="component-about" role="status" :data-testid="`tool-status:${t.id}`">{{ toolStatus(t) }}</span>
-                <span v-if="t.unavailable" class="component-about component-unavailable">{{ t.unavailable }}</span>
-                <span v-else-if="t.note" class="component-about">{{ t.note }}</span>
-                <span v-if="t.error && !toolBusy(t)" class="component-about component-unavailable">{{ S.components.failed(t.error) }}</span>
-              </td>
-              <td class="component-cell">
-                <template v-if="tools.allowInstalls">
                   <button
-                    v-if="t.state === 'absent' || t.state === 'downloading'"
                     type="button"
                     class="component-action"
-                    :disabled="toolBusy(t) || !!t.unavailable"
-                    :title="S.components.downloadTitle(t.label, megabytes(t.downloadBytes))"
-                    :data-testid="`tool-download:${t.id}`"
-                    @click="toolAction(t, 'download')"
-                  >{{ S.components.download }}</button>
-                  <button
-                    v-else
-                    type="button"
-                    class="component-action"
-                    :disabled="toolBusy(t)"
-                    :title="S.components.removeTitle(t.label)"
-                    :data-testid="`tool-remove:${t.id}`"
-                    @click="toolAction(t, 'remove')"
-                  >{{ S.components.remove }}</button>
-                </template>
-                <input v-else type="checkbox" :checked="t.state === 'ready'" disabled :aria-label="t.label">
-              </td>
-              <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-              <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-            </tr>
-          </tbody>
-
-          <!-- Syncs (0059): each one's settings are the open workspace's, in a subpanel. -->
-          <tbody v-if="syncs.length" data-kind="syncs" data-testid="components-syncs">
-            <tr class="component-kind-row">
-              <th colspan="4" scope="rowgroup">
-                <div class="component-kind-head">
-                  <h4>{{ S.components.kinds.syncs }}</h4>
-                </div>
-                <p class="component-kind-about">{{ S.components.kindAbout.syncs }}</p>
-              </th>
-            </tr>
-            <tr v-for="x in syncs" :key="x.id" class="component-row" :data-testid="`component-sync:${x.id}`">
-              <td class="component-text">
-                <span class="component-name">{{ x.label }}</span>
-                <span class="component-about">{{ x.description }}</span>
-                <span class="component-about">{{ x.targets.length ? S.components.syncTargets(x.targets.map((t) => t.url)) : S.components.syncNone }}</span>
-              </td>
-              <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-              <td class="component-cell">
-                <button
-                  type="button"
-                  class="component-action"
-                  :disabled="!workspaceName"
-                  :title="workspaceName ? S.components.syncFor(workspaceName) : S.components.syncNoWorkspace"
-                  :data-testid="`sync-settings:${x.id}`"
-                  @click="sub = { kind: 'sync', id: x.id }"
-                >{{ S.components.syncSettings }}</button>
-              </td>
-              <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-            </tr>
-          </tbody>
-        </table>
+                    :disabled="!workspaceName"
+                    :title="workspaceName ? S.components.syncFor(workspaceName) : S.components.syncNoWorkspace"
+                    :data-testid="`sync-settings:${x.id}`"
+                    @click="sub = { kind: 'sync', id: x.id }"
+                  >{{ S.components.syncSettings }}</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <div class="components-note">
           <span class="muted">{{ canChangeSettings ? S.components.ownerSets : S.components.setBy }}</span>

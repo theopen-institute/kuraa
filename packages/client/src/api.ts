@@ -413,6 +413,10 @@ export interface HubWorkspace {
   peers: boolean;
   /** Why it is not open, if it is not. */
   error?: string;
+  /** It is still opening (0103): what is asked of it waits until it has. */
+  opening?: boolean;
+  /** The cloud storage service keeping its folder ("iCloud Drive"), if one does (0103). */
+  cloud?: string;
 }
 
 /**
@@ -440,6 +444,8 @@ export interface HubList {
   canChangeSettings?: boolean;
   /** Why Preferences, opening folders and your identity are not available here, if they are not. */
   ownerOff?: string;
+  /** Where new workspaces go (and one moved out of a cloud service's folder), where people may add them. */
+  folder?: string;
 }
 
 /** The owner's settings (the host's settings.ts), as the Preferences dialog edits them. */
@@ -558,6 +564,11 @@ export class HubApi extends HostApi {
   /** Take a workspace off the list (its folder stays). */
   remove(id: string) {
     return this.json(`/hub/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** Move a workspace's folder out of one a cloud storage service keeps, into the hub's folder for new workspaces (0103). */
+  async move(id: string): Promise<HubWorkspace> {
+    return (await this.json<{ workspace: HubWorkspace }>(`/hub/api/workspaces/${encodeURIComponent(id)}/move`, { method: 'POST' })).workspace;
   }
 
   /** The API of one of the hub's workspaces. */

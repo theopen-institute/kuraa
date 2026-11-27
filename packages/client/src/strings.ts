@@ -110,6 +110,13 @@ export const S = {
     cannotOpenWorkspace: (name: string, why: string) => `${name} cannot be opened: ${why}`,
     removeBroken: (name: string, why: string) => `${quote(name)} cannot be opened: ${why}. Remove it from this list?`,
     removeWorkspace: (name: string, path: string) => `Remove ${quote(name)} from this list? Its folder stays as it is (${path}).`,
+    /** A workspace whose folder a cloud storage service keeps (0103). */
+    inCloud: (name: string, service: string) => `${quote(name)} is in a folder ${service} keeps in sync. Workspaces there can take minutes to open and to sync, and ${service} can damage their history. Move it out to keep it safe and quick.`,
+    moveOutOfCloud: 'Move it…',
+    moveAsk: (name: string, service: string, from: string, into: string) => `Move ${quote(name)} out of ${service}, into ${into}? It moves from ${from}, and its devices go on finding it. R packages its code uses are installed again the next time it runs.`,
+    move: 'Move',
+    moving: (name: string, service: string) => `Moving ${quote(name)}… This can take a few minutes while ${service} lets go of it.`,
+    moved: (name: string, path: string) => `Moved ${quote(name)} to ${path}.`,
     joined: (name: string) => `Joined ${quote(name)}.`,
     made: (name: string) => `Made ${quote(name)}.`,
     workspace: 'Workspace',
@@ -905,6 +912,10 @@ export const S = {
 
   workspaceSwitcher: {
     cannotOpen: ' (cannot open)',
+    /** Still opening (0103): it can be chosen, and opens when ready. */
+    opening: ' (opening…)',
+    /** Its folder is kept by a cloud storage service (0103). */
+    inCloud: (service: string) => ` (in ${service})`,
     add: 'Add a workspace…',
     settings: 'Workspace settings',
     allSettings: 'Settings…',

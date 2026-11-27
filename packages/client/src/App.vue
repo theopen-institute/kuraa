@@ -67,7 +67,7 @@ const fail = (e: unknown) => {
 };
 
 // The host's workspaces, and the one open (see workspaces.ts).
-const { hubApi, workspaces: hub, canAdd, canOpenFolder, canChangeSettings, ownerOff, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
+const { hubApi, workspaces: hub, canAdd, canOpenFolder, canChangeSettings, ownerOff, folder: workspacesFolder, known: hubKnown, chosen, ready, api, load: loadHub } = useWorkspaces({
   settings,
   active: () => !editingSettings.value,
   preferred: () => props.shell.workspace,
@@ -529,6 +529,46 @@ async function removeWorkspace(id: string) {
     }
     await loadHub();
   } catch (e) {
+    fail(e);
+  }
+}
+
+// A workspace whose folder a cloud storage service keeps (0103): said each time
+// it is opened, with Move… where the host lets this person move it.
+let cloudSaidFor: string | null = null;
+watch([ready, chosen, hub], () => {
+  const id = ready.value ? chosen.value : null;
+  const w = id ? hub.value?.find((x) => x.id === id) : undefined;
+  if (!w?.cloud) {
+    if (id !== cloudSaidFor) cloudSaidFor = null;
+    return;
+  }
+  if (cloudSaidFor === w.id) return;
+  cloudSaidFor = w.id;
+  const actions = workspacesFolder.value ? [{ label: S.app.moveOutOfCloud, run: () => void moveOutOfCloud(w.id), testid: 'move-out-of-cloud' }] : undefined;
+  notice.value = { kind: 'warn', text: S.app.inCloud(w.name, w.cloud), ...(actions ? { actions } : {}) };
+});
+
+/** Move a workspace's folder out of the cloud service's, into the host's folder for workspaces (0103). */
+async function moveOutOfCloud(id: string) {
+  const w = hub.value?.find((x) => x.id === id);
+  const into = workspacesFolder.value;
+  if (!w?.cloud || !into) return;
+  if (!(await askConfirm(S.app.moveAsk(w.name, w.cloud, w.path, into), S.app.move))) return;
+  notice.value = { kind: 'info', text: S.app.moving(w.name, w.cloud) };
+  // Its host closes while it moves: the open workspace is left, and opened again where it now is.
+  const wasOpen = chosen.value === id;
+  if (wasOpen) {
+    leaveWorkspace();
+    chosen.value = null;
+  }
+  try {
+    const moved = await hubApi.value.move(id);
+    await loadHub(wasOpen ? id : undefined);
+    notice.value = { kind: 'info', text: S.app.moved(moved.name, moved.path) };
+  } catch (e) {
+    notice.value = null;
+    await loadHub(wasOpen ? id : undefined);
     fail(e);
   }
 }

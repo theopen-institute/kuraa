@@ -35,7 +35,7 @@ pnpm host --dir ~/research/notes --static apps/web/dist   # one folder, and noth
 ```
 
 With neither `--dir` nor `--workspaces`, `pnpm host` serves **your workspaces**, just as the desktop
-app does: new ones go in the folder Settings names (`Documents/kuraa` at first), its list and its
+app does: new ones go in the folder Settings names (`~/Kuraa Workspaces` at first: never Documents, which iCloud often keeps, 0103), its list and its
 settings are kept with the app's data (`settings.json` and `host-workspaces.json`, or beside the file
 `--settings` names), so choosing another folder for new workspaces keeps the list. `--workspaces
 <folder>` names that folder instead (its list kept in it), and wins over Settings. `--dir` serves
@@ -69,7 +69,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--allow-origin` | none | A page served elsewhere that may use the server (its origin, e.g. `https://notes.example.org`); repeatable. The server's own page, `pnpm dev` and the desktop app need none | Command line only (as `--port`) |
 | `--dir` | off | Serve this one folder, and nothing else | Command line only; **Open a folder…** adds one to your workspaces |
 | `--settings` | `settings.json` in your app data folder | Where Settings are kept | Command line only |
-| `--workspaces` | Settings, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Settings: New workspaces |
+| `--workspaces` | Settings, else `~/Kuraa Workspaces` | Where new workspaces go (their list kept in it). See below | Settings: New workspaces |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Settings: Other computers › Advanced |
 | `--relay` | none | Relays to connect through when computers cannot connect directly, by key (`pnpm host relay` runs one) | Settings: Other computers › Advanced |
 | `--peer-port`, `--public-address` | none | A server's: take devices' connections over TCP on this port, and where they reach it (`host` or `host:port`), for networks that block UDP; told to members and put in invite links | Command line only |
@@ -266,8 +266,10 @@ In the app, the workspace's name at the top of the sidebar switches between them
 ones: a new folder (made a git repository, inside `~/research`), or a workspace someone shared,
 joined with their invite link. **Invite people…** (there, and in the menu) makes an invite link
 for the open workspace, to send to whoever should join it. The desktop app works this way by itself:
-new workspaces go in `Documents/kuraa` (or `--workspaces <folder>`), and **Open a folder…** adds
-any folder on the computer.
+new workspaces go in `~/Kuraa Workspaces` (or `--workspaces <folder>`), and **Open a folder…** adds
+any folder on the computer. A workspace in a folder iCloud Drive, Dropbox, Google Drive or OneDrive
+keeps in sync says so, as those services hold back its files while they upload them (it can take
+minutes to open), and **Move it…** moves it into that folder (0103).
 
 **A workspace has one name, the same for everyone in it**
 ([0061](docs/decisions/0061-one-name-for-a-workspace.md)). Whoever makes it names it; it is kept in
@@ -593,7 +595,7 @@ URL and token in the welcome, or later in **Settings…** (You).
 ## Run the desktop app
 
 ```sh
-pnpm desktop                          # your workspaces (new ones in Documents/kuraa)
+pnpm desktop                          # your workspaces (new ones in ~/Kuraa Workspaces)
 pnpm desktop -- --workspaces ~/research   # new workspaces in another folder
 pnpm desktop -- --open ~/research/notes
 pnpm desktop -- --open ~/research/notes --engine none --format pandoc-markdown --format text

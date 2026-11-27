@@ -6,7 +6,8 @@
 // (0101); and on the open one's, ⚙, Workspace settings. Apart below them, where the
 // host allows it, Add a workspace… (a new one, one joined from an invite link,
 // or a folder opened); with none open, Settings…. A host of one folder shows
-// just that one.
+// just that one. A workspace still opening says so, and one whose folder a
+// cloud storage service keeps says which (0103).
 import type { HubWorkspace } from './api.js';
 import type { ContextIcon, ContextItem } from './ContextMenu.vue';
 import { S } from './strings.js';
@@ -66,7 +67,7 @@ export function workspaceMenuItems(s: WorkspaceMenuState, act: WorkspaceMenuActi
     ...s.workspaces.map((w) => {
       const icons = [...(w.error ? [] : syncIcon(w)), ...(w.id === s.current ? [gear] : [])];
       return {
-        label: `${w.id === s.current ? '✓ ' : ''}${label(w)}${w.error ? S.workspaceSwitcher.cannotOpen : ''}`,
+        label: `${w.id === s.current ? '✓ ' : ''}${label(w)}${w.error ? S.workspaceSwitcher.cannotOpen : w.opening ? S.workspaceSwitcher.opening : ''}${w.cloud ? S.workspaceSwitcher.inCloud(w.cloud) : ''}`,
         run: () => act.switch(w.id),
         testid: `workspace:${w.id}`,
         ...(icons.length ? { icons } : {}),

@@ -66,7 +66,7 @@ describe('a hub', () => {
   it('makes a new workspace as a git folder, and serves it under /w/<id> like a host of its own', async () => {
     const h = await hub();
     expect((await fetch(`${h.url}/hub/api/workspaces`)).status).toBe(401);
-    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [], canAdd: true, canInvite: true, canOpenFolder: true, canChangeSettings: false });
+    expect(await (await call(h, '/hub/api/workspaces')).json()).toEqual({ workspaces: [], canAdd: true, canInvite: true, canOpenFolder: true, canChangeSettings: false, folder: h.hub.root });
     const made = await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Field notes' }) });
     expect(made.status).toBe(201);
     const { workspace } = (await made.json()) as { workspace: { id: string; path: string; name: string } };
@@ -258,10 +258,13 @@ describe('a hub', () => {
   it('syncs a workspace once it is shared, and only then: one on this computer alone has nothing to sync with', async () => {
     const root = temp('kuraa-hub-');
     const syncing = async (h: RunningHub) => ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { peers: boolean }[] }).workspaces.map((w) => w.peers);
+    // Once its workspaces have opened: the hub answers before (0103), and says which are opening.
     const restart = async (h: RunningHub) => {
       await h.close();
       running.splice(running.indexOf(h), 1);
-      return hub(root, h.token);
+      const next = await hub(root, h.token);
+      await next.hub.opened();
+      return next;
     };
     let h = await hub(root);
     await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Thesis' }) });
@@ -277,6 +280,61 @@ describe('a hub', () => {
     h = await restart(h);
     expect(await syncing(h)).toEqual([true, false]);
     await until(() => existsSync(join(root, 'thesis', '.git', 'kuraa', 'bin', 'git-remote-kuraa')), 10_000, 'syncing started');
+  });
+
+  it('answers as soon as it listens, its workspaces opening meanwhile: what is asked of one waits for it (0103)', async () => {
+    const root = temp('kuraa-hub-');
+    let h = await hub(root);
+    for (const name of ['Thesis', 'Diary']) await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name }) });
+    await h.close();
+    running.splice(running.indexOf(h), 1);
+    h = await hub(root, h.token);
+    // Asked at once: each is opening or open, and one asked of is answered once it has opened (never 503).
+    const list = ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { id: string; opening?: boolean; error?: string }[] }).workspaces;
+    expect(list.map((w) => w.id)).toEqual(['thesis', 'diary']);
+    expect(list.every((w) => !w.error)).toBe(true);
+    const asked = await call(h, '/w/diary/api/workspace');
+    expect(asked.status).toBe(200);
+    await h.hub.opened();
+    const after = ((await (await call(h, '/hub/api/workspaces')).json()) as { workspaces: { opening?: boolean }[] }).workspaces;
+    expect(after.some((w) => w.opening)).toBe(false);
+  });
+
+  it('says which workspaces a cloud storage service keeps, and moves one out, into its folder, where it opens again (0103)', async () => {
+    const home = temp('kuraa-home-');
+    const was = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const kept = join(home, 'Dropbox', 'Notes');
+      mkdirSync(kept, { recursive: true });
+      git(kept, 'init', '-q', '-b', 'main');
+      git(kept, 'config', 'user.name', 'Ada');
+      git(kept, 'config', 'user.email', 'ada@example.org');
+      writeFileSync(join(kept, 'a.md'), '---\ntitle: A\n---\n\nHello.\n');
+      git(kept, 'add', '-A');
+      git(kept, 'commit', '-q', '-m', 'Initial');
+      const root = join(home, 'Kuraa Workspaces');
+      const h = await hub(root);
+      const added = (await (await call(h, '/hub/api/workspaces/open', { method: 'POST', body: JSON.stringify({ path: kept }) })).json()) as { workspace: { id: string; cloud?: string } };
+      expect(added.workspace.cloud).toBe('Dropbox');
+      const { id } = added.workspace;
+      // One no service keeps is not moved.
+      await call(h, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'new', name: 'Here' }) });
+      expect((await call(h, '/hub/api/workspaces/here/move', { method: 'POST' })).status).toBe(400);
+      const moved = await call(h, `/hub/api/workspaces/${id}/move`, { method: 'POST' });
+      expect(moved.status).toBe(200);
+      const { workspace } = (await moved.json()) as { workspace: { path: string; cloud?: string; error?: string } };
+      expect(workspace).toMatchObject({ path: join(root, 'Notes') });
+      expect(workspace.cloud).toBeUndefined();
+      expect(workspace.error).toBeUndefined();
+      expect(existsSync(kept)).toBe(false);
+      expect(git(join(root, 'Notes'), 'log', '--format=%s')).toBe('Initial');
+      // Served from where it is now, and kept so on the list.
+      expect((await call(h, `/w/${id}/api/workspace`)).status).toBe(200);
+      expect(JSON.parse(readFileSync(join(root, '.kuraa-workspaces.json'), 'utf8')).find((e: { id: string }) => e.id === id).dir).toBe(join(root, 'Notes'));
+    } finally {
+      process.env.HOME = was;
+    }
   });
 
   it('joins a workspace from an invite link, as a device that syncs, called what it calls itself; a rename on either reaches the other', async () => {

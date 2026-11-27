@@ -14,7 +14,7 @@ export { autoUpdate, currentVersion, defaultServerRoot, installServer, installed
 /** A key pair kept in a file, made the first time (keys.ts): a server's own signing key (@kuraa/server, 0099). */
 export { keptKey, type KeyPair } from './keys.js';
 export type { JoinOptions, JoinProgress, Joined } from './peers/join.js';
-export { Hub, startHub, slugOf, isLoopback, OWNER_OFF, type HubOptions, type HubWorkspace, type HubList, type FolderListing, type RunningHub } from './hub.js';
+export { Hub, startHub, slugOf, defaultWorkspacesFolder, isLoopback, OWNER_OFF, type HubOptions, type HubWorkspace, type HubList, type FolderListing, type RunningHub } from './hub.js';
 export { SettingsStore, DEFAULT_SETTINGS, DATA_MARKER, settingsFrom, readSettings, writeSettings, checkDataDir, fromSettings, type Settings, type SettingsView } from './settings.js';
 export type { PeerOptions, PeersStatus, DeviceInfo, LinkInfo } from './peers/peers.js';
 

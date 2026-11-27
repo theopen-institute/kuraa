@@ -1,5 +1,5 @@
 // kuraa-host                              your workspaces, as the desktop app: new ones go in the
-//                                          Preferences' folder (default Documents/kuraa), the list
+//                                          Preferences' folder (default ~/Kuraa Workspaces), the list
 //                                          and settings with the app's data (--settings moves them)
 // kuraa-host --workspaces <folder> [...]   the same, with new workspaces in <folder> (its list in it)
 // kuraa-host --dir <workspace> [--init]    one folder; nothing is added from the app
@@ -38,8 +38,7 @@ import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import { dirname, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
-import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, type Settings } from './index.js';
+import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, defaultWorkspacesFolder, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 import { runsAsService } from './selfupdate.js';
 
@@ -153,7 +152,7 @@ const hub = await startHub({
     // The list lives beside the settings, so choosing another folder for new workspaces keeps it.
     registry: join(dirname(settingsFile), 'host-workspaces.json'),
   }),
-  defaultRoot: join(homedir(), 'Documents', 'kuraa'),
+  defaultRoot: defaultWorkspacesFolder(),
   settings,
   port,
   host: values.host!,

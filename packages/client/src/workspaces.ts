@@ -16,6 +16,8 @@ import type { Settings } from './settings.js';
 
 /** The id of the one workspace of an address that is a single workspace’s host, not a hub. */
 const DIRECT = '';
+/** How often the list is read again while a workspace is still opening. */
+const OPENING_POLL_MS = 1000;
 
 export function useWorkspaces(options: {
   settings: Ref<Settings>;
@@ -48,6 +50,16 @@ export function useWorkspaces(options: {
   const known = ref(false);
   const chosen = ref<string | null>(null);
   const chosenKey = () => `kuraa:workspace:${keptAs(hostUrl.value)}`;
+  /** Where new workspaces go on the host (and one is moved to out of a cloud service's folder), where it says. */
+  const folder = ref<string | null>(null);
+  let againTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Read the list again in a moment, while the address is the same. */
+  function again(asked: HubApi) {
+    clearTimeout(againTimer);
+    againTimer = setTimeout(() => {
+      if (asked === hubApi.value && active()) void load();
+    }, OPENING_POLL_MS);
+  }
 
   async function load(prefer?: string | null) {
     const asked = hubApi.value;
@@ -63,6 +75,7 @@ export function useWorkspaces(options: {
         canOpenFolder.value = false;
         canChangeSettings.value = false;
         ownerOff.value = null;
+        folder.value = null;
         chosen.value = DIRECT;
       } else {
         const list = answer.workspaces;
@@ -72,6 +85,9 @@ export function useWorkspaces(options: {
         canOpenFolder.value = !!answer.canOpenFolder;
         canChangeSettings.value = !!answer.canChangeSettings;
         ownerOff.value = answer.ownerOff ?? null;
+        folder.value = answer.folder ?? null;
+        // Some still opening (0103): asked again shortly, to learn how each stands once it has opened.
+        if (list.some((w) => w.opening)) again(asked);
         let stored: string | null = null;
         try { stored = localStorage.getItem(chosenKey()); } catch { /* storage unavailable */ }
         const ok = (id: string | null | undefined) => !!id && list.some((w) => w.id === id && !w.error);
@@ -102,7 +118,7 @@ export function useWorkspaces(options: {
   const ready = computed(() => known.value && chosen.value !== null);
   const api = computed(() => markRaw(direct.value || chosen.value === null ? new HostApi(hostUrl.value, token.value) : hubApi.value.workspaceApi(chosen.value)));
 
-  return { hubApi, workspaces, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, known, chosen, ready, api, load };
+  return { hubApi, workspaces, canAdd, canInvite, canOpenFolder, canChangeSettings, ownerOff, folder, known, chosen, ready, api, load };
 }
 
 /**

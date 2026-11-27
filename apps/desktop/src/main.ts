@@ -9,7 +9,7 @@
 //   electron .                          your workspaces
 //   electron . --open <folder>          your workspaces, with <folder> added and open
 //   electron . --join <url> --token <t> join a shared host or hub; none of its own
-//   --workspaces <folder>               where new workspaces go (default: Documents/kuraa)
+//   --workspaces <folder>               where new workspaces go (default: Kuraa Workspaces, in the home folder)
 //
 // For folders it opens itself, the configuration is its Preferences: the hub's
 // settings (@kuraa/host's settings.ts, decisions 0046 and 0047), kept in
@@ -41,7 +41,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, onNewerVersion, SettingsStore, startHub, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, onNewerVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import type { ShellConfig } from '@kuraa/client';
@@ -134,7 +134,8 @@ function flagSettings(): Partial<Settings> {
 }
 const settings = new SettingsStore(PREFERENCES_FILE, flagSettings());
 
-const defaultWorkspaces = () => join(app.getPath('documents'), 'kuraa');
+// In the home folder, never Documents: iCloud keeps Documents on many Macs, and a workspace there is slow and can be damaged (0103).
+const defaultWorkspaces = () => defaultWorkspacesFolder();
 
 let window: BrowserWindow | null = null;
 let hub: RunningHub | null = null;

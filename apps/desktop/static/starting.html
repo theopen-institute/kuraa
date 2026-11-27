@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
   <title>Kuraa</title>
-  <!-- Shown at once while the app's host starts (its workspaces open, and it finds their other devices), so the
-       window is never blank. The workspaces replace it as soon as they are ready. -->
+  <!-- Shown at once while the app's host starts (its workspaces then open on their own, 0103), so the
+       window is never blank. The app replaces it as soon as the host answers. -->
   <style>
     :root { --bg: #fbfaf8; --text: #1d1c1a; --muted: #635f58; --accent: #2f6f5e; color-scheme: light; }
     @media (prefers-color-scheme: dark) {
@@ -26,7 +26,7 @@
     <h1>Kuraa</h1>
     <p>Opening your workspaces…</p>
     <div class="spinner" aria-hidden="true"></div>
-    <p class="slow" id="slow">Still starting. Networks that block connections between computers (some school and office networks) make this slower; your files are safe.</p>
+    <p class="slow" id="slow">Still starting; your files are safe. If this goes on, Help › Show Log File says what Kuraa is waiting for.</p>
   </main>
   <script>
     setTimeout(() => { document.getElementById('slow').style.visibility = 'visible'; }, 5000);

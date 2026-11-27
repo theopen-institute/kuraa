@@ -143,10 +143,9 @@ function onKey(e: KeyboardEvent) {
       </button>
 
       <p v-if="status" class="menu-footer" role="none" :title="status.lastCommit ? S.menu.versionDetails(status.lastCommit.slice(0, 7)) : undefined">
-        <span data-testid="last-flush">{{ S.menu.savedAt(time(status.lastFlushAt)) }}</span>
-        ·
-        <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
-        <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
+        <!-- Whether what was typed here is saved (at the host), in plain words; then the latest version, if there is one this session. -->
+        <span data-testid="save-state">{{ status.unsynced === 0 ? S.menu.allSaved : status.connection === 'connected' ? S.menu.saving : S.menu.notSaved(status.unsynced) }}</span>
+        <template v-if="status.lastCommitAt"> · <span data-testid="last-commit">{{ S.menu.lastVersion(time(status.lastCommitAt)) }}</span></template>
       </p>
       <template v-for="line in featureFooter ?? []" :key="line.text">
         <!-- A line that does something is chosen as an item is (click, Enter; the arrows reach it). -->

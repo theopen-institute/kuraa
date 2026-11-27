@@ -805,7 +805,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .document-menu .menu-footer { margin: 4px 0 0; padding: 6px 10px 2px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 /* A line features add below it (0094: the word count): under the same rule, not one of its own. */
 .document-menu .menu-footer.menu-footer-more { margin-top: 0; padding-top: 2px; border-top: 0; }
-.document-menu .menu-footer-action { display: block; width: 100%; text-align: left; background: none; border-radius: 4px; padding-bottom: 4px; cursor: pointer; font: inherit; font-size: 12px; }
+.document-menu .menu-footer-action { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 4px; padding-bottom: 4px; cursor: pointer; font: inherit; font-size: 12px; }
 .document-menu .menu-footer-action:hover, .document-menu .menu-footer-action:focus-visible { color: var(--text); background: var(--selected); outline: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .context-menu .context-icon.spinning svg { animation: none; opacity: 0.5; } }

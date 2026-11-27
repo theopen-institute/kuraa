@@ -163,9 +163,13 @@ export const S = {
     find: 'Find and replace…',
     insertTable: 'Insert table',
     nextConflict: 'Next conflict',
-    savedAt: (t: string) => `Saved ${t}`,
-    versionAt: (t: string) => `In the history ${t}`,
-    unsent: (n: number) => `${count(n, 'change', 'changes')} not yet sent`,
+    /** The menu's foot: what was typed here has reached the host (it keeps it, and writes it to the file). */
+    allSaved: 'All changes saved',
+    saving: 'Saving…',
+    /** Not connected, with changes made here waiting: kept in this window, sent when it reconnects. */
+    notSaved: (n: number) => `${count(n, 'change', 'changes')} not saved yet`,
+    /** The latest version in the history, this session. */
+    lastVersion: (t: string) => `Last version ${t}`,
     versionDetails: (hash: string) => `Latest version: ${hash}`,
     workspaceDetails: (branch: string, head: string | null) => `Branch ${branch}${head ? `, version ${head}` : ''}`,
     renameWorkspace: 'Rename workspace…',

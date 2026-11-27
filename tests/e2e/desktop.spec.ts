@@ -138,7 +138,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('when we arrived. Desktop edit.');
     await expect.poll(() => git(dir, 'show', 'HEAD:notes.md'), { timeout: 15_000 }).toContain('Desktop edit.');
     await page.getByTestId('document-menu-button').click();
-    await expect(page.getByTestId('last-commit')).not.toContainText('—');
+    await expect(page.getByTestId('last-commit')).toContainText('Last version');
     // Escape closes the document's menu.
     await page.keyboard.press('Escape');
 

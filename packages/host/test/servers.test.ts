@@ -91,18 +91,24 @@ describe('servers in the policy (0099)', () => {
     expect(p.role(cy.id)).toBeNull();
   });
 
-  it('counts nothing else a server signs: no grant, no rule, no admit', () => {
+  it('counts nothing else a server signs, no grant, no rule; but its admit, letting someone in by their link', () => {
     const h = history();
     const s = server();
     h.join(s, ada);
     h.add({ t: 'grant', group: 'workspace', who: cy.id, role: 'member' }, s);
     h.add({ t: 'rule', path: '', by: [s.id] }, s);
     const before = h.now().applied.length;
-    h.add({ t: 'admit', link: 'ffffffffffffffff', key: hexOf(cy) }, s);
-    const p = h.now();
-    expect(p.role(cy.id)).toBeNull();
-    expect(p.rules.size).toBe(0);
-    expect(p.applied.length).toBe(before);
+    expect(h.now().role(cy.id)).toBeNull();
+    expect(h.now().rules.size).toBe(0);
+    // Its admit counts (0099): Cy, let in by the server by Ada's link, is in once Cy joins by it.
+    const link = '7777666655554444';
+    h.add({ t: 'admit', link, key: hexOf(cy) }, s);
+    expect(h.now().applied.length).toBe(before + 1);
+    h.join(cy, ada, { link, role: 'member', admitter: null });
+    expect(h.now().role(cy.id)).toBe('member');
+    // A stranger's key's admit does not.
+    h.add({ t: 'admit', link: '1111222233334444', key: hexOf(bo) }, server());
+    expect(h.now().applied.length).toBe(before + 2);
   });
 
   it('puts a server in no group: a grant naming it counts for nothing', () => {

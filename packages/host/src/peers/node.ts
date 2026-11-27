@@ -265,8 +265,8 @@ export interface NodeEvents {
   room?(link: PeerLink, m: Extract<ControlMessage, { type: 'room' }>): void;
   /** Run outputs as they happen on the device (outputs.ts, 0062). */
   outputs?(link: PeerLink, frame: OutputsFrame): void;
-  /** The answer of the device that let this one in, when joining. */
-  welcome?(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>): void;
+  /** The answer of the device that let this one in, when joining; `fromServer`: a server's (0099), its copy to be checked. */
+  welcome?(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>, fromServer?: boolean): void;
   /** The members changed (a device paired or removed). */
   members?(): void;
   /** A device turned this one away, saying why. */
@@ -770,8 +770,8 @@ export class PeerNode {
       for (const t of topicsFor(this.ws.secret)) want.set(t.toString('hex'), { server: true, client: true });
       const origin = await this.identity.originSecret();
       if (origin) for (const t of topicsFor(origin)) want.set(t.toString('hex'), { server: true, client: true });
-      // A server lets no one in (0099): it announces no invite link, which would only bring it devices it turns away.
-      if (!this.o.joining && !this.isServerDevice(this.myKey)) {
+      // A server too (0099): it lets people in by their links while every member is away, so it announces them.
+      if (!this.o.joining) {
         // A link from before that has expired since (its grant counts without anyone letting its holder in): unlinked.
         await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
         const links = await this.identity.linkTopics();
@@ -1158,13 +1158,6 @@ export class PeerNode {
     return !!a?.policy.isServer(a.personOf.get(device) ?? null);
   }
 
-  /** Whether this device is a server's (0099): no person here, and its key one of the policy's servers. */
-  private async isServerHere(): Promise<boolean> {
-    if (await this.person()) return false;
-    const key = (await this.signingKeyNow()).publicKey.toString('hex');
-    return (await this.identity.policy()).isServer(key);
-  }
-
   /** Whose a device is (its person's identity ID; a server's key, for a server's: 0099), as the records said when the members last changed; null if no one's known. */
   personOfDevice(device: string): string | null {
     return this.access?.personOf.get(device) ?? null;
@@ -1513,9 +1506,6 @@ export class PeerNode {
     if (!member && same && recently && recently.until > Date.now()) member = { key: link.key, name: recently.name };
     if (!member) {
       if (!same || typeof h.link !== 'string') return bye('not in this workspace');
-      // A server lets no one in (0099): it has no person to let them in as, and would hand out the secret and the
-      // files on no one's word. Closed without a word, so the device joining goes on to a person's.
-      if (await this.isServerHere()) return link.close();
       const code = h.link;
       // One device let in by a link at a time here (0071): two at once by a link for one person would both
       // pass the check before either used it up.
@@ -1570,6 +1560,8 @@ export class PeerNode {
    */
   private async welcomed(link: PeerLink, m: Extract<ControlMessage, { type: 'welcome' }>): Promise<void> {
     if (!this.o.joining) return;
+    // Let in by a server (0099): what it hands over is checked.
+    let fromServer = false;
     const records = Array.isArray(m.records) ? m.records : [];
     let members = Array.isArray(m.members) ? m.members : [];
     if (!link.accepted) {
@@ -1577,9 +1569,13 @@ export class PeerNode {
       if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
       const l = decodeLink(t);
       // In the workspace, as the policy the link's genesis roots says (0072): someone who only knows its secret is not.
-      // A person's device (0099): a server's first copy and secret would be taken unchecked, so not through one.
-      const known = await this.identity.devicesIn(records, this.ws.id, { people: true });
+      // In the workspace, a person's device or a server's (0099); a server's welcome is checked (its secret here, its
+      // first copy as it is fetched: join.ts), as a person's need not be.
+      const known = await this.identity.devicesIn(records, this.ws.id);
       known.add(l.issuer.key);
+      const people = await this.identity.devicesIn(records, this.ws.id, { people: true });
+      people.add(l.issuer.key);
+      fromServer = !people.has(link.key);
       if (!known.has(link.key)) {
         this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
         link.close();
@@ -1595,6 +1591,12 @@ export class PeerNode {
     // The workspace's secret, from the device that let this one in (the link did not carry it, 0050).
     if (!this.ws.secret) {
       const secret = typeof m.secret === 'string' && /^[0-9a-f]{32,128}$/.test(m.secret) ? m.secret : null;
+      // From a server (0099): the secret a person's device last made, as the records it sent say, where they say one.
+      if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret))) {
+        this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
+        link.close();
+        return;
+      }
       if (!secret) {
         this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} let this device in without the workspace's secret; not joining through it`);
         link.close();
@@ -1628,7 +1630,7 @@ export class PeerNode {
     }
     this.joinedIn = true;
     if ((person || asServer) && this.o.ticket) void this.membersChanged().catch(() => undefined);
-    this.events.welcome?.(link, { ...m, members });
+    this.events.welcome?.(link, { ...m, members }, fromServer);
   }
 
   /**

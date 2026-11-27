@@ -223,9 +223,17 @@ from a device in the workspace, once an hour.
   this device would keep that change out too; and a merge a server made is made again here whatever
   version of merging it names (else, naming another, it could take one side's text and undo the
   other's change unseen).
-- A device joining takes its first copy, and the secret, from a person's device, not a server's; a
-  server lets no one in (it closes, without a word, so the device goes on to a person's), and announces
-  no invite link.
+- A server lets people in by their links while every member is away, as the owner then asked ("yes,
+  do now"), with what it hands over checked: its `admit` counts (the link's grant, an admin's, is what
+  lets them in; the admit, only that the link held when it did); the secret it gives must be the
+  latest a person's device made, where the records say one; and its first copy is judged as work
+  coming in from it. An invite link now carries its maker's branch tip, signed with the rest: the copy
+  must hold it; what came before it is the workspace's own history, taken as it is (unsigned commits
+  there are not the server's); what came after is judged, what no one known signed being the server's,
+  and a copy whose files hold a change so refused is not taken. (A server's merge, which the device
+  joining cannot make again yet, having no document types, could still drop one side's change from
+  the copy; the members refuse that merge, and the device takes their history back the first time it
+  syncs with one.) A link made before this, with no tip, is not joined through a server.
 - A device that is no one yet (let in by a link, its join not come) edits no live room and leads none.
 - The workspace's secret, invite links and their revocation are taken only from people's devices; the
   latest 32 links are announced, not every one.

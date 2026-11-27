@@ -14,10 +14,11 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Git } from '../git.js';
-import { decodeLink } from './identity.js';
+import { decodeLink, linkSigned } from './identity.js';
 import { PeerNode } from './node.js';
 import type { PeerOptions } from './peers.js';
 import { createOnly, keyJson, type KeyPair } from '../keys.js';
+import { gate } from './gate.js';
 
 export interface JoinOptions {
   /** Where the workspace goes: a folder that is empty or does not exist. */
@@ -118,7 +119,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   if (o.name) await node.identity.setDeviceName(o.name);
   // The device that made the link is the first to look for.
   await node.identity.addRemote(l.issuer.key, l.issuer.name);
-  const welcomed = new Promise<{ branch: string; remote: string; from: string }>((resolveWelcome, reject) => {
+  const welcomed = new Promise<{ branch: string; remote: string; from: string; fromServer: boolean; device: string }>((resolveWelcome, reject) => {
     const timer = setTimeout(() => reject(new Error('Could not reach a device of the workspace: is one running, with syncing on?')), o.timeoutMs ?? 120_000);
     let done = false;
     // Turned away (a revoked, used or expired link): another device may still
@@ -142,7 +143,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
       clearTimeout(refusal);
       reject(new Error(`Could not join: ${why}`));
     };
-    node.events.welcome = (from, m) => {
+    node.events.welcome = (from, m, fromServer) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
@@ -150,7 +151,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
       void (async () => {
         for (const member of m.members) await node.identity.addRemote(member.key, member.name);
         await node.refresh();
-        resolveWelcome({ branch: m.branch, remote: from.remote!, from: m.name });
+        resolveWelcome({ branch: m.branch, remote: from.remote!, from: m.name, fromServer: !!fromServer, device: from.key });
       })().catch(reject);
     };
   });
@@ -161,7 +162,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
     tell({ step: 'looking', slowNetwork: false });
     await node.start(false);
     log('looking for a device of the workspace…');
-    const { branch, remote, from } = await welcomed;
+    const { branch, remote, from, fromServer, device } = await welcomed;
     clearInterval(watch);
     tell({ step: 'copying', slowNetwork: node.slowNetwork, from });
     // How far, as git says it; in the log at each tenth of each of its stages, so a long copy is not silent.
@@ -176,6 +177,12 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
       }
     };
     if (!(await node.fetch(remote, { progress: copying }))) throw new Error(`Could not copy the workspace from ${from}: the copy stopped (see the log for why)`);
+    // Let in by a server (0099): its copy, which nothing else here checks, judged as any work coming in is (no one
+    // known signed it: the server's, refused); one whose files hold a change so refused is not taken.
+    if (fromServer) {
+      const why = await firstCopyRefused(git, node, `refs/remotes/${remote}/${branch}`, device, l);
+      if (why) throw new Error(`Could not join: the copy ${from} (a server) offered ${why}`);
+    }
     await git.run(['checkout', '-q', '-B', branch, `refs/remotes/${remote}/${branch}`]);
     await node.identity.setJoinedLink(link);
     log(`joined: ${dir} on ${branch}, let in by ${from}`);
@@ -185,4 +192,35 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
     clearInterval(watch);
     if (!kept) await node.close();
   }
+}
+
+/**
+ * Why a first copy a server offered is not to be taken (0099), or null: judged
+ * whole as work coming in from that server (what no one known signed is its, and
+ * refused), its files at the tip holding a change refused (one kept out since, by
+ * a merge, holds nothing of it); or naming policy it did not send.
+ */
+async function firstCopyRefused(git: Git, node: PeerNode, tip: string, device: string, link: ReturnType<typeof decodeLink>): Promise<string | null> {
+  // What the link's maker had, signed in the link: taken as it is (what came before it is the workspace's own history,
+  // signed or not); only what came after it is the server's to answer for. No such commit in the copy: not taken.
+  if (!link.tip || !linkSigned(link)) return 'no history its link’s maker vouched for (the link is from before servers let people in: ask for a new one)';
+  if ((await git.run(['merge-base', '--is-ancestor', link.tip, tip], { allowFail: true })).code !== 0) return 'a history that does not hold what the link’s maker had';
+  const id = node.identity;
+  const records = await id.records();
+  const policy = await id.policy(records);
+  const people = await id.people();
+  const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
+  const names = new Map(people.map((p) => [p.key, p.name]));
+  const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
+  const from = await id.whoIs(device);
+  const head = (await git.run(['rev-parse', '-q', '--verify', `${tip}^{commit}`], { allowFail: true })).stdout.trim();
+  if (!head) return 'no history';
+  const g = await gate(git, link.tip, head, { policy, known, servers: await id.everServers(records), cutKeys: await id.cutKeys(), from, personOf: (k) => byKey.get(k) ?? null, nameOf: (p) => names.get(p) ?? null });
+  if (g.waitFor.length) return 'commits naming policy it did not send';
+  const blob = async (commit: string, path: string) => (await git.run(['rev-parse', '-q', '--verify', `${commit}:${path}`], { allowFail: true })).stdout.trim() || null;
+  for (const r of g.refused) {
+    // As the refused change left it, made or taken away: still so at the tip.
+    if ((await blob(head, r.path)) === (await blob(r.commit, r.path))) return `${r.path} as a change no one who may made`;
+  }
+  return null;
 }

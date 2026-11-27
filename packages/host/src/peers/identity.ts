@@ -383,6 +383,20 @@ export class Identity {
     return mine.filter((r) => r.kind !== 'policy' || counted.has(r.subject));
   }
 
+  /**
+   * Whether a secret a server handed a device joining is the workspace's (0099):
+   * the latest a person's device made, as the records it sent say; where they say
+   * none (never made anew since the workspace began), any.
+   */
+  async secretMatches(list: unknown[], workspace: string, secret: string): Promise<boolean> {
+    const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
+    const people = await this.devicesIn(list, workspace, { people: true });
+    const made = records.filter((r) => r.kind === 'secret' && people.has(r.by));
+    if (!made.length) return true;
+    const latest = made.reduce((a, b) => (b.at > a.at || (b.at === a.at && b.sig > a.sig) ? b : a));
+    return latest.subject === secret;
+  }
+
   /** Whether records a device not known to be in sends could show it is (proven): cheap, before the policy is worked out. */
   private async mayProve(mine: MemberRecord[]): Promise<boolean> {
     const policy = await this.policy();
@@ -1454,13 +1468,16 @@ export class Identity {
     // Its own topic, not the workspace's secret: whoever holds the link finds the members by it
     // while it lets people in (every member announces it, from the link record), and nothing after.
     const topic = randomBytes(32).toString('hex');
-    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic), key.secretKey).toString('hex');
+    // Where its maker's history was (0099): a device let in by a server takes what came before as its maker had it, and
+    // checks only what came after.
+    const tip = (await this.git.run(['rev-parse', '-q', '--verify', 'HEAD^{commit}'], { allowFail: true })).stdout.trim() || undefined;
+    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic, tip), key.secretKey).toString('hex');
     const list = await this.links();
     list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true, ...(granted.role === 'server' ? { server: true } : {}) } : {}) });
     await mkdir(this.stateDir, { recursive: true });
     await writeWhole(this.linksFile, JSON.stringify(list));
     await this.decide('link', id, { topic, expires });
-    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}) });
+    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}), ...(tip ? { tip } : {}) });
   }
 
   /**
@@ -1648,6 +1665,8 @@ export interface InviteLink {
   signature: string;
   /** Where the workspace has a policy (0066): the group the holder is put in, and as what, signed by an admin of it. */
   grant?: LinkGrant;
+  /** The commit its maker's branch was at (0099), signed with the rest: what a device let in by a server takes as is. */
+  tip?: string;
 }
 
 /** What an invite link lets its holder be (0066): signed (grantMessage) by an admin's signing key. */
@@ -1689,16 +1708,17 @@ function decodeHints(s: string | undefined): LinkHints | undefined {
 }
 
 /** What a link's maker signs: all it says but the secret (a link before 0050 has one, and no topic). */
-const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[], topic: string | null) =>
-  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}${topic ? `\0${topic}` : ''}`);
+const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[], topic: string | null, tip?: string) =>
+  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}${topic ? `\0${topic}` : ''}${tip ? `\0tip:${tip}` : ''}`);
 
 export function encodeLink(l: InviteLink): string {
   // The second field: the topic, as `t:<topic>`; in a link before 0050, the workspace's secret.
   const where = l.topic ? `t:${l.topic}` : l.workspace.secret ?? '';
   const hints = encodeHints(l.hints);
   const grant = encodeGrant(l.grant);
-  // Hints, then the grant, each where there is one (an empty hints field before a grant).
-  const tail = grant ? [hints, grant] : hints ? [hints] : [];
+  // Hints, then the grant, then the tip (0099), each where there is one (empty fields before one that is).
+  const tip = l.tip ? `p:${l.tip}` : '';
+  const tail = tip ? [hints, grant, tip] : grant ? [hints, grant] : hints ? [hints] : [];
   const payload = [l.workspace.id, where, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(','), ...tail].join('|');
   return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
 }
@@ -1706,7 +1726,7 @@ export function encodeLink(l: InviteLink): string {
 export function decodeLink(code: string): InviteLink {
   const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
   if (!m) throw new Error('Not an invite link (it starts with kuraa-invite:)');
-  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField, grantField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
+  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField, grantField, tipField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
   const through = throughField ? throughField.split(',') : [];
   const topic = where?.startsWith('t:') ? where.slice(2) : null;
   const secret = topic === null ? where : null;
@@ -1717,7 +1737,9 @@ export function decodeLink(code: string): InviteLink {
   const hints = decodeHints(hintsField);
   const grant = decodeGrant(grantField);
   if (grantField && !grant) throw new Error('This invite link is damaged');
-  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}), ...(grant ? { grant } : {}) };
+  const tip = tipField && /^p:[0-9a-f]{40,64}$/.test(tipField) ? tipField.slice(2) : undefined;
+  if (tipField && !tip) throw new Error('This invite link is damaged');
+  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}), ...(grant ? { grant } : {}), ...(tip ? { tip } : {}) };
 }
 
 /**
@@ -1736,7 +1758,7 @@ export function checkLink(l: InviteLink, o: { workspace: string; members: string
 
 /** Whether a link is as the device it names made it: its signature over all it says but the workspace's secret. */
 export function linkSigned(l: InviteLink): boolean {
-  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
+  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic, l.tip), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
 }
 
 /**

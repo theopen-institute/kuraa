@@ -322,9 +322,10 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
   }
   const counted = [...p.counted].map((id) => byId.get(id)!).filter((e) => e.op.t !== 'genesis');
   for (const e of counted) {
-    // A key that is no one's: only a server's own join counts (0099).
+    // A key that is no one's: only a server's own join counts, and a server's admit (0099).
     const serverJoin = e.op.t === 'join' && e.op.role === 'server';
-    if (!personOf(e.signer) && !serverJoin) out.push('an operation signed by no one counted');
+    const serverAdmit = e.op.t === 'admit' && serverIds.includes(e.signer);
+    if (!personOf(e.signer) && !serverJoin && !serverAdmit) out.push('an operation signed by no one counted');
     if (strangerKeys.has(e.signer)) out.push('a stranger’s operation counted');
     if (personOf(e.signer) && serverJoin) out.push('a server’s join signed by a person’s key counted');
     if (forged.has(e.id)) out.push('an operation naming a parent no one holds counted');

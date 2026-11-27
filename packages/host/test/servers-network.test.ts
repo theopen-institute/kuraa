@@ -258,16 +258,36 @@ describe('a server in a workspace (0099)', () => {
     await expect(join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv')).rejects.toThrow('removed from the workspace for good');
   });
 
-  it('lets no one in: a person’s link, with only the server online, gets its holder nowhere (0099)', async () => {
-    const { a, s } = await withServer();
+  it('lets people in while every member is away: by their links, their joins counting (0099)', async () => {
+    const { a, s, sk } = await withServer();
     await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.online), 15_000, 'the server online');
     const link = await a.host.peers!.inviteLink({ hours: 24, once: true });
+    // The link on record at the server, then Ada away.
+    await until(async () => (await s.host.peers!.status()).devices.some((d) => d.online), 15_000, 'Ada online to the server');
+    await new Promise((r) => setTimeout(r, 1000));
     await stop(a);
     const bo = await person('Bo');
-    const dir = join(tmp('bee'), 'notes');
-    await expect(joinWorkspace({ dir, invitation: link, name: 'bee', person: bo, signing: crypto.keyPair(), bootstrap: testnet.bootstrap as never, timeoutMs: 8000 })).rejects.toThrow(/Could not reach a device/);
-    // The server holds the workspace still, and is not the worse for it.
-    expect((await s.host.peers!.people()).servers.length).toBe(1);
+    const boKey = crypto.keyPair();
+    const dirB = await join_(link, bo, boKey, 'bee');
+    expect(read(dirB, 'notes.md')).toBe(NOTES);
+    // Bo is in: his join counts, on the server's word that it let him in.
+    await until(async () => (await s.host.peers!.people()).people.some((p) => p.name === 'Bo'), 20_000, 'Bo in, as the server sees it');
+    void sk;
+  });
+
+  it('is not joined through where the copy it offers holds a change no one who may made', async () => {
+    const { a, s, dirS } = await withServer();
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.online), 15_000, 'the server online');
+    const link = await a.host.peers!.inviteLink({ hours: 24, once: true });
+    await new Promise((r) => setTimeout(r, 1000));
+    await stop(a);
+    // Whoever runs the server plants a change, unsigned, in its copy.
+    writeFileSync(join(dirS, 'notes.md'), '# Notes\n\nPlanted.\n');
+    git(dirS, 'add', '-A');
+    git(dirS, '-c', 'user.name=x', '-c', 'user.email=x@example.org', 'commit', '-q', '-m', 'Planted');
+    const bo = await person('Bo');
+    await expect(join_(link, bo, crypto.keyPair(), 'bee')).rejects.toThrow(/a change no one who may made/);
+    void s;
   });
 
   it('refuses a link for a server to anyone with an identity', async () => {

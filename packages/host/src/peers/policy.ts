@@ -60,7 +60,8 @@
 //
 // - servers (0099): a key no person vouched for, in the workspace as itself,
 //   by its own `join` with an owner's invite link for a server (role `server`,
-//   for one). The only operation of a key that is no one's that counts. A
+//   for one). Of a key that is no one's, only that counts, and a server's
+//   `admit` (it lets people in by their links). A
 //   server reads the workspace's own files and the spaces whose audiences name
 //   it, changes nothing, and is in no group. The owner takes it out as a person
 //   is taken out (`revoke`, of the workspace): it may be invited back, by a new
@@ -828,8 +829,9 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'unlink':
       return now.isAdmin(by, op.group);
     case 'admit':
-      // Anyone in the workspace lets someone in by a link, as a device of theirs checks it.
-      return !!now.role(by);
+      // Anyone in the workspace lets someone in by a link, as a device of theirs checks it; or a server (0099), always
+      // there to: the link's grant, an admin's, is what lets them in, the admit only that the link held when it did.
+      return !!now.role(by) || s.servers.has(by);
     case 'rule':
     case 'perm':
       return now.isAdmin(by);
@@ -1219,8 +1221,9 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   let lineFrom: Folded = { state: freshState(genesis), counted: new Set(), clashes: [] };
   let lineIds: string[] = [];
   for (const e of ops) {
-    // A key that is no one's: its word counts for nothing, but a server's own join (0099), made by the key itself.
-    const who = ctx.personOf(e.signer) ?? (e.op.t === 'join' && e.op.role === 'server' ? e.signer : null);
+    // A key that is no one's: its word counts for nothing, but a server's own join, made by the key itself, and a
+    // server's word that it let someone in by a link (0099: allowed() asks that it is one).
+    const who = ctx.personOf(e.signer) ?? ((e.op.t === 'join' && e.op.role === 'server') || e.op.t === 'admit' ? e.signer : null);
     if (!who) continue;
     // A key its person revoked: only what its revoker had seen of what it signed (0072).
     const cut = ctx.cutKey?.(e.signer);

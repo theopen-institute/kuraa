@@ -202,7 +202,17 @@ function insertAt(doc: PMNode, anchor: string, text: string): PMNode {
   return new Transform(doc).insert(pos, pandocMarkdown.schema.text(text)).doc;
 }
 
-const file = (d: Device) => readFileSync(join(d.dir, 'notes.md'), 'utf8');
+/** The file as it is: git takes it away before writing the new one, so where it is not there that moment, read again (up to half a second). */
+const file = (d: Device) => {
+  for (let i = 0; ; i++) {
+    try {
+      return readFileSync(join(d.dir, 'notes.md'), 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT' || i >= 50) throw e;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+};
 const head = (d: Device) => git(d.dir, 'rev-parse', 'HEAD');
 const clean = (d: Device) => git(d.dir, 'status', '--porcelain') === '';
 const session = (d: Device) => d.host.host.liveRooms()[0]?.session ?? null;

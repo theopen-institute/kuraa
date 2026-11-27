@@ -60,7 +60,7 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   // Compile… on the folder's menu: its panel, for it, with its outline in the tree's order.
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
   await page.getByTestId('context:compile').click();
-  await expect(page.getByTestId('compile-folder')).toHaveText(`Compile ${folder}`);
+  await expect(page.getByTestId('compile-folder')).toHaveText(`Compile “${folder}”`);
   await expect(page.getByTestId('compile-title')).toHaveValue(folder);
   const outline = page.getByTestId('compile-outline');
   await expect(outline.locator('.compile-name')).toHaveText(['Coast', 'Tide', 'Boats', 'Arrival']);

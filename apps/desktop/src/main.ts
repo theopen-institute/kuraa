@@ -445,6 +445,11 @@ app.on('web-contents-created', (_e, contents) => {
   });
 });
 
+/** A word the page's own menu (a table's) adds to the dictionary, as the native menu's Add to Dictionary does. */
+ipcMain.on('kuraa:add-to-dictionary', (e, word: unknown) => {
+  if (fromOwnPage(e) && typeof word === 'string' && word && word.length < 100) e.sender.session.addWordToSpellCheckerDictionary(word);
+});
+
 /** The page's word on its latest right-click: whether it answered it itself (preload.ts). */
 let pageMenu = { prevented: false, at: 0 };
 ipcMain.on('kuraa:context-menu', (e, prevented: unknown) => {

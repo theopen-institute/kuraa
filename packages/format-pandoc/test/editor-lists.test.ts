@@ -6,7 +6,7 @@ import { EditorState, TextSelection, type Command, type Transaction } from 'pros
 import { sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 import { chainCommands } from 'prosemirror-commands';
 import { pandocMarkdown as md } from '../src/index.js';
-import { liftAtItemStart, listRules, switchList } from '../src/editor/index.js';
+import { joinAfterList, liftAtItemStart, listRules, switchList } from '../src/editor/index.js';
 
 const n = md.schema.nodes;
 
@@ -147,5 +147,31 @@ describe('Backspace at the start of a list item', () => {
   it('does nothing in the middle of an item, or in a paragraph', () => {
     expect(back(stateAt('- One\n', 'One', 1))).toBe(false);
     expect(back(stateAt('Plain\n', 'Plain', 0))).toBe(false);
+  });
+});
+
+describe('Backspace at the start of a paragraph after a list', () => {
+  const back = chainCommands(liftAtItemStart(n.list_item!), joinAfterList);
+
+  it('takes the number away, then goes back to the end of the line before (not the number again)', () => {
+    let s = run(stateAt('1. First\n2. Second\n', 'Second'), splitListItem(n.list_item!), back);
+    expect(out(s)).toBe('1. First\n2. Second\n');
+    s = run(s, back);
+    expect(out(s)).toBe('1. First\n2. Second\n');
+    s = type(s, '!');
+    expect(out(s)).toBe('1. First\n2. Second!\n');
+  });
+
+  it('joins a paragraph with text to the last line of the list, however deep', () => {
+    const s = run(stateAt('- One\n  - Two\n\nThree\n', 'Three', 0), back);
+    expect(out(s)).toBe('- One\n  - TwoThree\n');
+    expect(s.selection.$from.parent.textContent).toBe('TwoThree');
+    expect(s.selection.$from.parentOffset).toBe(3);
+    roundTrips(s);
+  });
+
+  it('does nothing after anything but a list, or in the middle of a paragraph', () => {
+    expect(joinAfterList(stateAt('Before\n\nAfter\n', 'After', 0))).toBe(false);
+    expect(joinAfterList(stateAt('- One\n\nAfter\n', 'After', 1))).toBe(false);
   });
 });

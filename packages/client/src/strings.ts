@@ -288,6 +288,8 @@ export const S = {
     renameFolderTo: 'Rename folder to',
     newFolder: 'New folder',
     deleteAsk: (name: string) => `Delete ${quote(name)}? It goes for everyone, and stays in the workspace’s history.`,
+    deleteFolderAsk: (name: string, files: number) =>
+      `Delete the folder ${quote(name)}${files ? ` and ${count(files, 'file', 'files')} in it` : ''}? It goes for everyone, and stays in the workspace’s history.`,
     conflicts: (n: number) => count(n, 'conflict', 'conflicts'),
     conflictsTitle: (n: number) => `${count(n, 'passage was', 'passages were')} changed both here and elsewhere: both versions are in the document, to choose between. Click to go to the first`,
     noType: (path: string) => `${path}: Kuraa does not open this kind of file. You can rename, move or delete it.`,

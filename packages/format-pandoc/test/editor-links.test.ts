@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { pandocMarkdown as md } from '../src/index.js';
-import { linkAt } from '../src/editor/index.js';
+import { linkAt, tidyHref } from '../src/editor/index.js';
 
 const link = md.schema.marks.link!;
 
@@ -33,5 +33,27 @@ describe('the link the cursor is in', () => {
   it('is none outside a link, or for a selection that goes beyond it', () => {
     expect(linkAt(at(src, 'and more', 4), link)).toBeNull();
     expect(linkAt(at(src, ' notes', 0, 8), link)).toBeNull();
+  });
+});
+
+describe('the address typed for a link', () => {
+  it('has one scheme when a full address is pasted after the https:// offered', () => {
+    expect(tidyHref('https://https://example.org/a?b=c')).toBe('https://example.org/a?b=c');
+    expect(tidyHref('https://http://example.org')).toBe('http://example.org');
+    expect(tidyHref('https://mailto:someone@example.org')).toBe('mailto:someone@example.org');
+  });
+
+  it('loses spaces and angle brackets around it', () => {
+    expect(tidyHref('  <https://example.org>  ')).toBe('https://example.org');
+  });
+
+  it('is kept as typed otherwise: an address, or a file in the workspace', () => {
+    expect(tidyHref('https://example.org')).toBe('https://example.org');
+    expect(tidyHref('notes.md#field')).toBe('notes.md#field');
+  });
+
+  it('is none when it is only the scheme offered', () => {
+    expect(tidyHref('https://')).toBe('');
+    expect(tidyHref('  ')).toBe('');
   });
 });

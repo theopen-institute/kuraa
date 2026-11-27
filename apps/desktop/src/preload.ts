@@ -4,7 +4,7 @@
 // the native dialog, and is told when the app's menu asks for Preferences, Open
 // Folder or the Help sheet. Everything else (Preferences, identity, opening a
 // folder) goes through the hub's API, as in a browser (decision 0047).
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
 import type { ShellBridge, ShellConfig } from '@kuraa/client';
 
 const bridge: ShellBridge = {
@@ -31,6 +31,9 @@ const bridge: ShellBridge = {
     ipcRenderer.send('kuraa:update-ready?');
   },
   restartToUpdate: () => ipcRenderer.send('kuraa:restart-to-update'),
+  // The spell checker, for the page's own menus (a table's), which take the place of the native one.
+  spellingSuggestions: (word) => (webFrame.isWordMisspelled(String(word)) ? webFrame.getWordSuggestions(String(word)).slice(0, 6) : null),
+  addToDictionary: (word) => ipcRenderer.send('kuraa:add-to-dictionary', String(word)),
 };
 contextBridge.exposeInMainWorld('kuraa', bridge);
 

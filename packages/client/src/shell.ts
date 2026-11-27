@@ -8,6 +8,8 @@
 // better (its own folder dialog, its menus); those are optional here, and the
 // client falls back to its own where the shell has none.
 
+import type { Spelling } from '@kuraa/editor-kit';
+
 /** What the client needs to know about its shell. A plain web page has none of the optional parts. */
 export interface Shell {
   /**
@@ -36,6 +38,8 @@ export interface Shell {
   onUpdateReady?(show: (version: string) => void): void;
   /** Save everything, quit, put the update in place and start again. */
   restartToUpdate?(): void;
+  /** The shell's spell checker, for the editor's own menus (a table's): the desktop app's. */
+  spelling?: Spelling;
 }
 
 /** What a folder is being chosen for: to open as a workspace, for new workspaces, or for packages and tools. */
@@ -120,4 +124,8 @@ export interface ShellBridge {
   onUpdateReady?(show: (version: string) => void): void;
   /** Save everything, quit, put the update in place and start again. */
   restartToUpdate?(): void;
+  /** A misspelled word's suggestions (perhaps none), or null if it is spelled right: asked at once, of the app's spell checker. */
+  spellingSuggestions?(word: string): string[] | null;
+  /** Add a word to the spell checker's dictionary. */
+  addToDictionary?(word: string): void;
 }

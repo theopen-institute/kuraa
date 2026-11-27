@@ -1035,6 +1035,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
               :features="features"
               :feature-commands="fh.editorCommands.value"
               :feature-items="fh.menuItems"
+              :spelling="shell.spelling"
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
               :focus-title="titleFocus === path"

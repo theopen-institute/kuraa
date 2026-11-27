@@ -8,7 +8,8 @@ export const S = {
   noHeadingMark: 'No heading in Compile: what is in it goes on at the level it is at',
   compiledAs: (title: string) => `Compiled as “${title}”`,
   none: 'Right-click a folder and choose Compile… to make one book of its documents, in the order the file tree shows them.',
-  folderTitle: (folder: string) => `Compile ${folder}`,
+  /** The panel's heading: Compile, then the folder's name (bold, in quotes) or the whole workspace. */
+  compileVerb: 'Compile',
   top: 'the whole workspace',
   bookTitle: 'Title',
   format: 'Format',

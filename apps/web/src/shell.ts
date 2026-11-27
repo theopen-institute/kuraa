@@ -38,6 +38,10 @@ export function resolveShell(): ResolvedShell {
         // The app updating itself (decision 0051): Restart now, once an update is downloaded.
         ...(bridge.onUpdateReady ? { onUpdateReady: (show: (version: string) => void) => bridge.onUpdateReady!(show) } : {}),
         ...(bridge.restartToUpdate ? { restartToUpdate: () => bridge.restartToUpdate!() } : {}),
+        // Its spell checker, for the editor's own menus (a table's), which take the place of its own.
+        ...(bridge.spellingSuggestions && bridge.addToDictionary
+          ? { spelling: { suggest: (word: string) => bridge.spellingSuggestions!(word), learn: (word: string) => bridge.addToDictionary!(word) } }
+          : {}),
       },
       overrides: config ? { hostUrl: config.hostUrl, token: config.token } : {},
       defaults: config ? { name: config.name, email: config.email } : {},

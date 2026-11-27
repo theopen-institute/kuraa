@@ -254,6 +254,32 @@ test('right-clicking a folder renames it, with what is in it', async ({ page }) 
   await expect(page.getByTestId('editor')).toContainText('Inside');
 });
 
+test('right-clicking a folder deletes it, with what is in it; the open file in it closes', async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const folder = `del-${stamp}`;
+  for (const name of ['one.md', 'two.md']) {
+    const res = await fetch(`${E2E.url}/api/files`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: `${folder}/${name}`, content: `# ${name}\n` }),
+    });
+    expect(res.status).toBe(201);
+  }
+  await openApp(page);
+  await page.getByTestId(`file:${folder}/one.md`).click();
+  await expect(page.getByTestId('editor')).toContainText('one.md');
+
+  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
+  await page.getByTestId('context:delete-folder').click();
+  await expect(dialog(page)).toContainText(`Delete the folder “${folder}” and 2 files in it?`);
+  await dialog(page).getByRole('button', { name: 'Delete' }).click();
+
+  await expect(page.getByTestId(`folder:${folder}`)).toHaveCount(0);
+  expect(existsSync(join(E2E.dir, folder))).toBe(false);
+  await expect.poll(() => execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Delete ${folder}`);
+  await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveCount(0);
+});
+
 test('nothing open is a blank document: untouched, never written; written in, a file; the space below the files, a blank one again', async ({ page }) => {
   const stamp = Date.now().toString(36);
   const untitledRows = page.locator('[role="treeitem"][data-path^="untitled-"]');

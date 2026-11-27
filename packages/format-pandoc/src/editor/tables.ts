@@ -4,10 +4,14 @@
 // type in; Insert table (in the menu) makes an empty one. In a table, Tab and
 // Shift+Tab move between cells (Tab in the last makes a row), Enter moves down
 // (making a row at the bottom), and ⌘Enter leaves the table. Right-click a cell
-// (or Shift+F10) for rows and columns: add above, below, left or right, or delete.
+// (or Shift+F10) for rows and columns: add above, below, left or right, or delete;
+// right-clicking a misspelled word, its spelling suggestions first, where the
+// page can ask the spell checker (the desktop app), as the menu it takes the
+// place of would have had them. ⌥⌘T (or Insert table) makes an empty table.
 //
 // Every change rebuilds the table, so the first row is always the header and the
 // alignment keeps one letter per column; each is an ordinary edit.
+import type { EditorContext, Spelling } from '@kuraa/editor-kit';
 import type { Fragment, Node as PMNode, NodeType, Schema } from 'prosemirror-model';
 import { Plugin, Selection, TextSelection, type Command, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
@@ -268,7 +272,53 @@ const MENU: { label: string; testid: string; run: Command; danger?: boolean }[] 
   { label: 'Delete the table', testid: 'table:delete', run: deleteTable, danger: true },
 ];
 
-function openTableMenu(view: EditorView, x: number, y: number): void {
+interface MenuItem { label: string; testid: string; run?: () => void; danger?: boolean; divided?: boolean }
+
+/** The word at a place in the text (letters, with apostrophes and hyphens inside it), and where it is; null if none. */
+export function wordAt(doc: PMNode, pos: number): { word: string; from: number; to: number } | null {
+  const $pos = doc.resolve(pos);
+  const parent = $pos.parent;
+  if (!parent.isTextblock) return null;
+  // The text node the place is in or at the edge of.
+  let found: { text: string; start: number } | null = null;
+  parent.forEach((child, offset) => {
+    if (found || !child.isText) return;
+    const start = $pos.start() + offset;
+    if (start <= pos && pos <= start + child.nodeSize) found = { text: child.text!, start };
+  });
+  if (!found) return null;
+  const { text, start } = found as { text: string; start: number };
+  const letter = /[\p{L}\p{M}'’-]/u;
+  let a = pos - start;
+  let b = a;
+  while (a > 0 && letter.test(text[a - 1]!)) a--;
+  while (b < text.length && letter.test(text[b]!)) b++;
+  // Not ending or starting with an apostrophe or hyphen ('quoted', -dash).
+  while (a < b && /['’-]/.test(text[a]!)) a++;
+  while (b > a && /['’-]/.test(text[b - 1]!)) b--;
+  if (a === b || !/\p{L}/u.test(text.slice(a, b))) return null;
+  return { word: text.slice(a, b), from: start + a, to: start + b };
+}
+
+/** A misspelled word's lines for the menu: its suggestions (each replacing it), then Add to Dictionary. None if it is spelled right. */
+function spellingItems(view: EditorView, spelling: Spelling | undefined, at: number): MenuItem[] {
+  const found = spelling ? wordAt(view.state.doc, at) : null;
+  const suggestions = found ? spelling!.suggest(found.word) : null;
+  if (!found || !suggestions) return [];
+  const { word, from, to } = found;
+  const replace = (by: string) => () => {
+    // Only if the word is still there (someone else may have changed the cell meanwhile).
+    if (view.state.doc.textBetween(from, to) !== word) return;
+    view.dispatch(view.state.tr.insertText(by, from, to).scrollIntoView());
+  };
+  return [
+    ...suggestions.map((s, i) => ({ label: s, testid: `spelling:${i}`, run: replace(s) })),
+    ...(suggestions.length ? [] : [{ label: 'No suggestions', testid: 'spelling:none' }]),
+    { label: 'Add to Dictionary', testid: 'spelling:learn', run: () => spelling!.learn(word) },
+  ];
+}
+
+function openTableMenu(view: EditorView, x: number, y: number, before: MenuItem[] = []): void {
   document.querySelector('.table-menu')?.remove();
   const menu = document.createElement('div');
   menu.className = 'context-menu table-menu';
@@ -283,22 +333,33 @@ function openTableMenu(view: EditorView, x: number, y: number): void {
   const outside = (e: Event) => {
     if (!menu.contains(e.target as Node)) close();
   };
-  for (const item of MENU) {
+  const items: MenuItem[] = [
+    ...before,
+    ...MENU.map((item, i) => ({ ...item, divided: i === 0 && before.length > 0, run: () => item.run(view.state, view.dispatch, view) })),
+  ];
+  for (const item of items) {
+    if (item.divided) {
+      const line = document.createElement('div');
+      line.className = 'context-divider';
+      line.setAttribute('role', 'separator');
+      menu.append(line);
+    }
     const b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
     b.textContent = item.label;
     b.dataset.testid = item.testid;
     if (item.danger) b.className = 'danger';
+    if (!item.run) b.disabled = true;
     b.addEventListener('click', () => {
       close();
       view.focus();
-      item.run(view.state, view.dispatch, view);
+      item.run?.();
     });
     menu.append(b);
   }
   menu.addEventListener('keydown', (e) => {
-    const buttons = [...menu.querySelectorAll('button')];
+    const buttons = [...menu.querySelectorAll('button')].filter((b) => !b.disabled);
     const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -313,14 +374,14 @@ function openTableMenu(view: EditorView, x: number, y: number): void {
   const box = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - box.width - 4))}px`;
   menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - box.height - 4))}px`;
-  menu.querySelector('button')?.focus();
+  menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   window.addEventListener('mousedown', outside, true);
   window.addEventListener('scroll', close, true);
   window.addEventListener('blur', close);
 }
 
-/** Right-click in a table: put the cursor there and offer its rows and columns. */
-export function tablePlugins(): Plugin[] {
+/** Right-click in a table: put the cursor there and offer its rows and columns (a misspelled word's suggestions first). */
+export function tablePlugins(ctx?: EditorContext): Plugin[] {
   return [
     new Plugin({
       props: {
@@ -334,7 +395,7 @@ export function tablePlugins(): Plugin[] {
             if (!cellAt(state)) return false;
             e.preventDefault();
             view.dispatch(view.state.tr.setSelection(sel));
-            openTableMenu(view, e.clientX, e.clientY);
+            openTableMenu(view, e.clientX, e.clientY, spellingItems(view, ctx?.ui.spelling, hit.pos));
             return true;
           },
         },

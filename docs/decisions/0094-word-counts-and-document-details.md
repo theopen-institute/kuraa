@@ -18,13 +18,16 @@ keys. The open document's are counted the same way from what is in the editor (p
 code nodes or marks, the header, or atoms such as citations), so the two agree but for such rarities as
 a word split by an atom.
 
-**The open document's words, in its ⋯ menu** (*revised*: at first along the document's foot; "Don't
-put wordcount the footer yet. Put it in the ... menu."). The menu's Words item says the document's
-words, counted as the menu opens (of its target, where it has one), and your words today, net and
-added: `7 / 1,000 words · today +2 net, 2 added…`. Choosing it opens the **Words** panel. (The core
-keeps what the footer needed, unused for now: a **status** panel, always drawn in a strip along the
-open document's foot, never opened or closed. ⋯ menu items are now made as the menu opens, and are
-given the document's live view and its `header()`.) The panel has:
+**The open document's words, at the foot of its ⋯ menu** (*revised* twice: at first along the
+document's own foot, then an item of the menu; "Don't put wordcount the footer yet. Put it in the ...
+menu", then "Put the word count in the footer, below the saved status. Keep it simple, just `Word
+count: xxx`. Then, in the same line: `(Words today: +xxx)`", and "Instead of words today do 'total
+today', to show it's across all documents"). Below when it was saved, one line, counted as the menu
+opens: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document. A
+component adds such a line with `documentFooter`. **Words…** in the menu opens the **Words** panel.
+(The core keeps the strip along the document's own foot, unused for now: a **status** panel, always
+drawn there, never opened or closed. What components add to the ⋯ menu is made as it opens, given the
+document's live view and its `header()`.) The panel has:
 
 - **A target for the document**, kept in its header as `target-words: 2000`, for everyone who opens it.
 - **Today, and the last seven days, from the history** (*revised*: at first a count kept in the
@@ -43,7 +46,7 @@ given the document's live view and its `header()`.) The panel has:
   does not (`wordChange` in the kernel). What is typed and not yet committed, in documents open on this
   host, is added for today, for whoever typed it. A commit never changes, so what it counts is kept
   (`.git/kuraa/words.json`) and counted once. The host gives it as `GET /api/words?since=`; components,
-  `host.wordsByDay(since)`. The menu says yours today ("today +312 net, 420 added"); the panel, yours
+  `host.wordsByDay(since)`. The menu's foot says your total today (net); the panel, yours (net and added)
   and everyone's today, and your last seven days. **A target for a day**, in words added, is yours,
   kept in this browser, as Scrivener's session target is the writer's.
   What it cannot see: a folder only some read is kept in its own space (0069), off the branch, and is

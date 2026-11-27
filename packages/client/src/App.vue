@@ -3,7 +3,7 @@
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
 import { TypeRegistry, sourceMapOf } from '@kuraa/kernel';
-import type { CoreHost, FeatureClientContext, FileMark, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
+import type { CoreHost, FeatureClientContext, FeatureDocumentContext, FileMark, FeaturePanel as FeaturePanelSpec, FeatureStatus } from '@kuraa/feature-kit/client';
 import type { Node as PMNode } from 'prosemirror-model';
 import { workspacePath } from '@kuraa/editor-kit';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
@@ -429,10 +429,11 @@ async function openAtText(p: string, at?: { from: number; to: number }) {
   editor.value?.revealText(at);
 }
 /** Items features add to the open document's ⋯ menu. */
-const featureMenu = computed(() => {
+/** What features add to the open document's ⋯ menu, with what each is given of the document; made each time the menu opens. */
+function forDocumentMenu<T>(make: (f: ActiveFeature, ctx: FeatureDocumentContext) => T[]): T[] {
   const p = path.value;
   const t = type.value;
-  // Made again each time the menu opens: an item may say how the document is now (0094: its words).
+  // Made again each time the menu opens: what is added may say how the document is now (0094: its words).
   if (!p || !t || !docMenu.value) return [];
   const view = () => editor.value?.view ?? null;
   const header = () => {
@@ -442,13 +443,19 @@ const featureMenu = computed(() => {
   };
   return features.value.flatMap((f) => {
     try {
-      return f.feature.documentMenu?.({ ...f.ctx, path: p, type: t, source: showSource.value, view, header }) ?? [];
+      return make(f, { ...f.ctx, path: p, type: t, source: showSource.value, view, header });
     } catch (e) {
       console.error(`[kuraa] the feature ${f.feature.id} could not add to the menu`, e);
       return [];
     }
   });
-});
+}
+const featureMenu = computed(() => forDocumentMenu((f, ctx) => f.feature.documentMenu?.(ctx) ?? []));
+/** Lines features add to the ⋯ menu's foot, below when the document was saved (0094). */
+const featureFooter = computed(() => forDocumentMenu((f, ctx) => {
+  const line = f.feature.documentFooter?.(ctx);
+  return line ? [line] : [];
+}));
 /** Items features add to a file's right-click menu. */
 function featureFileMenu(p: string): ContextItem[] {
   return features.value.flatMap((f) => {
@@ -1305,6 +1312,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
       :history-open="historyOpen"
       :conflicts="file?.conflicts ?? 0"
       :feature-items="featureMenu"
+      :feature-footer="featureFooter"
       @toggle-source="showSource = !showSource"
       @toggle-history="historyOpen = !historyOpen"
       @find="editor?.openFind()"

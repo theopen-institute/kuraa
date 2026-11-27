@@ -25,6 +25,11 @@ export interface ClientFeature {
   panels?: FeaturePanel[];
   /** Items for the open document's ⋯ menu, in a group of their own. */
   documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
+  /**
+   * A line for the foot of the open document's ⋯ menu, below when it was
+   * saved (0094: its word count), made as the menu opens; null for none.
+   */
+  documentFooter?(ctx: FeatureDocumentContext): { text: string; testid?: string } | null;
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
   /**

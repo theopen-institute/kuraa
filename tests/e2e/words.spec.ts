@@ -30,19 +30,19 @@ test('words counted as typed, a document’s target and details kept in its head
   await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('status')).toContainText('Connected');
 
-  // In the ⋯ menu: its words (not its header's), counted as it opens.
+  // At the foot of the ⋯ menu, below when it was saved: its words (not its header's), counted as it opens, and the total today.
   const menuWords = async () => {
     await page.getByTestId('document-menu-button').click();
-    const text = await page.getByTestId('menu-words').innerText();
+    const text = await page.getByTestId('words-footer').innerText();
     await page.keyboard.press('Escape');
     return text;
   };
-  await expect.poll(menuWords).toBe('5 words…');
+  await expect.poll(menuWords).toBe('Word count: 5 (Total today: 0)');
   await page.getByTestId('editor').locator('p', { hasText: 'One two' }).click();
   await page.keyboard.press(MAC ? 'Meta+ArrowRight' : 'End');
   await page.keyboard.type(' Six seven.');
   // Today, from the history and what is not committed yet: net and added, said apart.
-  await expect.poll(menuWords, { timeout: 15_000 }).toBe('7 words · today +2 net, 2 added…');
+  await expect.poll(menuWords, { timeout: 15_000 }).toBe('Word count: 7 (Total today: +2)');
 
   // A target for it, from the Words panel (its item in the menu): kept in its header.
   await page.getByTestId('document-menu-button').click();
@@ -69,7 +69,7 @@ test('words counted as typed, a document’s target and details kept in its head
   await expect(page.getByTestId(`mark:label:${path}`)).toBeAttached();
   await expect.poll(() => readIn(path), { timeout: 10_000 }).toMatch(/synopsis: They come by sea\.\n[\s\S]*label: Chapter\n[\s\S]*status: First draft\n[\s\S]*keywords:\n {2}- sea\n {2}- arrival\n/);
   // Still the document's words: details are in its header, not its text.
-  await expect.poll(menuWords).toBe('7 / 1,000 words · today +2 net, 2 added…');
+  await expect.poll(menuWords).toBe('Word count: 7 (Total today: +2)');
 
   // Its folder's words in Compile: each document's, and the book's against a target.
   await page.getByTestId(`folder:${folder}`).click({ button: 'right' });

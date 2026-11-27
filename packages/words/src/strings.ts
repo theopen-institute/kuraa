@@ -5,9 +5,8 @@ const signed = (x: number) => `${x > 0 ? '+' : ''}${n(x)}`;
 
 export const S = {
   panel: 'Words',
-  /** The ⋯ menu's item: the document's words, and yours today where there are any. */
-  menu: (words: number, target: number | null, net: number, added: number) =>
-    `${target ? `${n(words)} / ${n(target)} words` : `${n(words)} ${words === 1 ? 'word' : 'words'}`}${net || added ? ` · today ${signed(net)} net, ${n(added)} added` : ''}…`,
+  /** The ⋯ menu's foot: the document's words, and your total today in every document (net). */
+  footer: (words: number, today: number) => `Word count: ${n(words)} (Total today: ${today > 0 ? '+' : ''}${n(today)})`,
   thisDocument: 'This document',
   words: 'words',
   documentTarget: 'Target for this document',

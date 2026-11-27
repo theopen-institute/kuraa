@@ -33,6 +33,8 @@ const props = defineProps<{
   shared?: boolean;
   /** What features add (0082): a group of their own, after the versions. */
   featureItems?: FeatureMenuItem[];
+  /** Lines features add to the foot, below when it was saved (0094: its word count). */
+  featureFooter?: { text: string; testid?: string }[];
 }>();
 const emit = defineEmits<{
   toggleSource: [];
@@ -146,6 +148,7 @@ function onKey(e: KeyboardEvent) {
         <span data-testid="last-commit">{{ S.menu.versionAt(time(status.lastCommitAt)) }}</span>
         <template v-if="status.unsynced > 0"> · {{ S.menu.unsent(status.unsynced) }}</template>
       </p>
+      <p v-for="line in featureFooter ?? []" :key="line.text" class="menu-footer menu-footer-more" role="none" :data-testid="line.testid">{{ line.text }}</p>
     </div>
   </div>
 </template>

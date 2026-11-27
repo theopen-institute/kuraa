@@ -180,6 +180,10 @@ export function setKuraaVersion(version: string | null): void {
   ownVersion = version && isVersion(version) ? version : null;
 }
 
+/** A device not seen for this long is away: dialled every AWAY_DIAL_MS at most (lookup). */
+const DAY_MS = 24 * 3600_000;
+const AWAY_DIAL_MS = 6 * 3600_000;
+
 /** How many of a computer's other workspaces it says it is in, at most (0053, 0099: a server holds many). */
 const MAX_ALSO = 1024;
 
@@ -507,7 +511,18 @@ export class PeerNode {
    */
   private async lookup(): Promise<void> {
     if (this.closing || !(await this.missing())) return;
-    for (const m of await this.identity.members()) if (!this.links.get(m.key)?.accepted) this.dial(m.key);
+    // A device not seen for a day (or never: one left by a join that did not finish) is dialled every six hours at
+    // most, not at every look (0099: a server's members are laptops, mostly away, and it held hundreds of such).
+    const now = Date.now();
+    for (const m of await this.identity.members()) {
+      if (this.links.get(m.key)?.accepted) continue;
+      // Never seen here: away once it has been missing a day (a device that joined a moment ago is not).
+      if (!this.missingSince.has(m.key)) this.missingSince.set(m.key, now);
+      const seen = this.hints.seen[m.key] ?? this.missingSince.get(m.key)!;
+      if (now - seen > DAY_MS && now - (this.dialledAway.get(m.key) ?? 0) < AWAY_DIAL_MS) continue;
+      if (now - seen > DAY_MS) this.dialledAway.set(m.key, now);
+      this.dial(m.key);
+    }
     await this.dialKnown();
     this.lan?.say(true);
     await this.reach();
@@ -755,7 +770,8 @@ export class PeerNode {
       for (const t of topicsFor(this.ws.secret)) want.set(t.toString('hex'), { server: true, client: true });
       const origin = await this.identity.originSecret();
       if (origin) for (const t of topicsFor(origin)) want.set(t.toString('hex'), { server: true, client: true });
-      if (!this.o.joining) {
+      // A server lets no one in (0099): it announces no invite link, which would only bring it devices it turns away.
+      if (!this.o.joining && !this.isServerDevice(this.myKey)) {
         // A link from before that has expired since (its grant counts without anyone letting its holder in): unlinked.
         await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
         const links = await this.identity.linkTopics();
@@ -1185,6 +1201,11 @@ export class PeerNode {
   }
 
   private admitting: Promise<unknown> = Promise.resolve();
+
+  /** When each away device was last dialled (lookup). */
+  private readonly dialledAway = new Map<string, number>();
+  /** When each device never seen here was first missed (lookup). */
+  private readonly missingSince = new Map<string, number>();
 
   /** Joining: let in, and in the workspace with its own join (welcomed); before, records saying it is out wait for that. */
   private joinedIn = false;

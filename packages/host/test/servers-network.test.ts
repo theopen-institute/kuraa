@@ -61,8 +61,9 @@ const person = async (name: string) => createPerson(name, join(tmp('person'), 'p
 const log = (who: string) => (process.env.PEER_LOG ? (m: string) => console.log(`[${who}] ${m}`) : undefined);
 
 /** A device's host: a person's (`person`), or a server's (null: no person). Each with its computer's signing key. */
-async function start(dir: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }): Promise<RunningHost> {
-  const h = await startHost({ dir, timings: FAST, invites: {}, peers: { bootstrap: testnet.bootstrap as never, signing, person: who }, log: log(dir.slice(-6)) });
+async function start(dir: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }, said?: string[]): Promise<RunningHost> {
+  const shown = log(dir.slice(-6));
+  const h = await startHost({ dir, timings: FAST, invites: {}, peers: { bootstrap: testnet.bootstrap as never, signing, person: who }, log: (m) => { said?.push(m); shown?.(m); } });
   hosts.push(h);
   return h;
 }
@@ -73,10 +74,18 @@ async function stop(h: RunningHost): Promise<void> {
 }
 
 /** Join into a new folder: as a person, or as a server (null). */
-async function join_(invitation: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }, name: string): Promise<string> {
+async function join_(invitation: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }, name: string, deviceKey?: { publicKey: Buffer; secretKey: Buffer }): Promise<string> {
   const dir = join(tmp(name), 'notes');
-  await joinWorkspace({ dir, invitation, name, person: who, signing, bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, log: log(`join ${name}`) });
+  await joinWorkspace({ dir, invitation, name, person: who, signing, bootstrap: testnet.bootstrap as never, timeoutMs: 20_000, log: log(`join ${name}`), ...(deviceKey ? { deviceKey } : {}) });
   return dir;
+}
+
+/** A device key whose hex starts with `prefix`: to say which of two keys is the lower. */
+function keyStarting(prefix: string): { publicKey: Buffer; secretKey: Buffer } {
+  for (;;) {
+    const k = crypto.keyPair();
+    if (k.publicKey.toString('hex').startsWith(prefix)) return k;
+  }
 }
 
 const api = (h: RunningHost, path: string, init: RequestInit = {}) =>
@@ -166,6 +175,39 @@ describe('a server in a workspace (0099)', () => {
     await until(() => read(dirB, 'a.md') !== null && read(dirS, 'b.md') !== null, 20_000, 'both works on both');
     await until(() => git(dirB, 'rev-parse', 'HEAD') === git(dirS, 'rev-parse', 'HEAD'), 20_000, 'one history');
     expect(read(dirA, 'b.md')).toBeNull();
+  });
+
+  it('makes the merge itself, though a member’s key is the lower: it brings work made apart together (0099)', async () => {
+    const ada = await person('Ada');
+    const adaKey = crypto.keyPair();
+    const dirA = repo();
+    const a = await start(dirA, ada, adaKey);
+    const serverKey = crypto.keyPair();
+    const dirS = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv', keyStarting('f'));
+    const onServer: string[] = [];
+    const s = await start(dirS, null, serverKey, onServer);
+    const bo = await person('Bo');
+    const boKey = crypto.keyPair();
+    const dirB = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), bo, boKey, 'bee', keyStarting('0'));
+    let b = await start(dirB, bo, boKey);
+    await until(async () => (await s.host.peers!.status()).devices.filter((d) => d.online).length === 2, 20_000, 'both members online to the server');
+    // Work made apart: Ada's reaches the server while Bo is away; Bo's is made while he is away.
+    await stop(b);
+    await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'a.md', content: '# A\n' }) });
+    await until(() => read(dirS, 'a.md') !== null, 20_000, 'Ada’s work on the server');
+    await stop(a);
+    writeFileSync(join(dirB, 'b.md'), '# B\n');
+    git(dirB, 'add', '-A');
+    git(dirB, '-c', 'user.name=Bo', '-c', 'user.email=bo@example.org', 'commit', '-q', '-m', 'B, apart');
+    const onBo: string[] = [];
+    b = await start(dirB, bo, boKey, onBo);
+    await until(() => read(dirS, 'b.md') !== null && read(dirB, 'a.md') !== null, 20_000, 'both works on both');
+    // The merge is the server's, though Bo's key is the lower (he would have made it, by the rule between two devices):
+    // the server merged; Bo's device only moved to it.
+    expect(git(dirS, 'log', '-1', '--merges', '--format=%H')).not.toBe('');
+    expect(onServer.some((m) => /^merged /.test(m))).toBe(true);
+    expect(onBo.some((m) => /^merged /.test(m))).toBe(false);
+    void b;
   });
 
   it('changes nothing: what the server’s key signs is kept out on the members’ devices', async () => {

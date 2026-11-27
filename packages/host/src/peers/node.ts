@@ -1133,6 +1133,12 @@ export class PeerNode {
     return a.policy.mayWrite(a.personOf.get(device) ?? null, path);
   }
 
+  /** Whether a device (this one too) is a server's, as the policy said when the members last changed (0099). */
+  isServerDevice(device: string): boolean {
+    const a = this.access;
+    return !!a?.policy.isServer(a.personOf.get(device) ?? null);
+  }
+
   /** Whether this device is a server's (0099): no person here, and its key one of the policy's servers. */
   private async isServerHere(): Promise<boolean> {
     if (await this.person()) return false;

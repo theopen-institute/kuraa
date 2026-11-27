@@ -620,7 +620,9 @@ export class Peers {
    */
   private async bringIn(link: PeerLink): Promise<boolean> {
     const remote = link.remote!;
-    const forwardOnly = link.key < this.node.myKey;
+    // A server makes the merges (0099: it brings together work made apart, members never online at once), and a member
+    // takes its merges; between two others, the lower key, as ever. Still one merger for each pair.
+    const forwardOnly = this.node.isServerDevice(this.node.myKey) ? false : this.node.isServerDevice(link.key) ? true : link.key < this.node.myKey;
     let retry = false;
     // Each on its own (0071): one that fails (a file in the way, the policy not here yet) holds up none of the others.
     for (const { branch, oid } of await this.branchesOf(remote)) {

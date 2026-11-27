@@ -144,7 +144,7 @@ export interface PeopleInfo {
   /** Whether you invite and remove servers: the owner (0099). */
   managesServers?: boolean;
   /** The latest removals (0072): people taken out, computers dropped, servers removed (0099); who has confirmed each so far. */
-  removals?: { kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[];
+  removals?: { kind: 'person' | 'computer' | 'server' | 'server-out'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
@@ -330,7 +330,8 @@ export class HostApi {
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   /** Remove a device from the workspace, for good (it keeps its copy). */
   /** Take a server out of the workspace, for good (0099): the owner's. */
-  removeServer(key: string) { return this.json<PeopleInfo>(`/api/peers/servers/${key}`, { method: 'DELETE' }); }
+  /** Take a server out (0099): invited back by a new link; `forGood` (its key lost or stolen), never with that key again. The owner's. */
+  removeServer(key: string, forGood = false) { return this.json<PeopleInfo>(`/api/peers/servers/${key}${forGood ? '?for-good=1' : ''}`, { method: 'DELETE' }); }
   removeDevice(key: string) { return this.json<{ ok: boolean; revoked?: boolean }>(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
   renameDevice(name: string) { return this.json<{ name: string }>('/api/peers/name', { method: 'POST', body: JSON.stringify({ name }) }); }
   /** The syncs the host's components bring (the online copy), their targets, and whether people here may add and remove them. */

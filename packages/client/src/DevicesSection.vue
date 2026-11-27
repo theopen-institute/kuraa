@@ -76,8 +76,11 @@ const devicesOf = (i: Info, p: Someone) => i.devices.filter((d) => p.devices.inc
 const others = (i: Info) => i.devices.filter((d) => !d.server && !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
 
 type Server = NonNullable<Info['people']>['servers'] extends (infer T)[] | undefined ? T : never;
-/** Each server, with its device here (the server's for this workspace), if this device knows it. */
-const serverRows = (i: Info) => (i.people?.servers ?? []).map((s) => ({ s, d: i.devices.find((d) => s.devices.includes(d.key)) }));
+/** Each server, with its device here (the server's for this workspace; of several, one online first), if this device knows it. */
+const serverRows = (i: Info) => (i.people?.servers ?? []).map((s) => {
+  const ds = i.devices.filter((d) => s.devices.includes(d.key));
+  return { s, d: ds.find((d) => d.online) ?? ds.find((d) => d.through.length) ?? ds[0] };
+});
 /** Whether you add and remove servers: the owner (0099), on a device still in. */
 const managesServers = (i: Info) => !!i.people?.managesServers && i.canInvite && !i.removed;
 
@@ -100,9 +103,9 @@ async function copyServerLink() {
     (document.querySelector('[data-testid=server-link]') as HTMLTextAreaElement | null)?.select();
   }
 }
-async function removeServer(s: Server) {
-  const ok = await askConfirm(S.servers.removeAsk(s.name), S.common.remove, true);
-  if (ok) await act(() => props.api.removeServer(s.key));
+async function removeServer(s: Server, forGood = false) {
+  const ok = await askConfirm(forGood ? S.servers.lostAsk(s.name) : S.servers.removeAsk(s.name), S.common.remove, true);
+  if (ok) await act(() => props.api.removeServer(s.key, forGood));
 }
 /** Whether you may remove a computer: an admin, or it is yours (0068). */
 const mayRemove = (i: Info, d: Device) => {
@@ -258,7 +261,8 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
             <span v-else class="device-state" :data-testid="`server-state:${s.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
           </template>
           <span v-else class="device-state" :data-testid="`server-state:${s.name}`">{{ S.devices.isOffline }}</span>
-          <button v-if="managesServers(info) && !s.you" type="button" class="danger" :disabled="busy" :data-testid="`remove-server:${s.name}`" @click="removeServer(s)">{{ S.servers.remove }}</button>
+          <button v-if="managesServers(info) && !s.you" type="button" :disabled="busy" :data-testid="`remove-server:${s.name}`" @click="removeServer(s)">{{ S.servers.remove }}</button>
+          <button v-if="managesServers(info) && !s.you" type="button" class="danger" :title="S.servers.lostTitle" :disabled="busy" :data-testid="`lost-server:${s.name}`" @click="removeServer(s, true)">{{ S.servers.lost }}</button>
         </li>
       </ul>
       <div v-if="serverLink" class="server-link" data-testid="server-link-box">

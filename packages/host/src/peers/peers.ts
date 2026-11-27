@@ -209,7 +209,7 @@ export interface PeopleInfo {
    * The latest removals (0072: people taken out, computers dropped; 0099:
    * servers), each with the names of those whose devices hold it so far.
    */
-  removals: { kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[];
+  removals: { kind: 'person' | 'computer' | 'server' | 'server-out'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -832,16 +832,19 @@ export class Peers {
   }
 
   /**
-   * Take a server out of the workspace, for good (0099): a drop of its key, the
-   * owner's to make, with the commits this device has; the workspace's secret
-   * made anew, so its devices can no longer find the others.
+   * Take a server out of the workspace (0099), the owner's to do: as a person is
+   * taken out (a revoke, with the commits this device has), to be invited back
+   * by a new link if the owner chooses; or, `forGood` (its key lost or stolen), a
+   * drop of its key, after which no link lets that key in again. Either way the
+   * workspace's secret is made anew, so its devices can no longer find the others.
    */
-  async removeServer(key: string): Promise<void> {
+  async removeServer(key: string, o: { forGood?: boolean } = {}): Promise<void> {
     const { policy, me } = await this.node.policy();
     if (!policy.isServer(key)) throw new Error('No such server in this workspace');
     if (!policy.isOwner(me)) throw new NotAllowed('Only the workspace’s owner removes a server');
     const devices = (await this.node.identity.servers()).find((s) => s.key === key)?.devices.map((d) => d.key) ?? [];
-    await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
+    if (o.forGood) await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
+    else await this.adminOp({ t: 'revoke', group: WORKSPACE, who: key, cutoff: await this.node.branchTips() });
     await this.node.newSecret();
     await this.node.membersChanged();
     for (const d of devices) {

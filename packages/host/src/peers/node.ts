@@ -246,6 +246,8 @@ export interface NodeEvents {
   members?(): void;
   /** A device turned this one away, saying why. */
   refused?(link: PeerLink, reason: string): void;
+  /** Joining, this device is out of the workspace even with its own join counted: why (0099). */
+  out?(why: string): void;
   /** A device does not hold these policy operations, asked for as its commits name them (gate.ts). */
   unheld?(link: PeerLink, ids: string[]): void;
 }
@@ -1134,6 +1136,9 @@ export class PeerNode {
 
   private admitting: Promise<unknown> = Promise.resolve();
 
+  /** Joining: let in, and in the workspace with its own join (welcomed); before, records saying it is out wait for that. */
+  private joinedIn = false;
+
   /**
    * Devices let in by an invite link here, and until when (0072): a device
    * joining may connect again (a second connection, by the workspace's topic,
@@ -1508,8 +1513,20 @@ export class PeerNode {
     const asServer = !person && !!this.o.ticket && decodeLink(this.o.ticket).grant?.role === 'server';
     if ((person || asServer) && this.o.ticket) {
       await this.identity.joinPolicy(decodeLink(this.o.ticket), await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not join the workspace's policy: ${e.message}`));
-      void this.membersChanged().catch(() => undefined);
     }
+    // Out, its own join counted or not (0099): a key removed for good, or a link that did not let it back in.
+    if ((await this.identity.removed()).includes(this.myKey)) {
+      const key = (await this.signingKeyNow()).publicKey.toString('hex');
+      const why = (await this.identity.policy()).dropped.has(key)
+        ? 'this computer’s key was removed from the workspace for good (lost or stolen), so it cannot join with it again'
+        : 'this computer is out of the workspace, and the link did not let it back in';
+      this.o.log(`peers: ${why}`);
+      this.events.out?.(why);
+      await this.close();
+      return;
+    }
+    this.joinedIn = true;
+    if ((person || asServer) && this.o.ticket) void this.membersChanged().catch(() => undefined);
     this.events.welcome?.(link, { ...m, members });
   }
 
@@ -1559,6 +1576,9 @@ export class PeerNode {
     if (!taken.length) return;
     // Out (0072): dropped, its key revoked, or its person taken out.
     const removed = new Set(await this.identity.removed());
+    // Joining: the records first say what was (a server taken out, someone invited back), before its own join is
+    // made; whether it is out is said once it is (welcomed).
+    if (removed.has(this.myKey) && this.o.joining && !this.joinedIn) return;
     if (removed.has(this.myKey)) {
       this.o.log('peers: this device is out of the workspace (removed, or its person taken out); not syncing');
       await this.close();

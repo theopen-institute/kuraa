@@ -123,6 +123,14 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
         reject(new Error(`Could not join: ${why}`));
       }, 8000);
     };
+    // Out even with its join (0099): said at once, as why.
+    node.events.out = (why) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      clearTimeout(refusal);
+      reject(new Error(`Could not join: ${why}`));
+    };
     node.events.welcome = (from, m) => {
       if (done) return;
       done = true;

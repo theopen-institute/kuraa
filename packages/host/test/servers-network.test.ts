@@ -182,7 +182,7 @@ describe('a server in a workspace (0099)', () => {
     await until(() => read(dirS, 'mine.md') === '# Mine\n', 20_000, 'Ada’s file on the server');
   });
 
-  it('is taken out by the owner, for good; an admin may not, nor invite a server', async () => {
+  it('is taken out by the owner; an admin may not, nor invite a server', async () => {
     const { a, s, sk } = await withServer();
     const bo = await person('Bo');
     const boKey = crypto.keyPair();
@@ -197,7 +197,23 @@ describe('a server in a workspace (0099)', () => {
     expect((await a.host.peers!.people()).servers).toEqual([]);
     await until(async () => !(await b.host.peers!.people()).servers.length, 20_000, 'the server gone on Bo’s device');
     await until(async () => (await s.host.peers!.status()).removed, 20_000, 'the server told it is out');
+    expect((await a.host.peers!.people()).removals[0]).toMatchObject({ kind: 'server-out', who: 'srv', by: 'Ada' });
+  });
+
+  it('comes back when the owner invites it again, the same key in a new folder; not once its key is removed for good', async () => {
+    const { a, s, sk, serverKey } = await withServer();
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.online), 15_000, 'the server online');
+    expect((await api(a, `/api/peers/servers/${sk}`, { method: 'DELETE' })).status).toBe(200);
+    await until(async () => (await s.host.peers!.status()).removed, 20_000, 'the server told it is out');
+    await stop(s);
+    // Invited back: the same server (its key), joining anew, as kuraa-server join does after a failed or removed one.
+    const back = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv');
+    expect(read(back, 'notes.md')).toBe(NOTES);
+    await until(async () => (await a.host.peers!.people()).servers.some((x) => x.key === sk), 20_000, 'the server in again');
+    // Its key removed for good: no link lets it in again, and the join says why.
+    expect((await api(a, `/api/peers/servers/${sk}?for-good=1`, { method: 'DELETE' })).status).toBe(200);
     expect((await a.host.peers!.people()).removals[0]).toMatchObject({ kind: 'server', who: 'srv', by: 'Ada' });
+    await expect(join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv')).rejects.toThrow('removed from the workspace for good');
   });
 
   it('refuses a link for a server to anyone with an identity', async () => {

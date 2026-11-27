@@ -299,8 +299,9 @@ export class Identity {
       }
       const p = w.personOf.get(key);
       if (!p) {
-        // A server (0099): in as itself, its key where a person's device has its person.
+        // A server (0099): in as itself, its key where a person's device has its person; out once taken out.
         if (policy.isServer(key)) inside.set(device, { person: key, name: w.names.get(device) ?? '' });
+        else if (policy.cutoffs.has(key)) out.add(device);
         continue;
       }
       if (!policy.founded || policy.role(p.key)) inside.set(device, { person: p.key, name: w.names.get(device) ?? '' });
@@ -1094,7 +1095,7 @@ export class Identity {
    * whoever made it and whoever it took out, whose devices' acknowledgements
    * say they hold it.
    */
-  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[]> {
+  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer' | 'server' | 'server-out'; who: string; by: string | null; confirmedBy: string[] }[]> {
     const records = await this.records();
     const policy = await this.policy(records);
     const w = this.who(records);
@@ -1117,7 +1118,7 @@ export class Identity {
       }
       held.set(person, seen);
     }
-    const out: { op: string; kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[] = [];
+    const out: { op: string; kind: 'person' | 'computer' | 'server' | 'server-out'; who: string; by: string | null; confirmedBy: string[] }[] = [];
     for (const id of [...policy.applied].reverse()) {
       const e = entries.get(id);
       if (!e) continue;
@@ -1125,7 +1126,9 @@ export class Identity {
       if (!who) continue;
       const by = personOfKey(e.signer);
       const confirmedBy = [...held].filter(([p, ops]) => p !== by && p !== who && ops.has(id)).map(([p]) => p).sort();
-      out.push({ op: id, kind: e.op.t === 'drop' ? (servers.has(e.op.key) ? 'server' : 'computer') : 'person', who, by, confirmedBy });
+      // A server taken out, or its key dropped for good (0099); a person taken out; a computer removed.
+      const kind = e.op.t === 'drop' ? (servers.has(e.op.key) ? 'server' : 'computer') : servers.has(who) ? 'server-out' : 'person';
+      out.push({ op: id, kind, who, by, confirmedBy });
       if (out.length >= limit) break;
     }
     return out;

@@ -746,10 +746,11 @@ const peerRoutes: Route[] = [
     send(res, 200, { ok: true, revoked });
   }),
 
-  // A server taken out, for good (0099): the owner's; it keeps its copy.
-  route('DELETE', /^\/api\/peers\/servers\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+  // A server taken out (0099): the owner's; it keeps its copy. Invited back by a new link, unless ?for-good=1 (its key
+  // lost or stolen), after which that key never comes in again.
+  route('DELETE', /^\/api\/peers\/servers\/([0-9a-f]{64})$/, async ({ host, res, params, q }) => {
     const peers = await host.peersForInvites();
-    await allowed(() => peers.removeServer(params[0]!));
+    await allowed(() => peers.removeServer(params[0]!, { forGood: q.get('for-good') === '1' }));
     send(res, 200, await peers.people());
   }),
 

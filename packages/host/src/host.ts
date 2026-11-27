@@ -377,6 +377,9 @@ export class Host {
     this.gitDirPath = await this.git.gitDir();
     this.realDir = realpathSync(this.dir);
     this.cacheDir = join(this.gitDirPath, 'kuraa', 'rooms');
+    // Before anything here writes: a feature starting (the codebook moved into .kuraa, 0082) writes through a
+    // temporary file of the same kind, which this would take away half-way.
+    await this.removeLeftovers();
     this.gitState = await this.readGitState();
     this.onBranch = this.gitState.branch;
     this.spaces = new Spaces(this.git, this.dir, this.tmpDir);
@@ -430,7 +433,6 @@ export class Host {
       this.log(`running code: ${this.runner.turnedOn.join(', ')}, ${env.label}${env.sandboxed ? '' : ' (NOT SANDBOXED)'}`);
     }
     await mkdir(this.cacheDir, { recursive: true });
-    await this.removeLeftovers();
     await this.ensureIdentity();
     // Pushes from other clones update the working tree, so open rooms see them.
     await this.git.run(['config', 'receive.denyCurrentBranch', 'updateInstead']);

@@ -692,8 +692,9 @@ interface State {
   spaceMade: Map<string, { by: string; op: string }>;
   /** Joins by a link for one person that another used at the same time. */
   once: Clash[];
-  /** Servers' signing keys (0099). */
+  /** Servers' signing keys (0099); and every key that has been one. */
   servers: Set<string>;
+  wasServer: Set<string>;
 }
 
 /** A view of a state to judge by. */
@@ -706,7 +707,7 @@ function freshState(genesis: PolicyEntry): State {
   // The genesis names its first admin, the owner (0070).
   return {
     groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(),
-    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(),
+    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(), wasServer: new Set(),
   };
 }
 
@@ -794,8 +795,8 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'drop': {
       // One's own computer; or an admin, a member's (the owner, anyone's: 0070).
       if (s.dropped.has(op.key) || !now.role(by)) return false;
-      // A server's key: the owner's to drop (0099).
-      if (s.servers.has(op.key)) return now.isOwner(by);
+      // A server's key, now or once (0099): the owner's to drop, taken out or not.
+      if (s.servers.has(op.key) || s.wasServer.has(op.key)) return now.isOwner(by);
       const whose = env.ctx.personOf(op.key);
       if (whose === by) return true;
       const ofAdmin = !!whose && (ws.get(whose) === 'admin' || whose === s.owner);
@@ -880,6 +881,7 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
       if (op.role === 'server') {
         if (s.dropped.has(by)) return false;
         s.servers.add(by);
+        s.wasServer.add(by);
         // Named in a group by a grant made at the same time as this join: in none, as a server.
         for (const g of s.groups.values()) g.delete(by);
         return true;

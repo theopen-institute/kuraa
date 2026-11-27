@@ -847,6 +847,13 @@ export class Peers {
     const devices = (await this.node.identity.servers()).find((s) => s.key === key)?.devices.map((d) => d.key) ?? [];
     if (o.forGood) await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
     else await this.adminOp({ t: 'revoke', group: WORKSPACE, who: key, cutoff: await this.node.branchTips() });
+    // Links for a server this device made and not yet used: unlinked, so the server does not come back by one (the
+    // owner makes a new one to invite it back).
+    for (const l of await this.links()) {
+      if (l.state !== 'active') continue;
+      const made = (await this.node.identity.links()).find((x) => x.id === l.id);
+      if (made?.server) await this.node.identity.revokeLink(l.id, await this.node.signingKeyNow());
+    }
     await this.node.newSecret();
     await this.node.membersChanged();
     for (const d of devices) {

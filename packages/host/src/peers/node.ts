@@ -647,7 +647,16 @@ export class PeerNode {
   private tunnelAsked(link: PeerLink, ask: TunnelAsk, stream: Duplex): void {
     if (!link.accepted || this.closing) return void stream.destroy();
     const here = localNodes(this.computer).get(ask.to);
-    if (here) return here.tunnelArrived(ask.from, stream, !!ask.also);
+    if (here) {
+      if (here.ws?.id === this.ws.id) return here.tunnelArrived(ask.from, stream, !!ask.also);
+      // Another workspace's device on this computer (one link per pair of computers): only for a device that is in
+      // that workspace, as its own records say. Else any device let in here would reach every workspace's (0099).
+      void here.identity.members().then(
+        (ms) => (ms.some((m) => m.key === ask.from) ? here.tunnelArrived(ask.from, stream, !!ask.also) : stream.destroy()),
+        () => stream.destroy(),
+      );
+      return;
+    }
     const next = this.links.get(ask.to);
     const passing = this.passing.get(link.key) ?? 0;
     if (ask.from !== link.key || link.hello?.workspace !== this.ws.id || !next?.accepted || next.hello?.workspace !== this.ws.id || passing >= MAX_PASSED_ON) return void stream.destroy();

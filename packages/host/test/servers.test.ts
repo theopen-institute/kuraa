@@ -184,6 +184,18 @@ describe('servers in the policy (0099)', () => {
     expect([...evaluate([...h.entries].reverse(), h.ctx()).servers]).toEqual([s.id]);
   });
 
+  it('keeps a server’s key the owner’s to drop once it is taken out: an admin may not', () => {
+    const h = history();
+    h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    const s = server();
+    h.join(s, ada);
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, ada);
+    h.add({ t: 'drop', key: s.id }, bo);
+    expect(h.now().dropped.has(s.id)).toBe(false);
+    h.add({ t: 'drop', key: s.id }, ada);
+    expect(h.now().dropped.has(s.id)).toBe(true);
+  });
+
   it('counts a taking out and a drop made at the same time both: out, and for good', () => {
     const h = history();
     const s = server();

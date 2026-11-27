@@ -1408,7 +1408,7 @@ export class Identity {
     const topic = randomBytes(32).toString('hex');
     const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic), key.secretKey).toString('hex');
     const list = await this.links();
-    list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true } : {}) });
+    list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true, ...(granted.role === 'server' ? { server: true } : {}) } : {}) });
     await mkdir(this.stateDir, { recursive: true });
     await writeWhole(this.linksFile, JSON.stringify(list));
     await this.decide('link', id, { topic, expires });
@@ -1568,6 +1568,8 @@ export interface IssuedLink {
   created: number;
   /** The group its grant lets its holder into; and whether that grant counts only for whom a device lets in (policy.ts, admit). */
   group?: string;
+  /** For a server (0099): unlinked when the owner takes a server out, so none comes back by a link left over. */
+  server?: boolean;
   admitted?: boolean;
 }
 

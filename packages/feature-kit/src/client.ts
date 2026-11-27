@@ -70,6 +70,12 @@ export interface ClientFeature {
   layout?: FeatureLayout;
   /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */
   views?: NavigationView[];
+  /**
+   * Views of a folder drawn in the main area, where a document is (0095: a
+   * corkboard, an outline): offered on a folder's menu, shown in place of the
+   * open document until a document is opened.
+   */
+  folderViews?: FolderView[];
 }
 
 /**
@@ -208,6 +214,11 @@ export interface NavigationContext extends FeatureClientContext {
   marks(path: string): FileMark[];
   /** The core's menu for a file, a folder (`path` ending in `/`) or the top level (''), at a point. */
   fileMenu(path: string, at: { x: number; y: number }): void;
+  /**
+   * Show a folder ('' the top level) in the main area, in a folder view
+   * (0095: `feature:view`, as `'corkboard:outline'`; none: the first there is).
+   */
+  showFolder(folder: string, view?: string): void;
   /** A file's icon, as its type defines it (0023). */
   icon(file: NavigationFile): FileIcon | undefined;
 }
@@ -281,6 +292,25 @@ export interface WordsDay {
   /** YYYY-MM-DD. */
   date: string;
   people: { name: string; email: string; net: number; added: number }[];
+}
+
+/** A view of a folder in the main area (0095). */
+export interface FolderView {
+  id: string;
+  /** What it is called on a folder's menu ('Corkboard'). */
+  label: string;
+  /** Draw it into `element` for the folder the context says; returns how to take it down. */
+  mount(element: HTMLElement, ctx: FolderViewContext): () => void;
+}
+
+/** What a folder view is given: navigation's, and the folder it shows. */
+export interface FolderViewContext extends NavigationContext {
+  /** The folder shown ('' the top level). */
+  folder(): string;
+  /** The folder views there are, to switch between (`feature:view`, and what each is called). */
+  folderViews(): { key: string; label: string }[];
+  /** This view's own key (`feature:view`). */
+  viewKey(): string;
 }
 
 /** A folder or document a folder's book could have (0093). */
@@ -360,10 +390,21 @@ export interface CoreHost {
   tools: ToolService;
   code: CodeService;
   history: HistoryService;
+  documents: DocumentService;
 }
 
 /** A service of the host's (CoreHost), by name. */
 export type CoreService = keyof CoreHost;
+
+/** Documents, whether open or not (0095). */
+export interface DocumentService {
+  /**
+   * Set fields of a document's header (its front matter), as one change;
+   * undefined, null or '' takes one away; the rest of it, comments and all, as
+   * it is. Where it is open, everyone in it sees the change at once.
+   */
+  setHeader(path: string, fields: { [key: string]: unknown }): Promise<void>;
+}
 
 /** The workspace's history, read (0094). */
 export interface HistoryService {

@@ -36,7 +36,7 @@ import FolderPicker from './FolderPicker.vue';
 import SettingsWindow from './SettingsWindow.vue';
 import type { SettingsSection } from './settingsSections.js';
 import InviteDialog from './InviteDialog.vue';
-import { connectionInfo, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
+import { connectionInfo, folderViewContext, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
 import { workspaceMenuItems } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
 import { useFeatureHost } from './featureHost.js';
@@ -238,6 +238,7 @@ const navApp: NavigationApp = {
   marks: (p) => fh.fileMarks(p),
   fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
+  showFolder: (folder, key) => showFolder(folder, key),
 };
 /** What the views add to ＋. */
 const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => fh.menuItems(active.feature.id, view.newItems!(navigationContext(active.ctx, navApp, navEvents)))));
@@ -546,6 +547,8 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
 function select(next: string | null) {
+  // A document opened: in place of a folder's view (0095).
+  if (next !== null) mainView.value = null;
   if (next === path.value) return;
   liveTitle.value = null;
   liveConflicts.value = null;
@@ -554,6 +557,44 @@ function select(next: string | null) {
   notice.value = null;
   showSource.value = false;
   path.value = next;
+}
+
+/**
+ * What the main area shows instead of a document (0095): a folder, in one of
+ * the folder views components give (a corkboard, an outline), until a
+ * document is opened.
+ */
+const mainView = shallowRef<{ key: string; folder: string } | null>(null);
+watch(api, () => (mainView.value = null));
+function showFolder(folder: string, key?: string) {
+  const views = fh.folderViews.value;
+  const found = views.find((v) => v.key === key) ?? views[0];
+  if (!found) return;
+  select(null);
+  view(null);
+  mainView.value = { key: found.key, folder: folder.replace(/\/+$/, '') };
+}
+/** The folder view shown, while it is one of a feature in use. */
+const shownFolderView = computed(() => {
+  const m = mainView.value;
+  const entry = m ? fh.folderViews.value.find((v) => v.key === m.key) : undefined;
+  return m && entry ? { ...m, entry } : null;
+});
+/** Drawn anew for another folder or view. */
+const folderMount = computed(() => {
+  const shown = shownFolderView.value;
+  if (!shown) return null;
+  const { entry, folder, key } = shown;
+  return (el: HTMLElement) => entry.view.mount(el, folderViewContext(entry.active.ctx, navApp, navEvents, {
+    folder,
+    key,
+    views: () => fh.folderViews.value.map((v) => ({ key: v.key, label: v.view.label })),
+  }));
+});
+/** A folder's menu: its views (Corkboard, Outline), then what features add. */
+function fileMenuItems(p: string): MenuItem[] {
+  const views = p.endsWith('/') ? fh.folderViews.value.map((v): MenuItem => ({ label: v.view.label, testid: `context:folder-view:${v.key}`, run: () => showFolder(p, v.key) })) : [];
+  return [...views, ...fh.fileMenu(p)];
 }
 
 /** Open a file (if it is not open), and Settings at its section. */
@@ -877,6 +918,10 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
             </div>
           </div>
         </div>
+        <!-- A folder, in a view of a component's (0095: a corkboard, an outline). -->
+        <div v-else-if="!path && ready && shownFolderView && folderMount" class="folder-view-pane">
+          <FeatureMount :key="`${shownFolderView.key}|${shownFolderView.folder}`" class="folder-view" testid="folder-view" :mount="folderMount" />
+        </div>
         <div v-else-if="!path && ready" class="empty">
           <div class="no-workspace" data-testid="no-document">
             <h2>{{ S.app.emptyTitle }}</h2>
@@ -1008,7 +1053,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
       :selected="path"
       :registry="hostRegistry"
       :shared="sharedWithDevices"
-      :feature-items="fh.fileMenu"
+      :feature-items="fileMenuItems"
       :new-items="viewItems"
       :orders="orders"
       @document-settings="openDocumentSettings"

@@ -427,6 +427,27 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  packages/corkboard:
+    dependencies:
+      '@kuraa/details':
+        specifier: workspace:*
+        version: link:../details
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/feature-ui':
+        specifier: workspace:*
+        version: link:../feature-ui
+      '@kuraa/files':
+        specifier: workspace:*
+        version: link:../files
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
   packages/details:
     dependencies:
       '@kuraa/feature-kit':
@@ -522,6 +543,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/corkboard':
+        specifier: workspace:*
+        version: link:../corkboard
       '@kuraa/details':
         specifier: workspace:*
         version: link:../details
@@ -750,6 +774,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/corkboard':
+        specifier: workspace:*
+        version: link:../corkboard
       '@kuraa/details':
         specifier: workspace:*
         version: link:../details
@@ -777,6 +804,9 @@ importers:
       prosemirror-transform:
         specifier: ^1.12.5
         version: 1.12.5
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/kernel:
     dependencies:

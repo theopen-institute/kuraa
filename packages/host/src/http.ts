@@ -274,6 +274,24 @@ const fileRoutes: Route[] = [
     send(res, 200, { files, folders: marks.folders, orders });
   }),
 
+  // A document's header fields set (0095: a corkboard's synopsis, an outline's
+  // status), open or not; committed, credited to whoever asked.
+  route('POST', '/api/documents/header', async ({ host, req, res }) => {
+    const body = await readBody(req);
+    const path = host.relPath(str(body.path, 'path'));
+    const fields = body.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !Object.keys(fields).length) throw new HttpError(400, 'fields: the header fields to set');
+    if (!existsSync(host.resolvePath(path))) throw new HttpError(404, 'No such file');
+    if (host.peers && !(await host.peers.access(path)).canWrite) throw new NotAllowed(`You may not change ${path}`);
+    const by = personOf(body.by);
+    const commit = await host.serial(async () => {
+      await host.requireWritable();
+      if (!(await host.setHeader(path, fields as Record<string, unknown>))) return null;
+      return host.commitPaths([path], `Change ${Object.keys(fields).join(', ')} of ${path}`, by && by.email ? [by] : []);
+    });
+    send(res, 200, { path, commit });
+  }),
+
   // A folder's order (0093): the names of its files and folders, in the order
   // people arranged them; none, the folder's own order file removed.
   route('POST', '/api/order', async ({ host, req, res }) => {

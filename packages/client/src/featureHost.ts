@@ -116,6 +116,11 @@ export function useFeatureHost(o: FeatureHostOptions) {
       bookContents: (folder) => api.value.bookContents(folder),
     },
     history: { wordsByDay: (since) => api.value.wordsByDay(since) },
+    documents: {
+      setHeader: async (p, fields) => {
+        await api.value.setHeader(p, fields, o.person());
+      },
+    },
     code: {
       session: () => o.codeSession?.() ?? null,
       onSession: (fn) => {
@@ -404,6 +409,8 @@ export function useFeatureHost(o: FeatureHostOptions) {
   /** No layout gives navigation: the core's own menu at the upper left. */
   const fallback = computed(() => !layout.value?.feature.layout?.navigation);
   const views = computed(() => (ready.value ? navFeatures.value.flatMap((f) => (f.feature.views ?? []).map((view) => ({ active: f, view }))) : []));
+  /** Views of a folder for the main area (0095), by `feature:view`, from the features in use. */
+  const folderViews = computed(() => (ready.value ? features.value.flatMap((f) => (f.feature.folderViews ?? []).map((view) => ({ active: f, view, key: `${f.feature.id}:${view.id}` }))) : []));
 
   return {
     status, known, hidden, setHidden, load, turn, messages, coreHost, toolsChanged, codeChanged,
@@ -411,7 +418,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     sidePanel, overPanels, dialogPanels, askPanel, closePanel, panelOpen, panelButtons,
     commands, editorCommands, commandKey, menuItems, menuLines, runCommand,
     documentMenu, documentFooter, fileMenu, fileMarks, help, pastEditors,
-    layout, fallback, views,
+    layout, fallback, views, folderViews,
   };
 }
 

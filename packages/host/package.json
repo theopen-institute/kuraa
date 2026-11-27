@@ -34,6 +34,8 @@
     "@kuraa/format-text": "workspace:*",
     "@kuraa/compile": "workspace:*",
     "@kuraa/details": "workspace:*",
+    "@kuraa/corkboard": "workspace:*",
+    "yaml": "^2.9.1",
     "@kuraa/sync-git": "workspace:*",
     "@types/ws": "^8.18.2",
     "prosemirror-transform": "^1.12.5"

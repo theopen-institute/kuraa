@@ -29,6 +29,7 @@ import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
 import { bookItems, joinBook, type BookPart } from './compile.js';
 import { readOrders } from './order.js';
+import { withHeaderFields } from './header.js';
 import { WordLog, type DayWords, type Uncommitted } from './wordlog.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
@@ -2675,6 +2676,29 @@ export class Host {
    * Give a document a new title, on disk and in its open room, if it has one;
    * people editing it see the change, as anyone's edit. Call inside serial().
    */
+  /**
+   * Set fields of a Markdown document's header (0095: a corkboard's synopsis,
+   * an outline's status), open or not: written to the file, and where it is
+   * open, the room takes it (everyone sees it at once). Not committed here.
+   */
+  async setHeader(path: string, fields: Record<string, unknown>): Promise<boolean> {
+    if (!/\.(md|markdown|qmd|rmd)$/i.test(path) || !this.typeFor(path)) throw new HttpError(400, `${path} is not a document with a header`);
+    const rec = this.records.get(`${await this.git.branch()}:${path}`);
+    if (rec) await this.flushNow(rec);
+    const abs = this.resolvePath(path);
+    const text = await this.readText(abs, path);
+    let next: string;
+    try {
+      next = withHeaderFields(text, fields);
+    } catch (e) {
+      throw new HttpError(409, (e as Error).message);
+    }
+    if (next === text) return false;
+    await this.writeAtomic(abs, next);
+    if (rec) await this.applyOutside(rec, next, true);
+    return true;
+  }
+
   async setTitle(path: string, title: string): Promise<void> {
     const type = this.typeFor(path);
     if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);

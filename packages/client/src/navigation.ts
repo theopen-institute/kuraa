@@ -4,7 +4,7 @@
 // connection, the core's menus and the views; a view shows the files; what is
 // done to files is the core's (FileActions.vue). With no layout that gives
 // navigation, the core's own menu at the upper left (FallbackMenu.vue).
-import type { ConnectionInfo, FeatureClientContext, FeatureMenuItem, FileMark, LayoutContext, NavigationContext, NavigationFile } from '@kuraa/feature-kit/client';
+import type { ConnectionInfo, FeatureClientContext, FeatureMenuItem, FileMark, FolderViewContext, LayoutContext, NavigationContext, NavigationFile } from '@kuraa/feature-kit/client';
 import type { FileIcon } from '@kuraa/kernel';
 import type { HostApi } from './api.js';
 import type { EditorStatus, WorkspaceLink } from './types.js';
@@ -36,6 +36,7 @@ export interface NavigationApp {
   place(path: string, folder: string, names: string[]): Promise<boolean>;
   sortByName(folder: string): void;
   marks(path: string): FileMark[];
+  showFolder(folder: string, view?: string): void;
   fileMenu(path: string, at: { x: number; y: number }): void;
   icon(file: NavigationFile): FileIcon | undefined;
 }
@@ -106,8 +107,19 @@ export function navigationContext(base: FeatureClientContext, app: NavigationApp
     place: (path, folder, names) => app.place(path, folder, names),
     sortByName: (folder) => app.sortByName(folder),
     marks: (path) => app.marks(path),
+    showFolder: (folder, view) => app.showFolder(folder, view),
     fileMenu: (path, at) => app.fileMenu(path, at),
     icon: (file) => app.icon(file),
+  };
+}
+
+/** What a folder view is given (0095): navigation's, the folder it shows, and the views it may switch to. */
+export function folderViewContext(base: FeatureClientContext, app: NavigationApp, events: NavigationEvents, shown: { folder: string; key: string; views: () => { key: string; label: string }[] }): FolderViewContext {
+  return {
+    ...navigationContext(base, app, events),
+    folder: () => shown.folder,
+    viewKey: () => shown.key,
+    folderViews: () => shown.views(),
   };
 }
 

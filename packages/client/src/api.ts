@@ -268,6 +268,8 @@ export class HostApi {
   }
   tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[]; orders?: Record<string, string[]> }>('/api/tree'); }
   /** A folder's order (0093): its files' and folders' names as arranged ('' the top level; none: by name). */
+  /** A document's header fields set, open or not (0095). */
+  setHeader(path: string, fields: Record<string, unknown>, by: { name: string; email: string; color: string }) { return this.json<{ path: string; commit: string | null }>('/api/documents/header', { method: 'POST', body: JSON.stringify({ path, fields, by }) }); }
   setOrder(folder: string, names: string[]) { return this.json<{ folder: string; names: string[] }>('/api/order', { method: 'POST', body: JSON.stringify({ folder, names }) }); }
   /** A file's or folder's permissions (0069). */
   permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }

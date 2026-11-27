@@ -18,6 +18,7 @@
     "@kuraa/search": "workspace:*",
     "@kuraa/sidebar": "workspace:*",
     "@kuraa/words": "workspace:*",
-    "@kuraa/details": "workspace:*"
+    "@kuraa/details": "workspace:*",
+    "@kuraa/corkboard": "workspace:*"
   }
 }

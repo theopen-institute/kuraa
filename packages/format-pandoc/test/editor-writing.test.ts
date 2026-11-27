@@ -7,7 +7,7 @@ import type { EditorContext } from '@kuraa/editor-kit';
 import { pandocMarkdown as md } from '../src/index.js';
 import {
   addColumn, addRow, Bibliography, cellAt, citationLabel, conflictPositions, deleteColumn, deleteRow, goToCell,
-  headerCells, insertTable, nextConflict, versionDateLabel, workspacePath,
+  headerCells, insertTable, nextConflict, versionDateLabel, wordAt, workspacePath,
 } from '../src/editor/index.js';
 
 function stateAt(src: string, text: string, offset = 0): EditorState {
@@ -73,6 +73,31 @@ describe('tables', () => {
     expect(headerCells('| a \\| b | c |')).toEqual(['a | b', 'c']);
     expect(headerCells('| |')).toBe(null);
     expect(headerCells('a | b')).toBe(null);
+  });
+});
+
+describe('the word right-clicked in a table (for its spelling suggestions)', () => {
+  const at = (src: string, text: string, offset: number) => {
+    const s = stateAt(src, text, offset);
+    return wordAt(s.doc, s.selection.from);
+  };
+  const src = '| Site | Notes |\n|---|---|\n| Kew | the bee’s **nset**-like hive |\n';
+
+  it('is the whole word, from inside it or at either edge', () => {
+    expect(at(src, 'bee’s', 2)?.word).toBe('bee’s');
+    expect(at(src, 'bee’s', 0)?.word).toBe('bee’s');
+    expect(at(src, 'bee’s', 5)?.word).toBe('bee’s');
+  });
+
+  it('is the text of one node: a word in bold stops where the bold does', () => {
+    const w = at(src, 'nset', 1)!;
+    expect(w.word).toBe('nset');
+    expect(stateAt(src, 'nset').doc.textBetween(w.from, w.to)).toBe('nset');
+  });
+
+  it('is none between words, or without letters', () => {
+    expect(at('| a | b |\n|---|---|\n| 12 34 | x |\n', '12', 1)).toBeNull();
+    expect(at(src, ' hive', 0)?.word).toBe('like');
   });
 });
 

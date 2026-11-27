@@ -186,9 +186,18 @@ function rename(path: string) {
 }
 
 async function remove(path: string) {
+  if (path.endsWith('/')) return removeFolder(path.replace(/\/+$/, ''));
   const name = props.files.find((f) => f.path === path)?.title || path.slice(path.lastIndexOf('/') + 1);
   if (await askConfirm(S.tree.deleteAsk(name), S.common.delete, true)) {
     await act(() => props.api.deleteFile(path), props.selected === path ? null : props.selected);
+  }
+}
+
+/** Delete a folder and what is in it (others' own files in it stay, theirs: the host's). The open file goes if it was in it. */
+async function removeFolder(folder: string) {
+  const inside = props.files.filter((f) => f.path.startsWith(`${folder}/`)).length;
+  if (await askConfirm(S.tree.deleteFolderAsk(nameOf(folder), inside), S.common.delete, true)) {
+    await act(() => props.api.deleteFile(folder), props.selected?.startsWith(`${folder}/`) ? null : props.selected);
   }
 }
 
@@ -269,6 +278,7 @@ function menuItems(path: string, plus = false): ContextItem[] {
     ...(kind === 'folder' ? [
       ...(props.shared ? [{ label: S.permissions.menu, run: () => emit('permissions', `${folder}/`), testid: 'context:folder-permissions' }] : []),
       { label: S.common.renameEllipsis, run: () => void renameFolder(folder), testid: 'context:rename-folder' },
+      { label: S.common.deleteEllipsis, run: () => void removeFolder(folder), danger: true, testid: 'context:delete-folder' },
       // What features add to a folder's menu (its path ending in /: 0088's Make a manuscript).
       ...(props.featureItems?.(`${folder}/`) ?? []).map((item, i) => ({ ...item, divided: i === 0 })),
     ] : []),

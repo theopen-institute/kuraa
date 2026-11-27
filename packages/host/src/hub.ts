@@ -11,7 +11,8 @@
 // workspace joined from an invitation or subscription link.
 //
 // New workspaces go in one folder: --workspaces, else the owner's setting (by
-// default Documents/kuraa). People may invite others to its workspaces from the
+// default Kuraa Workspaces, in the home folder: never one a cloud storage
+// service keeps, 0103). People may invite others to its workspaces from the
 // app (invitations and subscription links), which turns syncing on for that
 // workspace. A workspace syncs once it is shared (joined, invited from, forked:
 // its repository has a workspace id and secret, peers/identity.ts), and always
@@ -22,9 +23,14 @@
 // applies by reopening every workspace, open any folder on the computer as a
 // workspace, browse its folders to choose one, manage their identity and the
 // online copy. On a hub open to the network those are off, and the app says why.
+//
+// The hub answers as soon as it listens, and its workspaces open meanwhile, each
+// on its own (0103): one slow to open (its folder kept by a cloud service, say)
+// holds up only itself. The list says which are still opening, and a request to
+// one waits for it.
 import { randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
@@ -48,6 +54,10 @@ import { startHost, joinWorkspace, type RunningHost } from './index.js';
 import { loadRunComponents } from './components.js';
 import type { RunOptions } from './runner.js';
 import { fromSettings, type SettingsStore, type SettingsView } from './settings.js';
+import { cloudService } from './cloud.js';
+
+/** Where new workspaces go unless the settings or --workspaces say: in the home folder, which no cloud service keeps (0103). */
+export const defaultWorkspacesFolder = (): string => join(homedir(), 'Kuraa Workspaces');
 
 export interface HubOptions {
   /**
@@ -55,7 +65,7 @@ export interface HubOptions {
    * `folder`. Without either, the settings' folder for new workspaces, else `defaultRoot`.
    */
   root?: string;
-  /** Where new workspaces go when neither `root` nor the settings say (Documents/kuraa). */
+  /** Where new workspaces go when neither `root` nor the settings say (defaultWorkspacesFolder). */
   defaultRoot?: string;
   /**
    * A hub of this one folder (--dir): the only workspace, nothing added or
@@ -139,6 +149,10 @@ export interface HubWorkspace {
   peers: boolean;
   /** Why it is not open, if it is not. */
   error?: string;
+  /** It is still opening (the hub answers meanwhile, 0103): what is asked of it waits. */
+  opening?: boolean;
+  /** The cloud storage service keeping its folder ("iCloud Drive"), if one does (0103). */
+  cloud?: string;
 }
 
 /** What GET /hub/api/workspaces answers. */
@@ -154,6 +168,8 @@ export interface HubList {
   canChangeSettings: boolean;
   /** Why the owner's features (Preferences, opening folders, your identity) are off here, if they are. */
   ownerOff?: string;
+  /** Where new workspaces go, and one moved out of a cloud service's folder (0103): for the owner, where workspaces may be added. */
+  folder?: string;
 }
 
 /** What GET /hub/api/folders answers: the folders in one, to choose one from. */
@@ -181,6 +197,10 @@ export class Hub {
   private entries: Entry[] = [];
   private readonly hosts = new Map<string, RunningHost>();
   private readonly errors = new Map<string, string>();
+  /** Workspaces opening, by id: what is asked of one waits for it (0103). */
+  private readonly opening = new Map<string, Promise<void>>();
+  /** The cloud storage service keeping each workspace's folder, by id, where one does (0103). */
+  private readonly clouds = new Map<string, string>();
   private server: Server | null = null;
   readonly token: string;
   private rootDir: string;
@@ -211,7 +231,7 @@ export class Hub {
 
   private rootFor(): string {
     const o = this.o;
-    return resolve(o.folder?.dir ?? o.root ?? o.settings?.current.workspaces ?? o.defaultRoot ?? join(homedir(), 'Documents', 'kuraa'));
+    return resolve(o.folder?.dir ?? o.root ?? o.settings?.current.workspaces ?? o.defaultRoot ?? defaultWorkspacesFolder());
   }
 
   /**
@@ -255,8 +275,11 @@ export class Hub {
     } else {
       await mkdir(this.root, { recursive: true });
       this.entries = await this.readRegistry();
-      // Each workspace opens on its own (a host, git, perhaps the peer network): all at once.
-      await Promise.all(this.entries.map((e) => this.open(e)));
+      // Each workspace opens on its own (a host, git, perhaps the peer network): all at once, and the hub
+      // answers meanwhile (0103), so one slow to open keeps no one from the others. A server, which no one
+      // waits on, has them all open first: what it lists is then how each stands.
+      const opened = this.entries.map((e) => this.open(e));
+      if (this.o.server) await Promise.all(opened);
     }
     this.server = createServer((req, res) => void this.handle(req, res));
     this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket as import('node:net').Socket, head));
@@ -292,6 +315,11 @@ export class Hub {
       this.log(`the list of workspaces could not be read (${(e as Error).message}): kept as ${aside}, starting with none`);
       return [];
     }
+  }
+
+  /** Once every workspace that was opening has opened (or could not). */
+  async opened(): Promise<void> {
+    while (this.opening.size) await Promise.all(this.opening.values());
   }
 
   /** Write and commit every workspace's open edits now (each on its own: one failing stops none of the others). */
@@ -363,7 +391,19 @@ export class Hub {
    * Start a workspace's host. A workspace that cannot open is listed with why.
    * `joined`: the node that just joined it, still connected, for its host to go on with.
    */
-  private async open(e: Entry, init = false, joined?: PeerNode): Promise<void> {
+  private open(e: Entry, init = false, joined?: PeerNode): Promise<void> {
+    const opening: Promise<void> = Promise.all([
+      this.openNow(e, init, joined),
+      // Whether a cloud service keeps its folder: known by the time it has opened.
+      cloudService(e.dir).then((s) => void (s ? this.clouds.set(e.id, s) : this.clouds.delete(e.id))),
+    ]).then(() => undefined).finally(() => {
+      if (this.opening.get(e.id) === opening) this.opening.delete(e.id);
+    });
+    this.opening.set(e.id, opening);
+    return opening;
+  }
+
+  private async openNow(e: Entry, init: boolean, joined?: PeerNode): Promise<void> {
     try {
       if (!init && !existsSync(e.dir)) throw new Error(`Its folder is gone: ${e.dir}`);
       const peerOptions = this.peerOptions();
@@ -403,11 +443,17 @@ export class Hub {
       canOpenFolder: this.owner && this.canAdd,
       canChangeSettings: this.owner && !!this.o.settings,
       ...(this.owner ? {} : { ownerOff: OWNER_OFF }),
+      ...(this.owner && this.canAdd ? { folder: this.root } : {}),
     };
   }
 
   list(): HubWorkspace[] {
-    return this.entries.map((e) => ({ id: e.id, name: e.name, path: e.dir, peers: !!this.hosts.get(e.id)?.host.peers, ...(this.errors.has(e.id) ? { error: this.errors.get(e.id) } : {}) }));
+    return this.entries.map((e) => ({
+      id: e.id, name: e.name, path: e.dir, peers: !!this.hosts.get(e.id)?.host.peers,
+      ...(this.errors.has(e.id) ? { error: this.errors.get(e.id) } : {}),
+      ...(this.opening.has(e.id) ? { opening: true } : {}),
+      ...(this.clouds.has(e.id) ? { cloud: this.clouds.get(e.id) } : {}),
+    }));
   }
 
   private freeId(name: string): string {
@@ -592,7 +638,7 @@ export class Hub {
         memory: DEFAULT_POLICY.memory, cpus: DEFAULT_POLICY.cpus, disk: DEFAULT_POLICY.disk,
         saveSeconds: DEFAULT_TIMINGS.flushMs / 1000, versionSeconds: DEFAULT_TIMINGS.idleCommitMs / 1000,
       },
-      defaultWorkspaces: resolve(this.o.defaultRoot ?? join(homedir(), 'Documents', 'kuraa')),
+      defaultWorkspaces: resolve(this.o.defaultRoot ?? defaultWorkspacesFolder()),
       defaultDataDir: store.defaultDataDir,
       environments,
       formats: (this.o.hosts?.types ?? standardTypes).map((t) => ({ id: t.id, label: t.label })),
@@ -618,6 +664,7 @@ export class Hub {
 
   /** Close every workspace (each writes and commits first) and open them again with the options as they now are. */
   private async reconfigure(): Promise<void> {
+    await this.opened();
     const running = [...this.hosts.entries()];
     this.hosts.clear();
     await Promise.all(running.map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
@@ -639,12 +686,52 @@ export class Hub {
       this.mayAdd();
       const e = this.entries.find((x) => x.id === id);
       if (!e) throw new HttpError(404, `No workspace ${id}`);
+      await this.opening.get(id);
       await this.hosts.get(id)?.close();
       this.hosts.delete(id);
       this.errors.delete(id);
       this.entries = this.entries.filter((x) => x !== e);
       await this.save();
       this.log(`removed workspace ${e.name} from the list (its folder stays: ${e.dir})`);
+    });
+  }
+
+  /**
+   * Move a workspace's folder out of one a cloud storage service keeps (0103),
+   * into the folder new workspaces go in (refused if a service keeps that one
+   * too). Its host is closed first, writing and committing its edits, and opened
+   * again where it now is. Its devices find it as before: what it is, and who,
+   * is in its repository, which moves with it.
+   */
+  move(id: string): Promise<HubWorkspace> {
+    return this.serial(async () => {
+      this.mayOwn();
+      this.mayAdd();
+      const e = this.entries.find((x) => x.id === id);
+      if (!e) throw new HttpError(404, `No workspace ${id}`);
+      await this.opening.get(id);
+      const from = e.dir;
+      const service = await cloudService(from);
+      if (!service) throw new HttpError(400, `${e.name} is not in a folder a cloud storage service keeps: it stays where it is`);
+      const into = this.root;
+      const intoService = await cloudService(into);
+      if (intoService) throw new HttpError(409, `New workspaces go in ${into}, which ${intoService} keeps too. Choose another folder for them in Settings, then move ${e.name}.`);
+      await mkdir(into, { recursive: true });
+      const to = freeFolder(into, basename(from));
+      const h = this.hosts.get(id);
+      this.hosts.delete(id);
+      await h?.close();
+      try {
+        await moveFolder(from, to);
+      } catch (err) {
+        await this.open(e); // where it was, as it was
+        throw new HttpError(500, `Could not move ${e.name} to ${to}: ${(err as Error).message}`);
+      }
+      e.dir = to;
+      await this.save();
+      this.log(`moved workspace ${e.name} out of ${service}: from ${from} to ${to}`);
+      await this.open(e);
+      return this.list().find((w) => w.id === id)!;
     });
   }
 
@@ -751,6 +838,8 @@ export class Hub {
       const status = JOIN_ID.test(joining[1]!) ? this.joinStatus(joining[1]!) : null;
       return status ? send(res, 200, status) : send(res, 404, { error: 'No join under way by that id' });
     }
+    const moving = /^\/hub\/api\/workspaces\/([a-z0-9-]+)\/move$/.exec(url.pathname);
+    if (moving && req.method === 'POST') return send(res, 200, { workspace: await this.move(moving[1]!) });
     const one = /^\/hub\/api\/workspaces\/([a-z0-9-]+)$/.exec(url.pathname);
     if (one && req.method === 'DELETE') {
       await this.remove(one[1]!);
@@ -762,6 +851,9 @@ export class Hub {
   /** Pass a request to a workspace's host, as if it had come to it. */
   private proxy(req: IncomingMessage, res: ServerResponse, id: string, path: string): void {
     const h = this.hosts.get(id);
+    // Still opening (0103): passed on once the workspace has opened, or told why it could not.
+    const opening = this.opening.get(id);
+    if (!h && opening) return void opening.then(() => this.proxy(req, res, id, path));
     if (!h) return send(res, this.entries.some((e) => e.id === id) ? 503 : 404, { error: this.errors.get(id) ?? `No workspace ${id}` });
     const target = new URL(h.url);
     const out = request({ host: target.hostname, port: target.port, method: req.method, path, headers: req.headers }, (answer) => {
@@ -780,6 +872,9 @@ export class Hub {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const w = /^\/w\/([a-z0-9-]+)(\/.*)$/.exec(url.pathname);
     const h = w && this.hosts.get(w[1]!);
+    // Still opening (0103): let in once it has opened.
+    const opening = w && !h && !this.o.server ? this.opening.get(w[1]!) : undefined;
+    if (opening) return void opening.then(() => (socket.destroyed ? undefined : this.upgrade(req, socket, head)));
     // A server is headless (0099): no rooms for anyone.
     if (this.o.server || !h || !upgradeAllowed(req, this.gate)) return void socket.destroy();
     const target = new URL(h.url);
@@ -811,6 +906,8 @@ export class Hub {
     for (const s of this.tunnels) s.destroy();
     this.tunnels.clear();
     await closed;
+    // A workspace still opening is let finish, and closed with the others.
+    await this.opened();
     await Promise.all([...this.hosts.entries()].map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
     this.hosts.clear();
   }
@@ -829,6 +926,32 @@ export { isLoopback };
 export async function startHub(options: HubOptions): Promise<RunningHub> {
   const hub = new Hub(options);
   return { hub, url: localUrl(await hub.start()), token: hub.token, close: () => hub.close() };
+}
+
+/** A folder in `parent` called `name`, or `name 2`, `name 3`… if there is one already. */
+function freeFolder(parent: string, name: string): string {
+  let to = join(parent, name);
+  for (let i = 2; existsSync(to); i++) to = join(parent, `${name} ${i}`);
+  return to;
+}
+
+/**
+ * Move a folder: renamed, if it stays on the same disk; else copied, and the
+ * original removed only once the copy is whole (a copy that fails is removed instead).
+ */
+async function moveFolder(from: string, to: string): Promise<void> {
+  try {
+    return await rename(from, to);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e;
+  }
+  try {
+    await cp(from, to, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true, verbatimSymlinks: true });
+  } catch (e) {
+    await rm(to, { recursive: true, force: true }).catch(() => undefined);
+    throw e;
+  }
+  await rm(from, { recursive: true, force: true, maxRetries: 5 });
 }
 
 /** Whether two paths are the same folder (links followed; on Windows, case aside). */

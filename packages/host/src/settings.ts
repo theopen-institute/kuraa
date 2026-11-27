@@ -50,7 +50,7 @@ export interface Settings {
   saveSeconds: number | null;
   /** Seconds of quiet before a version is saved (--commit-ms); null for the default. */
   versionSeconds: number | null;
-  /** Where new workspaces go (--workspaces); null for Documents/kuraa. */
+  /** Where new workspaces go (--workspaces); null for Kuraa Workspaces, in the home folder (0103). */
   workspaces: string | null;
 }
 

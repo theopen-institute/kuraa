@@ -6,10 +6,11 @@
 // computer lacks (LaTeX, for a PDF) offers to download it, and renders again
 // once it is there (decision 0045). A component (0089): the rendering is the
 // host's, asked through the core.
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { FeaturePanelContext, RenderFormat, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
 import { megabytes, outputName, previewDocument, saveFile, time } from './preview.js';
 import { KEYS, S } from './strings.js';
+import { exportAsked } from './exporting.js';
 
 const props = defineProps<{ ctx: FeaturePanelContext }>();
 const ctx = props.ctx;
@@ -54,6 +55,7 @@ onBeforeUnmount(() => {
   stopDocument();
   stopTools();
   stopAsk();
+  clearTimeout(exportTimer);
 });
 
 /** A tool being downloaded for a render: which, what it is doing, and the render to make once it is there. */
@@ -199,7 +201,20 @@ watch(path, () => {
   known = refresh(true);
 }, { immediate: true });
 // Asked for (opened by ⇧⌘R or the menu, or asked again while open): render now, once what is there is known.
-const stopAsk = ctx.onAsk(() => void known.then(() => render('html')));
+// Asked by Export… (0100): the formats to export as, shown and the first focused, nothing rendered for the page.
+const actions = useTemplateRef<HTMLElement>('actions');
+const exporting = ref(false);
+let exportTimer: ReturnType<typeof setTimeout> | undefined;
+const stopAsk = ctx.onAsk(() => {
+  if (!exportAsked()) return void known.then(() => render('html'));
+  void known.then(async () => {
+    exporting.value = true;
+    await nextTick();
+    actions.value?.querySelector<HTMLButtonElement>('[data-export]:not(:disabled)')?.focus();
+    clearTimeout(exportTimer);
+    exportTimer = setTimeout(() => (exporting.value = false), 2500);
+  });
+});
 watch(writtenAt, (at, before) => {
   if (onSave.value && at && at !== before && !busy.value) void render('html');
 });
@@ -224,7 +239,7 @@ const status = computed(() => {
         <pre>{{ explained.details }}</pre>
       </details>
     </div>
-    <div v-if="info && info.formats.length" class="render-actions">
+    <div v-if="info && info.formats.length" ref="actions" :class="['render-actions', { exporting }]">
       <button type="button" class="primary" :disabled="!!info.unavailable" :title="info.unavailable ?? S.renderTitle(ctx.keyLabel(KEYS.open))" data-testid="render-button" @click="render('html')">{{ S.render }}</button>
       <span class="muted">{{ S.saveAs }}</span>
       <button
@@ -234,6 +249,7 @@ const status = computed(() => {
         :disabled="!!info.unavailable"
         :title="info.unavailable ?? S.saveTitle(LABELS[f]!)"
         :data-testid="`save-${f}`"
+        data-export
         @click="render(f, true)"
       >{{ LABELS[f] }}…</button>
       <label class="render-on-save"><input v-model="onSave" type="checkbox" :disabled="!!info.unavailable" data-testid="render-on-save"> {{ S.onSave }}</label>
@@ -273,6 +289,8 @@ const status = computed(() => {
 .render-made-from button { font-size: inherit; }
 .render-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .render-actions .muted { margin-left: 6px; font-size: 12px; }
+.render-actions [data-export] { transition: box-shadow 0.3s; }
+.render-actions.exporting [data-export]:not(:disabled) { box-shadow: 0 0 0 2px var(--accent-soft, rgba(46, 107, 90, 0.25)); }
 .render-on-save { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-left: auto; }
 .render-status { padding: 7px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
 .render-status.failed { background: var(--warn-soft); color: var(--warn); }

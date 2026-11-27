@@ -12,7 +12,7 @@ import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { keymap } from 'prosemirror-keymap';
 import { baseKeymap } from 'prosemirror-commands';
-import type { FormatEditor } from '@kuraa/editor-kit';
+import type { FormatEditor, Spelling } from '@kuraa/editor-kit';
 import type { HostApi, RunInfo } from './api.js';
 import type { Settings } from './settings.js';
 import type { EditorStatus } from './types.js';
@@ -60,6 +60,8 @@ const props = defineProps<{
   featureCommands?: BoundCommand[];
   /** A feature's menu entries as items to draw (commands named by their label and keys). */
   featureItems?: (feature: string, entries: FeatureMenuEntry[]) => FeatureMenuItem[];
+  /** The shell's spell checker, for the format's own menus (a table's), where it has one. */
+  spelling?: Spelling;
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -361,7 +363,7 @@ function open(carried: Carried | null = null): () => void {
     const files = workspaceFiles(api, path, () => user.value);
     disposeFiles = () => files.dispose();
     const notify = (text: string, kind: 'info' | 'warn' = 'info') => report({ notice: { kind, text } });
-    const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify });
+    const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify, spelling: props.spelling });
     commands = formatEditor?.commands?.(ctx) ?? {};
     // Features (0082): each given the room's state for it, where the room was started with it (else nothing it does here would be kept).
     const stops: (() => void)[] = [];

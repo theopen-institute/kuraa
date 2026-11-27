@@ -110,6 +110,13 @@ export const S = {
     cannotOpenWorkspace: (name: string, why: string) => `${name} cannot be opened: ${why}`,
     removeBroken: (name: string, why: string) => `${quote(name)} cannot be opened: ${why}. Remove it from this list?`,
     removeWorkspace: (name: string, path: string) => `Remove ${quote(name)} from this list? Its folder stays as it is (${path}).`,
+    /** A workspace whose folder a cloud storage service keeps (0103). */
+    inCloud: (name: string, service: string) => `${quote(name)} is in a folder ${service} keeps in sync. Workspaces there can take minutes to open and to sync, and ${service} can damage their history. Move it out to keep it safe and quick.`,
+    moveOutOfCloud: 'Move it…',
+    moveAsk: (name: string, service: string, from: string, into: string) => `Move ${quote(name)} out of ${service}, into ${into}? It moves from ${from}, and its devices go on finding it. R packages its code uses are installed again the next time it runs.`,
+    move: 'Move',
+    moving: (name: string, service: string) => `Moving ${quote(name)}… This can take a few minutes while ${service} lets go of it.`,
+    moved: (name: string, path: string) => `Moved ${quote(name)} to ${path}.`,
     joined: (name: string) => `Joined ${quote(name)}.`,
     made: (name: string) => `Made ${quote(name)}.`,
     workspace: 'Workspace',
@@ -288,6 +295,8 @@ export const S = {
     renameFolderTo: 'Rename folder to',
     newFolder: 'New folder',
     deleteAsk: (name: string) => `Delete ${quote(name)}? It goes for everyone, and stays in the workspace’s history.`,
+    deleteFolderAsk: (name: string, files: number) =>
+      `Delete the folder ${quote(name)}${files ? ` and ${count(files, 'file', 'files')} in it` : ''}? It goes for everyone, and stays in the workspace’s history.`,
     conflicts: (n: number) => count(n, 'conflict', 'conflicts'),
     conflictsTitle: (n: number) => `${count(n, 'passage was', 'passages were')} changed both here and elsewhere: both versions are in the document, to choose between. Click to go to the first`,
     noType: (path: string) => `${path}: Kuraa does not open this kind of file. You can rename, move or delete it.`,
@@ -903,12 +912,18 @@ export const S = {
 
   workspaceSwitcher: {
     cannotOpen: ' (cannot open)',
+    /** Still opening (0103): it can be chosen, and opens when ready. */
+    opening: ' (opening…)',
+    /** Its folder is kept by a cloud storage service (0103). */
+    inCloud: (service: string) => ` (in ${service})`,
     add: 'Add a workspace…',
     settings: 'Workspace settings',
     allSettings: 'Settings…',
     syncNow: 'Sync now',
     syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
     syncing: 'Syncing…',
+    /** How syncing a workspace that is not open went, said with its name. */
+    syncedOther: (name: string, message: string) => `${quote(name)}: ${message}`,
   },
 
   errors: {

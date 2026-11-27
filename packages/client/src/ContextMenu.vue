@@ -27,6 +27,8 @@ export interface ContextIcon {
   busy?: boolean;
   /** A count beside it (saves waiting, say); none at 0. */
   count?: number;
+  /** Something is wrong (the last sync failed): drawn in the warning colour. */
+  warn?: boolean;
 }
 
 const props = defineProps<{ x: number; y: number; items: ContextItem[] }>();
@@ -122,7 +124,7 @@ onBeforeUnmount(() => {
           type="button"
           role="menuitem"
           tabindex="-1"
-          :class="['context-icon', { spinning: icon.busy }]"
+          :class="['context-icon', { spinning: icon.busy, warn: icon.warn }]"
           :title="icon.label"
           :aria-label="icon.label"
           :data-testid="icon.testid"

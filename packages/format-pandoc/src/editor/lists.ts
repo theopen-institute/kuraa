@@ -115,3 +115,38 @@ export const liftAtItemStart = (item: NodeType): Command => (state, dispatch) =>
   if ($at.parentOffset > 0 || $at.depth < 2 || $at.node(-1).type !== item || $at.index(-1) !== 0) return false;
   return liftListItem(item)(state, dispatch);
 };
+
+/**
+ * Backspace at the start of a paragraph just after a list: up to the end of the
+ * list's last line, the paragraph's text joined to it (an empty one gone), as a
+ * word processor does. ProseMirror's own Backspace would put the paragraph back
+ * in the list as an item, so the number Backspace took away (liftAtItemStart)
+ * came back, and the next took it away again.
+ */
+export const joinAfterList: Command = (state, dispatch) => {
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const $at = selection.$from;
+  const para = $at.parent;
+  if ($at.parentOffset > 0 || para.type.name !== 'paragraph' || $at.depth < 1) return false;
+  const index = $at.index(-1);
+  if (index === 0) return false;
+  const list = $at.node(-1).child(index - 1);
+  if (!isList(list)) return false;
+  // The list's last line: the last textblock in it, however deep.
+  let last: Node = list;
+  let end = $at.before() - 1; // just inside the list's end
+  while (!last.isTextblock) {
+    const child = last.lastChild;
+    if (!child) return false;
+    last = child;
+    end -= 1; // into the child, past its closing token
+  }
+  if (!last.type.validContent(last.content.append(para.content))) return false;
+  if (dispatch) {
+    const tr = state.tr.delete($at.before(), $at.after());
+    if (para.content.size) tr.insert(end, para.content);
+    dispatch(tr.setSelection(TextSelection.create(tr.doc, end)).scrollIntoView());
+  }
+  return true;
+};

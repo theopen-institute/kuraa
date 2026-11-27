@@ -73,10 +73,12 @@ function open(message: string, opts: AskOptions): Promise<string | null> {
     document.body.append(backdrop);
     release = trapFocus(form, { onEscape: () => close(null), initial: input ?? ok });
     if (input) {
-      // Select the file name without its extension, as file managers do.
+      // Select the file name without its extension, as file managers do; all of
+      // it if nothing follows its last slash (a link's `https://`, to paste over).
       const dot = input.value.lastIndexOf('.');
       const slash = input.value.lastIndexOf('/');
-      input.setSelectionRange(slash + 1, dot > slash + 1 ? dot : input.value.length);
+      if (slash + 1 === input.value.length) input.select();
+      else input.setSelectionRange(slash + 1, dot > slash + 1 ? dot : input.value.length);
     }
   });
 }

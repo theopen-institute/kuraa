@@ -85,7 +85,7 @@ const groups = computed<Item[][]>(() => {
   if (!layout.value && !props.showSource) {
     writing.push(
       { label: S.menu.find, keys: APP_KEYS.find, testid: 'menu-find', run: () => then(() => emit('find')) },
-      { label: S.menu.insertTable, testid: 'menu-insert-table', run: () => then(() => emit('insertTable')) },
+      { label: S.menu.insertTable, keys: 'Mod-Alt-t', testid: 'menu-insert-table', run: () => then(() => emit('insertTable')) },
     );
     if (props.conflicts) writing.push({ label: S.menu.nextConflict, keys: 'Mod-Alt-n', testid: 'menu-next-conflict', run: () => then(() => emit('nextConflict')) });
   }

@@ -21,6 +21,20 @@ export interface EditorUi {
   askConfirm(message: string, ok?: string, danger?: boolean): Promise<boolean>;
   /** Say something in passing (an image that could not be added), as the client shows its notices. */
   notify?(text: string, kind?: 'info' | 'warn'): void;
+  /**
+   * The spell checker, where the page can ask it (the desktop app's): for a
+   * menu of the format's own, which takes the place of the one with spelling
+   * suggestions (a table's). Absent in a browser, which does not say.
+   */
+  spelling?: Spelling;
+}
+
+/** A spell checker the page can ask. */
+export interface Spelling {
+  /** A misspelled word's suggestions (perhaps none); null if it is spelled right. */
+  suggest(word: string): string[] | null;
+  /** Take a word as spelled right from now on (the computer's dictionary). */
+  learn(word: string): void;
 }
 
 export interface EditorContext {

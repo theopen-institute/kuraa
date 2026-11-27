@@ -14,6 +14,7 @@ import { mathFromMarkdown } from 'mdast-util-math';
 import { frontmatter } from 'micromark-extension-frontmatter';
 import { frontmatterFromMarkdown } from 'mdast-util-frontmatter';
 import { CITATION_KEY } from './citations.js';
+import { readGrid } from './grid.js';
 
 /** A loose view of an mdast node with absolute source offsets. */
 export interface MdNode {
@@ -79,6 +80,14 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 /** Grid tables and simple/multiline tables, which remark reads as paragraphs. */
 const TABLE_LIKE = /^\+[-=:]+\+|(^|\n)[ \t]*-{3,}[ \t]+-{3,}/;
+/** The first line of a grid table. */
+const GRID_START = /^\+[-=:]+\+/;
+/**
+ * What a grid table's cell, read alone, could not read as it is read in the
+ * document: a footnote's reference, a link to a reference given elsewhere
+ * (`[text][ref]`, `[ref]`). Such a table stays raw.
+ */
+const NEEDS_DOCUMENT = /\[\^|\]\[|\[(?![@-])[^\]]*\](?![(\{])/;
 
 const DEF_MARKER = /^ {0,2}[:~](?:[ \t]+|$)/;
 
@@ -167,7 +176,14 @@ function scanRegions(text: string, from: number, to: number): Region[] {
   const lines = splitLines(text, from, to);
   let mdStart = from;
   let codeFence: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
+  // The file's YAML header (`---` … `---` or `...`), left to the markdown: its
+  // opening `---` is not a multiline table's first rule.
+  let first = 0;
+  if (from === 0 && /^---[ \t]*$/.test(lines[0]?.text ?? '')) {
+    const close = lines.findIndex((l, k) => k > 0 && /^(---|\.\.\.)[ \t]*$/.test(l.text));
+    if (close > 0) first = close + 1;
+  }
+  for (let i = first; i < lines.length; i++) {
     const line = lines[i]!;
     const fence = FENCE.exec(line.text);
     if (codeFence) {
@@ -293,6 +309,8 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
       case 'paragraph': {
         const src = slice(node);
         // Tier 3: line blocks, grid and simple tables, LaTeX environments.
+        // A grid table the editor can hold is a table (0102); any other, raw.
+        if (GRID_START.test(src)) return gridTable(dedented(node)) ?? raw(node);
         if (/^\|( |$)/.test(src) || TABLE_LIKE.test(src) || /^\\begin\{/.test(src)) return raw(node);
         return definitionList(node) ?? n.paragraph!.create(null, convertInlines(node, []));
       }
@@ -366,13 +384,43 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
     return n.table!.create({ align }, rows);
   }
 
+  /** A grid table as a table, where each cell is a paragraph at most (its lines kept); null for one to keep raw. */
+  function gridTable(src: string): PMNode | null {
+    const grid = readGrid(src);
+    if (!grid) return null;
+    const rows: PMNode[] = [];
+    for (const [ri, cells] of grid.rows.entries()) {
+      const made: PMNode[] = [];
+      for (const cell of cells) {
+        const content = cellContent(cell);
+        if (!content) return null;
+        made.push(n.table_cell!.create({ header: ri === 0 }, content));
+      }
+      rows.push(n.table_row!.create(null, made));
+    }
+    return n.table!.create({ align: grid.align, widths: grid.widths.join(' ') }, rows);
+  }
+
+  /** A grid table's cell, read as a document of its own: its paragraph's content; null if it is more than a paragraph. */
+  function cellContent(text: string): PMNode[] | null {
+    if (!text.trim()) return [];
+    if (NEEDS_DOCUMENT.test(text)) return null;
+    const doc = parseUnsafe(schema, hooks, text).doc;
+    const para = doc.firstChild;
+    if (doc.childCount !== 1 || !para || para.type !== n.paragraph) return null;
+    const out: PMNode[] = [];
+    para.forEach((c) => out.push(c));
+    return out;
+  }
+
   function headingAttrs(node: MdNode): { children: MdNode[]; attrs: string } {
     const children = [...(node.children ?? [])];
     const last = children[children.length - 1];
     if (last?.type === 'text' && typeof last.value === 'string' && slice(last) === last.value) {
       const m = /[ \t]+(\{[^{}\n]*\})[ \t]*$/.exec(last.value);
       if (m?.[1]) {
-        const value = last.value.slice(0, m.index);
+        // A closing sequence before the attributes (`## Title ## {#id}`) is not text, as in Pandoc.
+        const value = last.value.slice(0, m.index).replace(/(^|[ \t]+)#+$/, '');
         children[children.length - 1] = withRange(last, value, start(last), start(last) + value.length);
         if (!value) children.pop();
         return { children, attrs: m[1] };
@@ -751,8 +799,8 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
           const c = kids[k]!;
           const next = kids[k + 1];
           const prev = kids[k - 1];
-          // Pandoc table captions: a `Table: ...` or `: ...` paragraph next to a table.
-          if (c.type === 'table') {
+          // Pandoc table captions: a `Table: ...` or `: ...` paragraph next to a table (a pipe table, or a grid table the editor holds).
+          if (c.type === 'table' || (c.type === 'paragraph' && GRID_START.test(slice(c)))) {
             const node = safeBlock(c);
             if (node && node.type === n.table && next?.type === 'paragraph' && CAPTION.test(slice(next))) {
               out.push({ node: n.table!.create({ ...node.attrs, caption: slice(next).trim() }, node.content), start: start(c) });
@@ -767,8 +815,10 @@ function parseUnsafe(schema: Schema, hooks: ParseHooks[], source: string): Parse
             k++;
             continue;
           }
-          if (c.type === 'paragraph' && next?.type === 'table' && prev?.type !== 'table' && CAPTION.test(slice(c))) {
-            const node = safeBlock(next);
+          const tableAfter = next?.type === 'table' || (next?.type === 'paragraph' && GRID_START.test(slice(next)));
+          const tableBefore = prev?.type === 'table' || (prev?.type === 'paragraph' && GRID_START.test(slice(prev)));
+          if (c.type === 'paragraph' && tableAfter && !tableBefore && CAPTION.test(slice(c))) {
+            const node = safeBlock(next!);
             if (node && node.type === n.table) {
               out.push({ node: n.table!.create({ ...node.attrs, caption: slice(c).trim(), captionBefore: true }, node.content), start: start(c) });
               k++;

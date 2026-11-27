@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
   <div class="compile-panel" data-testid="compile-panel">
     <p v-if="folder === null" class="compile-about">{{ S.none }}</p>
     <template v-else>
-      <h3 class="compile-folder" data-testid="compile-folder">{{ S.folderTitle(shownName) }}</h3>
+      <h3 class="compile-folder" data-testid="compile-folder">{{ S.compileVerb }} <strong v-if="folder" class="compile-folder-name">“{{ shownName }}”</strong><template v-else>{{ shownName }}</template></h3>
       <label class="compile-field">
         <span>{{ S.bookTitle }}</span>
         <input v-model="title" type="text" data-testid="compile-title" :disabled="busy" />
@@ -270,7 +270,8 @@ onBeforeUnmount(() => {
 
 <style>
 .compile-panel { display: grid; gap: 10px; padding: 10px 12px; align-content: start; }
-.compile-folder { margin: 0; font-size: 14px; }
+.compile-folder { margin: 0; font-size: 14px; font-weight: 500; }
+.compile-folder-name { font-weight: 700; }
 .compile-field { display: grid; gap: 3px; }
 .compile-field > span, .compile-formats legend { color: var(--muted); font-size: 12px; }
 .compile-formats { border: 0; margin: 0; padding: 0; display: flex; gap: 12px; flex-wrap: wrap; }

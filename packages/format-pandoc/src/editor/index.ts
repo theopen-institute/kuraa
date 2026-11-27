@@ -19,16 +19,16 @@ import { conflictViews, nextConflict } from './conflicts.js';
 import { citationPlugins, citationRules, citationViews } from './citations.js';
 import { imagePlugins, imageRules, imageViews } from './images.js';
 import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
-import { liftAtItemStart, listRules, switchList } from './lists.js';
+import { joinAfterList, liftAtItemStart, listRules, switchList } from './lists.js';
 import { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
 export { conflictPositions, nextConflict, versionDateLabel, versionLabel } from './conflicts.js';
 export { Bibliography, citationLabel, describeEntry } from './citations.js';
-export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable } from './tables.js';
+export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable, wordAt } from './tables.js';
 export { workspacePath } from './paths.js';
-export { liftAtItemStart, listRules, switchList } from './lists.js';
+export { joinAfterList, liftAtItemStart, listRules, switchList } from './lists.js';
 export { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
 export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
 
@@ -85,6 +85,18 @@ export function linkAt(state: EditorState, type: MarkType): { from: number; to: 
 }
 
 /**
+ * A link's address as typed or pasted, tidied: spaces and `<…>` around it
+ * taken away, and an address pasted after the `https://` the dialog offers
+ * (`https://https://…`) given one scheme. Nothing but a scheme is no address.
+ */
+export function tidyHref(typed: string): string {
+  let href = typed.trim().replace(/^<(.*)>$/s, '$1').trim();
+  const doubled = /^[a-z][a-z0-9+.-]*:\/\/(?=[a-z][a-z0-9+.-]*:)/i;
+  while (doubled.test(href)) href = href.replace(doubled, '');
+  return /^[a-z][a-z0-9+.-]*:(\/\/)?$/i.test(href) ? '' : href;
+}
+
+/**
  * ⌘K (and ⌘⇧K): link the selected text, asking for the address; in a link,
  * change its address, or take the link away (the address emptied).
  */
@@ -95,7 +107,7 @@ const editLink = (schema: Schema, ctx: EditorContext): Command => (state, dispat
   if (dispatch) {
     void ctx.ui.askText('Link address', at?.href || 'https://', at ? 'Change link' : 'Add link').then((answer) => {
       if (answer === null || view.isDestroyed) return;
-      const href = answer.trim();
+      const href = tidyHref(answer);
       // Where it is now: remote edits made while the dialog was open have moved it.
       const now = linkAt(view.state, link);
       const { from, to, empty } = view.state.selection;
@@ -234,6 +246,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
     'Mod-Shift-.': wrapIn(n.blockquote!),
     'Mod-[': lift,
     'Mod-Alt-c': setBlockType(n.code_block!),
+    'Mod-Alt-t': insertTable,
     ...notes.keys,
     Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitTask(splitListItem(n.list_item!))),
     'Shift-Enter': chainCommands(
@@ -244,7 +257,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
         return true;
       },
     ),
-    Backspace: chainCommands(undoInputRule, untask(n.list_item!), liftAtItemStart(n.list_item!)),
+    Backspace: chainCommands(undoInputRule, untask(n.list_item!), liftAtItemStart(n.list_item!), joinAfterList),
     ...tableKeys(),
     Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
     'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
@@ -286,11 +299,11 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: INSERT, does: 'Image', type: '![caption](file.png)', note: 'or paste or drop one' },
   { group: INSERT, does: 'Math', type: '$x^2$' },
   { group: INSERT, does: 'Display math', type: '$$', enter: true },
-  { group: INSERT, does: 'Table', type: '| a | b |', enter: true },
+  { group: INSERT, does: 'Table', type: '| a | b |', enter: true, keys: ['Mod-Alt-t'] },
 
   { group: EDITING, does: 'List item in, out', keys: ['Tab', 'Shift-Tab'] },
   { group: EDITING, does: 'Out of a list or quote', keys: ['Mod-['] },
-  { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph' },
+  { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph; in a table, a new line in the cell' },
   { group: EDITING, does: 'Leave a code block or table', keys: ['Mod-Enter'] },
   { group: EDITING, does: 'Next cell, previous cell', keys: ['Tab', 'Shift-Tab'], note: 'in a table' },
   { group: EDITING, does: 'Rows and columns', keys: ['Shift-F10'], note: 'in a table; or right-click' },
@@ -310,7 +323,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         ...citationPlugins(ctx),
         inputRules({ rules: [...(ext.rules?.(schema) ?? []), ...notes.rules, ...imageRules(schema), ...citationRules(schema), ...markdownRules(schema, ext)] }),
         keymap(keys),
-        ...tablePlugins(),
+        ...tablePlugins(ctx),
         ...imagePlugins(ctx),
         ...notes.plugins,
         ...header.plugins,

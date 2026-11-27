@@ -216,6 +216,18 @@ describe('a server in a workspace (0099)', () => {
     await expect(join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv')).rejects.toThrow('removed from the workspace for good');
   });
 
+  it('lets no one in: a person’s link, with only the server online, gets its holder nowhere (0099)', async () => {
+    const { a, s } = await withServer();
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.online), 15_000, 'the server online');
+    const link = await a.host.peers!.inviteLink({ hours: 24, once: true });
+    await stop(a);
+    const bo = await person('Bo');
+    const dir = join(tmp('bee'), 'notes');
+    await expect(joinWorkspace({ dir, invitation: link, name: 'bee', person: bo, signing: crypto.keyPair(), bootstrap: testnet.bootstrap as never, timeoutMs: 8000 })).rejects.toThrow(/Could not reach a device/);
+    // The server holds the workspace still, and is not the worse for it.
+    expect((await s.host.peers!.people()).servers.length).toBe(1);
+  });
+
   it('refuses a link for a server to anyone with an identity', async () => {
     const { a } = await withServer();
     const link = await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' });

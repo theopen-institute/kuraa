@@ -249,6 +249,9 @@ export function judge(r: MemberRecord, s: Standing): 'take' | 'wait' | 'refuse' 
   if (r.kind === 'revoke-key') return s.persons?.get(r.by) === r.person ? 'take' : 'wait';
   if (selfProven(r.kind)) return 'take';
   if (!s.members.has(r.by)) return 'wait';
+  // The workspace's secret, invite links and their revocation (0099): a person's device's to say, not a server's (a
+  // server lets no one in, and must not hand out, or change, where the others are found).
+  if ((r.kind === 'secret' || r.kind === 'link' || r.kind === 'revoke-link') && s.managers && !s.persons?.has(r.by)) return 'refuse';
   // A removal from before: an admin's, or the same person's as the device it removes; for an admin's, the owner's.
   if (forAdmins(r.kind) && s.managers) {
     const whose = s.persons?.get(r.by);

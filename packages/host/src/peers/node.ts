@@ -1113,8 +1113,18 @@ export class PeerNode {
   mayWrite(device: string, path: string): boolean {
     const a = this.access;
     if (a?.policy.isServer(a.personOf.get(device) ?? null)) return false;
+    // A device that is no one yet (0099: let in by a link, its join not come; a server's before its join counts):
+    // no edit of it is taken, nor does it lead a room, where there is a policy.
+    if (a?.policy.founded && device !== this.myKey && !a.personOf.get(device)) return false;
     if (!a || !a.policy.founded || !a.policy.rules.size) return true;
     return a.policy.mayWrite(a.personOf.get(device) ?? null, path);
+  }
+
+  /** Whether this device is a server's (0099): no person here, and its key one of the policy's servers. */
+  private async isServerHere(): Promise<boolean> {
+    if (await this.person()) return false;
+    const key = (await this.signingKeyNow()).publicKey.toString('hex');
+    return (await this.identity.policy()).isServer(key);
   }
 
   /** Whose a device is (its person's identity ID; a server's key, for a server's: 0099), as the records said when the members last changed; null if no one's known. */
@@ -1448,6 +1458,9 @@ export class PeerNode {
     if (!member && same && recently && recently.until > Date.now()) member = { key: link.key, name: recently.name };
     if (!member) {
       if (!same || typeof h.link !== 'string') return bye('not in this workspace');
+      // A server lets no one in (0099): it has no person to let them in as, and would hand out the secret and the
+      // files on no one's word. Closed without a word, so the device joining goes on to a person's.
+      if (await this.isServerHere()) return link.close();
       const code = h.link;
       // One device let in by a link at a time here (0071): two at once by a link for one person would both
       // pass the check before either used it up.
@@ -1507,7 +1520,8 @@ export class PeerNode {
       if (!t || !link.hello || link.hello.workspace !== this.ws.id) return;
       const l = decodeLink(t);
       // In the workspace, as the policy the link's genesis roots says (0072): someone who only knows its secret is not.
-      const known = await this.identity.devicesIn(records, this.ws.id);
+      // A person's device (0099): a server's first copy and secret would be taken unchecked, so not through one.
+      const known = await this.identity.devicesIn(records, this.ws.id, { people: true });
       known.add(l.issuer.key);
       if (!known.has(link.key)) {
         this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);

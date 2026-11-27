@@ -53,6 +53,9 @@ export const KURAA_SCHEME = 'kuraa://';
 /** At most this many records prove a device to be in (Identity.proof). */
 export const MAX_PROOF = 200;
 
+/** At most this many invite links' topics are announced (the latest): each member announces every one (0099). */
+const MAX_LINK_TOPICS = 32;
+
 /** The ID of the identity whose log this is (its inception's hash). */
 const person0 = (events: KeyEvent[]) => resolve(events)!.id;
 
@@ -315,12 +318,13 @@ export class Identity {
    * a device joining, which holds none yet, to tell whether the device letting
    * it in is one, under the genesis its link names.
    */
-  async devicesIn(list: unknown[], workspace: string): Promise<Set<string>> {
+  async devicesIn(list: unknown[], workspace: string, o: { people?: boolean } = {}): Promise<Set<string>> {
     const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
     // Under the genesis the link names (a workspace from before has none: it is founded again first, 0078).
     const policy = await this.evaluatePolicy(records, workspace, await this.pin());
     if (!policy.founded) return new Set();
-    return new Set(this.devicesBy(records, policy, workspace, new Set()).in.keys());
+    // `people`: people's devices only, not servers' (0099: a device joining takes its first copy from a person's).
+    return new Set([...this.devicesBy(records, policy, workspace, new Set()).in].filter(([, d]) => !o.people || !policy.isServer(d.person)).map(([k]) => k));
   }
 
   /**
@@ -1246,10 +1250,18 @@ export class Identity {
     const revoked = new Set([...(await this.revokedLinks()), ...(await this.policy()).unlinked]);
     const topics = new Set<string>();
     let next = 0;
-    for (const r of await this.records()) {
-      if (r.kind !== 'link' || r.workspace !== ws?.id || !r.topic || revoked.has(r.subject)) continue;
-      if (r.expires && r.expires <= now) continue;
-      topics.add(r.topic);
+    // Made by a person's device in the workspace (0099: not a server's, which makes none), the latest 32: every member
+    // announces each, so a device that made thousands would have them all announce thousands.
+    const policy = await this.policy();
+    const { in: inside } = await this.devices();
+    const self = (await this.deviceKey()).publicKey.toString('hex');
+    const made = (await this.records())
+      .filter((r) => r.kind === 'link' && r.workspace === ws?.id && !!r.topic && !revoked.has(r.subject) && !(r.expires && r.expires <= now))
+      .filter((r) => !policy.founded || r.by === self || (inside.has(r.by) && !policy.isServer(inside.get(r.by)!.person)))
+      .sort((a, b) => b.at - a.at)
+      .slice(0, MAX_LINK_TOPICS);
+    for (const r of made) {
+      topics.add(r.topic!);
       if (r.expires && (!next || r.expires < next)) next = r.expires;
     }
     return { topics: [...topics], next };

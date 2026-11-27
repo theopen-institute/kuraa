@@ -55,7 +55,9 @@ describe('signed records', () => {
     expect(judge(remove, standing({ managers: new Set([hex(bo), hex(cy)]), adminDevices: new Set([hex(bo), hex(cy)]), assigners: new Set() }))).toBe('wait');
     expect(judge(remove, standing({ managers: new Set([hex(bo), hex(cy)]), adminDevices: new Set([hex(bo), hex(cy)]), assigners: new Set([hex(bo)]) }))).toBe('take');
     // The new secret that goes with a removal is any member's to make.
-    expect(judge(secret, standing({ managers: new Set([hex(cy)]) }))).toBe('take');
+    expect(judge(secret, standing({ managers: new Set([hex(cy)]), persons: new Map([[hex(bo), 'p1']]) }))).toBe('take');
+    // But a person's device's: not a server's, which is no one's (0099).
+    expect(judge(secret, standing({ managers: new Set([hex(cy)]), persons: new Map([[hex(cy), 'p2']]) }))).toBe('refuse');
   });
 });
 

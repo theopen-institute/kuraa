@@ -6,6 +6,7 @@ export const S = {
   corkboard: 'Corkboard',
   outline: 'Outline',
   top: 'Workspace',
+  crumbs: 'The folders above it',
   empty: 'Nothing in this folder yet.',
   summary: (documents: number, words: number) => `${n(documents)} ${documents === 1 ? 'document' : 'documents'} · ${n(words)} ${words === 1 ? 'word' : 'words'}`,
   noSynopsis: 'No synopsis yet: click to write one',

@@ -48,6 +48,18 @@ test('a folder as a corkboard and as an outline: synopses and statuses edited in
   await expect(page.getByTestId(`card:${folder}/a.md`)).toContainText('First draft');
   await expect(page.getByTestId(`card:${folder}/a.md`)).toContainText('4 words');
 
+  // Down into a folder by its card, and up again by the folders above it: to the folder, and to the whole workspace.
+  await page.getByTestId(`card-open:${folder}/coast`).click();
+  await expect(page.getByTestId('cork-title')).toHaveText('coast');
+  await expect(page.getByTestId(`card:${folder}/coast/c.md`)).toBeVisible();
+  await page.getByTestId(`cork-crumb:${folder}`).click();
+  await expect(page.getByTestId('cork-title')).toHaveText(folder);
+  await page.getByTestId('cork-crumb:').click();
+  await expect(page.getByTestId('cork-title')).toHaveText('kuraa-e2e-workspace');
+  await expect(page.getByTestId(`card:${folder}`)).toBeVisible();
+  await page.getByTestId(`card-open:${folder}`).click();
+  await expect(page.getByTestId('cork-title')).toHaveText(folder);
+
   // A synopsis written on a card: into the document's header.
   await page.getByTestId(`card-synopsis:${folder}/a.md`).click();
   await page.getByTestId(`card-synopsis-edit:${folder}/a.md`).fill('They arrive at night.');

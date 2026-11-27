@@ -22,7 +22,10 @@ on its name opens and closes it, as before. The folder shown is marked in the tr
 is (`shownFolder`). It stays until a document is opened (from it, or anywhere), and goes when another
 workspace is opened. A view is told its folder, may show
 another (`showFolder`: a folder's card opens that folder in the same view), and may switch to another
-view of the same folder. Its context is navigation's (the files, the folders' orders, opening, `place`
+view of the same folder. **The folders above it** head both views, from the workspace down
+(`novel › coast`), each shown there when clicked: the way up, and to the **whole workspace**, which
+has no row in the file tree to click (the owner: "is it possible to view the corkboard/outline of the
+whole workspace?"). Its context is navigation's (the files, the folders' orders, opening, `place`
 to arrange): it shows the files as the file tree does, never apart from them.
 
 **The corkboard**: what is in the folder, in the file tree's order (its order, then folders and

@@ -160,7 +160,7 @@ colour shows by the document in the file tree, and the statuses offered are the 
 Workspace, under Document details) ([0094](docs/decisions/0094-word-counts-and-document-details.md)).
 
 Click a folder's name for its **Corkboard** or its **Outline** (whichever was shown last), shown
-where a document is; its icon opens and closes it. Both show what is in the folder, in the file
+where a document is; its icon opens and closes it (the folders above it head the view: click one, or the workspace, to show it). Both show what is in the folder, in the file
 tree's order, as index cards (each document's title, synopsis, label, status and words) or as rows
 (the synopsis a second line under each). Write a synopsis on a card, or a synopsis, label, status or target in a row,
 and it goes into the document's header, open or not; drag a card or a row to arrange the folder (the

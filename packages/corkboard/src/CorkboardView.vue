@@ -70,7 +70,12 @@ const summary = computed(() => {
   const words = docs.reduce((n, d) => n + ((d.card as DocumentCard | null)?.words ?? 0), 0) + subs.reduce((n, f) => n + ((f.card as FolderCard | null)?.words ?? 0), 0);
   return S.summary(count, words);
 });
-const title = computed(() => (folder ? nameOf(folder) : S.top));
+const title = computed(() => (folder ? nameOf(folder) : ctx.workspaceName() || S.top));
+/** The folders above it, from the workspace down, each to show here instead (the whole workspace first). */
+const above = computed(() => {
+  const parts = folder ? folder.split('/') : [];
+  return parts.length ? [{ path: '', name: ctx.workspaceName() || S.top }, ...parts.slice(0, -1).map((name, i) => ({ path: parts.slice(0, i + 1).join('/'), name }))] : [];
+});
 const views = computed(() => ctx.folderViews());
 
 /** Opening: a document in the editor, a folder here. */
@@ -164,7 +169,13 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 <template>
   <div :class="['cork', `cork-mode-${mode}`]" data-testid="corkboard">
     <header class="cork-head">
-      <h2 data-testid="cork-title">{{ title }}</h2>
+      <nav class="cork-crumbs" :aria-label="S.crumbs">
+        <template v-for="c in above" :key="c.path">
+          <button type="button" class="cork-crumb" :data-testid="`cork-crumb:${c.path}`" @click="ctx.showFolder(c.path, ctx.viewKey())">{{ c.name }}</button>
+          <span class="cork-crumb-sep" aria-hidden="true">›</span>
+        </template>
+        <h2 data-testid="cork-title">{{ title }}</h2>
+      </nav>
       <span class="cork-summary" data-testid="cork-summary">{{ summary }}</span>
       <span class="cork-views">
         <button
@@ -268,6 +279,11 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 .cork { padding: 14px 20px 30px; }
 .cork-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .cork-head h2 { margin: 0; font-size: 18px; }
+/* The folders above, from the workspace down: each shown here when clicked. */
+.cork-crumbs { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.cork-crumb { border: 0; background: none; padding: 0; font: inherit; font-size: 15px; color: var(--muted); cursor: pointer; }
+.cork-crumb:hover { color: var(--text); text-decoration: underline; }
+.cork-crumb-sep { color: var(--muted); }
 .cork-summary { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cork-views { margin-left: auto; display: inline-flex; gap: 0; }
 .cork-views button { border-radius: 0; font-size: 12px; padding: 3px 10px; }

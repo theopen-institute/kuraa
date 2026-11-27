@@ -9,7 +9,7 @@ import { computed, inject } from 'vue';
 import type { FileMark, NavigationFile as TreeFile } from '@kuraa/feature-kit/client';
 import { shownName, TREE, type Folder } from './tree.js';
 import { S } from './strings.js';
-import FileIcon from './FileIcon.vue';
+import FileIcon from '@kuraa/feature-ui/FileIcon.vue';
 
 /** A folder's icon, drawn as files' are (FileIcon): closed, or open while its contents show. */
 const FOLDER = { paths: ['M1.5 12.5v-9h4.25l1.5 1.5h7.25v7.5z'] };

@@ -25,9 +25,10 @@ count: xxx`. Then, in the same line: `(Words today: +xxx)`", and "Instead of wor
 today', to show it's across all documents"). Below when it was saved, one line, counted as the menu
 opens: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document. A
 component adds such a line with `documentFooter` (with `run`, it is chosen as an item is). Clicking it opens the **Words** panel ("Couldn't that be opened by clicking on the word count line?": there is no **Words…** item).
-(The core keeps the strip along the document's own foot, unused for now: a **status** panel, always
-drawn there, never opened or closed. What components add to the ⋯ menu is made as it opens, given the
-document's live view and its `header()`.) The panel has:
+(A strip along the document's own foot, drawn by the core for a **status** panel, was made for the first
+version and taken out again unused when this was merged with 0091, whose panels have places: a bar below
+the document is a place to add when the word count goes there. What components add to the ⋯ menu is
+made as it opens, given the document's live view and its `header()`.) The panel has:
 
 - **A target for the document**, kept in its header as `target-words: 2000`, for everyone who opens it.
 - **Today, and the last seven days, from the history** (*revised*: at first a count kept in the
@@ -46,7 +47,7 @@ document's live view and its `header()`.) The panel has:
   does not (`wordChange` in the kernel). What is typed and not yet committed, in documents open on this
   host, is added for today, for whoever typed it. A commit never changes, so what it counts is kept
   (`.git/kuraa/words.json`) and counted once. The host gives it as `GET /api/words?since=`; components,
-  `host.wordsByDay(since)`. The menu's foot says your total today (net); the panel, yours (net and added)
+  `host.history.wordsByDay(since)`. The menu's foot says your total today (net); the panel, yours (net and added)
   and everyone's today, and your last seven days. **A target for a day**, in words added, is yours,
   kept in this browser, as Scrivener's session target is the writer's.
   What it cannot see: a folder only some read is kept in its own space (0069), off the branch, and is
@@ -68,10 +69,11 @@ it as a dot by the document, its label and status said on pointing. The host hal
 document's details for that (`GET documents`), again as a document is saved and after a rename,
 deletion or merge.
 
-**What the core gives** (all additive): a status panel (`status: true`) and the strip it is drawn in;
-`header()` for panels, the open document's header fields to read and set (`get`, `set`), the rest of
+**What the core gives** (all additive): a line at the ⋯ menu's foot (`documentFooter`), what is added
+to the menu given the document's live view and `header()`; `header()` for panels, the open document's header fields to read and set (`get`, `set`), the rest of
 the header, its comments among it, as it is; a mark's `color`, drawn as a dot; each document's `words`
-in `bookContents`.
+in `bookContents`; and the host's **history** service (`host.history.wordsByDay`, a component using
+it saying so, as 0091 has it: `uses: ['history']`).
 
 ### Not yet
 

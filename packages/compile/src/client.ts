@@ -18,6 +18,7 @@ const BOOK = { paths: ['M8 4.5c-1.6-1.2-3.6-1.5-6-1.2v9c2.4-.3 4.4 0 6 1.2 1.6-1
 
 export const compileClient = defineClientFeature({
   id: 'compile',
+  uses: ['renders'],
   activate(ctx) {
     forget();
     void load(ctx);

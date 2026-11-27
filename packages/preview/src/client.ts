@@ -9,6 +9,8 @@ import { KEYS, S } from './strings.js';
 
 export const previewClient = defineClientFeature({
   id: 'preview',
+  helpGroup: S.helpGroup,
+  uses: ['renders', 'tools'],
   panels: [{
     id: 'preview',
     label: S.title,
@@ -21,6 +23,5 @@ export const previewClient = defineClientFeature({
       return () => app.unmount();
     },
   }],
-  documentMenu: (ctx) => (ctx.type.editor?.layout ? [] : [{ label: S.title, keys: KEYS.open, testid: 'menu-preview', run: () => ctx.openPanel('preview') }]),
-  help: [{ group: S.helpGroup, does: S.title, keys: [KEYS.open] }],
+  documentMenu: (ctx) => (ctx.type.editor?.layout ? [] : [{ command: 'panel:preview', testid: 'menu-preview' }]),
 });

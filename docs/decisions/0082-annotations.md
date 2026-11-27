@@ -1,5 +1,7 @@
 # 0082 · Annotations: coding and comments, kept beside the documents, as a feature (proposed)
 
+*Since [0091](0091-the-feature-runtime-commands-and-places.md): Comment, Code # and the panels' keys are commands, bound by the core; each feature keeps one context for the page; the example uses every hook again (commands, a view, a layout).*
+
 **Status: step 1 of the build order is built: features and the hooks the core gives them, with an
 example feature (*Built: step 1*), as revised by *Who owns an annotation*; step 2, comments
 (*Built: step 2*); and step 3, coding (*Built: step 3*). Steps 4 and 5 are not; nor is an author's

@@ -130,12 +130,15 @@ and ⌘/ (Ctrl+/), the menu, or the desktop app's Help menu lists everything tha
 pressed, from the same tables the editor binds its keys from
 ([decision 0044](docs/decisions/0044-polish.md)).
 
-The sidebar, the file tree in it, Preview, Search and the Outline are **components**, each a feature
+The sidebar, the file tree in it, Preview, Search, the Outline and **Running code** (the code session
+in the document's ⋯ menu, and **Packages…**) are **components**, each a feature
 on by default that a workspace can turn off (Settings › Workspace, under Features): the core draws no
 navigation, only what is done to files, and with no layout on, a menu at the upper left (the
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
-[0089](docs/decisions/0089-preview-search-and-outline-are-components.md)).
+[0089](docs/decisions/0089-preview-search-and-outline-are-components.md),
+[0092](docs/decisions/0092-running-code-is-a-component.md)). A component's keys are said once and bound
+by the core, which refuses keys something else has ([0091](docs/decisions/0091-the-feature-runtime-commands-and-places.md)).
 
 Any folder can be **arranged by hand**: drag a file or folder between two rows of the file tree (a line
 shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is kept in a plain
@@ -513,6 +516,20 @@ pnpm dev                          # a folder of workspaces: .dev-workspaces/ (gi
 pnpm dev --workspaces ~/research  # another folder of workspaces
 pnpm dev --dir ~/research/notes   # one folder, as `pnpm host --dir` serves it
 ```
+
+To try a feature branch from the main checkout (each is made in a git worktree,
+`.claude/worktrees/<name>`), while your own `pnpm dev` and the desktop app go on as they are:
+
+```sh
+pnpm try                          # the worktrees to choose from: ↑↓, Enter for pnpm dev, d for the desktop app
+pnpm try words                    # its pnpm dev, on a free port (never 5173), its address printed (--open: the browser too)
+pnpm try words desktop            # its desktop app, with data of its own
+```
+
+A name is the worktree's folder or branch, or the start of only one. Its packages are installed
+first. Its `pnpm dev` has the worktree's own `.dev-workspaces` (said, if a workspace from elsewhere
+has been added there: close it in the app that has it open first); its desktop app keeps its
+preferences and workspaces in the worktree (`.try-desktop/`), never with yours.
 
 Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
 Settings and **Open a folder…** in the page; its settings are kept in

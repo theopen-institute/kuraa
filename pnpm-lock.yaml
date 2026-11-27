@@ -187,6 +187,9 @@ importers:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.11
+        version: 6.0.11(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(vue@3.5.45(typescript@6.0.3))
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -305,9 +308,6 @@ importers:
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
-      prosemirror-keymap:
-        specifier: ^1.2.3
-        version: 1.2.3
       prosemirror-model:
         specifier: ^1.25.13
         version: 1.25.13
@@ -406,6 +406,15 @@ importers:
         specifier: workspace:*
         version: link:../format-pandoc
 
+  packages/code:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
   packages/compile:
     dependencies:
       '@kuraa/feature-kit':
@@ -493,11 +502,23 @@ importers:
         specifier: ^1.42.9
         version: 1.42.9
 
+  packages/feature-ui:
+    dependencies:
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
+
   packages/features:
     dependencies:
       '@kuraa/annotations':
         specifier: workspace:*
         version: link:../annotations
+      '@kuraa/code':
+        specifier: workspace:*
+        version: link:../code
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
@@ -531,6 +552,9 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/feature-ui':
+        specifier: workspace:*
+        version: link:../feature-ui
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -855,6 +879,9 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/feature-ui':
+        specifier: workspace:*
+        version: link:../feature-ui
       '@kuraa/kernel':
         specifier: workspace:*
         version: link:../kernel

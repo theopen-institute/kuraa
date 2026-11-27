@@ -93,8 +93,6 @@ export const S = {
     changeCode: 'Change the access code…',
   },
 
-  session: { none: 'not started', starting: 'starting…', ready: 'ready', busy: 'running', stopped: 'stopped', failed: 'failed' } as Record<string, string>,
-
   app: {
     title: 'Kuraa',
     updateReady: (version: string) => `Kuraa ${version} is ready. It is put in place when Kuraa next starts.`,
@@ -661,32 +659,8 @@ export const S = {
     closePanel: (label: string) => `Close ${label}`,
     failed: (label: string, why: string) => `${label}: ${why}`,
   },
-  packages: {
-    title: (label: string) => `${label} packages`,
-    toInstall: 'Packages to install',
-    placeholder: 'dplyr, fixest@0.12.1, bioc::limma, owner/repo',
-    installing: 'Installing…',
-    install: 'Install',
-    off: 'Installing packages is turned off on this host.',
-    inWorkspace: 'In this workspace',
-    noneYet: 'None installed yet. The environment’s own packages are available too.',
-    removeTitle: (name: string) => `Remove ${name} from this workspace`,
-    fromEnvironment: (n: number) => `From the environment (${n.toLocaleString()})`,
-    environmentAbout: 'Part of the environment itself, and listed because this workspace uses them.',
-    kept: 'The workspace keeps a list of its packages, so everyone who works on it gets the same ones. In a chunk, install.packages() works too.',
-    keptDetails: 'The list is .kuraa/r-packages.json, saved with the workspace.',
-  },
 
   code: {
-    title: 'Code',
-    runAll: 'Run all',
-    runAllTitle: 'Run every chunk, top to bottom',
-    interrupt: 'Interrupt',
-    interruptTitle: 'Interrupt, and drop queued runs',
-    restart: 'Restart',
-    restartTitle: 'A fresh session: everything defined so far is gone',
-    packages: 'Packages…',
-    notAvailable: (label: string) => `${label}: not available`,
     run: '▶ Run',
     runTitle: `Run this chunk (${keyLabel('Mod-Shift-Enter')}). ${keyLabel('Mod-Enter')} runs the current line or selection.`,
     cannotRun: 'Code cannot run here now.',
@@ -834,8 +808,6 @@ export const S = {
     name: 'Name',
     components: 'Components',
     engines: 'Languages',
-    packages: 'Packages',
-    packagesAbout: 'The R packages this workspace’s documents use, recorded in the workspace.',
   },
 
   /** The Settings window (decision 0060): you, then this computer's host. */

@@ -12,6 +12,7 @@ import { S } from './strings.js';
 
 export const wordsClient = defineClientFeature({
   id: 'words',
+  uses: ['history'],
   activate: (ctx) => follow(ctx),
   panels: [{
     id: 'words',

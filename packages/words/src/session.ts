@@ -56,7 +56,7 @@ export async function load(ctx: FeatureClientContext): Promise<void> {
   const since = new Date();
   since.setDate(since.getDate() - (DAYS - 1));
   try {
-    const r = await ctx.host.wordsByDay(day(since));
+    const r = await ctx.host.history.wordsByDay(day(since));
     if (n === asked) days.value = r;
   } catch {
     // The host away, or older: what was known stays.

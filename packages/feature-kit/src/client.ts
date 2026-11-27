@@ -23,8 +23,17 @@ export interface ClientFeature {
   editor?(ctx: FeatureEditorContext): FeatureEditor;
   /** Panels beside the document, its own or the workspace's. */
   panels?: FeaturePanel[];
+  /**
+   * What it does, by name (0091): each command's label and keys said once, for
+   * its menus (an item `{ command: id }`), the keys the core binds, and the
+   * shortcuts sheet. Each panel is a command too, made by the core
+   * (`panel:<id>`, opening it; its keys, if it has them).
+   */
+  commands?: FeatureCommand[];
+  /** The heading its commands (and its panels' keys) are listed under on the shortcuts sheet: its label, if not said. */
+  helpGroup?: string;
   /** Items for the open document's ⋯ menu, in a group of their own. */
-  documentMenu?(ctx: FeatureDocumentContext): FeatureMenuItem[];
+  documentMenu?(ctx: FeatureDocumentContext): FeatureMenuEntry[];
   /**
    * A line for the foot of the open document's ⋯ menu, below when it was
    * saved (0094: its word count), made as the menu opens; null for none. With
@@ -33,7 +42,7 @@ export interface ClientFeature {
    */
   documentFooter?(ctx: FeatureDocumentContext): { text: string; testid?: string; title?: string; run?(): void } | null;
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
-  fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuItem[];
+  fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuEntry[];
   /**
    * A mark it puts on a file or a folder (its path ending in `/`) wherever
    * navigation shows them (0093: a manuscript's folder, a document left out of
@@ -42,7 +51,11 @@ export interface ClientFeature {
   marks?(path: string, ctx: FeatureClientContext): FileMark | null;
   /** Its parts of Settings: the workspace's (its settings, while it is on there) and yours. */
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
-  /** Lines for the Markdown and shortcuts sheet: what it adds to typing and keys. */
+  /**
+   * Lines for the Markdown and shortcuts sheet that are not commands: what it
+   * adds to typing, and keys its own parts handle (a tree's arrows). Its
+   * commands' and panels' keys are listed from them, not here.
+   */
   help?: HelpItem[];
   /**
    * Called once it is in use for the open workspace (on there, and not hidden),
@@ -51,6 +64,8 @@ export interface ClientFeature {
    * workspace is opened.
    */
   activate?(ctx: FeatureClientContext): (() => void) | void;
+  /** The host's services it uses (CoreHost, 0091): only these are given it. */
+  uses?: CoreService[];
   /** Where navigation goes in the window (0087): one layout is used at a time. */
   layout?: FeatureLayout;
   /** Ways of seeing the workspace's files (0087), drawn wherever the layout in use gives them room. */
@@ -139,7 +154,7 @@ export interface NavigationView {
   label: string;
   mount(element: HTMLElement, ctx: NavigationContext): () => void;
   /** What it adds to the ＋ menu, after the core's New file and New folder (a manuscript's New chapter). */
-  newItems?(ctx: NavigationContext): FeatureMenuItem[];
+  newItems?(ctx: NavigationContext): FeatureMenuEntry[];
 }
 
 /** What the client gives a navigation view. */
@@ -219,7 +234,10 @@ export interface FeatureClientContext {
   onMessage(fn: (message: Json, path: string | null) => void): () => void;
   /** Open a file at a match (0089): a line, where on it, and the words, found again in an open document as it has been typed since. */
   openMatch(path: string, target: MatchTarget): void;
-  /** The host's own calls a component may make (0089): the core's routes, not the feature's. */
+  /**
+   * The host's own services (0089, 0091): the core's routes, not the feature's.
+   * Only those the feature says it uses (`uses`) are given it.
+   */
   host: CoreHost;
   /** An error in plain words, and what was actually said, as the client says errors everywhere. */
   explain(error: unknown): { text: string; details: string | null };
@@ -329,12 +347,45 @@ export interface ToolState {
   error: string | null;
 }
 
-/** The host's calls offered to components (0089). Each rejects as the client's own calls do. */
+/**
+ * The host's own services offered to components (0089, 0091), each a group of
+ * the core's calls: what a component may ask of the host besides its own
+ * routes. A feature says which it uses (`ClientFeature.uses`); one it did not
+ * say it uses is not given it (using it throws, saying so). Each call rejects
+ * as the client's own calls do.
+ */
 export interface CoreHost {
+  search: SearchService;
+  renders: RenderService;
+  tools: ToolService;
+  code: CodeService;
+  history: HistoryService;
+}
+
+/** A service of the host's (CoreHost), by name. */
+export type CoreService = keyof CoreHost;
+
+/** The workspace's history, read (0094). */
+export interface HistoryService {
+  /**
+   * Words written each day from `since` (YYYY-MM-DD), by person, newest day
+   * first: every commit on the branch but merges, each credited in full to
+   * everyone credited on it, on its own day; and what is typed here and not
+   * committed yet, today.
+   */
+  wordsByDay(since: string): Promise<WordsDay[]>;
+}
+
+/** Searching the workspace (0042). */
+export interface SearchService {
   /** Search the workspace's text files, and open documents as they are now. */
-  search(query: string, caseSensitive: boolean): Promise<SearchResult>;
+  run(query: string, caseSensitive: boolean): Promise<SearchResult>;
+}
+
+/** Rendering documents (0041), and what their outputs were made from (0081). */
+export interface RenderService {
   /** A document's renders, or a folder's (its path ending in `/`, the top level `/`: 0093): what it can be rendered to, and how its latest ones stand. */
-  renders(path: string): Promise<RenderInfo>;
+  info(path: string): Promise<RenderInfo>;
   /**
    * Render a document (as you, for the record); a render that cannot start says
    * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
@@ -345,28 +396,93 @@ export interface CoreHost {
    */
   render(path: string, format: RenderFormat, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState>;
   /** A document's latest output in a format. */
-  renderOutput(path: string, format: RenderFormat): Promise<Blob>;
+  output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
-  renderMadeFrom(path: string, format: RenderFormat): Promise<Blob>;
+  madeFrom(path: string, format: RenderFormat): Promise<Blob>;
   /**
    * What a folder's book could have (its path ending in `/`, the top level
    * `/`: 0093): its folders and documents, nothing left out, in the file
    * tree's order, each at how deep it is (1: in the folder itself).
    */
   bookContents(folder: string): Promise<BookContent[]>;
-  /**
-   * Words written each day from `since` (YYYY-MM-DD), by person, newest day
-   * first (0094): every commit on the branch but merges, each credited in full
-   * to everyone credited on it, on its own day; and what is typed here and not
-   * committed yet, today.
-   */
-  wordsByDay(since: string): Promise<WordsDay[]>;
-  /** The tools this computer has or may download. */
-  tools(): Promise<{ tools: ToolState[] }>;
-  /** Download a tool; follow it with tools(). */
-  downloadTool(id: string): Promise<void>;
+}
+
+/**
+ * The open document's code session (0011, 0092), where its type runs code: the
+ * session on the host that runs its chunks, as this client follows it. Running
+ * a chunk from the document is the core's (its node views); a component offers
+ * the rest: running everything, stopping, starting again, the packages.
+ */
+export interface CodeService {
+  /** The open document's session, or null (none open, or its type runs no code). */
+  session(): CodeSession | null;
+  /** Be told when the open document's session is another (a document opened, closed). Returns how to stop. */
+  onSession(fn: () => void): () => void;
+}
+
+export interface CodeSession {
+  /** How it stands now (read anew when onChange says). */
+  status(): CodeSessionStatus;
+  /** Be told when how it stands changes. Returns how to stop. */
+  onChange(fn: () => void): () => void;
+  /** Run every chunk, top to bottom. */
+  runAll(): Promise<void>;
+  /** Interrupt, and drop queued runs. */
+  interrupt(): Promise<unknown>;
+  /** A fresh session: everything defined so far is gone. */
+  restart(): Promise<unknown>;
+  /** The workspace's packages for an engine (0014). */
+  listPackages(engine: string): Promise<PackageInfo[]>;
+  installPackages(engine: string, refs: string[]): Promise<PackageResult>;
+  removePackages(engine: string, names: string[]): Promise<PackageResult>;
+}
+
+export interface CodeSessionStatus {
+  /** The language, as people call it: 'R'. */
+  engine: string;
+  /** The session's state: 'none', 'starting', 'ready', 'busy', 'stopped', 'failed'. */
+  state: string;
+  /** What it says as it starts, if anything. */
+  message: string | null;
+  /** Where code runs (0019), if the host says. */
+  environment: { label: string; sandboxed: boolean; available: boolean; message?: string } | null;
+  /** Why code cannot run now (Podman missing, say), or null. */
+  unavailable: string | null;
+  /** Something is running or queued. */
+  busy: boolean;
+  /** The document has chunks this host can run. */
+  runnable: boolean;
+  /** The engine whose packages the workspace keeps (null: none). */
+  packageEngine: string | null;
+  /** The engines, by id and label. */
+  engines: { id: string; label: string }[];
+  /** Whether people may install packages here (the host's choice). */
+  allowInstalls: boolean;
+  /** The latest the host said of packages being changed: for an engine, what it says, and when. */
+  packageNews: { engine: string; message: string; at: number } | null;
+}
+
+/** A package as the workspace has it (0014). */
+export interface PackageInfo {
+  name: string;
+  version: string;
+  /** In the workspace's own library, or the environment's. */
+  source: 'workspace' | 'environment';
+}
+
+export interface PackageResult {
+  ok: boolean;
+  message: string;
+  log?: string;
+}
+
+/** The tools this computer has or may download (0045). */
+export interface ToolService {
+  list(): Promise<{ tools: ToolState[] }>;
+  /** Download a tool; follow it with list(). */
+  download(id: string): Promise<void>;
   /** Be told when the host says a tool changed (downloaded, removed). Returns how to stop. */
-  onToolsChanged(fn: () => void): () => void;
+  onChanged(fn: () => void): () => void;
 }
 
 /**
@@ -426,7 +542,12 @@ export interface FeatureEditor {
   /** Marks for the margin beside the text, each at a place in the document. */
   margin?(view: EditorView): MarginItem[];
   /** What can be done with the selected text, offered beside it while there is a selection. */
-  selectionActions?(view: EditorView): FeatureMenuItem[];
+  selectionActions?(view: EditorView): FeatureMenuEntry[];
+  /**
+   * How this document does the feature's `editor` commands (0091), by id: true
+   * if it did. Their keys are bound in the editor, while it has the focus.
+   */
+  commands?: { [id: string]: (view: EditorView) => boolean };
   destroy?(): void;
 }
 
@@ -458,9 +579,64 @@ export interface MarginItem {
 export interface FeatureMenuItem {
   label: string;
   run(): void;
-  /** Its keys, as key bindings write them ('Mod-Alt-m'): shown beside it, not bound by the client. */
+  /** Its keys, as key bindings write them ('Mod-Alt-m'): shown beside it, not bound by the client (a command's are). */
   keys?: string;
   testid?: string;
+  /** Shown, but not to be chosen now (0092). */
+  disabled?: boolean;
+  /** What it says when pointed at. */
+  title?: string;
+}
+
+/**
+ * A line of words in a menu, not to be chosen (0092): how something stands
+ * ("R ready · in a Podman container"). In the document's ⋯ menu; other menus
+ * leave it out.
+ */
+export interface FeatureMenuNote {
+  note: string;
+  title?: string;
+  testid?: string;
+  /** Classes for its look (its feature styles them). */
+  className?: string;
+}
+
+/** A menu item that is one of the feature's commands (0091): its label (unless given), its keys and what it does are the command's. */
+export interface FeatureCommandItem {
+  /** The command's id: one of the feature's `commands`, or `panel:<id>` for one of its panels. */
+  command: string;
+  label?: string;
+  testid?: string;
+}
+
+/** What a feature puts in a menu: an item of its own, or one of its commands. */
+export type FeatureMenuEntry = FeatureMenuItem | FeatureCommandItem | FeatureMenuNote;
+
+/**
+ * Something a feature does, by name (0091). Its keys are bound by the core,
+ * once: keys another command or the app already has are refused (said in the
+ * console, and by the tests of the standard features), never bound twice.
+ */
+export interface FeatureCommand {
+  /** Its id within the feature ('comment'); `panel:` is the core's, for panels. */
+  id: string;
+  /** What it is called in menus: 'Comment'. */
+  label: string;
+  /** Its keys, as key bindings write them ('Mod-Alt-m'). */
+  keys?: string;
+  /**
+   * Where it is done:
+   * - `workspace` (the default): anywhere on the page, by `run`.
+   * - `document`: while a live document is open, by `run`.
+   * - `editor`: in the open document, its keys bound in the editor while it has
+   *   the focus, done by the document's FeatureEditor (`commands[id]`).
+   */
+  about?: 'workspace' | 'document' | 'editor';
+  run?(ctx: FeatureClientContext): void;
+  /** What the shortcuts sheet says it does, where it has keys: its label, if not said; false: not listed. */
+  help?: string | false;
+  /** A word more on the sheet, shown quietly after it. */
+  note?: string;
 }
 
 export interface FeatureDocumentContext extends FeatureClientContext {
@@ -473,6 +649,9 @@ export interface FeatureDocumentContext extends FeatureClientContext {
   /** The open document's header, as panels have it (0094). */
   header(): DocumentHeader | null;
 }
+
+/** Where a panel is drawn (FeaturePanel.place). */
+export type PanelPlace = 'side' | 'over' | 'dialog';
 
 /** A panel the feature draws: beside the open document, or about the workspace. */
 export interface FeaturePanel {
@@ -488,19 +667,26 @@ export interface FeaturePanel {
    */
   toggle?: boolean;
   /**
-   * A document's panel drawn over the document's top left, all of it the
-   * panel's own (no heading of the client's), not in the place beside it: it
-   * stays open beside any other panel. Over the rich view only (0089).
+   * Where it is drawn (0091), the core arranging each place:
+   *
+   * - `side` (the default): beside the document, one panel at a time, under a
+   *   heading of the client's (its label, and closing it).
+   * - `over`: a document's panel over the document's top left, all of it the
+   *   panel's own (no heading of the client's); it stays open beside any other
+   *   panel. Over the rich view only (0089).
+   * - `dialog`: over the whole page, modal (0092): the client draws the window
+   *   (its backdrop, keeping the focus in it, Escape and a click outside closing
+   *   it, unless held open: holdOpen); all inside it is the panel's own. Over
+   *   any other window (Settings), which stays beneath it.
+   *
+   * A place added later (a bar below the document, say) is a value added here;
+   * a client that does not know a panel's place draws it beside the document.
    */
-  over?: boolean;
+  place?: PanelPlace;
   /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */
   icon?: FileIcon;
-  /**
-   * A document's panel always drawn, small, in the strip along the foot of the
-   * open document (0094: its word count), not opened or closed: a line of its
-   * own at most. It may open another panel (`openPanel`) for more.
-   */
-  status?: boolean;
+  /** What the shortcuts sheet says its keys do: its label, if not said; false: not listed (0091). */
+  help?: string | false;
   /** Draw it into `element`; returns how to take it down. */
   mount(element: HTMLElement, ctx: FeaturePanelContext): () => void;
 }
@@ -529,6 +715,8 @@ export interface FeaturePanelContext extends FeatureClientContext {
    */
   header(): DocumentHeader | null;
   close(): void;
+  /** A dialog's (0092): while held, Escape and a click outside do not close it (something it started is under way). */
+  holdOpen(hold: boolean): void;
 }
 
 /** A part of Settings the feature draws. */

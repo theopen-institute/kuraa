@@ -1,5 +1,7 @@
 # 0089 · Preview, Search and the Outline are components
 
+*Since [0091](0091-the-feature-runtime-commands-and-places.md): `over: true` is `place: 'over'`; the host's calls are services by name (`host.search.run`, `host.renders.info`, …) given as a feature says it `uses` them; the panels' keys are commands, listed on the sheet from them.*
+
 The owner, reading the list of panels beside and over the document:
 
 > "For now, the editor and history windows can stay part of core."

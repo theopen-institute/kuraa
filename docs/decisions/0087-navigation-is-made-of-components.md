@@ -1,5 +1,7 @@
 # 0087 · Navigation is made of components (proposed)
 
+*Since [0091](0091-the-feature-runtime-commands-and-places.md): layouts and views are given each feature's one context (no copies made by hand); the example feature has a view and a layout of its own.*
+
 **Status: built** (steps 1 and 2: the hooks, the core's menu at the upper left, `@kuraa/sidebar`
 and `@kuraa/files`; the manuscript is [0088](0088-a-manuscript-is-a-quarto-book.md)'s). Choosing
 between layouts in Settings › You waits for a second layout: the layout used is the one this browser

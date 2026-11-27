@@ -26,7 +26,7 @@ async function loadContents() {
     return;
   }
   try {
-    const items = await ctx.host.bookContents(p);
+    const items = await ctx.host.renders.bookContents(p);
     if (n === contentsAsked.n) contents.value = items;
   } catch (e) {
     if (n === contentsAsked.n) error.value = ctx.explain(e).text;
@@ -134,7 +134,7 @@ async function follow(save: boolean) {
   if (!p) return;
   clearTimeout(timer);
   try {
-    const next = await ctx.host.renders(p);
+    const next = await ctx.host.renders.info(p);
     if (n !== asked) return;
     info.value = next;
     const r = next.renders.find((x) => x.format === format.value) ?? null;
@@ -151,7 +151,7 @@ async function follow(save: boolean) {
 
 async function saveOutput(f: CompileFormat) {
   try {
-    const blob = await ctx.host.renderOutput(renderPath.value!, f);
+    const blob = await ctx.host.renders.output(renderPath.value!, f);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -182,7 +182,7 @@ async function compile() {
     console.warn('[kuraa] Compile could not keep its settings', e);
   }
   try {
-    state.value = await ctx.host.render(p, format.value, { exclude: leftOut.value, noHeading: noHeadingPaths(known.value).filter((x) => !f || x.startsWith(`${f}/`)), title: t });
+    state.value = await ctx.host.renders.render(p, format.value, { exclude: leftOut.value, noHeading: noHeadingPaths(known.value).filter((x) => !f || x.startsWith(`${f}/`)), title: t });
     if (state.value.state !== 'failed') await follow(true);
   } catch (e) {
     error.value = ctx.explain(e).text;

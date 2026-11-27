@@ -8,18 +8,18 @@ import { KEYS, S } from './strings.js';
 
 export const outlineClient = defineClientFeature({
   id: 'outline',
+  helpGroup: S.helpGroup,
   panels: [{
     id: 'outline',
     label: S.title,
     about: 'document',
     keys: KEYS.open,
-    over: true,
+    place: 'over',
     mount(element, ctx) {
       const app = createApp(OutlinePanel, { ctx });
       app.mount(element);
       return () => app.unmount();
     },
   }],
-  documentMenu: (ctx) => (ctx.type.editor?.layout || ctx.source ? [] : [{ label: S.title, keys: KEYS.open, testid: 'menu-outline', run: () => ctx.openPanel('outline') }]),
-  help: [{ group: S.helpGroup, does: S.title, keys: [KEYS.open] }],
+  documentMenu: (ctx) => (ctx.type.editor?.layout || ctx.source ? [] : [{ command: 'panel:outline', testid: 'menu-outline' }]),
 });

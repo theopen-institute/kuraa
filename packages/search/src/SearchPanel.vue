@@ -30,7 +30,7 @@ async function search() {
   }
   searching.value = true;
   try {
-    const r = await props.ctx.host.search(q, caseSensitive.value);
+    const r = await props.ctx.host.search.run(q, caseSensitive.value);
     if (n !== asked) return;
     result.value = r;
     searched.value = q;

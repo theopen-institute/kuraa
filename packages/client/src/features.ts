@@ -5,7 +5,7 @@
 // gives: the host's API, you, notices, dialogs, and opening panels and files.
 // The editor (Editor.vue) adds the open document's part; App.vue draws panels,
 // menus and settings from what the features contribute.
-import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
+import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type CoreService, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
 import type { EditorUi } from '@kuraa/editor-kit';
 import type { HostApi } from './api.js';
 
@@ -69,11 +69,40 @@ export class FeatureMessages {
   }
 }
 
-/** A client half in use, with how its feature stands and its context. */
+/**
+ * A client half in use: the feature, how it stands now (read anew each time),
+ * and what it is given. The same object, and the same context, for as long as
+ * the page is open (0091): how features stand changing (one turned on, a
+ * feature's settings saved, a merge) never draws a panel or view again, nor
+ * starts a feature again.
+ */
 export interface ActiveFeature {
-  feature: ClientFeature;
-  status: FeatureStatus;
-  ctx: FeatureClientContext;
+  readonly feature: ClientFeature;
+  readonly status: FeatureStatus;
+  readonly ctx: FeatureClientContext;
+}
+
+/** Each feature's one ActiveFeature and context, made once and kept. */
+export class FeatureContexts {
+  private readonly made = new Map<string, { feature: ClientFeature; active: ActiveFeature; last: FeatureStatus }>();
+
+  /** `live`: how features stand as the host says now (none: what each was last said to be, as assumed). */
+  constructor(private readonly app: FeatureApp, private readonly messages: FeatureMessages, private readonly live: () => FeatureStatus[]) {}
+
+  /** The feature in use, `status` being how it stands where the host has not said (yet). */
+  of(feature: ClientFeature, status: FeatureStatus): ActiveFeature {
+    let m = this.made.get(feature.id);
+    if (!m || m.feature !== feature) {
+      const entry: { feature: ClientFeature; active?: ActiveFeature; last: FeatureStatus } = { feature, last: status };
+      const current = () => this.live().find((s) => s.id === feature.id) ?? entry.last;
+      const ctx = clientContext(feature, current, this.app, this.messages);
+      entry.active = { feature, ctx, get status() { return current(); } };
+      m = entry as { feature: ClientFeature; active: ActiveFeature; last: FeatureStatus };
+      this.made.set(feature.id, m);
+    }
+    m.last = status;
+    return m.active;
+  }
 }
 
 /**
@@ -81,12 +110,12 @@ export interface ActiveFeature {
  * loaded and on for the workspace, and not hidden by this person. In the order
  * the host lists them.
  */
-export function activeFeatures(clients: Record<string, ClientFeature>, status: FeatureStatus[], hidden: string[], app: FeatureApp, messages: FeatureMessages, live: () => FeatureStatus[] = () => status): ActiveFeature[] {
+export function activeFeatures(clients: Record<string, ClientFeature>, status: FeatureStatus[], hidden: string[], contexts: FeatureContexts): ActiveFeature[] {
   const out: ActiveFeature[] = [];
   for (const s of status) {
     const feature = clients[s.id];
     if (!feature || feature.apiVersion !== FEATURE_API_VERSION || !s.on || hidden.includes(s.id)) continue;
-    out.push({ feature, status: s, ctx: clientContext(feature, () => live().find((x) => x.id === s.id) ?? s, app, messages) });
+    out.push(contexts.of(feature, s));
   }
   return out;
 }
@@ -107,12 +136,32 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     openFile: (path, at) => app.openFile(path, at),
     onMessage: (fn) => messages.on(feature.id, fn),
     openMatch: (path, target) => app.openMatch(path, target),
-    host: app.host,
+    host: servicesFor(feature, app.host),
     explain: (error) => app.explain(error),
     keyLabel: (keys) => app.keyLabel(keys),
     moveFile: (from, to) => app.moveFile(from, to),
     marksChanged: () => app.marksChanged(),
   };
+}
+
+/**
+ * The host's services a feature is given (0091): those it says it uses. Using
+ * one it did not say throws, saying so, so what each feature asks of the host
+ * is in its definition.
+ */
+export function servicesFor(feature: ClientFeature, host: CoreHost): CoreHost {
+  const uses = new Set<CoreService>(feature.uses ?? []);
+  const out = {} as CoreHost;
+  for (const name of Object.keys(host) as CoreService[]) {
+    Object.defineProperty(out, name, {
+      enumerable: true,
+      get: () => {
+        if (!uses.has(name)) throw new Error(`The feature ${feature.id} uses the host's ${name} without saying so (uses: ['${name}']).`);
+        return host[name];
+      },
+    });
+  }
+  return out;
 }
 
 /**

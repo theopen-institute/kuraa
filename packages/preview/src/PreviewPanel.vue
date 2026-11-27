@@ -45,7 +45,7 @@ watch(onSave, (v) => {
 let asked = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let toolTimer: ReturnType<typeof setTimeout> | undefined;
-const stopTools = ctx.host.onToolsChanged(() => {
+const stopTools = ctx.host.tools.onChanged(() => {
   if (fetching.value) void followTool();
 });
 onBeforeUnmount(() => {
@@ -64,7 +64,7 @@ async function download(needs: NonNullable<RenderState['needs']>, format: Render
   fetching.value = { tool: needs.tool, label: needs.label, progress: null, format, save };
   error.value = null;
   try {
-    await ctx.host.downloadTool(needs.tool);
+    await ctx.host.tools.download(needs.tool);
   } catch (e) {
     fetching.value = null;
     error.value = e;
@@ -79,7 +79,7 @@ async function followTool() {
   const f = fetching.value;
   if (!f) return;
   try {
-    const t = (await ctx.host.tools()).tools.find((x) => x.id === f.tool);
+    const t = (await ctx.host.tools.list()).tools.find((x) => x.id === f.tool);
     if (fetching.value !== f) return;
     if (t?.state === 'ready') {
       fetching.value = null;
@@ -101,7 +101,7 @@ const busy = computed(() => !!info.value?.renders.some((r) => r.state === 'rende
 
 async function loadPreview(p: string) {
   try {
-    const text = await (await ctx.host.renderOutput(p, 'html')).text();
+    const text = await (await ctx.host.renders.output(p, 'html')).text();
     if (p === path.value) html.value = previewDocument(text);
   } catch {
     if (p === path.value) html.value = null;
@@ -114,7 +114,7 @@ async function refresh(first = false) {
   const n = asked;
   clearTimeout(timer);
   try {
-    const next = await ctx.host.renders(p);
+    const next = await ctx.host.renders.info(p);
     if (n !== asked || p !== path.value) return;
     const before = info.value;
     info.value = next;
@@ -157,7 +157,7 @@ async function render(format: RenderFormat, thenSave = false) {
   if (thenSave) toSave.add(format);
   try {
     await synced();
-    const state = await ctx.host.render(path.value, format);
+    const state = await ctx.host.renders.render(path.value, format);
     shown.value = state;
     if (state.state === 'failed') toSave.delete(format);
     await refresh();
@@ -168,7 +168,7 @@ async function render(format: RenderFormat, thenSave = false) {
 
 async function save(format: RenderFormat) {
   try {
-    saveFile(await ctx.host.renderOutput(path.value, format), outputName(path.value, format));
+    saveFile(await ctx.host.renders.output(path.value, format), outputName(path.value, format));
   } catch (e) {
     error.value = e;
   }
@@ -177,7 +177,7 @@ async function save(format: RenderFormat) {
 async function saveMadeFrom(format: RenderFormat) {
   try {
     const name = `${outputName(path.value, format).replace(/\.[^.]*$/, '')}-${format}-made-from.zip`;
-    saveFile(await ctx.host.renderMadeFrom(path.value, format), name);
+    saveFile(await ctx.host.renders.madeFrom(path.value, format), name);
   } catch (e) {
     error.value = e;
   }

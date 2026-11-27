@@ -1,5 +1,9 @@
 # 0093 · Order and Compile over folders
 
+*Since [0091](0091-the-feature-runtime-commands-and-places.md): the host's calls below are its render
+service's (`host.renders.bookContents`, `host.renders.render`, `host.renders.info`), given to Compile as
+it says it uses them (`uses: ['renders']`); features' marks are drawn from the features' runtime.*
+
 **Status: built.** Replaces [0090](0090-manuscripts-apart-from-folders.md), and the Quarto storage of
 [0088](0088-a-manuscript-is-a-quarto-book.md): there is no manuscript beside the file tree any more.
 Folders are arranged by hand in it, and any folder is compiled into one book.

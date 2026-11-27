@@ -1,0 +1,14 @@
+{
+  "name": "@kuraa/feature-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./FileIcon.vue": "./src/FileIcon.vue"
+  },
+  "dependencies": {
+    "@kuraa/kernel": "workspace:*",
+    "vue": "^3.5.45"
+  }
+}

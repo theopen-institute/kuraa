@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { LayoutContext } from '@kuraa/feature-kit/client';
 import { S } from './strings.js';
 import ConnectionLight from './ConnectionLight.vue';
-import FileIcon from './FileIcon.vue';
+import FileIcon from '@kuraa/feature-ui/FileIcon.vue';
 import ViewMount from './ViewMount.vue';
 
 const props = defineProps<{ ctx: LayoutContext }>();
@@ -115,6 +115,23 @@ function drop(e: DragEvent) {
 </template>
 
 <style>
+/* The sidebar's own look; what every pane shares (.pane, .pane-header, .pane-header-actions) is the client's (@kuraa/feature-ui says which). */
+.dot.conn-connected { background: #30a46c; }
+.dot.conn-connecting { background: #f5a524; }
+.dot.conn-unauthorized, .dot.conn-disconnected { background: #e5484d; }
+.dot.conn-none { background: var(--border); }
+.pane-left { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.pane-left .pane-header { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); gap: 8px; }
+.workspace-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The workspace's name fills the header; its actions sit at the right. */
+.pane-left .pane-header > .workspace-name, .pane-left .pane-header > .workspace-switcher, .pane-left .pane-header > .workspace-title { flex: 1; }
+/* The connection's light, then the workspace's name and its menu. */
+.workspace-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.connection-light { display: inline-flex; align-items: center; flex: none; cursor: default; }
+.workspace-switcher { display: flex; align-items: center; gap: 4px; min-width: 0; border: 0; background: none; padding: 2px 6px; margin-left: -6px; font: inherit; font-weight: 600; color: inherit; border-radius: 5px; cursor: pointer; }
+.workspace-switcher:hover { background: var(--selected); }
+.workspace-switcher .workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-switcher .caret { color: var(--muted); font-size: 10px; }
 .sidebar-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane-left .pane-header.drop-target { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
 .sidebar-views { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--border); }

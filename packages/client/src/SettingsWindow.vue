@@ -23,7 +23,6 @@ import { computed, ref, useTemplateRef } from 'vue';
 import type { FormatEditor, HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
 import type { HostApi, HubApi, WorkspaceInfo } from './api.js';
-import type { ChunkRunner } from './runs.js';
 import type { Settings } from './settings.js';
 import { SETTINGS_SECTIONS, SUB_SECTIONS, type SettingsSection } from './settingsSections.js';
 import { useHostSettings } from './hostSettings.js';
@@ -56,8 +55,6 @@ const props = defineProps<{
   /** The open document's editor is not ready yet. */
   opening: boolean;
   workspace: WorkspaceInfo | null;
-  /** The open document's runner, if it runs code (for the workspace's packages). */
-  runner: ChunkRunner | null;
   canRemoveWorkspace: boolean;
   editors: Record<string, FormatEditor>;
   editorsOff: string[];
@@ -80,7 +77,6 @@ const emit = defineEmits<{
   invite: [];
   /** A file's or folder's permissions, to open (0069). */
   permissions: [path: string];
-  packages: [runner: ChunkRunner, engine: string];
   /** The features you hid (0082), in this browser. */
   hiddenFeatures: [ids: string[]];
 }>();
@@ -154,7 +150,7 @@ async function close(then?: () => void): Promise<boolean> {
   return true;
 }
 
-/** Things done in another dialog (inviting people, packages, removing the workspace): this one closes as it starts, if it can. */
+/** Things done in another dialog (inviting people, removing the workspace): this one closes as it starts, if it can. */
 function thenClose(then: () => void) {
   void close(then);
 }
@@ -215,7 +211,6 @@ useDialog(root, () => {
             v-show="section === 'workspace'"
             :api="api"
             :workspace="workspace"
-            :runner="runner"
             :can-remove="canRemoveWorkspace"
             :features="features ?? []"
             :feature-parts="featureParts ?? []"
@@ -223,7 +218,6 @@ useDialog(root, () => {
             @remove="thenClose(() => emit('removeWorkspace'))"
             @invite="thenClose(() => emit('invite'))"
             @permissions="(p) => thenClose(() => emit('permissions', p))"
-            @packages="(r, engine) => thenClose(() => emit('packages', r, engine))"
           />
           <SettingsHost
             v-show="section === 'host'"

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/feature-ui": "workspace:*",
     "@kuraa/kernel": "workspace:*",
     "vue": "^3.5.45"
   }

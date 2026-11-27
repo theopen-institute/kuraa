@@ -5,7 +5,8 @@
 // this exposes.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { sourceMapOf, type DocumentType } from '@kuraa/kernel';
-import type { FeatureEditor, FeatureMenuItem, FeatureState, Json, MarginItem } from '@kuraa/feature-kit/client';
+import type { FeatureEditor, FeatureMenuEntry, FeatureMenuItem, FeatureState, Json, MarginItem } from '@kuraa/feature-kit/client';
+import type { BoundCommand } from './commands.js';
 import { connectRoom, type RoomConnection, type RoomMessage } from '@kuraa/session/client';
 import { EditorState, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
@@ -53,6 +54,10 @@ const props = defineProps<{
   readOnly?: boolean;
   /** Features on (0082): what each adds to the document (plugins, the margin, actions on a selection). */
   features?: ActiveFeature[];
+  /** Features' `editor` commands with keys (0091): bound here, done by each one's FeatureEditor. */
+  featureCommands?: BoundCommand[];
+  /** A feature's menu entries as items to draw (commands named by their label and keys). */
+  featureItems?: (feature: string, entries: FeatureMenuEntry[]) => FeatureMenuItem[];
 }>();
 const emit = defineEmits<{
   status: [status: EditorStatus];
@@ -404,6 +409,11 @@ function open(carried: Carried | null = null): () => void {
         return [];
       }
     });
+    // Their commands' keys (0091), bound here once, done by the feature's editor in this document.
+    const commandKeys = Object.fromEntries((props.featureCommands ?? [])
+      .filter((c) => featureEditors.some((f) => f.id === c.feature && f.editor.commands?.[c.id]))
+      .map((c) => [c.keys!, (_state: EditorState, _dispatch?: unknown, v?: EditorView) => !!v && runFeatureCommand(c.feature, c.id, v)]));
+    if (Object.keys(commandKeys).length) featurePlugins.push(keymap(commandKeys));
     // A feature's plugins come after the format's, before the client's generic ones.
     const plugins = layout?.kind === 'lines'
       ? [...featurePlugins, ...linesPlugins(type.schema, layout, path, history)]
@@ -620,7 +630,8 @@ function drawFeatures() {
   // the editor has the focus: typing elsewhere (a feature's panel), the selection stays, but what to do with it is done.
   const actions = sel.empty || !v.hasFocus() ? [] : featureEditors.flatMap((f) => {
     try {
-      return f.editor.selectionActions?.(v) ?? [];
+      const entries = f.editor.selectionActions?.(v) ?? [];
+      return props.featureItems ? props.featureItems(f.id, entries) : entries.filter((e): e is FeatureMenuItem => !('command' in e));
     } catch (e) {
       console.error(`[kuraa] the feature ${f.id} could not say what to do with the selection`, e);
       return [];
@@ -696,7 +707,20 @@ watch([() => props.focusTitle, view], async ([want, v]) => {
   emit('titleFocused');
 }, { immediate: true });
 
-defineExpose({ openFind, command, view, docVersion, featureState, featureTick, tick, ...documentActions });
+/** Do a feature's `editor` command in this document (0091): true if it did. */
+function runFeatureCommand(feature: string, id: string, v: EditorView | null = view.value): boolean {
+  const f = featureEditors.find((x) => x.id === feature);
+  const run = f?.editor.commands?.[id];
+  if (!run || !v || v.isDestroyed) return false;
+  try {
+    return run(v);
+  } catch (e) {
+    console.error(`[kuraa] the feature ${feature} could not do ${id}`, e);
+    return false;
+  }
+}
+
+defineExpose({ openFind, command, view, docVersion, featureState, featureTick, tick, runFeatureCommand, ...documentActions });
 
 // Becoming read-only, or editable again (the workspace's rules changed): the view asks `editable` again.
 watch(() => props.readOnly, () => view.value?.setProps({}));

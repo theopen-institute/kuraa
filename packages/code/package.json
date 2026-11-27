@@ -1,0 +1,14 @@
+{
+  "name": "@kuraa/code",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@kuraa/feature-kit": "workspace:*",
+    "vue": "^3.5.45"
+  }
+}

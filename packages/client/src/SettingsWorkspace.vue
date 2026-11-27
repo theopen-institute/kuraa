@@ -1,14 +1,14 @@
 <script setup lang="ts">
 // Settings › Workspace (decision 0064): the open workspace's own settings, kept
-// in the workspace, for everyone in it: its packages; its devices, and inviting
+// in the workspace, for everyone in it: its features (and their parts: the
+// packages are Running code's, @kuraa/code, 0092); its devices, and inviting
 // people (DevicesSection); its groups and permissions (RulesSection); and, where
 // the host allows it, taking it off this host's list (its folder stays). Its
 // name is the section's heading, renamed there (SettingsWindow, 0061); its online
 // copy is the online copy component's, under Host's components (SettingsHost). Each of these is done at once, asking first
 // where it should, as it always was: none waits for the window to close.
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { HostApi, WorkspaceInfo } from './api.js';
-import type { ChunkRunner } from './runs.js';
 import { S } from './strings.js';
 import DevicesSection from './DevicesSection.vue';
 import RulesSection from './RulesSection.vue';
@@ -20,8 +20,6 @@ import type { ActiveFeature } from './features.js';
 const props = defineProps<{
   api: HostApi;
   workspace: WorkspaceInfo | null;
-  /** The open document's runner, if it runs code: through it, the workspace's packages are listed and changed. */
-  runner: ChunkRunner | null;
   /** The host lets people take this workspace off its list. */
   canRemove: boolean;
   /** Features (0082): how each the host has stands here, and the client halves on, for their settings. */
@@ -33,7 +31,7 @@ const props = defineProps<{
    */
   turnFeature: (id: string, on: boolean) => Promise<void>;
 }>();
-const emit = defineEmits<{ remove: []; invite: []; permissions: [path: string]; packages: [runner: ChunkRunner, engine: string] }>();
+const emit = defineEmits<{ remove: []; invite: []; permissions: [path: string] }>();
 
 // Features (0082): which this workspace uses, saved in it for everyone (who may change its settings turns them on and off).
 const featureBusy = ref<string | null>(null);
@@ -67,12 +65,6 @@ const subMount = computed(() => {
   return part && panel ? (el: HTMLElement) => panel.mount(el, part.ctx) : null;
 });
 
-// The engine whose packages the workspace's documents use, followed as the runner changes.
-const tick = ref(0);
-watch(() => props.runner, (r, _prev, onCleanup) => {
-  if (r) onCleanup(r.subscribe(() => tick.value++));
-}, { immediate: true });
-const packageEngine = computed(() => (void tick.value, props.runner?.packageEngine ?? null));
 </script>
 
 <template>
@@ -115,15 +107,6 @@ const packageEngine = computed(() => (void tick.value, props.runner?.packageEngi
         <template v-for="p in featureParts" :key="p.feature.id">
           <SubpanelLink v-if="p.feature.settings?.workspace && !p.feature.settings.workspace.inline" :title="p.feature.settings.workspace.label" :about="p.status.description" :testid="`open-feature-${p.feature.id}`" @open="featureSub = p.feature.id" />
         </template>
-      </section>
-      <section v-if="runner && packageEngine" class="settings-part">
-        <fieldset class="pref-group">
-          <legend>{{ S.sections.packages }}</legend>
-          <p class="pref-note">{{ S.sections.packagesAbout }}</p>
-          <div class="pref-row">
-            <button type="button" data-testid="settings-packages" @click="emit('packages', runner, packageEngine)">{{ S.code.packages }}</button>
-          </div>
-        </fieldset>
       </section>
       <DevicesSection :api="api" @invite="emit('invite')" />
       <RulesSection :api="api" @permissions="(p) => emit('permissions', p)" />

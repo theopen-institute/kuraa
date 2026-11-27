@@ -2,8 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
+  // Components' client halves draw with Vue (0087): the tests that load them (apps/web/test) read their .vue files.
+  plugins: [vue()],
   test: {
     include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
     testTimeout: 60_000,

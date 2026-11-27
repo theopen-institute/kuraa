@@ -2,6 +2,8 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import pluginVue from 'eslint-plugin-vue';
+import { readdirSync, readFileSync } from 'node:fs';
+import { URL } from 'node:url';
 
 const yjsFamily = ['yjs', 'y-prosemirror', 'y-protocols', 'y-indexeddb', '@hocuspocus/*'];
 const restrict = (patterns, message) => ({
@@ -12,8 +14,26 @@ const merge = (...rules) => {
   return { 'no-restricted-imports': ['error', { patterns }] };
 };
 const noYjs = restrict(yjsFamily, 'Only @kuraa/session may import Yjs, y-prosemirror or Hocuspocus.');
-// The core imports no feature (decision 0082): whoever starts it passes them, as run components.
-const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: '^@kuraa/(feature-(?!kit(/|$))[^/]+|features|annotations)(/.*)?$', message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, it may.' }] }] };
+// The features (decisions 0082, 0091): the standard list's (what @kuraa/features depends on) and the
+// example. Every package that depends on the feature contract is one of these or the core: a new feature
+// not in the list is said here, so the rules below never miss one.
+const pkg = (dir) => JSON.parse(readFileSync(new URL(`./packages/${dir}/package.json`, import.meta.url), 'utf8'));
+const FEATURES = [
+  ...Object.keys(pkg('features').dependencies).filter((n) => n.startsWith('@kuraa/') && n !== '@kuraa/feature-kit').map((n) => n.slice('@kuraa/'.length)),
+  'feature-example',
+];
+const CORE_USES_CONTRACT = ['client', 'host', 'feature-kit', 'features'];
+for (const dir of readdirSync(new URL('./packages', import.meta.url))) {
+  let deps;
+  try { deps = pkg(dir).dependencies ?? {}; } catch { continue; }
+  if ('@kuraa/feature-kit' in deps && !FEATURES.includes(dir) && !CORE_USES_CONTRACT.includes(dir)) {
+    throw new Error(`packages/${dir} depends on @kuraa/feature-kit but is not a feature the lint rules know: add it to @kuraa/features (or to FEATURES in eslint.config.js).`);
+  }
+}
+const featureSrc = (glob) => FEATURES.map((f) => `packages/${f}/src/${glob}`);
+// The core imports no feature: whoever starts it passes them, as run components. Their contract
+// (@kuraa/feature-kit) and what they draw with (@kuraa/feature-ui) it may.
+const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: `^@kuraa/(${[...FEATURES, 'features'].join('|')}|feature-(?!(kit|ui)(/|$))[^/]+)(/.*)?$`, message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, and @kuraa/feature-ui, it may.' }] }] };
 
 export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', '.dev-workspaces/**'] },
@@ -76,21 +96,32 @@ export default tseslint.config(
     ),
   },
   {
-    // Features (docs/decisions/0082-annotations.md) and their contract: a host half and a client half that
-    // meet the core only through @kuraa/feature-kit. No Yjs (the session gives rooms' state as JSON and
-    // anchors), no host, client or session; the client half and the shared entry use no Node.
-    files: ['packages/feature-kit/src/**', 'packages/feature-*/src/**', 'packages/features/src/**', 'packages/annotations/src/**'],
+    // Features (0082, 0091) and their contract: a host half and a client half that meet the core only
+    // through @kuraa/feature-kit (and draw with @kuraa/feature-ui). No Yjs (the session gives rooms'
+    // state as JSON and anchors), no host, client or session. A feature may use Vue inside its own
+    // package (0087); the contract may not.
+    files: ['packages/feature-kit/src/**', 'packages/features/src/**', ...featureSrc('**')],
     rules: merge(
-      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*'], 'Features reach the core only through @kuraa/feature-kit (and the kernel, editor-kit and formats).'),
+      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', '@codemirror/*'], 'Features reach the core only through @kuraa/feature-kit (and the kernel, editor-kit, feature-ui and formats).'),
       noYjs,
     ),
   },
   {
-    files: ['packages/feature-kit/src/index.ts', 'packages/feature-kit/src/client.ts', 'packages/feature-*/src/client.ts', 'packages/feature-*/src/client/**', 'packages/features/src/client.ts', 'packages/annotations/src/client.ts', 'packages/annotations/src/format.ts'],
+    files: ['packages/feature-kit/src/**'],
+    rules: merge(restrict(['vue', '@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', '@codemirror/*'], 'The feature contract is free of any framework, and of the core.'), noYjs),
+  },
+  {
+    // A feature's client half (and what it draws, its .vue files) runs in the browser.
+    files: ['packages/feature-kit/src/index.ts', 'packages/feature-kit/src/client.ts', 'packages/features/src/client.ts', ...featureSrc('client.ts'), ...featureSrc('client/**'), ...featureSrc('**/*.vue'), 'packages/annotations/src/format.ts'],
     rules: merge(
-      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', 'vue', '@codemirror/*', 'node:*'], 'A feature’s client half runs in the browser, and reaches the client only through @kuraa/feature-kit/client.'),
+      restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/run-kit', '@codemirror/*', 'node:*'], 'A feature’s client half runs in the browser, and reaches the client only through @kuraa/feature-kit/client.'),
       noYjs,
     ),
+  },
+  {
+    // What components draw with: the kernel's types, the DOM, and Vue for its components.
+    files: ['packages/feature-ui/src/**'],
+    rules: merge(restrict(['@kuraa/host*', '@kuraa/client*', '@kuraa/session*', '@kuraa/feature-kit*', '@kuraa/run-kit', 'node:*', '@codemirror/*', 'prosemirror-*'], 'feature-ui is what components draw with: it knows no feature and no part of the core.'), noYjs),
   },
   {
     files: ['packages/editor-kit/src/**'],

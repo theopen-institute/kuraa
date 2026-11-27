@@ -467,7 +467,7 @@ export class Hub {
         try {
           // A server joins by a link for a server, as no person (0099).
           if (this.o.server && decodeLink(invitation).grant?.role !== 'server') throw new Error('A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
-          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}) });
+          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}), ...(this.o.peers?.signing ? { signing: this.o.peers.signing } : {}) });
         } catch (err) {
           // Leave nothing half-made behind.
           // (On Windows a process that has just ended may hold a file in it for a moment.)

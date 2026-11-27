@@ -874,6 +874,25 @@ importers:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
 
+  packages/server:
+    dependencies:
+      '@kuraa/features':
+        specifier: workspace:*
+        version: link:../features
+      '@kuraa/host':
+        specifier: workspace:*
+        version: link:../host
+      '@kuraa/run-components':
+        specifier: workspace:*
+        version: link:../run-components
+    devDependencies:
+      hypercore-crypto:
+        specifier: ^3.7.0
+        version: 3.7.0(bare-buffer@3.7.3)(bare-events@2.9.2)(bare-url@2.5.8)
+      hyperdht:
+        specifier: ^6.36.0
+        version: 6.36.0(bare-buffer@3.7.3)(bare-url@2.5.8)
+
   packages/session:
     dependencies:
       '@hocuspocus/provider':

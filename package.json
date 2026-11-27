@@ -15,6 +15,7 @@
     "dev": "tsx scripts/dev.ts",
     "try": "tsx scripts/try.ts",
     "host": "tsx packages/host/src/cli.ts",
+    "server": "tsx packages/server/src/cli.ts",
     "web:dev": "pnpm --filter @kuraa/web dev",
     "web:build": "pnpm --filter @kuraa/web build",
     "desktop": "pnpm --filter @kuraa/desktop start",

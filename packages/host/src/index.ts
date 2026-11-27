@@ -9,6 +9,8 @@ export { lastResort, type LastResortOptions } from './lastresort.js';
 export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './workspace.js';
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
+/** A key pair kept in a file, made the first time (keys.ts): a server's own signing key (@kuraa/server, 0099). */
+export { keptKey, type KeyPair } from './keys.js';
 export type { JoinOptions, JoinProgress, Joined } from './peers/join.js';
 export { Hub, startHub, slugOf, isLoopback, OWNER_OFF, type HubOptions, type HubWorkspace, type HubList, type FolderListing, type RunningHub } from './hub.js';
 export { SettingsStore, DEFAULT_SETTINGS, DATA_MARKER, settingsFrom, readSettings, writeSettings, checkDataDir, fromSettings, type Settings, type SettingsView } from './settings.js';

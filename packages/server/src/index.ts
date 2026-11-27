@@ -15,7 +15,7 @@
 // - where it is reached (`server.json`: its address and access code, readable by
 //   whoever runs it alone), for those commands to ask it.
 import { randomBytes } from 'node:crypto';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -79,6 +79,9 @@ export function serverKey(data = defaultServerData()): Promise<KeyPair> {
 /** Start a server: a hub of its workspaces as no person, with its own key (0099). */
 export async function startServer(o: ServerOptions = {}): Promise<RunningServer> {
   const data = resolve(o.data ?? defaultServerData());
+  // Its folder, and all it holds, for whoever runs it alone (0099): the workspaces it holds, private ones included.
+  await mkdir(data, { recursive: true, mode: 0o700 });
+  await chmod(data, 0o700);
   const signing = await serverKey(data);
   const key = signing.publicKey.toString('hex');
   const peers: PeerOptions = Object.fromEntries(Object.entries({

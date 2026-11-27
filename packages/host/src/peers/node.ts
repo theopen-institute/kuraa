@@ -1504,7 +1504,9 @@ export class PeerNode {
     link.spaces = readHeads(h.spaces);
     link.outputs = readOutputs(h.outputs);
     if (same) await this.gossip(link, h);
-    if (same) this.noteHints(link.key, h);
+    // Where to reach others (relays, DHT nodes, addresses): only from a device that is someone here, a person's or a
+    // server's (0099), not from one let in by a link a moment ago.
+    if (same && (!this.access?.policy.founded || this.access.personOf.has(link.key))) this.noteHints(link.key, h);
     this.hints.seen[link.key] = Date.now();
     this.events.accepted?.(link);
     this.tellPresence();

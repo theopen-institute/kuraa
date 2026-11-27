@@ -363,11 +363,32 @@ export class Identity {
     const sent = list.slice(0, MAX_PROOF).map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === ws.id && !known.has(r.sig));
     const mine = this.about(device, [...have, ...sent]).filter((r) => !known.has(r.sig));
     if (!mine.length) return [];
+    // Worth weighing (0099: working the policy out costs, and anyone may send records): its person already has a
+    // place here, or its key is a server's, or it carries a join whose grant an admin here signed. Else, no.
+    if (!(await this.mayProve(mine))) return [];
     const all = [...have, ...mine];
     const policy = await this.evaluatePolicy(all, ws.id, await this.pin());
     if (!this.devicesBy(all, policy, ws.id, new Set(await this.getAll('kuraa.removed'))).in.has(device)) return [];
     const counted = new Set(policy.applied);
     return mine.filter((r) => r.kind !== 'policy' || counted.has(r.subject));
+  }
+
+  /** Whether records a device not known to be in sends could show it is (proven): cheap, before the policy is worked out. */
+  private async mayProve(mine: MemberRecord[]): Promise<boolean> {
+    const policy = await this.policy();
+    if (!policy.founded) return true;
+    if (mine.some((r) => r.kind === 'vouch' && !!r.person && (policy.role(r.person) !== null || policy.cutoffs.has(r.person)))) return true;
+    if (mine.some((r) => r.kind === 'signs' && policy.isServer(r.subject))) return true;
+    const ws = await this.workspace();
+    const pin = await this.pin();
+    const w = this.who(await this.records());
+    return mine.some((r) => {
+      const op = r.op;
+      if (r.kind !== 'policy' || op?.t !== 'join' || op.issuer === undefined) return false;
+      const granter = w.personOf.get(op.granter)?.key ?? null;
+      if (!policy.isAdmin(granter, op.group)) return false;
+      return crypto.verify(admittedGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+    });
   }
 
   /**

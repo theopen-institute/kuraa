@@ -2078,7 +2078,7 @@ export class Host {
    * refused; where both sides' were, it keeps its version where they meet.
    */
   private async judgeBoth(x: string, y: string, space: string | null = null): Promise<GateResult> {
-    const [theirs, ours] = await Promise.all([this.gate!(x, y, space), this.gate!(y, x, space)]);
+    const [theirs, ours] = await Promise.all([this.gate!(x, y, space), this.gate!(y, x, space, { ours: true })]);
     const waitFor = [...new Set([...theirs.waitFor, ...ours.waitFor])].sort();
     if (waitFor.length) return { keeps: new Map(), refused: [], waitFor };
     const keeps = new Map([...theirs.keeps, ...ours.keeps]);
@@ -2101,7 +2101,8 @@ export class Host {
   }
 
   /** Judges the commits that `y` brings to `x` by the workspace's write rules (peers/gate.ts), where it syncs with other devices. */
-  gate: ((x: string | null, y: string, space?: string | null) => Promise<GateResult>) | null = null;
+  /** `ours`: the commits judged are this device's own (the other side of a merge), not the device's bringing them. */
+  gate: ((x: string | null, y: string, space?: string | null, o?: { ours?: boolean }) => Promise<GateResult>) | null = null;
 
   /**
    * Where a commit took a room's file, if one did (it is in no file now, and the

@@ -329,17 +329,17 @@ export class Peers {
     };
     this.stateDir = stateDir;
     // Who may change what, where work comes in (0066).
-    host.gate = (x, y, space) => this.gate(x, y, space ?? null);
+    host.gate = (x, y, space, o) => this.gate(x, y, space ?? null, o?.ours ?? false);
   }
 
   private readonly stateDir: string;
 
   /** The workspace's write rules, applied to the commits `y` brings to `x` (gate.ts). */
-  private async gate(x: string | null, y: string, space: string | null = null): Promise<GateResult> {
+  private async gate(x: string | null, y: string, space: string | null = null, ours = false): Promise<GateResult> {
     const ctx = await this.gateContext();
     if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
-    // Who the device bringing them is (0099): what no one known signed is its.
-    const from = this.bringing ? await this.node.identity.whoIs(this.bringing) : undefined;
+    // Who the device bringing them is (0099): what no one known signed is its. Not for this device's own commits.
+    const from = this.bringing && !ours ? await this.node.identity.whoIs(this.bringing) : undefined;
     return gate(this.host.git, x, y, { ...ctx, space, from, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
   }
 
@@ -796,6 +796,8 @@ export class Peers {
   async removeDevice(key: string): Promise<{ revoked: boolean }> {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
+    // A server's device (0099): removing it would drop the whole server's key, for good. A server is taken out as one.
+    if (await this.node.identity.isServerDevice(key)) throw new NotAllowed('This is a server’s device: take the server out under Servers instead (Remove…)');
     // An admin, or the same person: one's own lost or retired computer (0068).
     if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
     // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.

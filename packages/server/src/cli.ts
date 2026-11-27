@@ -12,7 +12,8 @@
 //   [--bootstrap host:port]... [--relay <key>]...   a private network's DHT nodes; relays
 //   [--port 4322] [--host 127.0.0.1] [--token T]   its own API, for join and list: it serves no app (headless, for now)
 //   [--auto-update]                    a release, installed, updates itself (0052)
-// server join <invite link> [--data <folder>]   bring a workspace onto the running server, by a link for a server
+// server join <invite link | -> [--data <folder>]   bring a workspace onto the running server, by a link for a server
+//                                      (-: read from standard input, so it is not on the command line)
 //                                      (its owner makes one: People and computers › Add a server…)
 // server list [--data <folder>]        the workspaces it holds, and whether each has taken it in
 // server key [--data <folder>]         its key: what workspaces know it by
@@ -47,6 +48,8 @@ function whole(flag: string, value: string | undefined, min = 1): number | undef
 /** Run the server's command line on `argv` (what follows the program, and `server` where released). */
 export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Promise<void> {
   const name = o.name ?? (o.released ? 'kuraa-host server' : 'kuraa-server');
+  // What it writes (its workspaces' files, git's), for whoever runs it alone (0099).
+  process.umask(0o077);
   let parsed: ReturnType<typeof parse>;
   try {
     parsed = parse(argv);
@@ -59,7 +62,8 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
 
   try {
     if (command === 'join') {
-      const link = rest[0];
+      // `-`: the link from standard input, so it is not on the command line, where others on this computer see it.
+      const link = rest[0] === '-' ? (await readStdin()).trim() : rest[0];
       if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (People and computers › Add a server…)`, 2);
       say('joining…');
       // How it is going, as it changes: each step; while copying, each tenth of each of git's stages.
@@ -147,6 +151,13 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     if (!o.released) say('--auto-update: this server runs from the repository; update it with git pull');
     else autoUpdate({ ...o.released, log: say, restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
   }
+}
+
+/** All of standard input, as text. */
+async function readStdin(): Promise<string> {
+  const parts: Buffer[] = [];
+  for await (const chunk of process.stdin) parts.push(chunk as Buffer);
+  return Buffer.concat(parts).toString('utf8');
 }
 
 function parse(argv: string[]) {

@@ -41,8 +41,29 @@ function open(port: number, log: (m: string) => void): Promise<Listener | null> 
  * that device, with what came after put back. Read without making the socket
  * flow, so nothing that comes meanwhile is lost before the device reads it.
  */
+/** Connections that have not said which device they are for yet: at most this many, and this many from one address (0099). */
+const MAX_WAITING = 256;
+const MAX_WAITING_FROM = 16;
+let waiting = 0;
+const waitingFrom = new Map<string, number>();
+
 function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): void {
   sock.on('error', () => undefined);
+  // A server's port is open to anyone (0099): connections that say nothing hold a socket each, so only so many.
+  const from = sock.remoteAddress ?? '';
+  if (waiting >= MAX_WAITING || (waitingFrom.get(from) ?? 0) >= MAX_WAITING_FROM) return void sock.destroy();
+  waiting++;
+  waitingFrom.set(from, (waitingFrom.get(from) ?? 0) + 1);
+  let counted = true;
+  const done = () => {
+    if (!counted) return;
+    counted = false;
+    waiting--;
+    const left = (waitingFrom.get(from) ?? 1) - 1;
+    if (left) waitingFrom.set(from, left);
+    else waitingFrom.delete(from);
+  };
+  sock.once('close', done);
   sock.setTimeout(10_000, () => sock.destroy());
   let head = Buffer.alloc(0);
   const onReadable = () => {
@@ -59,6 +80,8 @@ function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): vo
       if (!handler) return void sock.destroy();
       const rest = head.subarray(nl + 1);
       if (rest.length) sock.unshift(rest);
+      done();
+      sock.setTimeout(0);
       return handler(sock);
     }
   };

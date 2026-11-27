@@ -329,6 +329,7 @@ systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it 
 loginctl enable-linger "$USER"                                         # to run while no one is logged in
 ~/.kuraa/server/kuraa-host server join 'kuraa-invite:…'                # the owner's link for a server
 ~/.kuraa/server/kuraa-host server list                                 # what it holds, and whether each took it in
+~/.kuraa/server/kuraa-host server remove <id>                          # let a workspace go (its copy here taken away)
 ```
 
 From the repository, `pnpm server` is the same (`pnpm server join …`, `pnpm server list`,

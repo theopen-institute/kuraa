@@ -195,6 +195,95 @@ So, besides being taken out to be invited back (above):
   and only signed releases are taken (0052), so a device that says so falsely makes nothing happen
   but a look.
 
+## An audit, and what it changed
+
+The owner asked for an audit of the whole of it, for security, efficiency and reliability, and then:
+
+> "fix them all, starting with the rollback, before moving forward with the release if possible."
+
+Three reviews, made apart, found about forty-five things; each was checked against the code before it was
+fixed, and each fix has a test.
+
+**Updates.** A release that does not start can no longer leave every server that took it stopped for
+good. The launcher counts the starts of the version `current` names; a version that runs well for
+two minutes writes itself to `good`; three starts without that, and the launcher goes back to the good
+one and marks the other `failed`, never to be taken again (a later release is). The launcher, which
+never changed before, is rewritten by the first version that runs well with it. A release says the
+Node it needs (`engines.node`), and one this Node cannot run is not put in place. A release servers
+update to is signed, or not built (`KURAA_UPDATES` without `SERVER_SIGNING_KEY` fails); one built
+without the key does not update itself. What a device says of its version, or protocol, counts only
+from a device in the workspace, once an hour.
+
+**A server changing nothing, for good.**
+- A commit no one known signed (unsigned, or by a key that is no one's here) is the device's it came
+  from: from a server, or from a device that is no one in the workspace, refused; from a person's,
+  judged as theirs. (Before, a server changed anything where no rule said otherwise by not signing.) A
+  device's own commits, on the other side of a merge it makes, are its own.
+- A merge's word that it kept a file out ("Kept f as it was: not Bo to change") is taken only where
+  this device would keep that change out too; and a merge a server made is made again here whatever
+  version of merging it names (else, naming another, it could take one side's text and undo the
+  other's change unseen).
+- A device joining takes its first copy, and the secret, from a person's device, not a server's; a
+  server lets no one in (it closes, without a word, so the device goes on to a person's), and announces
+  no invite link.
+- A device that is no one yet (let in by a link, its join not come) edits no live room and leads none.
+- The workspace's secret, invite links and their revocation are taken only from people's devices; the
+  latest 32 links are announced, not every one.
+- A server taken out stays the owner's to drop for good; **Remove…** unlinks the owner's unused links
+  for a server. The HTTP API refuses to remove a server's device as a computer (which would drop the
+  whole server's key).
+- A tunnel to another workspace's device on the same computer only for a device in that workspace;
+  hints (relays, DHT nodes, addresses) only from devices that are someone here; connections not yet
+  past their first line limited (256, and 16 from one address); a stranger's records weighed only
+  where they could show it in (its person has a place, its key is a server's, or it carries a join an
+  admin's grant signed).
+- A server's folder and all it writes are its user's alone (0700, umask 077); `server join -` takes
+  the link from standard input.
+- (Run outputs of documents in private spaces, thought to reach every device, did not: they were never
+  published to the shared ref.)
+
+**Its state, whatever stops it.** One server to a folder (`server.lock`, a process gone taken over).
+It answers at once, its workspaces opening meanwhile, three at a time (`server list` says *opening…*).
+`server.json` is written whole, as soon as the API listens; one left by a process gone is not taken. A
+join cut short (the server stopped, the computer off) is taken up where its copy was checked out, and
+taken away where not; git's locks a stop left are let go of. Each workspace's device key is kept apart
+(`server-data/devices/`), so a join tried again is the same device, not one more the members look for
+for ever, and a workspace held already is the one held (joined again where the server was taken out).
+A member joining again is welcomed (it waited for ever). Restarting to update waits for a join under
+way; stopping never waits more than a minute; an uncaught exception stops it, to be started again; the
+service stops the server, not its git processes (`KillMode=mixed`). Records that cannot be read are
+said, never taken for none (and written over); damaged, set aside. The workspaces' list is on the disk
+for sure before it is used. `server remove <id>` lets a workspace go. A UDP port taken is said.
+
+**Efficiency.** The policy is worked out along the line where nothing was made at the same time (each
+operation's past is the last one's with it applied), and whole only where operations were at once: 400
+operations in 18 ms, not 6 s (it grew as the cube of the history), the two ways checked to agree over
+histories made at random; its memo keyed on the records it is worked out from alone. Each commit's
+verdict is kept, by the records it was judged by: judged once, not at every merge and on both sides of
+it. Changes are told to the other devices one run at a time, those coming meanwhile together, what
+every hello says alike read once (each member's acknowledgement had every device told again). A server
+makes the merges, and members take them (else a member with the lower key had to merge, and the work
+stayed apart if they left first). A server watches no folder (on Linux a watch for every file, `.git`
+included), looks on no local network, keeps no online copy; its first copy may bring 64 GiB, and holds
+up no other join; git's housekeeping runs in turn, one thread. A device away a day is dialled every six
+hours at most. One link per pair of computers for up to 1024 workspaces. Identity memos keyed by a
+hash, not every signature joined.
+
+## Not yet (after the audit)
+
+- **One presence on the network for the whole server**, not one for each workspace (its own key, its
+  own DHT announcements, a connection to each member for each): a server of many workspaces should
+  have one, with workspaces carried over one connection to each member's computer, and need not
+  announce what members reach by its address.
+- **Members meet each other through the server** (tunnels, when they cannot connect directly), as well
+  as syncing through it. Their live rooms need a link between them, so these stay; syncing over them
+  where the server has both could be left to the server.
+- **A limit on git processes at once.** A plain one could leave a fetch waiting on a git process of
+  the same server that is waiting for room under the limit; it needs the long-running ones (fetches,
+  the uploads they read) kept apart.
+- **Each operation's past held whole** (the policy's): fine at hundreds of operations, heavy at many
+  thousands.
+
 ## Not yet (in the app)
 
 - **Naming a server among a folder's readers** in Permissions: the policy takes it (an audience

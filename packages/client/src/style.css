@@ -802,10 +802,10 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .document-menu .menu-keys { margin-left: 16px; color: var(--muted); font-size: 12px; }
 .document-menu .menu-divider { height: 1px; margin: 4px 6px; background: var(--border); }
 .document-menu .menu-note { margin: 2px 0; padding: 2px 10px 2px calc(1em + 12px); color: var(--muted); font-size: 12px; }
-.document-menu .menu-footer { margin: 4px 0 0; padding: 6px 10px 2px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-/* A line features add below it (0094: the word count): under the same rule, not one of its own. */
-.document-menu .menu-footer.menu-footer-more { margin-top: 0; padding-top: 2px; border-top: 0; }
-.document-menu .menu-footer-action { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 4px; padding-bottom: 4px; cursor: pointer; font: inherit; font-size: 12px; }
+/* The foot, under one rule (0094): what features add (the word count), then whether it is saved. */
+.document-menu .menu-footer { margin: 4px 0 0; padding: 4px 0 2px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.document-menu .menu-footer-line { margin: 0; padding: 2px 10px; }
+.document-menu .menu-footer-action { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 4px; color: inherit; cursor: pointer; font: inherit; font-size: 12px; }
 .document-menu .menu-footer-action:hover, .document-menu .menu-footer-action:focus-visible { color: var(--text); background: var(--selected); outline: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .context-menu .context-icon.spinning svg { animation: none; opacity: 0.5; } }

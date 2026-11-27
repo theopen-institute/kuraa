@@ -345,7 +345,7 @@ this proposal adds it.
 
 - **In the margin**: a 💬 beside each commented passage, opening its thread (*revised*: the threads
   are in the Comments panel, not cards in the margin, which is too narrow for them).
-- **Comments** panel: the document's threads in order, each comment with its replies; reply, edit
+  or delete your own. **Recent comments**: the workspace's newest, each opening at its passage (*revised*: reached from a link at the top of the Comments panel, and back, not the ⋯ menu; the owner: "is it necessary to have separate 'Recent Comments' and 'Retreive coded passages' menu lines? Couldn't those panels be accessed from the main comments/codes panels?"; so too **Retrieve coded passages**, from the top of the Codes panel).
   or delete your own. **Recent comments**: the workspace's newest, each opening at its passage.
 
 ## Build order
@@ -507,7 +507,7 @@ method a project chooses.
   name or make one and apply it; coded passages underlined in their codes' colours, a mark in the
   margin for each passage (saying its codes, the count where several), opening the codings there,
   yours to remove; the codebook as a tree with each code's count (`GET counts`), each to edit
-  (name, meaning, colour, parent), merge or delete; **Retrieve** (from a code, or the ⋯ menu):
+  (name, meaning, colour, parent), merge or delete; **Retrieve** (from a code, or the top of the Codes panel):
   every passage coded with a code, and those under it if asked (`GET retrieve`), across the
   documents this device holds, each opening at its passage.
 

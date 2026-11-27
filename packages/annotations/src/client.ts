@@ -798,6 +798,24 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, o: { cls?: string; te
   for (const k of kids) if (k !== null) e.append(k);
   return e;
 };
+
+/**
+ * A link at the top of a panel to its companion: the document's Comments and
+ * Recent comments (in every document), Codes and Retrieve coded passages; one
+ * in place of the other, as a tab is (the ⋯ menu offers Comments and Codes).
+ */
+function viewLink(pctx: FeaturePanelContext, text: string, testid: string, panel: string, needsDocument = false): HTMLElement {
+  const b = el('button', { cls: 'kuraa-view-link', text, testid });
+  b.type = 'button';
+  b.onclick = () => pctx.openPanel(panel);
+  // To the document's comments: only while a document is open.
+  if (needsDocument) {
+    const show = () => (b.hidden = !pctx.path());
+    show();
+    pctx.onDocument(show);
+  }
+  return b;
+}
 const button = (label: string, run: () => void, testid?: string, cls?: string) => {
   const b = el('button', { text: label, testid, cls });
   b.type = 'button';
@@ -812,7 +830,7 @@ const when = (iso: string) => {
 function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-comments', testid: 'annotations-panel' });
-  root.append(body);
+  root.append(viewLink(pctx, 'Recent comments in every document →', 'annotations-to-recent', 'recent'), body);
   let store: Store | null = null;
   const watch = () => {
     const now = stores.get(pctx.path() ?? '') ?? null;
@@ -1016,7 +1034,7 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
 function mountRecent(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-comments', testid: 'annotations-recent' });
-  root.append(body);
+  root.append(viewLink(pctx, '← Comments in this document', 'annotations-to-comments', 'comments', true), body);
   let live = true;
   const draw = async () => {
     if (!commenting(pctx)) {
@@ -1077,7 +1095,7 @@ const retrieveListeners = new Set<() => void>();
 function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-comments kuraa-codes', testid: 'annotations-codes' });
-  root.append(body);
+  root.append(viewLink(pctx, 'Retrieve coded passages →', 'annotations-to-retrieve', 'retrieve'), body);
   const codes = codesOf(pctx);
   let counts: { [id: string]: number } = {};
   let editing: string | null = null;
@@ -1263,7 +1281,7 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
 function mountRetrieve(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-comments', testid: 'annotations-retrieve' });
-  root.append(body);
+  root.append(viewLink(pctx, '← Codes', 'annotations-to-codes', 'codes'), body);
   const codes = codesOf(pctx);
   let wanted = retrieveWanted;
   let rows: { path: string; person: string; id: string; code: string; by: string; created: string; quote: string | null; at: { from: number; to: number } | null }[] = [];
@@ -1398,6 +1416,8 @@ function injectStyle() {
 .kuraa-meta { color: var(--muted, #666); font-size: 12px; }
 .kuraa-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .kuraa-note { color: var(--muted, #666); margin: 0; }
+.kuraa-view-link { display: block; border: 0; background: none; padding: 6px 10px 0; color: var(--accent, #2e6b5a); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.kuraa-view-link:hover { text-decoration: underline; }
 .kuraa-actions { display: flex; gap: 6px; }
 .kuraa-composer { display: flex; flex-direction: column; gap: 6px; }
 .kuraa-composer textarea { min-height: 64px; resize: vertical; font: inherit; padding: 6px; border: 1px solid var(--border, #ddd); border-radius: 4px; background: var(--bg, #fff); color: inherit; }
@@ -1477,11 +1497,9 @@ export const annotationsClient = defineClientFeature({
   documentMenu: (ctx) => [
     ...(commenting(ctx) ? [
       { label: 'Comments', keys: PANEL_KEYS, testid: 'menu-comments', run: () => ctx.openPanel('comments') },
-      { label: 'Recent comments', testid: 'menu-recent-comments', run: () => ctx.openPanel('recent') },
     ] : []),
     ...(coding(ctx) ? [
       { label: 'Codes', testid: 'menu-codes', run: () => ctx.openPanel('codes') },
-      { label: 'Retrieve coded passages', testid: 'menu-retrieve', run: () => ctx.openPanel('retrieve') },
     ] : []),
   ],
   settings: { workspace: { label: 'Annotations', inline: true, mount: mountSettings } },

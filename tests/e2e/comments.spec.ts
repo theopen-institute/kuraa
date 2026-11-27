@@ -106,12 +106,15 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await expect(panel.getByTestId('annotations-thread').first()).toContainText('On the document');
   await expect.poll(() => annotations(path).length).toBe(3);
 
-  // The workspace's newest, from the document's menu.
-  await page.getByTestId('document-menu-button').click();
-  await page.getByTestId('menu-recent-comments').click();
+  // The workspace's newest, from the link at the top of the document's comments; and back.
+  await page.getByTestId('annotations-to-recent').click();
   const recent = page.getByTestId('feature-panel-annotations-recent');
   await expect(recent.getByTestId('annotations-recent-row').first()).toBeVisible();
   await expect(recent).toContainText('A short interview');
+  await recent.getByTestId('annotations-to-comments').click();
+  await expect(panel).toBeVisible();
+  await panel.getByRole('button', { name: 'Close Comments' }).click();
+  await expect(panel).toHaveCount(0);
 
   // Comments off on their own (under Annotations, in the list of features): nothing of them shown, coding's switch beside it.
   await openSettings(page);

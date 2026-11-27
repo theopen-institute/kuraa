@@ -142,16 +142,19 @@ function onKey(e: KeyboardEvent) {
         <span v-if="item.keys" class="menu-keys" aria-hidden="true">{{ keyLabel(item.keys) }}</span>
       </button>
 
-      <p v-if="status" class="menu-footer" role="none" :title="status.lastCommit ? S.menu.versionDetails(status.lastCommit.slice(0, 7)) : undefined">
-        <!-- Whether what was typed here is saved (at the host), in plain words; then the latest version, if there is one this session. -->
-        <span data-testid="save-state">{{ status.unsynced === 0 ? S.menu.allSaved : status.connection === 'connected' ? S.menu.saving : S.menu.notSaved(status.unsynced) }}</span>
-        <template v-if="status.lastCommitAt"> · <span data-testid="last-commit">{{ S.menu.lastVersion(time(status.lastCommitAt)) }}</span></template>
-      </p>
-      <template v-for="line in featureFooter ?? []" :key="line.text">
-        <!-- A line that does something is chosen as an item is (click, Enter; the arrows reach it). -->
-        <button v-if="line.run" type="button" role="menuitem" class="menu-footer menu-footer-more menu-footer-action" :title="line.title" :data-testid="line.testid" @click="then(() => line.run!())">{{ line.text }}</button>
-        <p v-else class="menu-footer menu-footer-more" role="none" :title="line.title" :data-testid="line.testid">{{ line.text }}</p>
-      </template>
+      <!-- The foot, under one rule: what features add (the word count), then whether it is saved. -->
+      <div v-if="status || featureFooter?.length" class="menu-footer" role="none">
+        <template v-for="line in featureFooter ?? []" :key="line.text">
+          <!-- A line that does something is chosen as an item is (click, Enter; the arrows reach it). -->
+          <button v-if="line.run" type="button" role="menuitem" class="menu-footer-line menu-footer-action" :title="line.title" :data-testid="line.testid" @click="then(() => line.run!())">{{ line.text }}</button>
+          <p v-else class="menu-footer-line" role="none" :title="line.title" :data-testid="line.testid">{{ line.text }}</p>
+        </template>
+        <p v-if="status" class="menu-footer-line" role="none" :title="status.lastCommit ? S.menu.versionDetails(status.lastCommit.slice(0, 7)) : undefined">
+          <!-- Whether what was typed here is saved (at the host), in plain words; then the latest version, if there is one this session. -->
+          <span data-testid="save-state">{{ status.unsynced === 0 ? S.menu.allSaved : status.connection === 'connected' ? S.menu.saving : S.menu.notSaved(status.unsynced) }}</span>
+          <template v-if="status.lastCommitAt"> · <span data-testid="last-commit">{{ S.menu.lastVersion(time(status.lastCommitAt)) }}</span></template>
+        </p>
+      </div>
     </div>
   </div>
 </template>

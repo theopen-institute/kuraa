@@ -10,8 +10,9 @@
 //     nothing to paste.
 // It serves a folder of workspaces, as the desktop app does: .dev-workspaces/ in
 // this repository (git-ignored), or --workspaces. The first time, it starts with a
-// Scratch workspace holding a sample file. --dir serves one folder instead, as
-// `kuraa-host --dir` does.
+// Scratch workspace holding a sample file, a repository of its own (never the
+// checkout its folder is in; a list naming that is mended as it starts). --dir
+// serves one folder instead, as `kuraa-host --dir` does.
 //
 // Its Preferences (the hub's settings, decision 0047) are kept in
 // .dev-workspaces/settings.json, or beside --workspaces; the page changes them as
@@ -26,7 +27,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gitIdentity, startHub } from '../packages/host/src/index.js';
 
@@ -60,19 +61,26 @@ async function served(): Promise<{ flag: '--dir' | '--workspaces'; dir: string }
   if (values.dir) return { flag: '--dir', dir: resolve(values.dir) };
   const root = resolve(values.workspaces ?? join(ROOT, '.dev-workspaces'));
   const list = join(root, '.kuraa-workspaces.json');
-  // A workspace that is this checkout itself (Scratch, added in a git worktree before the hub made it a
-  // repository of its own): taken off the list, and Scratch added again.
+  // A workspace that holds the workspaces folder (this checkout, or the repository --workspaces is in: Scratch,
+  // added before the hub made it a repository of its own): taken off the list, its files untouched, and Scratch
+  // added again, whatever else the list has.
+  let mended = false;
   if (existsSync(list)) {
     const entries = JSON.parse(readFileSync(list, 'utf8')) as { dir: string }[];
     const real = (p: string) => (existsSync(p) ? realpathSync(p) : resolve(p));
-    const kept = entries.filter((e) => real(e.dir) !== real(ROOT));
+    const holds = (outer: string) => {
+      const r = relative(real(outer), real(root));
+      return r === '' || (!r.startsWith('..') && !isAbsolute(r));
+    };
+    const kept = entries.filter((e) => !holds(e.dir));
     if (kept.length !== entries.length) {
-      console.log('[dev] Scratch was this checkout itself: made again, as a workspace of its own');
+      console.log('[dev] Scratch was the repository the workspaces are in: made again, as a workspace of its own');
       if (kept.length) writeFileSync(list, `${JSON.stringify(kept, null, 2)}\n`);
       else rmSync(list);
+      mended = true;
     }
   }
-  if (!existsSync(list)) {
+  if (mended || !existsSync(list)) {
     const hub = await startHub({ root, log: (m) => console.log(`[dev] ${m}`) });
     try {
       const scratch = join(root, 'scratch');

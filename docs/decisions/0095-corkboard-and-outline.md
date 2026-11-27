@@ -56,7 +56,6 @@ arrive, and they ask again.
 
 ### Not yet
 
-A folder opened in the main area by clicking it in the file tree (it opens and closes the folder, as
-now); several cards chosen and moved at once; cards in a freeform arrangement; the outline's columns
+Several cards chosen and moved at once; cards in a freeform arrangement; the outline's columns
 chosen, sorted, or widened; a document's own target and words beside its sections (an outline of its
 headings); the view following its folder when the folder is renamed.

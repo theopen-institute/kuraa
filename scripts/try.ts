@@ -5,18 +5,24 @@
 // worktree, while your own `pnpm dev` and the desktop app go on as they are.
 //
 //   pnpm try                          the worktrees, to choose from (↑↓, Enter: pnpm dev, d: desktop)
-//   pnpm try <name>                   its pnpm dev, on a free port (never 5173), its address printed
+//   pnpm try <name>                   its pnpm dev, on a free port (never 5173), its address printed,
+//                                     with your pnpm dev's workspaces
 //   pnpm try <name> desktop           its desktop app, with data of its own
 //   --open                            the browser opened at it, once it is ready
+//   --own                             its pnpm dev with the worktree's own workspaces instead (a Scratch)
 //
 // <name> is the worktree's folder (words-metadata), or its branch
 // (worktree-words-metadata), or the start of either, where only one has it.
 //
 // Its packages are installed first (seconds: pnpm links from its store). Its
-// pnpm dev has workspaces of its own (the worktree's .dev-workspaces, with a
-// Scratch the first time). Its desktop app keeps its preferences and list of
-// workspaces in the worktree (.try-desktop/), never with yours: two apps never
-// save to the same workspaces, and the branch never sees your documents.
+// pnpm dev serves your pnpm dev's workspaces (the main checkout's .dev-workspaces:
+// its list and its settings), so the branch is tried on what you work with; its
+// edits are real. Served by your pnpm dev at the same time, it says so and goes
+// on: two hosts on one workspace take each other's saves as outside changes, and
+// typing in one document through both at once can double or drop a little of it.
+// --own gives it the worktree's own .dev-workspaces (a Scratch the first time).
+// Its desktop app keeps its preferences and list of workspaces in the worktree
+// (.try-desktop/), never with yours.
 // Other arguments go on to pnpm dev or the app (`pnpm try words -- --dir ~/x`).
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -28,7 +34,9 @@ const ROOT = resolve(import.meta.dirname, '..');
 const given = process.argv.slice(2).filter((a) => a !== '--');
 /** --open: the browser opened at its address; else the address is said, and nothing opened. */
 const openIt = given.includes('--open');
-const args = given.filter((a) => a !== '--open');
+/** --own: its pnpm dev with the worktree's own workspaces, not yours. */
+const own = given.includes('--own');
+const args = given.filter((a) => a !== '--open' && a !== '--own');
 const [name, modeArg, ...rest] = args;
 const mode = modeArg === 'desktop' ? 'desktop' : modeArg === 'dev' || modeArg === undefined ? 'dev' : null;
 const extra = modeArg === 'desktop' || modeArg === 'dev' ? rest : modeArg === undefined ? [] : [modeArg, ...rest];
@@ -39,11 +47,12 @@ interface Worktree {
   name: string;
 }
 
+/** The main checkout (where your pnpm dev runs), wherever this is run from. */
+const mainCheckout = resolve(execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: ROOT, encoding: 'utf8' }).trim(), '..');
+
 /** The repository's worktrees but the main checkout, from git. */
 function worktrees(): Worktree[] {
   const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: ROOT, encoding: 'utf8' });
-  const main = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const mainCheckout = resolve(main, '..');
   return out.split('\n\n').map((block) => {
     const path = /^worktree (.+)$/m.exec(block)?.[1] ?? '';
     const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null;
@@ -95,6 +104,18 @@ function portFree(port: number): Promise<boolean> {
 async function freePort(): Promise<number> {
   for (let p = 5174; p < 5300; p++) if (await portFree(p)) return p;
   throw new Error('no free port between 5174 and 5300');
+}
+
+/** Processes of hosts serving a folder of workspaces now (a pnpm dev, a pnpm try, `pnpm host --workspaces`): their pids. */
+function servingNow(workspaces: string): string[] {
+  try {
+    const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+    return out.split('\n')
+      .filter((l) => l.includes('host/src/cli.ts') && (l.includes(`--workspaces ${workspaces} `) || l.endsWith(`--workspaces ${workspaces}`)))
+      .map((l) => l.trim().split(' ')[0]!);
+  } catch {
+    return []; // No ps (Windows): nothing said.
+  }
 }
 
 function openInBrowser(url: string): void {
@@ -184,16 +205,32 @@ console.log('[try] installing its packages…');
 execFileSync('pnpm', ['install', '--prefer-offline'], { cwd: wt.path, stdio: ['ignore', 'ignore', 'inherit'] });
 
 if (chosenMode === 'dev') {
-  // Workspaces added to its list from elsewhere (your own, say): said, as two apps saving to one workspace at once can go wrong.
+  // Your pnpm dev's workspaces, unless --own, or others are named (--dir, --workspaces).
+  const named = extra.some((a) => /^--(dir|workspaces)(=|$)/.test(a));
+  const shared = !own && !named;
+  const workspaces = shared ? join(mainCheckout, '.dev-workspaces') : join(wt.path, '.dev-workspaces');
+  const served: string[] = [];
+  if (shared) {
+    served.push('--workspaces', workspaces);
+    // Their settings too, where the branch's pnpm dev can be given them (--settings); else it keeps its own beside the list.
+    if (readFileSync(join(wt.path, 'scripts', 'dev.ts'), 'utf8').includes("settings: { type: 'string' }")) served.push('--settings', join(workspaces, 'settings.json'));
+    else console.log(`[try] NOTE: this branch's pnpm dev cannot be given your settings: it keeps its own, in ${join(workspaces, '.kuraa-settings.json')}.`);
+    // Said once, however many processes it has (tsx watch and the host it runs).
+    if (servingNow(workspaces).length) {
+      console.log('[try] NOTE: your pnpm dev (or another try) is serving these workspaces now. Both will save to them: each takes the other\'s saves'
+        + ' as outside changes, and typing in one document through both at once can double or drop a little of it. --own gives the branch workspaces of its own.');
+    }
+  }
+  // Workspaces on the list from elsewhere (your Documents, say): said, as the desktop app may have them open.
   try {
-    const listed = JSON.parse(readFileSync(join(wt.path, '.dev-workspaces', '.kuraa-workspaces.json'), 'utf8')) as { name?: string; dir?: string }[];
-    const outside = listed.filter((w) => w.dir && !resolve(w.dir).startsWith(`${resolve(wt.path)}/`));
-    for (const w of outside) console.log(`[try] NOTE: its list has ${w.name ?? w.dir} (${w.dir}), from outside the worktree: if the desktop app or another pnpm dev has it open, close it there first, or remove it from this list.`);
+    const listed = JSON.parse(readFileSync(join(workspaces, '.kuraa-workspaces.json'), 'utf8')) as { name?: string; dir?: string }[];
+    const outside = listed.filter((w) => w.dir && !resolve(w.dir).startsWith(`${resolve(workspaces)}/`));
+    for (const w of outside) console.log(`[try] NOTE: the list has ${w.name ?? w.dir} (${w.dir}), from elsewhere: if the desktop app has it open too, both will save to it.`);
   } catch { /* no list yet: Scratch only */ }
   const port = await freePort();
   const url = `http://127.0.0.1:${port}/`;
-  console.log(`[try] its pnpm dev at ${url} (its own workspaces: ${join(wt.path, '.dev-workspaces')})`);
-  const child = spawn('pnpm', ['dev', '--port', String(port), ...extra], { cwd: wt.path, stdio: ['inherit', 'pipe', 'inherit'] });
+  console.log(`[try] its pnpm dev at ${url} (${shared ? 'your pnpm dev\'s workspaces' : 'workspaces of its own'}: ${workspaces})`);
+  const child = spawn('pnpm', ['dev', '--port', String(port), ...served, ...extra], { cwd: wt.path, stdio: ['inherit', 'pipe', 'inherit'] });
   let opened = false;
   child.stdout.on('data', (chunk: Buffer) => {
     process.stdout.write(chunk);

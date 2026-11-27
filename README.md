@@ -522,18 +522,23 @@ To try a feature branch from the main checkout (each is made in a git worktree,
 
 ```sh
 pnpm try                          # the worktrees to choose from: ↑↓, Enter for pnpm dev, d for the desktop app
-pnpm try words                    # its pnpm dev, on a free port (never 5173), its address printed (--open: the browser too)
+pnpm try words                    # its pnpm dev, on a free port (never 5173), with your pnpm dev's workspaces (--open: the browser too)
+pnpm try words --own              # its pnpm dev with workspaces of its own (the worktree's .dev-workspaces: a Scratch)
 pnpm try words desktop            # its desktop app, with data of its own
 ```
 
 A name is the worktree's folder or branch, or the start of only one. Its packages are installed
-first. Its `pnpm dev` has the worktree's own `.dev-workspaces` (said, if a workspace from elsewhere
-has been added there: close it in the app that has it open first); its desktop app keeps its
+first. Its `pnpm dev` serves your `pnpm dev`'s workspaces, the main checkout's `.dev-workspaces`
+(its list and its settings), so a branch is tried on what you work with, and what you do there is
+kept. If your `pnpm dev` is serving them at the same time, it says so and goes on: both hosts save
+to them, each taking the other's saves as changes made outside the app, so typing in one document
+through both at once can double or drop a little of it (git keeps every version committed).
+`--own` gives the branch the worktree's own `.dev-workspaces` instead. Its desktop app keeps its
 preferences and workspaces in the worktree (`.try-desktop/`), never with yours.
 
 Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
 Settings and **Open a folder…** in the page; its settings are kept in
-`.dev-workspaces/settings.json` (beside `--workspaces`, if given). The first time, it starts with a
+`.dev-workspaces/settings.json` (beside `--workspaces`, if given, or where `--settings` says). The first time, it starts with a
 Scratch workspace.
 
 R chunks run in Podman, as everywhere. `--allow-write` and `--allow-network` let the workspace ask

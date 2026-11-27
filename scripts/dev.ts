@@ -1,4 +1,4 @@
-// pnpm dev [--workspaces <folder> | --dir <folder>] [--port 5173] [--allow-write] [--allow-network]
+// pnpm dev [--workspaces <folder> | --dir <folder>] [--settings <file>] [--port 5173] [--allow-write] [--allow-network]
 //
 // The web client against a live host, for development, in one command:
 //   - the host runs under `tsx watch`, so it restarts when host, session, kernel
@@ -15,8 +15,9 @@
 // serves one folder instead, as `kuraa-host --dir` does.
 //
 // Its Preferences (the hub's settings, decision 0047) are kept in
-// .dev-workspaces/settings.json, or beside --workspaces; the page changes them as
-// in the desktop app. R chunks run in Podman containers, as everywhere (never on
+// .dev-workspaces/settings.json, or beside --workspaces, or in --settings (pnpm try
+// gives a branch the main checkout's list and its settings.json); the page changes
+// them as in the desktop app. R chunks run in Podman containers, as everywhere (never on
 // this computer itself). --allow-write and --allow-network let the workspace ask
 // for those in .kuraa/run.json (as flags, they win over the Preferences).
 //
@@ -38,6 +39,7 @@ const { values } = parseArgs({
   options: {
     dir: { type: 'string' },
     workspaces: { type: 'string' },
+    settings: { type: 'string' },
     port: { type: 'string', default: '5173' },
     'allow-write': { type: 'boolean', default: false },
     'allow-network': { type: 'boolean', default: false },
@@ -120,7 +122,7 @@ const who = await gitIdentity(dir);
 const bin = (name: string) => join(ROOT, 'node_modules', '.bin', name);
 
 // Never the app's own settings: the developer's are kept with the workspaces they develop with.
-const settings = values.workspaces ? join(dir, '.kuraa-settings.json') : join(ROOT, '.dev-workspaces', 'settings.json');
+const settings = values.settings ? resolve(values.settings) : values.workspaces ? join(dir, '.kuraa-settings.json') : join(ROOT, '.dev-workspaces', 'settings.json');
 const host = run('host', bin('tsx'), [
   'watch', '--clear-screen=false', 'packages/host/src/cli.ts',
   flag, dir, '--port', String(hostPort), '--host', '127.0.0.1', '--settings', settings,

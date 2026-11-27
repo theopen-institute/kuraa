@@ -15,7 +15,7 @@
 // - where it is reached (`server.json`: its address and access code, readable by
 //   whoever runs it alone), for those commands to ask it.
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -82,6 +82,9 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
   // Its folder, and all it holds, for whoever runs it alone (0099): the workspaces it holds, private ones included.
   await mkdir(data, { recursive: true, mode: 0o700 });
   await chmod(data, 0o700);
+  // One server to a folder (0099): a second, started by hand beside the service, would open the same workspaces as
+  // the same devices, and write over the first's files.
+  const unlock = await lockFolder(data);
   const signing = await serverKey(data);
   const key = signing.publicKey.toString('hex');
   const peers: PeerOptions = Object.fromEntries(Object.entries({
@@ -94,8 +97,15 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     bootstrap: o.bootstrap,
     relays: o.relays,
   }).filter(([, v]) => v !== undefined));
-  const hub = await startHub({
+  let hub: RunningHub;
+  try {
+    hub = await startHub({
     server: true,
+    // Each workspace's device key, apart from its folder: a join tried again is the same device (0099).
+    deviceKeyFor: (workspace) => {
+      if (!/^[0-9a-f]{16,64}$/.test(workspace)) throw new Error('Not a workspace id');
+      return keptKey(join(data, 'devices', `${workspace}.json`));
+    },
     root: join(data, 'workspaces'),
     host: o.host ?? '127.0.0.1',
     port: o.port ?? SERVER_PORT,
@@ -104,20 +114,74 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents } },
     peers,
     log: o.log,
-  });
+    });
+  } catch (e) {
+    await unlock();
+    throw e;
+  }
   const address: ServerAddress = { url: hub.url, token: hub.token, key, pid: process.pid };
   const file = join(data, 'server.json');
-  // Readable only by whoever runs it: it holds the access code.
-  await writeFile(file, JSON.stringify(address, null, 1), { mode: 0o600 });
+  // Readable only by whoever runs it: it holds the access code. Written whole (a command reading it meanwhile finds
+  // the old or the new), and as soon as the API listens. Not written (a full disk): the server goes on, and says so.
+  try {
+    const tmp = `${file}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(address, null, 1), { mode: 0o600 });
+    await rename(tmp, file);
+  } catch (e) {
+    o.log?.(`could not write ${file} (${(e as Error).message}): kuraa-host server join and list cannot find this server until it can`);
+  }
   return {
     hub, key, data,
     close: async () => {
-      await hub.close();
-      // Only its own: another started since in the same folder keeps its.
-      const now = await readAddress(data).catch(() => null);
-      if (now?.pid === process.pid && now.url === hub.url) await rm(file, { force: true });
+      try {
+        await hub.close();
+      } finally {
+        // Only its own: another started since in the same folder keeps its.
+        const now = await readAddress(data).catch(() => null);
+        if (now?.pid === process.pid && now.url === hub.url) await rm(file, { force: true });
+        await unlock();
+      }
     },
   };
+}
+
+/** The folders this process holds (lockFolder). */
+const heldHere = new Set<string>();
+
+/** Whether a process is running (one that has gone: no). */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Hold a server's folder alone (0099): `server.lock`, made only if there is none,
+ * naming this process; one naming a process that has gone (stopped hard) is taken
+ * over. Refused if another server runs from it. Returns how to let it go.
+ */
+async function lockFolder(data: string): Promise<() => Promise<void>> {
+  const file = join(data, 'server.lock');
+  // This process's own: a lock naming it is held, not left over, where it holds it (a second server in one process).
+  if (heldHere.has(file)) throw new Error(`Another server is running from ${data} (this process)`);
+  for (let tries = 0; ; tries++) {
+    try {
+      await writeFile(file, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+      heldHere.add(file);
+      return async () => {
+        heldHere.delete(file);
+        if (Number((await readFile(file, 'utf8').catch(() => '')).trim()) === process.pid) await rm(file, { force: true });
+      };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries > 2) throw e;
+      const pid = Number((await readFile(file, 'utf8').catch(() => '')).trim());
+      if (pid && pid !== process.pid && alive(pid)) throw new Error(`Another server is running from ${data} (process ${pid}): stop it first (as a service: systemctl --user stop kuraa)`, { cause: e });
+      await rm(file, { force: true });
+    }
+  }
 }
 
 /**
@@ -136,7 +200,8 @@ export async function readAddress(data = defaultServerData(), o: { waitMs?: numb
     if (text !== null) {
       const a = JSON.parse(text) as Partial<ServerAddress>;
       if (typeof a.url !== 'string' || typeof a.token !== 'string' || typeof a.key !== 'string') throw new Error(`${file} is damaged: start the server again`);
-      return a as ServerAddress;
+      // Left by a server stopped hard (its process gone): not one running; one may be starting.
+      if (typeof a.pid !== 'number' || alive(a.pid)) return a as ServerAddress;
     }
     if (Date.now() >= until) throw new Error(`No server is running from ${resolve(data)}: start it (as a service: systemctl --user start kuraa; by hand: kuraa-host server, or pnpm server)`);
     await new Promise((r) => setTimeout(r, 500));
@@ -189,7 +254,7 @@ function ask<T>(a: ServerAddress, path: string, o: { method?: string; body?: unk
 }
 
 /** A workspace the server holds, and whether the workspace has taken it in yet (its join reached the policy there). */
-export interface ServerWorkspace { id: string; name: string; path: string; in: boolean; error?: string }
+export interface ServerWorkspace { id: string; name: string; path: string; in: boolean; opening?: boolean; error?: string }
 
 /** How a join is going, as the server says it (its steps, and how far a copy is). */
 export interface JoinStep { step: 'waiting' | 'looking' | 'letting-in' | 'copying' | 'opening'; slowNetwork: boolean; from?: string; copied?: string }
@@ -230,6 +295,12 @@ export async function joinServer(link: string, data = defaultServerData(), o: { 
 
 /** What the running server holds (GET /hub/api/server): each workspace, and whether it has taken the server in. */
 const listing = async (a: ServerAddress) => (await ask<{ workspaces: ServerWorkspace[] }>(a, '/hub/api/server')).workspaces;
+
+/** Let go of a workspace the running server holds (its copy here taken away): `id` as `list` says it. */
+export async function removeFromServer(id: string, data = defaultServerData()): Promise<void> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  await ask(a, `/hub/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
 
 /** The workspaces the running server holds. */
 export async function listServer(data = defaultServerData()): Promise<ServerWorkspace[]> {

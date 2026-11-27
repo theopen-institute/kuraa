@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { connect, createServer } from 'node:net';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
@@ -129,6 +129,50 @@ describe('a server, run from its folder (0099)', () => {
     await new Promise((r) => setTimeout(r, 1500));
     await server(data);
     expect(await asked).toEqual([]);
+  });
+
+  it('runs one to a folder: a second is refused while the first runs; a lock left by a process gone is taken over', async () => {
+    const data = tmp('data');
+    const first = await server(data);
+    await expect(startServer({ data, port: 0, peerPort: 0, dhtPort: 0, bootstrap: testnet.bootstrap as never })).rejects.toThrow('Another server is running');
+    await first.close();
+    running.splice(running.indexOf(first), 1);
+    // A server stopped hard: its lock names a process that has gone.
+    writeFileSync(join(data, 'server.lock'), '999999\n');
+    await server(data);
+  });
+
+  it('takes up a join cut short after its copy, takes away one cut short before, and lets go of git’s locks', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'in');
+    await s.close();
+    running.splice(running.indexOf(s), 1);
+    // As if stopped hard: the list without it (the join had not got to listing it), a half-made folder beside it,
+    // and a lock git left in it.
+    writeFileSync(join(data, 'workspaces', '.kuraa-workspaces.json'), '[]');
+    mkdirSync(join(data, 'workspaces', 'shared-workspace-9', '.git'), { recursive: true });
+    writeFileSync(join(w.path, '.git', 'index.lock'), '');
+    await server(data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'taken up, and in');
+    expect(existsSync(join(data, 'workspaces', 'shared-workspace-9'))).toBe(false);
+    expect(existsSync(join(w.path, '.git', 'index.lock'))).toBe(false);
+  });
+
+  it('holds a workspace once: joined again, by a new link, it is the one held, the same device', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'in');
+    const again = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    expect(again.id).toBe(w.id);
+    expect((await listServer(data)).length).toBe(1);
+    // One device of the server, as the owner sees it.
+    const devices = (await a.host.peers!.people()).servers[0]!.devices;
+    expect(devices.length).toBe(1);
   });
 
   it('makes no workspace of its own', async () => {

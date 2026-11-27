@@ -386,6 +386,10 @@ export class PeerNode {
     // The process's DHT node, shared with every other workspace's swarm (dht.ts); this workspace's own key.
     const dhtOptions = { port: this.o.dhtPort, ephemeral: this.o.serveDht === false ? true : undefined };
     const dht = await useDht(this.o.bootstrap?.map(bootstrapNode), dhtOptions);
+    // A fixed port asked for and taken by something else: the DHT node is on another, which members told of the one
+    // asked for will not find (0099). Said, so whoever runs it can see why.
+    const on = (dht as unknown as { address?: () => { port?: number } | null }).address?.()?.port;
+    if (this.o.dhtPort && on && on !== this.o.dhtPort) this.o.log(`peers: UDP port ${this.o.dhtPort} is taken by something else: the DHT node is on ${on} instead`);
     // Closed meanwhile: close() found no swarm to destroy, so this lets go of the node.
     if (this.closing) return void (await dht.destroy());
     this.swarm = new Hyperswarm({
@@ -1461,6 +1465,12 @@ export class PeerNode {
       const proven = await this.identity.proven(link.key, h.proof.slice(0, MAX_PROOF));
       if (proven.length) await this.takeRecords(link, proven);
       member = (await this.identity.members()).find((x) => x.key === link.key);
+    }
+    // A device in already, joining again by a link (0099: a server whose join got as far as its join, then stopped,
+    // tried again as the same device): welcomed as one let in is, so its join goes on, rather than waiting for ever.
+    if (member && same && typeof h.link === 'string' && typeof h.signer === 'string' && !link.accepted) {
+      const others = (await this.identity.members()).filter((x) => x.key !== link.key);
+      link.send({ type: 'welcome', name: this.name, members: others.map((x) => ({ key: x.key, name: x.name })), branch: await this.o.branch(), records: await this.identity.records(), secret: this.ws.secret });
     }
     // Let in by a link here a moment ago, connecting again before its join came (0072).
     const recently = this.letIn.get(link.key);

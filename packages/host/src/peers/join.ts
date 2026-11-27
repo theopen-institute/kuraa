@@ -17,6 +17,7 @@ import { Git } from '../git.js';
 import { decodeLink } from './identity.js';
 import { PeerNode } from './node.js';
 import type { PeerOptions } from './peers.js';
+import { createOnly, keyJson, type KeyPair } from '../keys.js';
 
 export interface JoinOptions {
   /** Where the workspace goes: a folder that is empty or does not exist. */
@@ -46,6 +47,11 @@ export interface JoinOptions {
   keep?: boolean;
   /** Each step, as it is reached (and again, while looking, when more is known about the network). */
   progress?: (p: JoinProgress) => void;
+  /**
+   * The device key to join as (a server's, kept apart from the folder: 0099), so a
+   * join tried again is the same device; else one made for the new folder.
+   */
+  deviceKey?: KeyPair;
   /** Who joins, and this computer's signing key for them: the ones this computer keeps, unless given (tests). */
   person?: PeerOptions['person'];
   signing?: PeerOptions['signing'];
@@ -88,6 +94,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   // A link in another device's commits is checked out as a file holding where it points, never as a link (gate.ts refuses them too).
   await git.run(['config', 'core.symlinks', 'false']);
   const stateDir = join(await git.gitDir(), 'kuraa');
+  if (o.deviceKey) await createOnly(join(stateDir, 'device.json'), keyJson(o.deviceKey));
   // A link carries no secret (0050): the members are found by its own topic, and by dialling the
   // devices it names; the secret comes with the welcome. A link made before carries the secret.
   // Ways in besides the DHT the link names (0053): servers that take TCP, and relays.

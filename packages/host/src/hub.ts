@@ -30,7 +30,7 @@
 // one waits for it.
 import { randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, open as openFile, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
@@ -47,6 +47,7 @@ import { localUrl, readBody, sameToken, send, serveStaticFrom, tokenOf } from '.
 import { corsHeaders, gateFor, hostAllowed, isLoopback, refuseHost, upgradeAllowed, type RequestGate } from './origins.js';
 import { cleanName, initWorkspace, inspectFolder, readWorkspaceName } from './workspace.js';
 import type { PeerOptions } from './peers/peers.js';
+import type { KeyPair } from './keys.js';
 import type { JoinProgress } from './peers/join.js';
 import type { PeerNode } from './peers/node.js';
 import { decodeLink } from './peers/identity.js';
@@ -104,6 +105,12 @@ export interface HubOptions {
    * rooms; only what `kuraa-server join` and `list` ask (serverApi).
    */
   server?: boolean;
+  /**
+   * A server's (0099): the device key it is in a workspace as, by the workspace's
+   * id, kept apart from the workspace's folder, so a join tried again (or the
+   * workspace joined again) is the same device, not one more the others look for.
+   */
+  deviceKeyFor?: (workspace: string) => Promise<KeyPair>;
   log?: (m: string) => void;
 }
 
@@ -277,11 +284,16 @@ export class Hub {
     } else {
       await mkdir(this.root, { recursive: true });
       this.entries = await this.readRegistry();
+      // A server (0099): a join cut short (stopped, or the computer off) left a folder the list does not name; and
+      // git, stopped mid-write, its locks. Taken up or taken away; let go of (no other process holds this folder:
+      // @kuraa/server holds a lock on it).
+      if (this.o.server) await this.recoverServer();
       // Each workspace opens on its own (a host, git, perhaps the peer network): all at once, and the hub
       // answers meanwhile (0103), so one slow to open keeps no one from the others. A server, which no one
       // waits on, has them all open first: what it lists is then how each stands.
-      const opened = this.entries.map((e) => this.open(e));
-      if (this.o.server) await Promise.all(opened);
+      // A server too (0099): it answers at once (`server list` says which are opening), so `server join` does not
+      // wait on every workspace to open first.
+      this.entries.map((e) => this.open(e));
     }
     this.server = createServer((req, res) => void this.handle(req, res));
     this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket as import('node:net').Socket, head));
@@ -338,9 +350,16 @@ export class Hub {
   private async save(): Promise<void> {
     if (this.o.folder) return; // one folder, no list
     await mkdir(dirname(this.registry), { recursive: true });
-    // Its own temporary file: two saves may overlap (a workspace added while another is removed).
+    // Its own temporary file: two saves may overlap (a workspace added while another is removed). On the disk for
+    // sure before it takes the list's place, so the computer going off then leaves the old list or the new (0099).
     const tmp = `${this.registry}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-    await writeFile(tmp, JSON.stringify(this.entries, null, 2));
+    const fh = await openFile(tmp, 'w');
+    try {
+      await fh.writeFile(JSON.stringify(this.entries, null, 2));
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await renameOver(tmp, this.registry);
   }
 
@@ -513,19 +532,44 @@ export class Hub {
       if (progress) this.joins.set(progress, s);
     };
     tell({ step: 'waiting', slowNetwork: false });
+    this.joiningNow++;
     try {
       return await this.serial(async () => {
         this.mayAdd();
+        let link: ReturnType<typeof decodeLink>;
+        try {
+          link = decodeLink(invitation);
+        } catch (e) {
+          throw new HttpError(400, (e as Error).message);
+        }
+        // A server joins by a link for a server, as no person (0099).
+        if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
+        // A server holding the workspace already (0099): in it, that one; taken out since, the old copy let go of, and
+        // joined again (as the same device: deviceKeyFor).
+        if (this.o.server) {
+          await this.opened();
+          const held = await this.heldWorkspace(link.workspace.id);
+          if (held) {
+            const peers = this.hosts.get(held.id)?.host.peers;
+            const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
+            if (policy?.isServer(me)) return this.list().find((w) => w.id === held.id)!;
+            this.log(`[${held.id}] held, but no longer in: joined again`);
+            await this.hosts.get(held.id)?.close().catch(() => undefined);
+            this.hosts.delete(held.id);
+            this.entries = this.entries.filter((e) => e !== held);
+            await this.save();
+            await rm(held.dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
+          }
+        }
         const label = 'Shared workspace';
         const id = this.freeId(label);
         const dir = join(this.root, id);
         let joined;
         try {
-          // A server joins by a link for a server, as no person (0099).
-          if (this.o.server && decodeLink(invitation).grant?.role !== 'server') throw new Error('A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
           // With the server's ways in (0053): the node joining goes on as the workspace's, and opens the process's TCP listener and DHT node.
           const { peerPort, publicAddress, dhtPort, serveDht } = this.peerOptions();
-          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, peerPort, publicAddress, dhtPort, serveDht, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}), ...(this.o.peers?.signing ? { signing: this.o.peers.signing } : {}) });
+          const deviceKey = this.o.deviceKeyFor ? await this.o.deviceKeyFor(link.workspace.id) : undefined;
+          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, peerPort, publicAddress, dhtPort, serveDht, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}), ...(this.o.peers?.signing ? { signing: this.o.peers.signing } : {}), ...(deviceKey ? { deviceKey } : {}) });
         } catch (err) {
           // Leave nothing half-made behind.
           // (On Windows a process that has just ended may hold a file in it for a moment.)
@@ -533,11 +577,31 @@ export class Hub {
           throw new HttpError(400, (err as Error).message);
         }
         tell({ step: 'opening', slowNetwork: false, from: joined.inviter });
-        return this.add({ id, name: (await readWorkspaceName(dir)) ?? label, dir, added: new Date().toISOString() }, joined.node);
+        try {
+          return await this.add({ id, name: (await readWorkspaceName(dir)) ?? label, dir, added: new Date().toISOString() }, joined.node);
+        } catch (err) {
+          // Joined, but not kept on the list (a full disk, say): let go of, whole, rather than left syncing unlisted.
+          await joined.node?.close().catch(() => undefined);
+          await this.hosts.get(id)?.close().catch(() => undefined);
+          this.hosts.delete(id);
+          this.entries = this.entries.filter((e) => e.id !== id);
+          await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
+          throw err;
+        }
       });
     } finally {
+      this.joiningNow--;
       if (progress) this.joins.delete(progress);
     }
+  }
+
+  /** The entry whose folder is of a workspace (by its id), if this hub holds it. */
+  private async heldWorkspace(workspace: string): Promise<Entry | null> {
+    for (const e of this.entries) {
+      const id = (await new Git(e.dir).run(['config', '--get', 'kuraa.workspace'], { allowFail: true })).stdout.trim();
+      if (id === workspace) return e;
+    }
+    return null;
   }
 
   /** How a join from the app is going, by the id it gave; null once it is over, or if there is none. */
@@ -797,16 +861,79 @@ export class Hub {
       const status = JOIN_ID.test(joining[1]!) ? this.joinStatus(joining[1]!) : null;
       return status ? send(res, 200, status) : send(res, 404, { error: 'No join under way by that id' });
     }
+    // A workspace let go of (kuraa-host server remove <id>): off the list, and its copy here taken away; the server
+    // stays in the workspace until its owner takes it out.
+    const one = /^\/hub\/api\/workspaces\/([a-z0-9-]+)$/.exec(url.pathname);
+    if (one && req.method === 'DELETE') {
+      const e = this.entries.find((x) => x.id === one[1]);
+      await this.remove(one[1]!);
+      if (e) await rm(e.dir, { recursive: true, force: true, maxRetries: 5 });
+      return send(res, 200, { ok: true });
+    }
     throw new HttpError(404, HEADLESS);
   }
 
   /** The workspaces a server holds, and whether each has taken it in: its own policy names this computer's key as a server. */
-  private async serverListing(): Promise<{ id: string; name: string; path: string; in: boolean; error?: string }[]> {
+  private async serverListing(): Promise<{ id: string; name: string; path: string; in: boolean; opening?: boolean; error?: string }[]> {
     return Promise.all(this.listing().workspaces.map(async (w) => {
       const peers = this.hosts.get(w.id)?.host.peers;
       const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
-      return { id: w.id, name: w.name, path: w.path, in: !!policy?.isServer(me), ...(w.error ? { error: w.error } : {}) };
+      return { id: w.id, name: w.name, path: w.path, in: !!policy?.isServer(me), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
     }));
+  }
+
+  /** How many joins are under way (a server's update waits for them: 0099). */
+  get joinsUnderWay(): number {
+    return this.joiningNow;
+  }
+
+  private joiningNow = 0;
+
+  /**
+   * A server's folder after a stop at any moment (0099): folders the list does
+   * not name (a join cut short) taken up where the join got as far as a copy
+   * checked out and its link noted, else taken away; and in every workspace,
+   * git's locks a stop mid-write left (no other process holds them: the server
+   * holds its folder alone), which would otherwise stop it opening, or merging.
+   */
+  private async recoverServer(): Promise<void> {
+    const listed = new Set(this.entries.map((e) => resolve(e.dir)));
+    let changed = false;
+    for (const name of await readdir(this.root).catch(() => [] as string[])) {
+      const dir = join(this.root, name);
+      if (name.startsWith('.') || listed.has(resolve(dir)) || !(await lstat(dir).catch(() => null))?.isDirectory()) continue;
+      await this.clearLocks(dir);
+      const head = (await new Git(dir).run(['rev-parse', '-q', '--verify', 'HEAD^{commit}'], { allowFail: true })).stdout.trim();
+      if (head && existsSync(join(dir, '.git', 'kuraa', 'joined-link')) && /^[a-z0-9-]+$/.test(name) && (await shared(dir))) {
+        this.entries.push({ id: name, name: (await readWorkspaceName(dir)) ?? 'Shared workspace', dir, added: new Date().toISOString() });
+        this.log(`[${name}] a join cut short after its copy: taken up`);
+        changed = true;
+      } else {
+        await rm(dir, { recursive: true, force: true }).catch((e: Error) => this.log(`[${name}] could not remove what a join cut short left: ${e.message}`));
+        this.log(`[${name}] a join cut short before its copy: taken away`);
+      }
+    }
+    for (const e of this.entries) await this.clearLocks(e.dir);
+    if (changed) await this.save();
+  }
+
+  /** Git's locks in a repository, a stop mid-write left (index, config, HEAD, packed-refs, any ref's): taken away. */
+  private async clearLocks(dir: string): Promise<void> {
+    const gitDir = join(dir, '.git');
+    const gone: string[] = [];
+    for (const f of ['index.lock', 'config.lock', 'HEAD.lock', 'ORIG_HEAD.lock', 'packed-refs.lock', 'shallow.lock']) {
+      if (existsSync(join(gitDir, f))) gone.push(join(gitDir, f));
+    }
+    const walk = async (d: string): Promise<void> => {
+      for (const x of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+        const p = join(d, x.name);
+        if (x.isDirectory()) await walk(p);
+        else if (x.name.endsWith('.lock')) gone.push(p);
+      }
+    };
+    await walk(join(gitDir, 'refs'));
+    for (const f of gone) await rm(f, { force: true }).catch(() => undefined);
+    if (gone.length) this.log(`[${basename(dir)}] took away ${gone.length} lock${gone.length === 1 ? '' : 's'} git left when stopped`);
   }
 
   private async api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {

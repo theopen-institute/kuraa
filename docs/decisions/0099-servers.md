@@ -277,18 +277,24 @@ up no other join; git's housekeeping runs in turn, one thread. A device away a d
 hours at most. One link per pair of computers for up to 1024 workspaces. Identity memos keyed by a
 hash, not every signature joined.
 
+## Decided after the audit
+
+Asked three things the audit left open, the owner chose:
+
+- **Members who reach each other only through a server sync through it** ("Live editing only"):
+  where a member is reached by a tunnel and a server connected here is connected to it too, this
+  device does not fetch from it: the server holds both, merges them, and each takes the merge. The
+  tunnel stays, for their live rooms, which need a link between them.
+- **One presence on the network for the whole server: later** ("Leave for later"). Each workspace
+  keeps its own key, its own DHT announcements and a connection to each member, which is fine for
+  tens of workspaces on a small server; one presence, with workspaces carried over one connection to
+  each member's computer, is for when a server holds hundreds.
+- **No limit on git processes at once** ("No limit"): a plain one could leave a fetch waiting on a
+  git process of the same server that waits for room under it.
+
 ## Not yet (after the audit)
 
-- **One presence on the network for the whole server**, not one for each workspace (its own key, its
-  own DHT announcements, a connection to each member for each): a server of many workspaces should
-  have one, with workspaces carried over one connection to each member's computer, and need not
-  announce what members reach by its address.
-- **Members meet each other through the server** (tunnels, when they cannot connect directly), as well
-  as syncing through it. Their live rooms need a link between them, so these stay; syncing over them
-  where the server has both could be left to the server.
-- **A limit on git processes at once.** A plain one could leave a fetch waiting on a git process of
-  the same server that is waiting for room under the limit; it needs the long-running ones (fetches,
-  the uploads they read) kept apart.
+- **One presence on the network for the whole server** (above).
 - **Each operation's past held whole** (the policy's): fine at hundreds of operations, heavy at many
   thousands.
 

@@ -61,9 +61,9 @@ const person = async (name: string) => createPerson(name, join(tmp('person'), 'p
 const log = (who: string) => (process.env.PEER_LOG ? (m: string) => console.log(`[${who}] ${m}`) : undefined);
 
 /** A device's host: a person's (`person`), or a server's (null: no person). Each with its computer's signing key. */
-async function start(dir: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }, said?: string[]): Promise<RunningHost> {
+async function start(dir: string, who: Person | null, signing: { publicKey: Buffer; secretKey: Buffer }, said?: string[], net?: { computer: string; direct?: (key: string) => boolean; tunnelAfterMs?: number }): Promise<RunningHost> {
   const shown = log(dir.slice(-6));
-  const h = await startHost({ dir, timings: FAST, invites: {}, peers: { bootstrap: testnet.bootstrap as never, signing, person: who }, log: (m) => { said?.push(m); shown?.(m); } });
+  const h = await startHost({ dir, timings: FAST, invites: {}, peers: { bootstrap: testnet.bootstrap as never, signing, person: who, ...(net ?? {}) }, log: (m) => { said?.push(m); shown?.(m); } });
   hosts.push(h);
   return h;
 }
@@ -208,6 +208,31 @@ describe('a server in a workspace (0099)', () => {
     expect(onServer.some((m) => /^merged /.test(m))).toBe(true);
     expect(onBo.some((m) => /^merged /.test(m))).toBe(false);
     void b;
+  });
+
+  it('has members who reach each other only through it sync through it, the tunnel for their live rooms (0099)', async () => {
+    const ada = await person('Ada');
+    const adaKey = crypto.keyPair();
+    const dirA = repo();
+    const blocked = new Set<string>();
+    const onAda: string[] = [];
+    const a = await start(dirA, ada, adaKey, onAda, { computer: 'a', direct: (k) => !blocked.has(k), tunnelAfterMs: 300 });
+    const serverKey = crypto.keyPair();
+    const dirS = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, serverKey, 'srv');
+    const s = await start(dirS, null, serverKey, undefined, { computer: 's' });
+    const bo = await person('Bo');
+    const boKey = crypto.keyPair();
+    const boDevice = crypto.keyPair();
+    blocked.add(boDevice.publicKey.toString('hex'));
+    const dirB = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), bo, boKey, 'bee', boDevice);
+    const b = await start(dirB, bo, boKey, undefined, { computer: 'b', direct: (k) => k !== a.host.peers!.node.myKey, tunnelAfterMs: 300 });
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.name === 'bee' && d.via === 'tunnel'), 20_000, 'Bo reached through the server');
+    // Bo's work reaches Ada, through the server's copy: Ada never fetches from Bo through the tunnel.
+    onAda.length = 0;
+    await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-bo.md', content: '# From Bo\n' }) });
+    await until(() => read(dirA, 'from-bo.md') === '# From Bo\n', 20_000, 'Bo’s file on Ada’s device');
+    expect(onAda.some((m) => /brought in main from bee/.test(m))).toBe(false);
+    void s;
   });
 
   it('changes nothing: what the server’s key signs is kept out on the members’ devices', async () => {

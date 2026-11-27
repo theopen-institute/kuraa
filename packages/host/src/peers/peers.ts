@@ -532,9 +532,24 @@ export class Peers {
     return true;
   }
 
+  /**
+   * Whether a member reached through a tunnel syncs through a server instead
+   * (0099, as the owner chose: "Live editing only"): a server connected here that
+   * the member is connected to too holds both their work and merges it, so the two
+   * need not fetch from each other through it; the tunnel carries their live rooms.
+   */
+  private syncsThroughServer(link: PeerLink): boolean {
+    const n = this.node;
+    if (n.isServerDevice(n.myKey) || n.isServerDevice(link.key) || n.via(link.key) !== 'tunnel') return false;
+    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.isServerDevice(l.key)).map((l) => l.key));
+    // The member is connected to one of them, as that server says (it told this device whom it is connected to).
+    return [...n.links.values()].some((l) => servers.has(l.key) && l.present.has(link.key));
+  }
+
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
+    if (this.syncsThroughServer(link)) return Promise.resolve();
     const remote = link.remote!;
     // The newest link to it counts, whichever started the sync under way.
     if (!link.closed || !this.linkTo.has(remote)) this.linkTo.set(remote, link);

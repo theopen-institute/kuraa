@@ -11,6 +11,7 @@
 // Documents, when iCloud keeps them; everything under ~/Library/CloudStorage.
 // Elsewhere, and for the older ways these services kept folders, by where it is.
 import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve, sep } from 'node:path';
 
@@ -43,8 +44,17 @@ export function serviceOfDomain(domain: string): string {
 
 /** The service a path is under by its folders' names (below the home folder), or null. */
 export function serviceByPath(path: string, home = homedir()): string | null {
-  const full = resolve(path);
-  const base = resolve(home);
+  // Both as they really are: a folder named by its real path (as a hub keeps one) under a home reached through a
+  // link (macOS's /var is /private/var), or the other way round, is still under it.
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const full = real(path);
+  const base = real(home);
   if (full !== base && !full.startsWith(base + sep)) return null;
   for (const part of full.slice(base.length).split(sep)) {
     const found = BY_NAME.find(([name]) => name.test(part));

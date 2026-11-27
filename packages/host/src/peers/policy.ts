@@ -375,6 +375,8 @@ export interface PolicyContext {
    * undefined, not revoked.
    */
   cutKey?: (signingKey: string) => string[] | null | undefined;
+  /** Work every operation's past out whole, never along the line (tests: the two must agree). */
+  whole?: boolean;
 }
 
 /** What a Policy is made of. */
@@ -695,6 +697,27 @@ interface State {
   /** Servers' signing keys (0099); and every key that has been one. */
   servers: Set<string>;
   wasServer: Set<string>;
+}
+
+/** A state copied, so applying an operation to the copy leaves the original as it was. */
+function cloneState(s: State): State {
+  return {
+    groups: new Map([...s.groups].map(([g, m]) => [g, new Map(m)])),
+    perms: new Map(s.perms),
+    spaces: new Map(s.spaces),
+    owner: s.owner,
+    usedLinks: new Map(s.usedLinks),
+    applied: [...s.applied],
+    dropped: new Map(s.dropped),
+    unlinked: new Set(s.unlinked),
+    admitted: new Set(s.admitted),
+    permFront: new Map(s.permFront),
+    spaceFront: new Map(s.spaceFront),
+    spaceMade: new Map(s.spaceMade),
+    once: [...s.once],
+    servers: new Set(s.servers),
+    wasServer: new Set(s.wasServer),
+  };
 }
 
 /** A view of a state to judge by. */
@@ -1186,7 +1209,15 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   const env: Env = { genesis, order: [genesis, ...ops], anc, by: new Map(), before: new Map(), removal: new Map(), ctx, grants: new Map() };
   // Each operation, judged by the policy its own past makes (the same wherever it is judged); operations with the same past, by one fold.
   const ok: PolicyEntry[] = [];
-  const folds = new Map<string, State>();
+  const folds = new Map<string, Folded>();
+  // While every operation taken comes after all taken before it (a history with nothing made at the same time, as
+  // most are), the policy so far is the last one's with it applied: kept, rather than worked out again from the
+  // start for each (0099: that made the cost grow as the cube of the history's length). Null once two are at once.
+  let line: State | null = ctx.whole ? null : freshState(genesis);
+  // Where the line last began: the operations worked out whole then (which counted, the clashes), and those applied
+  // along it since. A line begun after operations at once starts from what settling them made.
+  let lineFrom: Folded = { state: freshState(genesis), counted: new Set(), clashes: [] };
+  let lineIds: string[] = [];
   for (const e of ops) {
     // A key that is no one's: its word counts for nothing, but a server's own join (0099), made by the key itself.
     const who = ctx.personOf(e.signer) ?? (e.op.t === 'join' && e.op.role === 'server' ? e.signer : null);
@@ -1196,9 +1227,21 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
     if (cut && !cut.some((h) => h === e.id || anc.get(h)?.has(e.id))) continue;
     const past = anc.get(e.id)!;
     const mine = ok.filter((x) => past.has(x.id));
-    const key = mine.map((x) => x.id).join();
-    let before = folds.get(key);
-    if (!before) folds.set(key, (before = fold(mine, env).state));
+    const after = mine.length === ok.length;
+    let before: State | undefined;
+    if (after && line) before = line;
+    else {
+      const key = mine.map((x) => x.id).join();
+      let folded = folds.get(key);
+      if (!folded) folds.set(key, (folded = fold(mine, env)));
+      before = folded.state;
+      // After all taken so far, worked out whole: the line begins again from here.
+      if (after && !ctx.whole) {
+        line = before;
+        lineFrom = folded;
+        lineIds = [];
+      }
+    }
     if (!allowed(e, who, before, env)) continue;
     env.by.set(e.id, who);
     env.before.set(e.id, before);
@@ -1206,8 +1249,23 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
     if (op.t === 'revoke') env.removal.set(e.id, { person: op.who, group: op.group, kind: 'out' });
     else if (op.t === 'grant' && op.role === 'member' && before.groups.get(op.group)?.get(op.who) === 'admin') env.removal.set(e.id, { person: op.who, group: op.group, kind: 'demote' });
     ok.push(e);
+    // On the line: the next one's past is this one's, with it applied (as build applies it). Else, off it.
+    if (after && line && !ctx.whole) {
+      const next = cloneState(line);
+      if (effect(e, who, next, env)) next.applied.push(e.id);
+      line = next;
+      lineIds.push(e.id);
+    } else line = null;
   }
-  const { state, counted, clashes } = fold(ok, env);
+  // Still on the line: what settling made where it began, and each since applied in turn (each after all before it,
+  // none at once with another, each allowed by its own past), so the line is the policy.
+  const { state, counted, clashes } = line
+    ? {
+      state: line,
+      counted: new Set([...lineFrom.counted, ...lineIds]),
+      clashes: [...lineFrom.clashes, ...line.once.slice(lineFrom.state.once.length)].sort((a, b) => (a.lost < b.lost ? -1 : a.lost > b.lost ? 1 : 0)),
+    }
+    : fold(ok, env);
   const parents = new Set(order.flatMap((e) => e.parents));
   const heads = order.filter((e) => rooted.has(e.id) && !parents.has(e.id)).map((e) => e.id).sort();
   // Who is out of the workspace, and the content they had seen when taken out (their cutoff: gate.ts).

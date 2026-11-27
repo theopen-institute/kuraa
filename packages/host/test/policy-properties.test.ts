@@ -483,6 +483,13 @@ describe('the policy, over histories made at random', () => {
         }), { numRuns: RUNS, seed: SEED });
       });
 
+      it('comes to the same along the line as worked out whole (0099: the quick way, where nothing is at once)', () => {
+        fc.assert(fc.property(fc.array(step, { maxLength: STEPS }), (steps) => {
+          const { ctx, devices, all } = play(steps);
+          for (const held of [...devices, all]) expect(summary(evaluate(held, ctx))).toEqual(summary(evaluate(held, { ...ctx, whole: true })));
+        }), { numRuns: RUNS, seed: SEED + 2 });
+      });
+
       it('keeps its rules on every device, whatever each holds', () => {
         fc.assert(fc.property(fc.array(step, { maxLength: STEPS }), (steps) => {
           const { ctx, devices, all, forged } = play(steps);

@@ -239,6 +239,7 @@ const navApp: NavigationApp = {
   fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
   showFolder: (folder, key) => showFolder(folder, key),
+  shownFolder: () => shownFolderView.value?.folder ?? null,
 };
 /** What the views add to ＋. */
 const viewItems = () => viewNewItems(views.value.filter(({ view }) => view.newItems).map(({ active, view }) => () => fh.menuItems(active.feature.id, view.newItems!(navigationContext(active.ctx, navApp, navEvents)))));
@@ -566,13 +567,19 @@ function select(next: string | null) {
  */
 const mainView = shallowRef<{ key: string; folder: string } | null>(null);
 watch(api, () => (mainView.value = null));
-function showFolder(folder: string, key?: string) {
+/** The folder view last shown, in this browser: a folder clicked in the tree is shown in it again. */
+const LAST_FOLDER_VIEW = 'kuraa:folder-view';
+function showFolder(folder: string, key?: string): boolean {
   const views = fh.folderViews.value;
-  const found = views.find((v) => v.key === key) ?? views[0];
-  if (!found) return;
+  let last: string | null = null;
+  try { last = localStorage.getItem(LAST_FOLDER_VIEW); } catch { /* storage unavailable */ }
+  const found = views.find((v) => v.key === key) ?? views.find((v) => v.key === last) ?? views[0];
+  if (!found) return false;
+  try { localStorage.setItem(LAST_FOLDER_VIEW, found.key); } catch { /* storage unavailable: for this page only */ }
   select(null);
   view(null);
   mainView.value = { key: found.key, folder: folder.replace(/\/+$/, '') };
+  return true;
 }
 /** The folder view shown, while it is one of a feature in use. */
 const shownFolderView = computed(() => {
@@ -591,11 +598,6 @@ const folderMount = computed(() => {
     views: () => fh.folderViews.value.map((v) => ({ key: v.key, label: v.view.label })),
   }));
 });
-/** A folder's menu: its views (Corkboard, Outline), then what features add. */
-function fileMenuItems(p: string): MenuItem[] {
-  const views = p.endsWith('/') ? fh.folderViews.value.map((v): MenuItem => ({ label: v.view.label, testid: `context:folder-view:${v.key}`, run: () => showFolder(p, v.key) })) : [];
-  return [...views, ...fh.fileMenu(p)];
-}
 
 /** Open a file (if it is not open), and Settings at its section. */
 function openDocumentSettings(next: string) {
@@ -874,7 +876,7 @@ onBeforeUnmount(() => fh.dispose());
 
 // What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
 watch([workspaceTitle, connection, views, fh.panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
-watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEvents.files.tell());
+watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], () => navEvents.files.tell());
 </script>
 
 <template>
@@ -1053,7 +1055,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEv
       :selected="path"
       :registry="hostRegistry"
       :shared="sharedWithDevices"
-      :feature-items="fileMenuItems"
+      :feature-items="fh.fileMenu"
       :new-items="viewItems"
       :orders="orders"
       @document-settings="openDocumentSettings"

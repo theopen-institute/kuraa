@@ -15,6 +15,8 @@ export const S = {
   untitled: (path: string) => `${path}: no title yet (Rename… or Document settings… gives it one)`,
   readers: (words: string) => `Who can read it: ${words}`,
   writers: (words: string) => `Who can change it: ${words}`,
+  fold: 'Close the folder',
+  unfold: 'Open the folder',
   rename: 'Rename',
   delete: 'Delete',
   /** The group of its keys on the Markdown and shortcuts sheet: the client's own. */

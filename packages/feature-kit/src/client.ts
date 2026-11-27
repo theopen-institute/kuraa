@@ -216,9 +216,13 @@ export interface NavigationContext extends FeatureClientContext {
   fileMenu(path: string, at: { x: number; y: number }): void;
   /**
    * Show a folder ('' the top level) in the main area, in a folder view
-   * (0095: `feature:view`, as `'corkboard:outline'`; none: the first there is).
+   * (0095: `feature:view`, as `'corkboard:outline'`; none: the one last
+   * shown, else the first there is). Whether it was: false where no
+   * component gives a folder view.
    */
-  showFolder(folder: string, view?: string): void;
+  showFolder(folder: string, view?: string): boolean;
+  /** The folder shown in the main area, if one is (0095), for navigation to mark it. */
+  shownFolder(): string | null;
   /** A file's icon, as its type defines it (0023). */
   icon(file: NavigationFile): FileIcon | undefined;
 }

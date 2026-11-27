@@ -54,7 +54,7 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
       :tabindex="tabStop === c.folder.path ? 0 : -1"
       :data-path="c.folder.path"
       :style="lineAt"
-      :class="['tree-dir', dropSide(c.folder.path), { 'drop-target': over === c.folder.path, dragging: dragging === c.folder.path, muted: t.marksOf(c.folder.path + '/').some((m) => m.muted) }]"
+      :class="['tree-dir', dropSide(c.folder.path), { shown: t.shownFolder.value === c.folder.path, 'drop-target': over === c.folder.path, dragging: dragging === c.folder.path, muted: t.marksOf(c.folder.path + '/').some((m) => m.muted) }]"
       @focus.self="t.focused(c.folder.path)"
       @dragover="t.dragOver($event, c.folder.path)"
       @drop="t.drop($event, c.folder.path)"
@@ -68,10 +68,11 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
         @dragover="t.dragOver($event, c.folder.path, folderRow(c.folder))"
         @drop="t.drop($event, c.folder.path, folderRow(c.folder))"
         @contextmenu="t.contextMenu($event, c.folder.path, 'folder')"
-        @click="t.toggle(c.folder.path)"
+        @click="t.openFolder(c.folder.path)"
       >
         <span class="tree-row tree-folder" :style="indent">
-          <FileIcon class="tree-icon" :icon="collapsed.has(c.folder.path) ? FOLDER : FOLDER_OPEN" /><span class="tree-name">{{ c.folder.name }}</span>
+          <!-- The icon opens and closes the folder; the rest of the row shows it (0095: its corkboard, its outline). -->
+          <span class="tree-fold" :title="collapsed.has(c.folder.path) ? S.unfold : S.fold" :data-testid="`fold:${c.folder.path}`" @click.stop="t.toggle(c.folder.path)"><FileIcon class="tree-icon" :icon="collapsed.has(c.folder.path) ? FOLDER : FOLDER_OPEN" /></span><span class="tree-name">{{ c.folder.name }}</span>
           <span v-for="m in t.marksOf(c.folder.path + '/')" :key="m.label" class="tree-mark" :title="m.label" :data-testid="m.testid"><FileIcon v-if="m.icon" :icon="m.icon" /><span v-else-if="m.color" class="tree-mark-dot" :style="{ background: m.color }" /></span>
           <template v-if="t.folderMarks.value.has(c.folder.path)">
             <svg v-if="markOf(c.folder.path).readers" class="tree-readers" viewBox="0 0 12 12" width="11" height="11" role="img" :aria-label="S.readers(markOf(c.folder.path).readers ?? '')" :data-testid="`readers:${c.folder.path + '/'}`"><title>{{ S.readers(markOf(c.folder.path).readers ?? '') }}</title><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor" /><path d="M3.8 5.5V4a2.2 2.2 0 0 1 4.4 0v1.5" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>

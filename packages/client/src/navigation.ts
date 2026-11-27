@@ -36,7 +36,8 @@ export interface NavigationApp {
   place(path: string, folder: string, names: string[]): Promise<boolean>;
   sortByName(folder: string): void;
   marks(path: string): FileMark[];
-  showFolder(folder: string, view?: string): void;
+  showFolder(folder: string, view?: string): boolean;
+  shownFolder(): string | null;
   fileMenu(path: string, at: { x: number; y: number }): void;
   icon(file: NavigationFile): FileIcon | undefined;
 }
@@ -108,6 +109,7 @@ export function navigationContext(base: FeatureClientContext, app: NavigationApp
     sortByName: (folder) => app.sortByName(folder),
     marks: (path) => app.marks(path),
     showFolder: (folder, view) => app.showFolder(folder, view),
+    shownFolder: () => app.shownFolder(),
     fileMenu: (path, at) => app.fileMenu(path, at),
     icon: (file) => app.icon(file),
   };

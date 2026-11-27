@@ -19,6 +19,7 @@ const ctx = props.ctx;
 const files = shallowRef(ctx.files());
 const folders = shallowRef(ctx.folders());
 const selected = ref(ctx.selected());
+const shownFolder = ref(ctx.shownFolder());
 const workspaceName = ref(ctx.workspaceName());
 /** Told of a change: what is asked of the core as it is drawn (orders, marks) is asked again. */
 const changes = ref(0);
@@ -26,6 +27,7 @@ const stopChange = ctx.onChange(() => {
   changes.value++;
   files.value = ctx.files();
   folders.value = ctx.folders();
+  shownFolder.value = ctx.shownFolder();
   workspaceName.value = ctx.workspaceName();
   if (ctx.selected() !== selected.value) {
     selected.value = ctx.selected();
@@ -290,6 +292,10 @@ provide(TREE, {
   showConflicts: (path) => ctx.openConflicts(path),
   prefetch: (path, now) => ctx.prefetch(path, now),
   toggle,
+  openFolder: (folder) => {
+    if (!ctx.showFolder(folder)) toggle(folder);
+  },
+  shownFolder,
   create: (folder) => ctx.newFile(folder),
   newFolder: (inside) => ctx.newFolder(inside ?? ''),
   rename: (path) => ctx.rename(path),
@@ -345,6 +351,11 @@ revealFolderOf(selected.value);
 .tree-file.selected .file-icon { color: var(--text); }
 .tree-folder { color: var(--muted); }
 .tree-file.selected > .tree-row { background: var(--selected); font-weight: 600; }
+/* The folder shown in the main area (0095): marked as the open file is; its icon opens and closes it. */
+.tree-dir.shown > .tree-dir-row { background: var(--selected); }
+.tree-dir.shown > .tree-dir-row .tree-folder { color: var(--text); font-weight: 600; }
+.tree-fold { display: inline-flex; align-items: center; border-radius: 3px; }
+.tree-fold:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 .tree-file.untyped > .tree-row { color: var(--muted); }
 .tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tree-file.untitled .tree-name { color: var(--muted); font-style: italic; }

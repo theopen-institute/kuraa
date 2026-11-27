@@ -220,44 +220,45 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
       </li>
     </ul>
 
-    <!-- The outline: a row for each, its details in columns, edited in place. -->
-    <table v-else class="cork-rows" @dragover.prevent @drop="drop">
-      <thead>
-        <tr><th>{{ S.columns.title }}</th><th>{{ S.columns.synopsis }}</th><th>{{ S.columns.label }}</th><th>{{ S.columns.status }}</th><th class="num">{{ S.columns.words }}</th><th class="num">{{ S.columns.target }}</th></tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="i in items"
-          :key="i.path"
-          :class="['cork-row', `cork-${i.kind}`, dropClass(i), { dragging: dragging === i.path }]"
-          draggable="true"
-          :data-testid="`row:${i.path}`"
-          @dragstart="dragStart($event, i)"
-          @dragend="dragEnd"
-          @dragover="dragOver($event, i)"
-        >
-          <td class="cork-row-title">
-            <span v-if="docCard(i)?.label" class="cork-dot" :style="{ background: labelColour(docCard(i)!.label!) }" :title="docCard(i)!.label!" />
-            <button type="button" :data-testid="`row-open:${i.path}`" @click="openItem(i)">{{ i.title }}</button>
-          </td>
-          <template v-if="i.kind === 'document'">
-            <td><input :value="fieldValue(i, 'synopsis')" @input="typed(i, 'synopsis', ($event.target as HTMLInputElement).value)" :placeholder="S.synopsisPlaceholder" :data-testid="`row-synopsis:${i.path}`" @change="save(i, 'synopsis', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'synopsis', ($event.target as HTMLInputElement).value)" /></td>
-            <td><input :value="fieldValue(i, 'label')" @input="typed(i, 'label', ($event.target as HTMLInputElement).value)" list="cork-labels" :data-testid="`row-label:${i.path}`" @change="save(i, 'label', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'label', ($event.target as HTMLInputElement).value)" /></td>
-            <td><input :value="fieldValue(i, 'status')" @input="typed(i, 'status', ($event.target as HTMLInputElement).value)" list="cork-statuses" :data-testid="`row-status:${i.path}`" @change="save(i, 'status', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'status', ($event.target as HTMLInputElement).value)" /></td>
-            <td class="num" :data-testid="`row-words:${i.path}`">{{ (docCard(i)?.words ?? 0).toLocaleString() }}</td>
-            <td class="num"><input class="num" :value="fieldValue(i, 'target')" @input="typed(i, 'target', ($event.target as HTMLInputElement).value)" inputmode="numeric" :data-testid="`row-target:${i.path}`" @change="save(i, 'target', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'target', ($event.target as HTMLInputElement).value)" /></td>
-          </template>
-          <template v-else-if="i.kind === 'folder'">
-            <td colspan="3" class="cork-muted">{{ S.folderCard(folderCard(i)?.documents ?? 0, folderCard(i)?.words ?? 0) }}</td>
-            <td class="num">{{ (folderCard(i)?.words ?? 0).toLocaleString() }}</td>
-            <td />
-          </template>
-          <template v-else>
-            <td colspan="5" class="cork-muted">{{ S.file }}</td>
-          </template>
-        </tr>
-      </tbody>
-    </table>
+    <!-- The outline: two lines for each: its title and its details in columns; below, its synopsis, indented. Edited in place. -->
+    <div v-else class="cork-rows" role="table" @dragover.prevent @drop="drop">
+      <div class="cork-rows-head" role="row">
+        <span role="columnheader">{{ S.columns.title }}</span><span role="columnheader">{{ S.columns.label }}</span><span role="columnheader">{{ S.columns.status }}</span><span role="columnheader" class="num">{{ S.columns.words }}</span><span role="columnheader" class="num">{{ S.columns.target }}</span>
+      </div>
+      <div
+        v-for="i in items"
+        :key="i.path"
+        :class="['cork-row', `cork-${i.kind}`, dropClass(i), { dragging: dragging === i.path }]"
+        role="row"
+        draggable="true"
+        :data-testid="`row:${i.path}`"
+        @dragstart="dragStart($event, i)"
+        @dragend="dragEnd"
+        @dragover="dragOver($event, i)"
+      >
+        <span class="cork-row-title" role="cell">
+          <span v-if="docCard(i)?.label" class="cork-dot" :style="{ background: labelColour(docCard(i)!.label!) }" :title="docCard(i)!.label!" />
+          <button type="button" :data-testid="`row-open:${i.path}`" @click="openItem(i)">{{ i.title }}</button>
+        </span>
+        <template v-if="i.kind === 'document'">
+          <span role="cell"><input :value="fieldValue(i, 'label')" list="cork-labels" :aria-label="S.columns.label" :data-testid="`row-label:${i.path}`" @input="typed(i, 'label', ($event.target as HTMLInputElement).value)" @change="save(i, 'label', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'label', ($event.target as HTMLInputElement).value)" /></span>
+          <span role="cell"><input :value="fieldValue(i, 'status')" list="cork-statuses" :aria-label="S.columns.status" :data-testid="`row-status:${i.path}`" @input="typed(i, 'status', ($event.target as HTMLInputElement).value)" @change="save(i, 'status', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'status', ($event.target as HTMLInputElement).value)" /></span>
+          <span role="cell" class="num" :data-testid="`row-words:${i.path}`">{{ (docCard(i)?.words ?? 0).toLocaleString() }}</span>
+          <span role="cell" class="num"><input class="num" :value="fieldValue(i, 'target')" inputmode="numeric" :aria-label="S.columns.target" :data-testid="`row-target:${i.path}`" @input="typed(i, 'target', ($event.target as HTMLInputElement).value)" @change="save(i, 'target', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'target', ($event.target as HTMLInputElement).value)" /></span>
+          <span role="cell" class="cork-row-synopsis"><input :value="fieldValue(i, 'synopsis')" :placeholder="S.synopsisPlaceholder" :aria-label="S.columns.synopsis" :data-testid="`row-synopsis:${i.path}`" @input="typed(i, 'synopsis', ($event.target as HTMLInputElement).value)" @change="save(i, 'synopsis', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'synopsis', ($event.target as HTMLInputElement).value)" /></span>
+        </template>
+        <template v-else-if="i.kind === 'folder'">
+          <span role="cell" />
+          <span role="cell" />
+          <span role="cell" class="num">{{ (folderCard(i)?.words ?? 0).toLocaleString() }}</span>
+          <span role="cell" />
+          <span role="cell" class="cork-row-synopsis cork-muted">{{ S.folderCard(folderCard(i)?.documents ?? 0, folderCard(i)?.words ?? 0) }}</span>
+        </template>
+        <template v-else>
+          <span role="cell" class="cork-row-synopsis cork-muted">{{ S.file }}</span>
+        </template>
+      </div>
+    </div>
     <datalist id="cork-labels"><option v-for="l in labels" :key="l" :value="l" /></datalist>
     <datalist id="cork-statuses"><option v-for="s in statuses" :key="s" :value="s" /></datalist>
   </div>
@@ -293,19 +294,23 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 .cork-card-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: 11px; color: var(--muted); }
 .cork-label { color: var(--text); }
 .cork-words { margin-left: auto; font-variant-numeric: tabular-nums; }
-.cork-rows { width: 100%; border-collapse: collapse; font-size: 13px; }
-.cork-rows th { text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--border); }
-.cork-rows td { padding: 2px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); vertical-align: middle; }
+.cork-rows { font-size: 13px; }
+.cork-rows-head, .cork-row { display: grid; grid-template-columns: minmax(12em, 3fr) minmax(8em, 2fr) minmax(8em, 2fr) 6em 7em; column-gap: 10px; align-items: center; }
+.cork-rows-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.cork-row { padding: 4px 6px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); cursor: grab; position: relative; }
 .cork-rows .num { text-align: right; font-variant-numeric: tabular-nums; }
-.cork-rows input { width: 100%; border: 1px solid transparent; background: none; font: inherit; padding: 2px 4px; }
+.cork-rows input { width: 100%; box-sizing: border-box; border: 1px solid transparent; background: none; font: inherit; padding: 2px 4px; }
 .cork-rows input:hover, .cork-rows input:focus { border-color: var(--border); background: var(--panel); }
-.cork-rows input.num { width: 6em; }
-.cork-row { cursor: grab; }
-.cork-row-title { white-space: nowrap; }
+.cork-rows input.num { text-align: right; }
+/* The synopsis: a second line of its own, under the title, indented. */
+.cork-row-synopsis { grid-column: 1 / -1; padding-left: 22px; }
+.cork-row-synopsis input { color: var(--muted); font-size: 12px; }
+.cork-row-synopsis input:focus { color: var(--text); }
+.cork-row-synopsis.cork-muted { padding-top: 2px; }
+.cork-row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cork-row-title button { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; cursor: pointer; color: var(--text); }
-.cork-row.cork-folder .cork-row-title button { color: var(--text); }
 .cork-row-title button:hover { text-decoration: underline; }
 .cork-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.cork-row.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
-.cork-row.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
+.cork-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.cork-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 </style>

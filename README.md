@@ -159,9 +159,10 @@ label, a status and keywords, kept in its header (`synopsis`, `label`, `status`,
 colour shows by the document in the file tree, and the statuses offered are the workspace's (Settings ›
 Workspace, under Document details) ([0094](docs/decisions/0094-word-counts-and-document-details.md)).
 
-Right-click a folder for its **Corkboard** or its **Outline**, shown where a document is: what is in
-the folder, in the file tree's order, as index cards (each document's title, synopsis, label, status
-and words) or as rows. Write a synopsis on a card, or a synopsis, label, status or target in a row,
+Click a folder's name for its **Corkboard** or its **Outline** (whichever was shown last), shown
+where a document is; its icon opens and closes it. Both show what is in the folder, in the file
+tree's order, as index cards (each document's title, synopsis, label, status and words) or as rows
+(the synopsis a second line under each). Write a synopsis on a card, or a synopsis, label, status or target in a row,
 and it goes into the document's header, open or not; drag a card or a row to arrange the folder (the
 file tree follows). A folder's card opens that folder; a document's title opens the document
 ([0095](docs/decisions/0095-corkboard-and-outline.md)).

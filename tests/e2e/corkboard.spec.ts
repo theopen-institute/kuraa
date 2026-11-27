@@ -31,10 +31,17 @@ test('a folder as a corkboard and as an outline: synopses and statuses edited in
   expect((await doc(`${folder}/coast/c.md`, 'title: Cliffs', 'High.')).status).toBe(201);
 
   await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
-  // From the folder's menu: its corkboard, in the main area, in the tree's order (folders first, by name).
-  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
-  await page.getByTestId('context:folder-view:corkboard:corkboard').click();
+  // The folder clicked in the tree: its corkboard, in the main area, in the tree's order (folders first, by name); marked in the tree.
+  await page.evaluate(() => localStorage.removeItem('kuraa:folder-view'));
+  await page.getByTestId(`folder:${folder}`).click();
   await expect(page.getByTestId('cork-title')).toHaveText(folder);
+  await expect(page.locator(`[role="treeitem"][data-path="${folder}"]`)).toHaveClass(/\bshown\b/);
+  // Its icon opens and closes it, and nothing else.
+  await page.getByTestId(`fold:${folder}`).click();
+  await expect(page.getByTestId(`file:${folder}/a.md`)).toHaveCount(0);
+  await expect(page.getByTestId('cork-title')).toHaveText(folder);
+  await page.getByTestId(`fold:${folder}`).click();
+  await expect(page.getByTestId(`file:${folder}/a.md`)).toBeVisible();
   await expect.poll(cardsIn(page)).toBe('coast a.md b.md');
   await expect(page.getByTestId(`card:${folder}/coast`)).toContainText('1 document');
   await expect(page.getByTestId(`card-synopsis:${folder}/b.md`)).toHaveText('Small ones.');
@@ -66,4 +73,8 @@ test('a folder as a corkboard and as an outline: synopses and statuses edited in
   await page.getByTestId(`row-open:${folder}/b.md`).click();
   await expect(page.getByTestId('editor')).toBeVisible();
   await expect(page.getByTestId('folder-view')).toHaveCount(0);
+
+  // The folder clicked again: in the view last shown, the outline.
+  await page.getByTestId(`folder:${folder}`).click();
+  await expect(page.getByTestId(`row:${folder}/a.md`)).toBeVisible();
 });

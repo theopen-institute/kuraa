@@ -12,9 +12,15 @@ label, status, words and target, kept in its header.
 ## What is decided
 
 **A folder shown in the main area.** Where a document is shown, a folder can be: in a **folder view**
-a component gives (`folderViews`: an id, a name, and how it is drawn), offered on every folder's
-right-click menu by its name (**Corkboard**, **Outline**). It stays until a document is opened (from
-it, or anywhere), and goes when another workspace is opened. A view is told its folder, may show
+a component gives (`folderViews`: an id, a name, and how it is drawn). **Clicking a folder's name in
+the file tree shows it**, in the view last shown (in this browser), else the first; **its icon opens
+and closes it** (*revised*: at first both were on the folder's right-click menu, and a click opened and
+closed it; the owner: "instead of accessing the corkboard/outline by right clicking the folder, make it
+trigger by clicking on the folder itself. Clicking on the folder icon still folds and unfolds", "and
+remove corkboard/outline from the rightclick menu"). Where no component gives a folder view, a click
+on its name opens and closes it, as before. The folder shown is marked in the tree as the open file
+is (`shownFolder`). It stays until a document is opened (from it, or anywhere), and goes when another
+workspace is opened. A view is told its folder, may show
 another (`showFolder`: a folder's card opens that folder in the same view), and may switch to another
 view of the same folder. Its context is navigation's (the files, the folders' orders, opening, `place`
 to arrange): it shows the files as the file tree does, never apart from them.
@@ -27,8 +33,10 @@ many documents are in it, all through it, and their words (click: that folder's 
 file's card has only its name. Drag a card before or after another (the side of it the pointer is on):
 the folder's order, which the file tree follows.
 
-**The outline**: the same, as rows: title, synopsis, label, status, words, target, the label's colour
-by the title. Synopsis, label (those used suggested), status (Scrivener's five and those used) and
+**The outline**: the same, as rows: title, label, status, words, target across the width, the
+label's colour by the title, and **the synopsis on a second line of its own, indented** (*revised*:
+it was a column; "Make synopsis an indented second line in the outline view. Expand the remaining
+fields to fit"). Synopsis, label (those used suggested), status (Scrivener's five and those used) and
 target are edited in place; Enter, or leaving the field, saves it. What is typed stays as typed until
 it is saved, whatever the view is told meanwhile (a save elsewhere, a commit). Drag a row above or
 below another to arrange them.

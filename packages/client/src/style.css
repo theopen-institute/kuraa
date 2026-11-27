@@ -725,30 +725,33 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .settings-host > form, .settings-components > form { display: grid; gap: 4px; min-width: 0; }
 .settings-content .settings-host > form > .settings-part:first-of-type, .settings-content .settings-components > form > .settings-part:first-of-type { border-top: 0; padding-top: 4px; }
 .components-part { gap: 10px; }
-/* Components in the list: under Host, as part of it. */
-/* The kinds it has, with how many of each: a way to each. */
-.component-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
-.component-kind-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
-.component-kind-chip:hover { background: var(--selected); }
-.component-kind-n { color: var(--muted); font-variant-numeric: tabular-nums; }
-/* One kind: its name and how many are on, what it is, its owner's switches, then each component. */
+/* A tab for each kind it has, with how many (0104): kept in view against the top of the scrolling content (its padding, 20px, above, covered),
+   one line high (scrolled sideways where they do not fit), the column heads kept in view beneath it (--kinds-h). */
+.components-part { --kinds-h: 38px; }
+.component-kinds { position: sticky; top: -20px; z-index: 2; display: flex; gap: 2px; height: var(--kinds-h); background: var(--surface); box-shadow: 0 -20px 0 var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.component-kinds::-webkit-scrollbar { display: none; }
+.component-kind-tab { flex: none; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 6px 6px 0 0; background: none; color: var(--muted); padding: 0 12px; font-size: 13.5px; white-space: nowrap; }
+.component-kind-tab:hover:not(:disabled) { color: var(--text); }
+.component-kind-tab[aria-selected='true'] { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.component-kind-tab:focus-visible { outline-offset: -2px; }
+.component-kind-n { color: var(--muted); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The kind shown: its name and how many are on, what it is, its owner's switches, then each component. */
+.component-panel { display: grid; gap: 4px; min-width: 0; }
+.component-kind-intro { display: grid; gap: 6px; padding: 10px 0 8px; }
+.component-kind-intro .flag { color: var(--warn); }
 .component-kind-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.component-kind-head h4 { flex: 1; margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text); }
-.component-kind-state { font-size: 12px; color: var(--muted); }
-.component-kind-about { margin: 0; font-size: 12.5px; color: var(--muted); }
+.component-kind-head h4 { flex: 1; margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.component-kind-state { font-size: 12.5px; color: var(--muted); }
+.component-kind-about { margin: 0; font-size: 13px; color: var(--muted); }
 .component-switches { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--bg); }
 .settings-components .components-note { display: grid; gap: 4px; }
-/* Settings › Components (0095): one table, a column for each level a component is switched at (Host, Workspace, You). Its column heads stay in view, against the top of the scrolling content (its padding, 20px, above). */
+/* Settings › Components (0095): a table, a column for each level a component is switched at (Host, Workspace, You). Its column heads stay in view under the tabs. */
 .component-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-.component-table thead th { position: sticky; top: -20px; z-index: 1; background: var(--surface); box-shadow: 0 -20px 0 var(--surface); padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; font-weight: 600; text-align: center; vertical-align: bottom; cursor: help; }
+.component-table thead th { position: sticky; top: calc(var(--kinds-h) - 20px); z-index: 1; background: var(--surface); padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; font-weight: 600; text-align: center; vertical-align: bottom; cursor: help; }
 .component-table thead th.component-col-name { text-align: left; padding-left: 0; cursor: default; }
 .component-table thead th > span { display: block; }
 .component-col-about { font-size: 11px; font-weight: 400; color: var(--muted); }
 .component-table th:not(.component-col-name), .component-table .component-cell { width: 84px; }
-.component-kind-row > th { text-align: left; font-weight: 400; padding: 16px 0 6px; scroll-margin-top: 48px; }
-.component-kind-row > th > * + * { margin-top: 6px; }
-.component-kind-row .component-kind-about { margin: 2px 0 0; }
-.component-kind-row .flag { color: var(--warn); }
 .component-row > td { padding: 7px 4px; border-top: 1px solid var(--border); vertical-align: top; }
 .component-row > td.component-text { padding-left: 0; min-width: 0; }
 .component-row > td.component-text > span { display: block; }

@@ -53,6 +53,11 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await page.getByTestId('settings-tab-components').click();
     await expect(page.getByTestId('settings-scope')).toContainText('Only you, the host’s owner, switch the Host column');
     await expect(switches.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeChecked();
+    // One kind at a time, a tab each (0104); the arrow keys move between them.
+    await page.getByTestId('kind:formats').press('ArrowRight');
+    await expect(page.getByTestId('kind:features')).toBeFocused();
+    await expect(page.getByTestId('kind:features')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId('kind:engines').click();
     await expect(switches.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
     await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();
     await page.getByTestId('settings-tab-host').click();
@@ -73,6 +78,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await prefs.getByTestId('pref-memory').fill('3g');
     // A component switched in Components, applied with Host's settings, together, as the window closes.
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await switches.getByTestId('pref-format-rmarkdown').uncheck();
     await page.getByTestId('settings-tab-host').click();
     // A relay to connect through, named by its key (kuraa-host relay prints it).
@@ -89,6 +95,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await openSettings(page);
     await page.getByTestId('settings-tab-you').click();
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await expect(page.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await expect(page.getByTestId('pref-format-pandoc-markdown')).toBeChecked();
     await page.keyboard.press('Escape');
@@ -96,6 +103,7 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     // Kept: the dialog opens with them, from the keyboard too (⌥⌘, as in the desktop app).
     await page.keyboard.press('ControlOrMeta+Alt+Comma');
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:formats').click();
     await expect(switches.getByTestId('pref-format-rmarkdown')).not.toBeChecked();
     await page.getByTestId('settings-tab-host').click();
     await prefs.getByTestId('pref-run-advanced').locator('summary').click();

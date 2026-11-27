@@ -112,6 +112,7 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     execFileSync('git', ['init', '-q', '--bare'], { cwd: bare });
     await openSettings(page);
     await page.getByTestId('settings-tab-components').click();
+    await page.getByTestId('kind:syncs').click();
     await expect(page.getByTestId('component-sync:online')).toContainText('not set up');
     await page.getByTestId('sync-settings:online').click();
     await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');

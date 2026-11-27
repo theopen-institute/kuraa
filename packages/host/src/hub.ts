@@ -43,6 +43,7 @@ import { cleanName, initWorkspace, inspectFolder, readWorkspaceName } from './wo
 import type { PeerOptions } from './peers/peers.js';
 import type { JoinProgress } from './peers/join.js';
 import type { PeerNode } from './peers/node.js';
+import { decodeLink } from './peers/identity.js';
 import { startHost, joinWorkspace, type RunningHost } from './index.js';
 import { loadRunComponents } from './components.js';
 import type { RunOptions } from './runner.js';
@@ -86,6 +87,12 @@ export interface HubOptions {
   };
   /** Syncing with other devices, for the workspaces that are shared: joined from an invite link, or that invited someone. */
   peers?: PeerOptions;
+  /**
+   * A server (0099; @kuraa/server runs one): every workspace's host has no
+   * person, its devices in as the server's; workspaces come by links for a
+   * server, and none is made here.
+   */
+  server?: boolean;
   log?: (m: string) => void;
 }
 
@@ -303,9 +310,11 @@ export class Hub {
 
   /** Syncing: the settings (servers to find computers through), else `peers`. */
   private peerOptions(): PeerOptions {
-    if (!this.o.settings) return this.o.peers ?? {};
+    // A server has no person (0099), whatever this computer keeps.
+    const server = this.o.server ? { person: null } : {};
+    if (!this.o.settings) return { ...this.o.peers, ...server };
     const s = fromSettings(this.o.settings.current).peers;
-    return { ...this.o.peers, ...(s.bootstrap ? { bootstrap: s.bootstrap } : {}), ...(s.relays ? { relays: s.relays } : {}) };
+    return { ...this.o.peers, ...(s.bootstrap ? { bootstrap: s.bootstrap } : {}), ...(s.relays ? { relays: s.relays } : {}), ...server };
   }
 
   /** Every workspace's host options: `hosts`, with the settings applied where there are any. */
@@ -361,7 +370,8 @@ export class Hub {
         // the first invitation turns syncing on, for good (the workspace is shared from then on).
         invites: { peers: peerOptions },
         // The owner's own features: only while the hub listens on this computer alone (0047).
-        managePerson: this.owner,
+        // A server has no identity to manage (0099).
+        managePerson: this.owner && !this.o.server,
         manageOnline: this.owner,
         personChanged: () => this.personChanged(),
         knownKeys: (id) => this.knownKeys(id),
@@ -416,6 +426,8 @@ export class Hub {
 
   /** A new workspace: a new folder in the hub's folder, made a git repository, named by whoever makes it (0061). */
   create(name: string): Promise<HubWorkspace> {
+    // A server holds what people share with it, and founds nothing (0099: no person to be its owner).
+    if (this.o.server) return Promise.reject(new HttpError(403, 'A server holds workspaces shared with it: it makes none of its own'));
     return this.serial(async () => {
       this.mayAdd();
       let label: string;
@@ -453,7 +465,9 @@ export class Hub {
         const dir = join(this.root, id);
         let joined;
         try {
-          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`) });
+          // A server joins by a link for a server, as no person (0099).
+          if (this.o.server && decodeLink(invitation).grant?.role !== 'server') throw new Error('A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
+          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}) });
         } catch (err) {
           // Leave nothing half-made behind.
           // (On Windows a process that has just ended may hold a file in it for a moment.)

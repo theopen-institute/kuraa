@@ -66,6 +66,8 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   const link = o.invitation.trim();
   const l = decodeLink(link);
   if (l.expires !== 0 && l.expires < Date.now()) throw new Error('This invite link has expired');
+  // A link for a server (0099) is joined by a server, which has no person: kuraa-server join.
+  if (l.grant?.role === 'server' && o.person !== null) throw new Error('This invite link is for a server: give it to kuraa-server join, on the server');
   const dir = resolve(o.dir);
   const log = o.log ?? (() => undefined);
   await mkdir(dir, { recursive: true });

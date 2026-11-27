@@ -6,7 +6,7 @@
 // - This device's key pair: .git/kuraa/device.json, readable only by its owner.
 // - The devices in the workspace (0072): those that sign with a key a person
 //   vouched for, whose person the policy has in it, the key neither dropped nor
-//   revoked. Each is a git remote whose URL is `kuraa://<device key>`, so
+//   revoked; and those that sign with a key the policy has as a server (0099). Each is a git remote whose URL is `kuraa://<device key>`, so
 //   `git fetch laptop` works and their branches are `laptop/main`; the remotes
 //   follow the records (syncRemotes).
 // - Devices removed before (0072: no longer made): `kuraa.removed`, never accepted again.
@@ -26,7 +26,7 @@ import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
-import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyEntry, type PolicyOp, type Role } from './policy.js';
+import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type JoinRole, type Policy, type PolicyEntry, type PolicyOp, type Role } from './policy.js';
 import { evaluateLegacy, frozenPolicy, mayRefound, type LegacySnapshot } from './legacy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
@@ -298,7 +298,11 @@ export class Identity {
         continue;
       }
       const p = w.personOf.get(key);
-      if (!p) continue;
+      if (!p) {
+        // A server (0099): in as itself, its key where a person's device has its person.
+        if (policy.isServer(key)) inside.set(device, { person: key, name: w.names.get(device) ?? '' });
+        continue;
+      }
       if (!policy.founded || policy.role(p.key)) inside.set(device, { person: p.key, name: w.names.get(device) ?? '' });
       else if (policy.cutoffs.has(p.key)) out.add(device);
     }
@@ -926,11 +930,13 @@ export class Identity {
 
   /**
    * Whether a device may remove another (0068, 0070): with no policy, any; its
-   * own person, always; an admin, a member's computer; the owner, anyone's.
+   * own person, always; an admin, a member's computer; the owner, anyone's; a
+   * server, only the owner (0099).
    */
   async mayRemove(device: string, other: string): Promise<boolean> {
     const { managers, persons, adminDevices, assigners } = await this.managers();
     if (!managers) return true;
+    if (await this.isServerDevice(other)) return assigners.has(device);
     const whose = persons.get(device);
     if (whose && whose === persons.get(other)) return true;
     return managers.has(device) && (!adminDevices.has(other) || assigners.has(device));
@@ -939,6 +945,57 @@ export class Identity {
   /** The person (identity ID) a device is, as its signing key's vouch says; null if none. */
   async personIdOf(device: string): Promise<string | null> {
     return (await this.personOf(device))?.key ?? null;
+  }
+
+  /**
+   * Who a device (or a signing key) is, to the policy: its person (identity ID);
+   * or, for a server's (0099), the server's key, which the policy names it by;
+   * null if neither.
+   */
+  async whoIs(deviceOrKey: string): Promise<string | null> {
+    const records = await this.records();
+    const w = this.who(records);
+    const key = w.signsWith.get(deviceOrKey) ?? deviceOrKey;
+    const person = w.personOf.get(key)?.key;
+    if (person) return person;
+    return (await this.policy(records)).isServer(key) ? key : null;
+  }
+
+  /** Whether a device is a server's (0099): it signs with a key the policy has as a server's. */
+  async isServerDevice(device: string): Promise<boolean> {
+    const records = await this.records();
+    const key = this.who(records).signsWith.get(device);
+    return !!key && !this.who(records).personOf.has(key) && (await this.policy(records)).isServer(key);
+  }
+
+  /** Servers' keys, now or before (0099): those whose joins as a server counted. */
+  async everServers(list?: MemberRecord[]): Promise<Set<string>> {
+    const records = list ?? (await this.records());
+    const policy = await this.policy(records);
+    return new Set(records.filter((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.role === 'server' && policy.counted.has(r.subject)).map((r) => r.signer!));
+  }
+
+  /** What servers, now or before, call themselves (0099): their devices' names, by the server's key. */
+  async serverNames(): Promise<Map<string, string>> {
+    const records = await this.records();
+    const w = this.who(records);
+    const out = new Map<string, string>();
+    for (const key of await this.everServers(records)) {
+      const name = [...w.signsWith].filter(([, k]) => k === key).map(([d]) => w.names.get(d) ?? '').find(Boolean);
+      if (name) out.set(key, name);
+    }
+    return out;
+  }
+
+  /** The servers in the workspace (0099): each one's key, and its devices here with their names. */
+  async servers(): Promise<{ key: string; devices: { key: string; name: string }[] }[]> {
+    const records = await this.records();
+    const w = this.who(records);
+    const policy = await this.policy(records);
+    return [...policy.servers].sort().map((key) => ({
+      key,
+      devices: [...w.signsWith].filter(([, k]) => k === key).map(([device]) => ({ key: device, name: w.names.get(device) ?? '' })),
+    }));
   }
 
   /** Whether a device's person is an admin of the workspace (or of `group`); with no policy yet, every member is (0038). */
@@ -1037,12 +1094,14 @@ export class Identity {
    * whoever made it and whoever it took out, whose devices' acknowledgements
    * say they hold it.
    */
-  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[]> {
+  async confirmations(limit = 10): Promise<{ op: string; kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[]> {
     const records = await this.records();
     const policy = await this.policy(records);
     const w = this.who(records);
     const entries = new Map(records.filter((r) => r.kind === 'policy').map((r) => [r.subject, policyEntry(r)]));
-    const personOfKey = (k: string) => (w.personOf.get(k) ?? w.formerly.get(k))?.key ?? null;
+    // A server, now or before (0099), by its key: its devices confirm, as people's do.
+    const servers = await this.everServers(records);
+    const personOfKey = (k: string) => (w.personOf.get(k) ?? w.formerly.get(k))?.key ?? (servers.has(k) ? k : null);
     // What each person's devices hold of the policy: all their acknowledged heads descend from.
     const held = new Map<string, Set<string>>();
     for (const device of new Set(records.filter((r) => r.kind === 'ack').map((r) => r.by))) {
@@ -1058,7 +1117,7 @@ export class Identity {
       }
       held.set(person, seen);
     }
-    const out: { op: string; kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[] = [];
+    const out: { op: string; kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[] = [];
     for (const id of [...policy.applied].reverse()) {
       const e = entries.get(id);
       if (!e) continue;
@@ -1066,7 +1125,7 @@ export class Identity {
       if (!who) continue;
       const by = personOfKey(e.signer);
       const confirmedBy = [...held].filter(([p, ops]) => p !== by && p !== who && ops.has(id)).map(([p]) => p).sort();
-      out.push({ op: id, kind: e.op.t === 'drop' ? 'computer' : 'person', who, by, confirmedBy });
+      out.push({ op: id, kind: e.op.t === 'drop' ? (servers.has(e.op.key) ? 'server' : 'computer') : 'person', who, by, confirmedBy });
       if (out.length >= limit) break;
     }
     return out;
@@ -1303,7 +1362,7 @@ export class Identity {
    * as a member, unless it says otherwise), signed by this person's signing key,
    * who must be an admin of that group.
    */
-  async createLink(hours: number | null, once: boolean, hints: LinkHints = { relays: [], tcp: [] }, grant?: { key: KeyPair; group?: string; role?: Role }): Promise<string> {
+  async createLink(hours: number | null, once: boolean, hints: LinkHints = { relays: [], tcp: [] }, grant?: { key: KeyPair; group?: string; role?: JoinRole }): Promise<string> {
     const ws = await this.workspace();
     if (!ws) throw new Error('This repository is not a workspace shared between devices');
     const key = await this.deviceKey();
@@ -1322,6 +1381,8 @@ export class Identity {
       const who = this.who(await this.records()).personOf.get(signer)?.key ?? null;
       if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
       if (group === WORKSPACE && role === 'admin' && !policy.mayAssignAdmins(who)) throw new Error('Only the workspace’s owner invites people as admins');
+      // A server (0099): the owner's to invite, to the workspace, one by each link.
+      if (role === 'server' && (!policy.isOwner(who) || group !== WORKSPACE || !once)) throw new Error('Only the workspace’s owner invites a server, one by each link');
       const genesis = await this.pin();
       // Counting only for whom a device in the workspace lets in by it (admit), which checks it has not expired.
       granted = { group, role, genesis, granter: signer, signature: crypto.sign(admittedGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer), grant.key.secretKey).toString('hex') };
@@ -1361,6 +1422,8 @@ export class Identity {
     if (policy.unlinked.has(l.id)) return l.once ? 'the link was used, or revoked' : 'the link was revoked';
     const who = this.who(await this.records()).personOf.get(g.granter)?.key ?? null;
     if (!policy.isAdmin(who, g.group)) return 'the person who made the link may no longer invite people';
+    // A link for a server (0099): the owner's, for one.
+    if (g.role === 'server' && (!policy.isOwner(who) || !l.once || g.group !== WORKSPACE)) return 'the person who made the link for a server is no longer the owner';
     return null;
   }
 
@@ -1525,7 +1588,8 @@ export interface InviteLink {
 /** What an invite link lets its holder be (0066): signed (grantMessage) by an admin's signing key. */
 export interface LinkGrant {
   group: string;
-  role: Role;
+  /** As what (0099: or as a server). */
+  role: JoinRole;
   /** The workspace's genesis (its pin); null in one from before. */
   genesis: string | null;
   /** The signing key that signed it. */
@@ -1538,8 +1602,8 @@ function encodeGrant(g: LinkGrant | undefined): string {
 }
 
 function decodeGrant(s: string | undefined): LinkGrant | undefined {
-  const m = s ? /^g:([a-z0-9][a-z0-9-]{0,39}),(admin|member),([0-9a-f]{64}|-),([0-9a-f]{64}),([0-9a-f]{128})$/.exec(s) : null;
-  return m ? { group: m[1]!, role: m[2] as Role, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]! } : undefined;
+  const m = s ? /^g:([a-z0-9][a-z0-9-]{0,39}),(admin|member|server),([0-9a-f]{64}|-),([0-9a-f]{64}),([0-9a-f]{128})$/.exec(s) : null;
+  return m ? { group: m[1]!, role: m[2] as JoinRole, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]! } : undefined;
 }
 
 /** Ways into a workspace besides the DHT, as an invite link carries them. */

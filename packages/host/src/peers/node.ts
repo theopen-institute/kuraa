@@ -1016,9 +1016,17 @@ export class PeerNode {
     }
   }
 
-  /** The workspace's policy (policy.ts), and the person this device is. */
+  /**
+   * The workspace's policy (policy.ts), and who this device is to it: its
+   * person; or, on a server (0099: no person), the server's key, where the
+   * policy has it as one.
+   */
   async policy(): Promise<{ policy: import('./policy.js').Policy; me: string | null }> {
-    return { policy: await this.identity.policy(), me: (await this.person())?.id ?? null };
+    const policy = await this.identity.policy();
+    const person = await this.person();
+    if (person) return { policy, me: person.id };
+    const key = (await this.signingKeyNow()).publicKey.toString('hex');
+    return { policy, me: policy.isServer(key) ? key : null };
   }
 
   /** This computer's signing key, for its person (person.ts: made on first use, never copied; read each time, as importing an identity replaces it). Tests give theirs. */
@@ -1079,15 +1087,17 @@ export class PeerNode {
   /**
    * Whether a device's person may change a file, by the workspace's write rules
    * (0066): for live rooms, which take edits only from devices that may make
-   * them. Anyone may where there is no policy, or no rule for the file.
+   * them. Anyone may where there is no policy, or no rule for the file; a
+   * server's device, nowhere (0099).
    */
   mayWrite(device: string, path: string): boolean {
     const a = this.access;
+    if (a?.policy.isServer(a.personOf.get(device) ?? null)) return false;
     if (!a || !a.policy.founded || !a.policy.rules.size) return true;
     return a.policy.mayWrite(a.personOf.get(device) ?? null, path);
   }
 
-  /** Whose a device is (its person's identity ID), as the records said when the members last changed; null if no one's known. */
+  /** Whose a device is (its person's identity ID; a server's key, for a server's: 0099), as the records said when the members last changed; null if no one's known. */
   personOfDevice(device: string): string | null {
     return this.access?.personOf.get(device) ?? null;
   }
@@ -1095,7 +1105,7 @@ export class PeerNode {
   private async updateAccess(): Promise<void> {
     const personOf = new Map<string, string>();
     for (const d of [this.myKey, ...(await this.identity.members()).map((m) => m.key)]) {
-      const id = await this.identity.personIdOf(d);
+      const id = await this.identity.whoIs(d);
       if (id) personOf.set(d, id);
     }
     this.access = { policy: await this.identity.policy(), personOf };
@@ -1492,9 +1502,11 @@ export class PeerNode {
       await this.syncPerson();
     }
     await this.takeRecords(link, records);
-    // Let in by a link that puts this person in a group: said in the policy (0066).
+    // Let in by a link that puts this person in a group: said in the policy (0066). A server (0099), by a link for one,
+    // says so itself, with its key: no person's.
     const person = await this.person();
-    if (person && this.o.ticket) {
+    const asServer = !person && !!this.o.ticket && decodeLink(this.o.ticket).grant?.role === 'server';
+    if ((person || asServer) && this.o.ticket) {
       await this.identity.joinPolicy(decodeLink(this.o.ticket), await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not join the workspace's policy: ${e.message}`));
       void this.membersChanged().catch(() => undefined);
     }

@@ -19,7 +19,9 @@
 // dropped when their identity was recovered), or by someone taken out of the
 // workspace, counts only if it is among the commits that the revocation or
 // removal named (what its maker had then); any other is refused, whatever the
-// rules, every file it changes kept as it was here.
+// rules, every file it changes kept as it was here. So is any commit signed by a
+// server's key (0099: a server changes nothing), now or after its drop; its
+// merges, as anyone's, are judged only by what they hold beyond the merge.
 //
 // Whoever made it, a change that would put a link (a symlink) in the workspace,
 // or a path that differs from another in it only by case or Unicode form (one
@@ -61,6 +63,8 @@ export interface GateContext {
   space?: string | null;
   /** Signing keys no longer their person's: whose they were, and the commits that still count (Identity.cutKeys). */
   cutKeys?: Map<string, { person: string; heads: string[] }>;
+  /** Servers' signing keys, now or before (0099): nothing they sign changes anything. */
+  servers?: Set<string>;
   /** The tree of the merge of two commits, as this device makes it; and what its merges' trailer says (merging.ts, mergeTrailerValue). */
   remake?: (a: string, b: string) => Promise<string>;
   mergeTrailer?: string;
@@ -115,7 +119,7 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
     return false;
   };
   // Write rules, or cutoffs, to judge by; else only what no one brings in this way (unsafePaths).
-  const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0;
+  const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0 || !!ctx.servers?.size;
   for (const [c, ...parents] of list as [string, ...string[]][]) {
     // A commit touching anyone's own files (0082) is judged, rules or none: they are their owners' alone.
     const quick = judging ? null : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', ...(parents.length >= 2 ? [parents[0]!] : []), c])).stdout.split('\0').filter(Boolean);
@@ -141,6 +145,11 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
       if (await among(c, gone.heads)) by = gone.person;
       else cut = true;
     } else if (by && ctx.policy.cutoffs.has(by) && !(await among(c, ctx.policy.cutoffs.get(by)!))) cut = true;
+    // A server's (0099): no change of its counts, whatever the rules.
+    if (signer && ctx.servers?.has(signer)) {
+      cut = true;
+      by = signer;
+    }
     const changed = parents.length >= 2
       ? await mergeChanges(git, c, parents, message, ctx)
       : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);

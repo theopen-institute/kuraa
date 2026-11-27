@@ -25,7 +25,7 @@ import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
 import type { Person } from './person.js';
-import { WORKSPACE, hashedPath, isGroupName, isRulePath, isWriter, pathsAbove, type Perm, type Policy, type PolicyOp, type Role } from './policy.js';
+import { WORKSPACE, hashedPath, isGroupName, isRulePath, isWriter, pathsAbove, type JoinRole, type Perm, type Policy, type PolicyOp, type Role } from './policy.js';
 import type { ClashInfo } from './clashes.js';
 import { NotAllowed } from '../errors.js';
 import type { KeyPair } from '../keys.js';
@@ -77,6 +77,8 @@ export interface DeviceInfo {
   key: string;
   /** Whose device it is, as their identity says (0035); null if it does not say. */
   person: string | null;
+  /** A server's device (0099): in as itself, no person's. */
+  server: boolean;
   /** Connected to this device. */
   online: boolean;
   /**
@@ -197,10 +199,17 @@ export interface PeopleInfo {
   assignsAdmins: boolean;
   people: { id: string; role: Role | 'owner'; name: string | null; devices: string[]; you: boolean }[];
   /**
-   * The latest removals (0072: people taken out, computers dropped), each with
-   * the names of those whose devices hold it so far.
+   * The servers in the workspace (0099): each by its key, what its devices call
+   * themselves, its devices here, and whether this is one of them.
    */
-  removals: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[];
+  servers: { key: string; name: string; devices: string[]; you: boolean }[];
+  /** Whether this person invites and removes servers: the owner (0099). */
+  managesServers: boolean;
+  /**
+   * The latest removals (0072: people taken out, computers dropped; 0099:
+   * servers), each with the names of those whose devices hold it so far.
+   */
+  removals: { kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** An invite link this device made, and whether it still lets people in. */
@@ -370,7 +379,9 @@ export class Peers {
         const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
         const names = new Map(people.map((p) => [p.key, p.name]));
         const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
-        return { policy, known, personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? null, cutKeys: await id.cutKeys() };
+        // Servers, now or before (0099): the keys whose joins as a server counted.
+        const servers = await id.everServers(records);
+        return { policy, known, servers, personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? (servers.has(p) ? 'a server' : null), cutKeys: await id.cutKeys() };
       })();
       this.gateCache = { digest, ctx };
       ctx.catch(() => {
@@ -739,12 +750,13 @@ export class Peers {
    * first device it lets in uses it up) or anyone with it, until it expires
    * (`hours`; null: never) or is revoked.
    */
-  async inviteLink(o: { hours: number | null; once: boolean; role?: Role; group?: string }): Promise<string> {
+  async inviteLink(o: { hours: number | null; once: boolean; role?: JoinRole; group?: string }): Promise<string> {
     // With the ways in besides the DHT this device knows: relays named, servers that take TCP (0053).
     // Putting its holder in a group, signed by this person (0066): the workspace, as a member, unless it says otherwise.
     const person = await this.node.person();
     const grant = person ? { key: await this.node.signingKeyNow(), group: o.group, role: o.role } : undefined;
-    const link = await this.node.identity.createLink(o.hours, o.once, await this.node.linkHints(), grant);
+    // A link for a server (0099) lets one in.
+    const link = await this.node.identity.createLink(o.hours, o.role === 'server' || o.once, await this.node.linkHints(), grant);
     // On record, so every member announces its topic while it lets people in (0050).
     await this.node.membersChanged();
     return link;
@@ -819,6 +831,25 @@ export class Peers {
     return true;
   }
 
+  /**
+   * Take a server out of the workspace, for good (0099): a drop of its key, the
+   * owner's to make, with the commits this device has; the workspace's secret
+   * made anew, so its devices can no longer find the others.
+   */
+  async removeServer(key: string): Promise<void> {
+    const { policy, me } = await this.node.policy();
+    if (!policy.isServer(key)) throw new Error('No such server in this workspace');
+    if (!policy.isOwner(me)) throw new NotAllowed('Only the workspace’s owner removes a server');
+    const devices = (await this.node.identity.servers()).find((s) => s.key === key)?.devices.map((d) => d.key) ?? [];
+    await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
+    await this.node.newSecret();
+    await this.node.membersChanged();
+    for (const d of devices) {
+      const link = this.node.links.get(d);
+      if (link) setTimeout(() => link.close(), 1000).unref();
+    }
+  }
+
   /** What this device is called, to people and to the devices that pair with it from now on. */
   async rename(name: string): Promise<void> {
     if (!name.trim()) throw new Error('A device needs a name');
@@ -836,6 +867,10 @@ export class Peers {
     const id = this.node.identity;
     const { policy, me } = await this.node.policy();
     const known = new Map((await id.people()).map((p) => [p.key, p]));
+    const servers = (await id.servers()).map((s) => ({ key: s.key, name: s.devices.map((d) => d.name).find(Boolean) ?? `${s.key.slice(0, 8)}…`, devices: s.devices.map((d) => d.key), you: s.key === me }));
+    // A person by their name; a server (0099), now or before, by what its devices call themselves.
+    const names = new Map([...[...known].map(([k, p]) => [k, p.name] as const), ...(await id.serverNames())]);
+    const nameOf = (k: string) => names.get(k) || `${k.slice(0, 8)}…`;
     return {
       founded: policy.founded,
       admin: policy.founded ? policy.isAdmin(me) : true,
@@ -843,7 +878,9 @@ export class Peers {
       owner: policy.owner,
       assignsAdmins: policy.founded ? policy.mayAssignAdmins(me) : true,
       people: policy.people().map((p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
-      removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: known.get(r.who)?.name ?? `${r.who.slice(0, 8)}…`, by: r.by ? known.get(r.by)?.name ?? `${r.by.slice(0, 8)}…` : null, confirmedBy: r.confirmedBy.map((p) => known.get(p)?.name ?? `${p.slice(0, 8)}…`) })),
+      servers,
+      managesServers: policy.founded && policy.isOwner(me),
+      removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: nameOf(r.who), by: r.by ? nameOf(r.by) : null, confirmedBy: r.confirmedBy.map(nameOf) })),
     };
   }
 
@@ -1249,6 +1286,7 @@ export class Peers {
         name: m.name,
         key: m.key,
         person: (await id.personOf(m.key))?.name ?? null,
+        server: await id.isServerDevice(m.key),
         online: !!link?.accepted,
         through: this.node.through(m.key).map((l) => l.key),
         otherVersion: this.node.mergesDiffer(m.key),

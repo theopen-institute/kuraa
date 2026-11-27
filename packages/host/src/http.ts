@@ -721,8 +721,8 @@ const peerRoutes: Route[] = [
     const peers = await host.peersForInvites();
     // Named before it is shared: whoever joins gets the name (0061).
     await host.ensureName();
-    // As a member, unless it says admin (0066).
-    const role = body.role === 'admin' ? 'admin' : 'member';
+    // As a member, unless it says admin (0066); or a server (0099: the owner's, for one).
+    const role = body.role === 'admin' ? 'admin' : body.role === 'server' ? 'server' : 'member';
     const link = await allowed(() => peers.inviteLink({ hours, once: body.once === true, role }));
     send(res, 201, { link, ...(await peers.links()).at(-1)! });
   }),
@@ -744,6 +744,13 @@ const peerRoutes: Route[] = [
     }
     // One's own computer: its key revoked too, where this computer keeps one's identity (0068).
     send(res, 200, { ok: true, revoked });
+  }),
+
+  // A server taken out, for good (0099): the owner's; it keeps its copy.
+  route('DELETE', /^\/api\/peers\/servers\/([0-9a-f]{64})$/, async ({ host, res, params }) => {
+    const peers = await host.peersForInvites();
+    await allowed(() => peers.removeServer(params[0]!));
+    send(res, 200, await peers.people());
   }),
 
   // The workspace's people (0066): an admin makes someone an admin or a member, or takes them out (with their devices).

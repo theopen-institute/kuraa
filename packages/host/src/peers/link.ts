@@ -32,9 +32,11 @@ const CONTROL = 'kuraa/control/1';
  * before founded again; attestations and trustee rotations no longer taken);
  * 8: 0082 (a file named `@<identity ID>` is its person's own: only they change
  * it, but to move it unchanged; rooms take a person's feature state only as
- * theirs, and readers' changes to their own).
+ * theirs, and readers' changes to their own);
+ * 9: 0099 (servers: a join with role `server`, by a key no one's, which every
+ * operation after it names, so an older device would wait for them for ever).
  */
-export const PROTOCOL = 8;
+export const PROTOCOL = 9;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

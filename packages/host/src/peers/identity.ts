@@ -53,6 +53,13 @@ export const KURAA_SCHEME = 'kuraa://';
 /** At most this many records prove a device to be in (Identity.proof). */
 export const MAX_PROOF = 200;
 
+/** A short key for a list of records, for a memo (0099: the signatures joined, kept for each, ran to megabytes). */
+function recordsKey(list: MemberRecord[]): string {
+  const h = createHash('sha256');
+  for (const r of list) h.update(r.sig);
+  return `${list.length}:${h.digest('hex')}`;
+}
+
 /** The records the policy is worked out from: its operations, and who people are (0099: its memo is keyed on these). */
 const POLICY_KINDS = new Set<RecordKind>(['policy', 'key-event', 'vouch', 'revoke-key']);
 
@@ -559,7 +566,7 @@ export class Identity {
 
   /** Each identity's log, as the events on record show it (kel.ts), by ID: worked out once for the same records. */
   private identities(list: MemberRecord[]): Map<string, IdentityState> {
-    const key = list.map((r) => r.sig).join();
+    const key = recordsKey(list);
     if (this.identitiesMemo?.key === key) return this.identitiesMemo.value;
     const value = this.identitiesOf(list);
     this.identitiesMemo = { key, value };
@@ -592,7 +599,7 @@ export class Identity {
    */
   private who(list: MemberRecord[]): ReturnType<Identity['whoOf']> {
     // Worked out once for the same records (0072): asked for at every turn, and each identity's log is checked by its signatures.
-    const key = list.map((r) => r.sig).join();
+    const key = recordsKey(list);
     if (this.whoMemo?.key === key) return this.whoMemo.value;
     const value = this.whoOf(list);
     this.whoMemo = { key, value };

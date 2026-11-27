@@ -319,7 +319,11 @@ export function installServer(o: { here: string; version: string; root: string; 
       `Environment=${SERVICE_ENV}=1`,
       // Stopped to update (or by mistake): started again.
       'Restart=always',
-      'RestartSec=5',
+      'RestartSec=10',
+      // Stopping: the server is told (it saves everything, then exits), not its git processes, which a stop would
+      // otherwise cut off mid-write, leaving locks behind (0099).
+      'KillMode=mixed',
+      'TimeoutStopSec=90',
       '',
       '[Install]',
       'WantedBy=default.target',

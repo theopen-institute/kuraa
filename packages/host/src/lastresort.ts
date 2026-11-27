@@ -13,6 +13,13 @@ export interface LastResortOptions {
   limit?: number;
   /** Where the errors are told of (default: this process). */
   on?: Pick<NodeJS.Process, 'on' | 'off'>;
+  /**
+   * Stop (saving as usual) at the first uncaught exception, rather than going on
+   * (a server's, 0099: what threw may have left a queue that never moves, its
+   * workspace stuck while the process looks well; its service starts it again).
+   * Promises no one waited on are still borne, up to the limit.
+   */
+  stopOnException?: boolean;
 }
 
 /** Handle uncaught exceptions and unhandled rejections in this process, from now on. Returns a function that stops handling them. */
@@ -35,7 +42,12 @@ export function lastResort(o: LastResortOptions): () => void {
     });
   };
   const rejection = handle('unexpected error (not waited for)');
-  const exception = handle('unexpected error');
+  const exception = o.stopOnException
+    ? (e: unknown) => {
+      o.log(`unexpected error: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}; stopping, to be started again`);
+      o.stop();
+    }
+    : handle('unexpected error');
   const on = o.on ?? process;
   on.on('unhandledRejection', rejection);
   on.on('uncaughtException', exception);

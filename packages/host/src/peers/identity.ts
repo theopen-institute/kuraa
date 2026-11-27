@@ -490,14 +490,29 @@ export class Identity {
     if (this.pending) return [...this.pending.list];
     const cached = await this.fresh(this.recordsFile, this.recordsCache);
     if (cached) return [...cached.value];
+    // None yet: none. Not readable for another reason (too many files open, the disk): said, never taken for none, as
+    // the next record kept would write over them all (0099). Damaged: set aside, beside it, and none.
+    const stamp = await this.stamp(this.recordsFile);
+    let text: string;
     try {
-      const stamp = await this.stamp(this.recordsFile);
-      const list = (JSON.parse(await readFile(this.recordsFile, 'utf8')) as unknown[]).map(readRecord).filter((r): r is MemberRecord => !!r);
-      this.recordsCache = { stamp, value: list };
-      return [...list];
-    } catch {
-      return [];
+      text = await readFile(this.recordsFile, 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Could not read this workspace's records (${this.recordsFile}): ${(e as Error).message}`, { cause: e });
     }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+      if (!Array.isArray(raw)) throw new Error('not a list');
+    } catch (e) {
+      const aside = `${this.recordsFile}.damaged-${Date.now()}`;
+      await rename(this.recordsFile, aside).catch(() => undefined);
+      return [];
+      void e;
+    }
+    const list = (raw as unknown[]).map(readRecord).filter((r): r is MemberRecord => !!r);
+    this.recordsCache = { stamp, value: list };
+    return [...list];
   }
 
   /** The latest record of a kind a device made about itself (signs). */

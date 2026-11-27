@@ -112,6 +112,38 @@ does is in a package of its own, `packages/server`:
 - **`kuraa-server join <link>`** brings a workspace onto the server, by an invite link for a server.
 - **`kuraa-server list`** says which workspaces it holds, and whether each has taken it in.
 
+## One program, a server by role
+
+The owner, asked how a server is installed and run, and whether it updates itself:
+
+> "Yes, give it functionality as a service, running for production unattended. […] Ultimately, I
+> want the "server" to be identical to the base application, but with different constraints and a
+> few added functionalities (like relay and multi-user login)."
+
+> "One program with a server mode/role is what I want."
+
+So there is one program, released as before (0052), and a server is that program in a role:
+
+- **`kuraa-host server [flags]`** runs it as a server (`server join`, `server list`, `server key`
+  likewise); `kuraa-host [flags]` is a host, as it was. `pnpm server` is the same from the
+  repository. The words follow [0079](0079-host-not-server.md): *host* is the program, *server* a
+  host in that role.
+- **Its names stay** (`kuraa-server-<version>.tar.gz`, `kuraa-host.mjs`, `~/.kuraa/server`, the
+  service `kuraa` / `org.kuraa.server`): installed computers look for and run them, and a rename
+  would leave them behind, never updating again.
+- **As a service, unattended:** `kuraa-host install --service -- server <flags>` writes the service
+  (systemd for the user, with lingering; launchd on macOS) that runs `kuraa-host --auto-update server
+  <flags>` with an access code of its own (never printed), started again whenever it stops. It takes
+  signed releases (0052) and restarts at night, or at once when a device of a workspace runs a newer
+  kuraa; a signal saves everything before it stops; an error nothing caught is said and the server
+  goes on, and too many in a row stop it for the service to start it again (`lastresort.ts`).
+  `install` says how to bring a workspace onto it. One service per computer: a host's or a server's.
+- **In the code**, the release's entry is `@kuraa/server`'s `release.ts`: it picks the role
+  (`roles.ts`: `server` first, after `--auto-update` where a service puts that), and runs the host's
+  command line (`@kuraa/host/cli`) or the server's (`runServerCli`). The host knows nothing of the
+  server package; the server package is the host with its constraints and, later, what it adds
+  (relaying, signing in).
+
 ## In the app
 
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
@@ -135,7 +167,4 @@ the only other device. Removals list *The server … removed*.
   timers. A server should wake a workspace when a member connects, and need not announce what its
   members reach by its address.
 - **Signing in from the web**, and the other things a server can do because it is always there.
-- **The released server build** (0052: `kuraa-server-<version>.tar.gz`, installed as a service, which
-  updates itself) is a host that serves the app, not a server in this sense: `kuraa-server` is run
-  from the repository for now (`pnpm server`), installed by no one and updating itself never.
 - **Signing in**, and with it any page a server serves.

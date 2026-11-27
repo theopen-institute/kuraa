@@ -1,5 +1,7 @@
 # 0052 · The server, released on its own, updates itself
 
+*Since [0099](0099-servers.md):* the release is one program in two roles, a host (as here) or, with `server`, a headless server; its entry is `packages/server/src/release.ts`. Its names (the archive, `kuraa-host.mjs`, `~/.kuraa/server`, the service) are as here.
+
 The desktop app updates itself ([0051](0051-the-app-updates-itself.md)), and carries the server
 and the web client inside it. A server run on its own (for browsers, or as an always-on device of
 shared workspaces) ran from a checkout of the repository, updated by hand: and once the protocol

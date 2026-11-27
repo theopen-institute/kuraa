@@ -313,21 +313,29 @@ A server is in a workspace as itself, not as anyone's computer
 ([decision 0099](docs/decisions/0099-servers.md)): always on, it keeps everyone's work and passes it
 on while people are apart; it reads the workspace's own files and any folder whose readers name it,
 and changes nothing. Only the workspace's owner adds one: **People and computers › Add a server…**
-makes an invite link for one server. On the server:
+makes an invite link for one server.
+
+It is the same program as the host above, in its server role: `kuraa-host server`. For a computer
+that runs one unattended, install the release (as above) with a service that runs it as a server,
+updating itself and started again whenever it stops:
 
 ```sh
-pnpm server --public-address kuraa.example.org --peer-port 443   # its folder: ~/.kuraa/server-data (--data)
-pnpm server join 'kuraa-invite:…'                                # the owner's link for a server
-pnpm server list                                                 # what it holds, and whether each took it in
+node kuraa-server-*/kuraa-host.mjs install --service -- server --public-address kuraa.example.org --peer-port 443
+systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it says (launchd on macOS)
+loginctl enable-linger "$USER"                                         # to run while no one is logged in
+~/.kuraa/server/kuraa-host server join 'kuraa-invite:…'                # the owner's link for a server
+~/.kuraa/server/kuraa-host server list                                 # what it holds, and whether each took it in
 ```
 
-It has a key of its own (in its folder, one for all its workspaces) and no identity; it makes no
-workspaces and runs no code. It is headless: it serves no page, and its port (`--port 4322`, the
-access code in its folder's `server.json`) answers only `join` and `list`. Run it from the
-repository: the released server below is a host, which serves the app. The owner removes it from
-**People and computers**.
-`--public-address` and `--peer-port` let members on networks that block UDP reach it (see the
-server's flags above); without them it is reached as any device is.
+From the repository, `pnpm server` is the same (`pnpm server join …`, `pnpm server list`,
+`pnpm server key`), not updating itself. Its folder is `~/.kuraa/server-data` (`--data`): its key
+(one for all its workspaces; no identity), its workspaces, and `server.json` (where its API is, and
+its access code). It makes no workspaces and runs no code. It is headless: it serves no page, and
+its port (`--port 4322`, on this computer only unless `--host` says otherwise) answers, with its
+access code, only `join` and `list`. `--public-address` and `--peer-port` let members on networks
+that block UDP reach it (open that TCP port); without them it is reached as any device is. The owner
+removes it from **People and computers**. One service per computer: installing one as a server
+replaces a host's.
 
 ## On several devices
 
@@ -786,7 +794,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, merges (`merging.ts`), devices (`peers/`), hub of many workspaces (`hub.ts`), HTTP API, CLI, run component registry |
-| `packages/server` | `kuraa-server` (`pnpm server`): a host as a server in workspaces, with its own key and no person ([decision 0099](docs/decisions/0099-servers.md)); what a server may do is the host's (`peers/`) |
+| `packages/server` | The server role (`kuraa-host server`, `pnpm server`): a host in workspaces as itself, with its own key and no person, headless ([decision 0099](docs/decisions/0099-servers.md)); and the release's entry, which picks the role. What a server may do is the host's (`peers/`) |
 | `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |

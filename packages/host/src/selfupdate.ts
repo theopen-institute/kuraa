@@ -285,6 +285,8 @@ export function installServer(o: { here: string; version: string; root: string; 
   } else {
     said.push('No service for this system: run it with --auto-update under whatever starts it again when it stops.');
   }
+  // As a server (0099): headless, so workspaces come to it from the shell.
+  if (o.args[0] === 'server') said.push(`Then bring a workspace onto it: ${join(root, 'kuraa-host')} server join <invite link for a server>; ${join(root, 'kuraa-host')} server list says what it holds.`);
   return said;
 }
 

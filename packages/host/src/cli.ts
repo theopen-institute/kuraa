@@ -28,7 +28,7 @@
 //                 [--no-serve-dht]             never serve the public DHT (a public address does, by default)
 //                 (see peers/cli.ts for invite, join, devices, online, fork)
 //   saving:       [--flush-ms N] [--commit-ms N]
-//   updating:     [--auto-update]   a released server (server.ts) updates itself and restarts (0052)
+//   updating:     [--auto-update]   a release (@kuraa/server, release.ts) updates itself and restarts (0052)
 //
 // Flags only, because they choose what code runs with your rights (0046, 0047):
 //   --component <path or package>...   more run components; @kuraa/run-components always loads

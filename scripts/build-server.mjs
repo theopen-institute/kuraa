@@ -1,5 +1,6 @@
-// Builds the server as released (decision 0052): kuraa-host (packages/host/src/
-// server.ts) bundled into one file, with the web client beside it, and
+// Builds the server as released (decision 0052): kuraa-host (packages/server/src/
+// release.ts: one program, a host or, with `server`, a server, 0099) bundled into
+// one file, with the web client beside it, and
 // Hyperswarm's native parts for every platform it ships on, in one folder that
 // needs only Node 24 and git; then that folder as an archive and, with the
 // release key, its signature. (Its checksum is the one GitHub lists for it.)
@@ -59,7 +60,7 @@ const nativeAddons = {
 };
 
 await build({
-  entryPoints: [join(ROOT, 'packages/host/src/server.ts')],
+  entryPoints: [join(ROOT, 'packages/server/src/release.ts')],
   outfile: join(dir, 'kuraa-host.mjs'),
   bundle: true,
   platform: 'node',

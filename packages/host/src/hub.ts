@@ -106,7 +106,7 @@ interface Entry {
 }
 
 /** What a server answers to anything but its own few routes (0099). */
-const HEADLESS = 'This is a Kuraa server: it serves no app, and shows nothing of the workspaces it holds (kuraa-server list says which)';
+const HEADLESS = 'This is a Kuraa server: it serves no app, and shows nothing of the workspaces it holds (its `server list` command says which)';
 
 /** The id the app gives a join, to ask how it is going by. */
 const JOIN_ID = /^[A-Za-z0-9_-]{8,64}$/;

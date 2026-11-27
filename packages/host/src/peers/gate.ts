@@ -42,6 +42,9 @@ import { ownerOf } from '@kuraa/feature-kit';
 
 /** The trailer a signed commit names the policy it was made under with: the policy's heads. */
 export const POLICY_TRAILER = 'Kuraa-Policy';
+/** How many commits' verdicts are kept (GateContext.cache). */
+const GATE_CACHE_MAX = 50_000;
+
 /** A merge's record of a change it refused: `<commit> <path>`. */
 export const REFUSED_TRAILER = 'Kuraa-Refused';
 
@@ -65,6 +68,13 @@ export interface GateContext {
   cutKeys?: Map<string, { person: string; heads: string[] }>;
   /** Servers' signing keys, now or before (0099): nothing they sign changes anything. */
   servers?: Set<string>;
+  /**
+   * Verdicts kept between calls (0099), by commit and `cacheKey` (what the
+   * verdict depends on beside the commit: the records and the policy they make).
+   * None: every commit judged each time.
+   */
+  cache?: Map<string, [string, { commit: string; by: string | null } | null][]>;
+  cacheKey?: string;
   /**
    * Who the device the commits came from is (0099): a person, or a server's key;
    * null, no one in the workspace; undefined, from no device (the online copy, a
@@ -128,20 +138,41 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
   // Write rules, or cutoffs, to judge by; else only what no one brings in this way (unsafePaths).
   // From a server or a device no one in (0099), every commit is looked at: one no one known signed is refused.
   const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0 || !!ctx.servers?.size || ctx.from === null;
+  type Taint = { commit: string; by: string | null } | null;
+  // What each commit says of each file it changes, judged once (0099): a commit never changes, so with the same records,
+  // the same space and the same device bringing it, the same; asked again for every merge and both sides of it, else.
   for (const [c, ...parents] of list as [string, ...string[]][]) {
+    const key = ctx.cache && ctx.cacheKey ? `${c}\0${ctx.cacheKey}\0${ctx.space ?? ''}\0${ctx.from === undefined ? '-' : ctx.from ?? 'none'}` : null;
+    const known = key ? ctx.cache!.get(key) : undefined;
+    if (known) {
+      for (const [path, t] of known) tainted.set(path, t);
+      continue;
+    }
+    const said: [string, Taint][] = [];
+    await judgeOne(c, parents, (path, t) => {
+      tainted.set(path, t);
+      said.push([path, t]);
+    });
+    if (key) {
+      ctx.cache!.set(key, said);
+      // The oldest let go of, past so many.
+      if (ctx.cache!.size > GATE_CACHE_MAX) ctx.cache!.delete(ctx.cache!.keys().next().value!);
+    }
+  }
+  async function judgeOne(c: string, parents: string[], set: (path: string, t: Taint) => void): Promise<void> {
     // A commit touching anyone's own files (0082) is judged, rules or none: they are their owners' alone.
     const quick = judging ? null : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', ...(parents.length >= 2 ? [parents[0]!] : []), c])).stdout.split('\0').filter(Boolean);
     if (quick && (!ctx.policy.founded || !quick.some((p) => ownerOf(p)))) {
       const changed = quick;
       const unsafe = await unsafePaths(git, c, parents, changed, ctx.policy);
       if (!unsafe.size) {
-        for (const path of changed) tainted.set(path, null);
-        continue;
+        for (const path of changed) set(path, null);
+        return;
       }
       const signer = await commitSigner(git, c);
       const by = signer ? ctx.personOf(signer) : null;
-      for (const path of changed) tainted.set(path, unsafe.has(path) ? { commit: c, by } : null);
-      continue;
+      for (const path of changed) set(path, unsafe.has(path) ? { commit: c, by } : null);
+      return;
     }
     const message = messages.get(c) ?? await git.out(['show', '-s', '--format=%B', c]);
     const signer = await commitSigner(git, c);
@@ -177,8 +208,8 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
       // Someone's own file counts as theirs only beside a document that is there (in the commit, or before it: one deleted).
       const beside = ownerOf(path) ? await besideDocument(git, c, parents[0] ?? null, path) : undefined;
       // By someone who may: taken, and whatever was refused before it with it.
-      if (!cut && !unsafe.has(path) && (ctx.policy.mayWrite(by, path, ctx.space ?? null, beside) || moved.has(path))) tainted.set(path, null);
-      else tainted.set(path, { commit: c, by });
+      if (!cut && !unsafe.has(path) && (ctx.policy.mayWrite(by, path, ctx.space ?? null, beside) || moved.has(path))) set(path, null);
+      else set(path, { commit: c, by });
     }
   }
   const keeps = new Map<string, string | null>();

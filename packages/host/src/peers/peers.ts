@@ -340,7 +340,9 @@ export class Peers {
     if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
     // Who the device bringing them is (0099): what no one known signed is its. Not for this device's own commits.
     const from = this.bringing && !ours ? await this.node.identity.whoIs(this.bringing) : undefined;
-    return gate(this.host.git, x, y, { ...ctx, space, from, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+    // Verdicts kept by commit, with the records they were judged by (0099): each judged once, not at every merge.
+    const cacheKey = `${this.gateCache?.digest ?? ''}\0${ctx.policy.version}\0${mergeTrailerValue(this.host.mergeSignature)}`;
+    return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
   }
 
   /**
@@ -355,6 +357,9 @@ export class Peers {
     const unheld = device ? this.unheld.get(device) : undefined;
     return unheld?.size ? new Set([...known, ...unheld]) : known;
   }
+
+  /** Commits' verdicts, kept between gates (gate.ts, GateContext.cache). */
+  private readonly verdicts = new Map<string, [string, { commit: string; by: string | null } | null][]>();
 
   /** Operations a device said it does not hold, though commits it sent name them (knownFrom). */
   private readonly unheld = new Map<string, Set<string>>();

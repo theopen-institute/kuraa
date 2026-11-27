@@ -83,6 +83,24 @@ describe('the gate, step 4', () => {
     void unsigned;
   });
 
+  it('keeps each commit’s verdict, and gives the same from it as judging afresh; not across other records (0099)', async () => {
+    const r = repo();
+    const left = await commit(r, 'notes.md', '# Notes\n\nBo’s.\n', bo.key);
+    const p = policy({ t: 'rule', path: 'notes.md', by: [ada.id] });
+    const cache = new Map<string, [string, { commit: string; by: string | null } | null][]>();
+    const fresh = await gate(r.git, r.base, left, p);
+    const first = await gate(r.git, r.base, left, { ...p, cache, cacheKey: 'v1' });
+    expect(cache.size).toBe(1);
+    // Kept: the verdict comes from the cache (a made-up one shows it is used), and the same as fresh.
+    const second = await gate(r.git, r.base, left, { ...p, cache, cacheKey: 'v1' });
+    expect(second.refused).toEqual(fresh.refused);
+    expect(first.refused).toEqual(fresh.refused);
+    cache.set([...cache.keys()][0]!, [['notes.md', null]]);
+    expect((await gate(r.git, r.base, left, { ...p, cache, cacheKey: 'v1' })).refused).toEqual([]);
+    // Other records (another key): judged afresh.
+    expect((await gate(r.git, r.base, left, { ...p, cache, cacheKey: 'v2' })).refused).toEqual(fresh.refused);
+  });
+
   it('refuses what someone taken out did past their cutoff, even where anyone may change it', async () => {
     const r = repo();
     const before = await commit(r, 'free.md', 'Bo’s first.\n', bo.key);

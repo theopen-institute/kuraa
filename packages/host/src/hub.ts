@@ -292,8 +292,10 @@ export class Hub {
       // answers meanwhile (0103), so one slow to open keeps no one from the others. A server, which no one
       // waits on, has them all open first: what it lists is then how each stands.
       // A server too (0099): it answers at once (`server list` says which are opening), so `server join` does not
-      // wait on every workspace to open first.
-      this.entries.map((e) => this.open(e));
+      // wait on every workspace to open first. A server opens them a few at a time: every one at once (each its git,
+      // its policy, its connections) is a storm each night it restarts to update.
+      if (this.o.server) void this.openInTurn(this.entries, 3);
+      else this.entries.map((e) => this.open(e));
     }
     this.server = createServer((req, res) => void this.handle(req, res));
     this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket as import('node:net').Socket, head));
@@ -427,6 +429,9 @@ export class Hub {
   private async openNow(e: Entry, init: boolean, joined?: PeerNode): Promise<void> {
     try {
       if (!init && !existsSync(e.dir)) throw new Error(`Its folder is gone: ${e.dir}`);
+      // A server's git housekeeping (0099): in the fetch that calls for it, not in the background beside every other
+      // workspace's at once; one thread, and a bounded window, so a few at once do not run a small computer out of memory.
+      if (this.o.server) for (const [k, v] of [['gc.autoDetach', 'false'], ['pack.threads', '1'], ['pack.windowMemory', '100m']]) await new Git(e.dir).run(['config', k!, v!], { allowFail: true });
       const peerOptions = this.peerOptions();
       const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
@@ -482,7 +487,7 @@ export class Hub {
   private freeId(name: string): string {
     const base = slugOf(name);
     let id = base;
-    for (let i = 2; this.entries.some((e) => e.id === id) || existsSync(join(this.root, id)); i++) id = `${base}-${i}`;
+    for (let i = 2; this.entries.some((e) => e.id === id) || this.reserved.has(id) || existsSync(join(this.root, id)); i++) id = `${base}-${i}`;
     return id;
   }
 
@@ -536,7 +541,9 @@ export class Hub {
     tell({ step: 'waiting', slowNetwork: false });
     this.joiningNow++;
     try {
-      return await this.serial(async () => {
+      // The list's turn only for what is quick (0099): which folder, whether held already; the copy, which may be
+      // long, is made outside it, so it holds up no other join, nor taking a workspace off the list.
+      const prep = await this.serial(async (): Promise<{ held: HubWorkspace } | { id: string; dir: string; workspace: string }> => {
         this.mayAdd();
         let link: ReturnType<typeof decodeLink>;
         try {
@@ -546,15 +553,17 @@ export class Hub {
         }
         // A server joins by a link for a server, as no person (0099).
         if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
+        const workspace = link.workspace.id;
+        if (this.joiningWorkspaces.has(workspace)) throw new HttpError(409, 'This workspace is being joined already: wait for that join to finish');
         // A server holding the workspace already (0099): in it, that one; taken out since, the old copy let go of, and
         // joined again (as the same device: deviceKeyFor).
         if (this.o.server) {
           await this.opened();
-          const held = await this.heldWorkspace(link.workspace.id);
+          const held = await this.heldWorkspace(workspace);
           if (held) {
             const peers = this.hosts.get(held.id)?.host.peers;
             const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
-            if (policy?.isServer(me)) return this.list().find((w) => w.id === held.id)!;
+            if (policy?.isServer(me)) return { held: this.list().find((w) => w.id === held.id)! };
             this.log(`[${held.id}] held, but no longer in: joined again`);
             await this.hosts.get(held.id)?.close().catch(() => undefined);
             this.hosts.delete(held.id);
@@ -563,39 +572,54 @@ export class Hub {
             await rm(held.dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
           }
         }
-        const label = 'Shared workspace';
-        const id = this.freeId(label);
-        const dir = join(this.root, id);
+        const id = this.freeId('Shared workspace');
+        this.reserved.add(id);
+        this.joiningWorkspaces.add(workspace);
+        return { id, dir: join(this.root, id), workspace };
+      });
+      if ('held' in prep) return prep.held;
+      const { id, dir, workspace } = prep;
+      try {
         let joined;
         try {
           // With the server's ways in (0053): the node joining goes on as the workspace's, and opens the process's TCP listener and DHT node.
           const { peerPort, publicAddress, dhtPort, serveDht } = this.peerOptions();
-          const deviceKey = this.o.deviceKeyFor ? await this.o.deviceKeyFor(link.workspace.id) : undefined;
-          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, peerPort, publicAddress, dhtPort, serveDht, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}), ...(this.o.peers?.signing ? { signing: this.o.peers.signing } : {}), ...(deviceKey ? { deviceKey } : {}) });
+          const deviceKey = this.o.deviceKeyFor ? await this.o.deviceKeyFor(workspace) : undefined;
+          joined = await joinWorkspace({ dir, invitation, bootstrap: this.peerOptions().bootstrap, relays: this.peerOptions().relays, peerPort, publicAddress, dhtPort, serveDht, keep: true, progress: tell, log: (m) => this.log(`[${id}] ${m}`), ...(this.o.server ? { person: null } : {}), ...(this.o.peers?.signing ? { signing: this.o.peers.signing } : {}), ...(deviceKey ? { deviceKey } : {}), ...(this.o.peers?.maxFetchBytes ? { maxFetchBytes: this.o.peers.maxFetchBytes } : {}) });
         } catch (err) {
           // Leave nothing half-made behind.
           // (On Windows a process that has just ended may hold a file in it for a moment.)
           await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch((e: Error) => this.log(`[${id}] could not remove ${dir}: ${e.message}`));
-          throw new HttpError(400, (err as Error).message);
+          throw err instanceof HttpError ? err : new HttpError(400, (err as Error).message);
         }
         tell({ step: 'opening', slowNetwork: false, from: joined.inviter });
-        try {
-          return await this.add({ id, name: (await readWorkspaceName(dir)) ?? label, dir, added: new Date().toISOString() }, joined.node);
-        } catch (err) {
-          // Joined, but not kept on the list (a full disk, say): let go of, whole, rather than left syncing unlisted.
-          await joined.node?.close().catch(() => undefined);
-          await this.hosts.get(id)?.close().catch(() => undefined);
-          this.hosts.delete(id);
-          this.entries = this.entries.filter((e) => e.id !== id);
-          await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
-          throw err;
-        }
-      });
+        const name = (await readWorkspaceName(dir)) ?? 'Shared workspace';
+        return await this.serial(async () => {
+          try {
+            return await this.add({ id, name, dir, added: new Date().toISOString() }, joined.node);
+          } catch (err) {
+            // Joined, but not kept on the list (a full disk, say): let go of, whole, rather than left syncing unlisted.
+            await joined.node?.close().catch(() => undefined);
+            await this.hosts.get(id)?.close().catch(() => undefined);
+            this.hosts.delete(id);
+            this.entries = this.entries.filter((e) => e.id !== id);
+            await rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
+            throw err;
+          }
+        });
+      } finally {
+        this.reserved.delete(id);
+        this.joiningWorkspaces.delete(workspace);
+      }
     } finally {
       this.joiningNow--;
       if (progress) this.joins.delete(progress);
     }
   }
+
+  /** Folders chosen for joins under way (freeId passes them over), and the workspaces being joined (one join each). */
+  private readonly reserved = new Set<string>();
+  private readonly joiningWorkspaces = new Set<string>();
 
   /** The entry whose folder is of a workspace (by its id), if this hub holds it. */
   private async heldWorkspace(workspace: string): Promise<Entry | null> {
@@ -882,6 +906,22 @@ export class Hub {
       const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
       return { id: w.id, name: w.name, path: w.path, in: !!policy?.isServer(me), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
     }));
+  }
+
+  /** Open workspaces, `at` at a time (a server's start: 0099); each listed as opening until it has. */
+  private async openInTurn(list: Entry[], at: number): Promise<void> {
+    // Each listed as opening from now: waiting its turn, until its own opening is done (which takes its place).
+    const done = new Map<string, () => void>();
+    for (const e of list) this.opening.set(e.id, new Promise<void>((r) => done.set(e.id, r)));
+    let next = 0;
+    const worker = async () => {
+      while (next < list.length) {
+        const e = list[next++]!;
+        await this.open(e).catch(() => undefined);
+        done.get(e.id)?.();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(at, list.length) }, worker));
   }
 
   /** How many joins are under way (a server's update waits for them: 0099). */

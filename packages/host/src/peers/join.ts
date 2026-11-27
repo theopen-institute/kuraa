@@ -31,6 +31,8 @@ export interface JoinOptions {
   relays?: string[];
   /** Look on the local network too (lan.ts). Default: yes. */
   lan?: boolean;
+  /** The most the first copy may bring, in bytes (a server's is larger: 0099). Default 2 GiB. */
+  maxFetchBytes?: number;
   /**
    * A server's ways in (0053, 0099): with `keep`, the node joining goes on as
    * the workspace's, and its TCP listener and DHT node are the process's, so they
@@ -100,7 +102,7 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
   // Ways in besides the DHT the link names (0053): servers that take TCP, and relays.
   const joinAs = l.topic ? { id: l.workspace.id, forkedFrom: l.workspace.forkedFrom, topic: l.topic, dial: [l.issuer.key, ...l.through], tcp: l.hints?.tcp ?? [] } : undefined;
   const relays = [...new Set([...(o.relays ?? []), ...(l.hints?.relays ?? [])])];
-  const node = new PeerNode({ dir, git, stateDir, bootstrap: o.bootstrap, relays, lan: o.lan, branch: async () => 'main', log, joining: true, ticket: link, joinAs, person: o.person, signing: o.signing, peerPort: o.peerPort, publicAddress: o.publicAddress, dhtPort: o.dhtPort, serveDht: o.serveDht });
+  const node = new PeerNode({ dir, git, stateDir, bootstrap: o.bootstrap, relays, lan: o.lan, branch: async () => 'main', log, joining: true, ticket: link, joinAs, person: o.person, signing: o.signing, peerPort: o.peerPort, publicAddress: o.publicAddress, dhtPort: o.dhtPort, serveDht: o.serveDht, ...(o.maxFetchBytes ? { maxFetchBytes: o.maxFetchBytes } : {}) });
   let said = '';
   const tell = (p: JoinProgress) => {
     const now = JSON.stringify(p);

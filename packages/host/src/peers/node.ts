@@ -180,6 +180,9 @@ export function setKuraaVersion(version: string | null): void {
   ownVersion = version && isVersion(version) ? version : null;
 }
 
+/** How many of a computer's other workspaces it says it is in, at most (0053, 0099: a server holds many). */
+const MAX_ALSO = 1024;
+
 /** When a newer release, or protocol, was last told of (versionNews): once an hour at most, whatever devices say. */
 let releaseToldAt = 0;
 let protocolToldAt = 0;
@@ -699,13 +702,13 @@ export class PeerNode {
       const pad = createHmac('sha256', k).update(`kuraa also key\0${this.myKey}\0${link.key}`).digest();
       entries.push({ t: createHmac('sha256', k).update(`kuraa also\0${this.myKey}\0${link.key}`).digest('hex').slice(0, 32), k: xor(Buffer.from(n.myKey, 'hex'), pad).toString('hex') });
     }
-    if (entries.length) link.send({ type: 'also', entries: entries.slice(0, 64) });
+    if (entries.length) link.send({ type: 'also', entries: entries.slice(0, MAX_ALSO) });
   }
 
   /** A device said which other workspaces its computer is in: for each this computer is in too, the lower key connects, through this link. */
   private heardAlso(link: PeerLink, entries: unknown[]): void {
     const said = new Map<string, string>();
-    for (const e of entries.slice(0, 64)) {
+    for (const e of entries.slice(0, MAX_ALSO)) {
       const x = e as { t?: unknown; k?: unknown };
       if (typeof x.t === 'string' && typeof x.k === 'string' && /^[0-9a-f]{64}$/.test(x.k)) said.set(x.t, x.k);
     }

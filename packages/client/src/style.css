@@ -189,6 +189,11 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .prose img { max-width: 100%; }
 .prose a { color: var(--accent); }
 .prose ul, .prose ol { padding-left: 1.4em; }
+/* A task: its box where the bullet was (format-pandoc's editor/tasks.ts). */
+.prose li.task { list-style: none; position: relative; }
+.prose li.task > .task-box { position: absolute; font-size: inherit; line-height: inherit; left: -1.3em; top: calc((1lh - 0.8em) / 2 + 1px); margin: 0; width: 0.8em; height: 0.8em; cursor: pointer; accent-color: var(--accent, currentColor); }
+.prose li.task > .task-box:disabled { cursor: default; }
+.prose li.task[data-checked="true"] > p:first-of-type { color: var(--muted, inherit); }
 
 .code-node { margin: 0 0 1em; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--code-bg); font-size: 13px; }
 .code-node-header { display: flex; align-items: center; gap: 2px; padding: 3px 8px; font: 12px var(--mono); color: var(--muted); border-bottom: 1px solid var(--border); }

@@ -87,7 +87,16 @@ export const pandocNodes: Record<string, NodeSpec> = {
     attrs: { checked: { default: null } },
     content: 'block+',
     defining: true,
-    parseDOM: [{ tag: 'li' }],
+    // A task pasted keeps its box: ours (`data-checked`), or a checkbox in it (GitHub's, a browser's).
+    parseDOM: [{
+      tag: 'li',
+      getAttrs: (dom) => {
+        const li = dom as HTMLElement;
+        if (li.dataset.checked) return { checked: li.dataset.checked === 'true' };
+        const box = li.querySelector(':scope > input[type=checkbox], :scope > p:first-child > input[type=checkbox]');
+        return { checked: box ? box.hasAttribute('checked') || (box as HTMLInputElement).checked : null };
+      },
+    }],
     toDOM: (node) =>
       ['li', node.attrs.checked === null ? {} : { 'data-checked': String(node.attrs.checked), class: 'task' }, 0],
   },

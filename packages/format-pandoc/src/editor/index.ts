@@ -20,6 +20,7 @@ import { citationPlugins, citationRules, citationViews } from './citations.js';
 import { imagePlugins, imageRules, imageViews } from './images.js';
 import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
 import { liftAtItemStart, listRules, switchList } from './lists.js';
+import { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
 
 export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
@@ -28,6 +29,7 @@ export { Bibliography, citationLabel, describeEntry } from './citations.js';
 export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable } from './tables.js';
 export { workspacePath } from './paths.js';
 export { liftAtItemStart, listRules, switchList } from './lists.js';
+export { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
 export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
 
 export interface PandocEditorExtension {
@@ -170,6 +172,8 @@ function markdownRules(schema: Schema, ext: PandocEditorExtension): InputRule[] 
     wrappingInputRule(/^\s*>\s$/, n.blockquote!),
     // In an empty item of the other kind of list: that item, as this kind (./lists.ts).
     ...listRules(schema),
+    // "[ ] " or "[x] " at the start of a list item: a task (./tasks.ts).
+    ...taskRules(schema),
     wrappingInputRule(/^\s*([-+*])\s$/, n.bullet_list!, (x) => ({ bullet: x[1] === '*' ? '*' : x[1] })),
     wrappingInputRule(/^(\d+)\.\s$/, n.ordered_list!, (x) => ({ order: Number(x[1]) }), (x, node) => node.childCount + node.attrs.order === Number(x[1])),
     // ```{…} then a space: whatever the extension makes of it (Pandoc alone waits for Enter).
@@ -231,7 +235,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
     'Mod-[': lift,
     'Mod-Alt-c': setBlockType(n.code_block!),
     ...notes.keys,
-    Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitListItem(n.list_item!)),
+    Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitTask(splitListItem(n.list_item!))),
     'Shift-Enter': chainCommands(
       (state, dispatch, view) => (notes.inNote(state) ? newParagraph(state, dispatch, view) : false),
       exitCode,
@@ -240,7 +244,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
         return true;
       },
     ),
-    Backspace: chainCommands(undoInputRule, liftAtItemStart(n.list_item!)),
+    Backspace: chainCommands(undoInputRule, untask(n.list_item!), liftAtItemStart(n.list_item!)),
     ...tableKeys(),
     Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
     'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
@@ -271,6 +275,7 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: BLOCKS, does: 'Plain paragraph', keys: ['Mod-Alt-0'] },
   { group: BLOCKS, does: 'Bullet list', type: '- ', keys: ['Mod-Shift-8'] },
   { group: BLOCKS, does: 'Numbered list', type: '1. ', keys: ['Mod-Shift-7'] },
+  { group: BLOCKS, does: 'Task (a box to tick)', type: '- [ ] ', note: '[x] for one done; click the box to tick it' },
   { group: BLOCKS, does: 'Block quote', type: '> ', keys: ['Mod-Shift-.'] },
   { group: BLOCKS, does: 'Code block', type: '```', enter: true, keys: ['Mod-Alt-c'], note: '```python for a language' },
   { group: BLOCKS, does: 'Line across the page', type: '---' },
@@ -299,7 +304,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
       const { schema } = ctx;
       const notes = footnotes(schema, ctx);
       const header = headerBehaviour(schema, ctx);
-      if (ctx.readOnly) return notes.plugins;
+      if (ctx.readOnly) return [...notes.plugins, taskPlugin(true)];
       const keys = pandocKeys(schema, ctx, ext, notes);
       return [
         ...citationPlugins(ctx),
@@ -309,6 +314,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         ...imagePlugins(ctx),
         ...notes.plugins,
         ...header.plugins,
+        taskPlugin(false),
       ];
     },
     nodeViews: (ctx) => ({

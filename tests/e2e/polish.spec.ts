@@ -112,6 +112,51 @@ test('a file shows at once from disk while its room connects; then it can be typ
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('Read before the room is ready. Typed.');
 });
 
+test('tasks: a box to tick by a click, "- [ ] " and "[x] " typed, a new one after Enter, kept when pasted', async ({ page }) => {
+  const path = `runs/tasks-${Date.now().toString(36)}.md`;
+  await create(path, '---\ntitle: Tasks\n---\n\n- [ ] Bread\n- [x] Milk\n');
+  await openApp(page);
+  await openFile(page, path);
+  const saved = () => readFileSync(join(E2E.dir, path), 'utf8');
+  const boxes = page.getByTestId('editor').locator('li.task > input.task-box');
+  await expect(boxes).toHaveCount(2);
+  await expect(boxes.nth(0)).not.toBeChecked();
+  await expect(boxes.nth(1)).toBeChecked();
+
+  // Clicked: ticked, in the file too.
+  await boxes.nth(0).click();
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect.poll(saved, { timeout: 10_000 }).toContain('- [x] Bread\n- [x] Milk\n');
+
+  // Enter after a task: a new one, not yet done; "[x] " in it ticks it.
+  await page.getByTestId('editor').getByText('Milk').click();
+  await page.keyboard.press(key('Meta+ArrowRight', 'End'));
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Eggs');
+  await expect.poll(saved, { timeout: 10_000 }).toContain('- [x] Milk\n- [ ] Eggs\n');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('[x] Jam');
+  await expect.poll(saved, { timeout: 10_000 }).toContain('- [ ] Eggs\n- [x] Jam\n');
+
+  // A new list of tasks, typed: "- [ ] ".
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- [ ] Sweep');
+  await expect.poll(saved, { timeout: 10_000 }).toMatch(/\n- \[ \] Sweep\n/);
+
+  // Pasted from elsewhere (GitHub's HTML): still tasks.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData('text/html', '<ul><li class="task-list-item"><input type="checkbox" checked disabled> Dust</li><li class="task-list-item"><input type="checkbox" disabled> Mop</li></ul>');
+    data.setData('text/plain', '- [x] Dust\n- [ ] Mop');
+    document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect.poll(saved, { timeout: 10_000 }).toMatch(/- \[x\] Dust\n- \[ \] Mop\n/);
+});
+
 test('bullets inside a numbered item: Enter, Tab, "- "; ⌘⇧7 makes them numbers', async ({ page }) => {
   const path = `runs/lists-${Date.now().toString(36)}.md`;
   await create(path, '---\ntitle: Lists\n---\n\n1. First\n2. Second\n');

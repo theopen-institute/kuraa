@@ -53,8 +53,15 @@ one folder, which has nothing to serve if it cannot open.
 **The starting screen** no longer blames the network: it says the app is still starting, that the
 files are safe, and that Help › Show Log File says what it is waiting for.
 
-## Not decided here
+## Workspaces stay out of cloud folders, for now
 
-Keeping a workspace's documents in a cloud service's folder, with its history elsewhere (git can keep
-a repository apart from its files), for people who want their documents there. Two copies would then
-sync the same documents, the service's and the workspace's own, and that needs deciding first.
+Asked whether Kuraa could tell iCloud to leave a workspace alone while the app runs: macOS has no
+supported way to pause a folder's syncing. It can exclude one (a name ending `.nosync`, or the file
+provider's mark to ignore it), but an excluded folder is taken out of iCloud, off the person's other
+computers too, and put back by uploading it all again: done at each start and quit, the workspace
+would be removed and uploaded every time, and left out after a crash. Two ways to have workspaces
+there were weighed: a copy of the documents kept in a cloud folder, one way, for seeing and backing
+them up; or the documents in the cloud folder with the history apart (git can keep a repository away
+from its files), where the service and the workspace's own syncing would carry the same documents and
+fight over them. The owner chose neither for now: workspaces belong outside cloud folders, and the
+app says so and moves them.

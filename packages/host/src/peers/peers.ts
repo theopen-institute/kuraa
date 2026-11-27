@@ -338,7 +338,9 @@ export class Peers {
   private async gate(x: string | null, y: string, space: string | null = null): Promise<GateResult> {
     const ctx = await this.gateContext();
     if (!ctx) return { keeps: new Map(), refused: [], waitFor: [] };
-    return gate(this.host.git, x, y, { ...ctx, space, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+    // Who the device bringing them is (0099): what no one known signed is its.
+    const from = this.bringing ? await this.node.identity.whoIs(this.bringing) : undefined;
+    return gate(this.host.git, x, y, { ...ctx, space, from, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
   }
 
   /**

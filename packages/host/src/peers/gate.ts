@@ -65,6 +65,13 @@ export interface GateContext {
   cutKeys?: Map<string, { person: string; heads: string[] }>;
   /** Servers' signing keys, now or before (0099): nothing they sign changes anything. */
   servers?: Set<string>;
+  /**
+   * Who the device the commits came from is (0099): a person, or a server's key;
+   * null, no one in the workspace; undefined, from no device (the online copy, a
+   * push). A commit no one known signed (unsigned, or by a key that is no one's
+   * here) is that device's: else a server would change anything by not signing.
+   */
+  from?: string | null;
   /** The tree of the merge of two commits, as this device makes it; and what its merges' trailer says (merging.ts, mergeTrailerValue). */
   remake?: (a: string, b: string) => Promise<string>;
   mergeTrailer?: string;
@@ -119,7 +126,8 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
     return false;
   };
   // Write rules, or cutoffs, to judge by; else only what no one brings in this way (unsafePaths).
-  const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0 || !!ctx.servers?.size;
+  // From a server or a device no one in (0099), every commit is looked at: one no one known signed is refused.
+  const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0 || !!ctx.servers?.size || ctx.from === null;
   for (const [c, ...parents] of list as [string, ...string[]][]) {
     // A commit touching anyone's own files (0082) is judged, rules or none: they are their owners' alone.
     const quick = judging ? null : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', ...(parents.length >= 2 ? [parents[0]!] : []), c])).stdout.split('\0').filter(Boolean);
@@ -150,8 +158,17 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
       cut = true;
       by = signer;
     }
+    // Signed by no one known here: as the device it came from made it (0099). From a server, or from a device that
+    // is no one in the workspace, refused, whatever the rules; from a person's, judged as theirs.
+    if (!cut && !by && !gone && ctx.from !== undefined) {
+      if (ctx.from === null || ctx.servers?.has(ctx.from)) cut = true;
+      if (ctx.from !== null) by = ctx.from;
+    }
+    // A merge a server made (0099) is made again here whatever version of merging it names: else, naming another, it
+    // could take one side's version of a file and so undo the other side's change unseen.
+    const serverMade = !!by && !!ctx.servers?.has(by);
     const changed = parents.length >= 2
-      ? await mergeChanges(git, c, parents, message, ctx)
+      ? await mergeChanges(git, c, parents, message, ctx, serverMade)
       : (await git.run(['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', '--root', c])).stdout.split('\0').filter(Boolean);
     const unsafe = await unsafePaths(git, c, parents, changed, ctx.policy);
     // Someone's own files moved unchanged with their document (0082): anyone may.
@@ -289,11 +306,11 @@ async function blobAt(git: Git, commit: string, path: string): Promise<string | 
  * of merging; else, where it differs from both parents), but for those it kept
  * as one side had them, saying so.
  */
-async function mergeChanges(git: Git, merge: string, parents: string[], message: string, ctx: GateContext): Promise<string[]> {
+async function mergeChanges(git: Git, merge: string, parents: string[], message: string, ctx: GateContext, strict = false): Promise<string[]> {
   const files = async (a: string, b: string) => (await git.run(['diff-tree', '-r', '--name-only', '-z', '--no-renames', a, b])).stdout.split('\0').filter(Boolean);
   let differs: string[];
   const version = trailers(message, MERGE_TRAILER)[0];
-  if (parents.length === 2 && ctx.remake && version === ctx.mergeTrailer) {
+  if (parents.length === 2 && ctx.remake && (strict || version === ctx.mergeTrailer)) {
     differs = await files(await ctx.remake(parents[0]!, parents[1]!), `${merge}^{tree}`);
   } else {
     const sets = await Promise.all(parents.map((p) => files(p, merge)));
@@ -307,6 +324,29 @@ async function mergeChanges(git: Git, merge: string, parents: string[], message:
     if (base === undefined) base = parents.length === 2 ? ((await git.run(['merge-base', parents[0]!, parents[1]!], { allowFail: true })).stdout.trim() || null) : null;
     return base;
   };
+  /**
+   * Whether this device would itself keep out the change a merge says it kept out
+   * (0099): the last change to the path on each side whose version the merge does
+   * not hold was made by someone who may not change it here (or by a server, or no
+   * one known). A merge's word alone would let whoever made it undo anyone's change.
+   */
+  const wouldRefuse = async (path: string, mine: string | null): Promise<boolean> => {
+    const parted = await mergeBase();
+    for (const p of parents) {
+      if ((await blobAt(git, p, path)) === mine) continue;
+      const last = (await git.run(['log', '-1', '--format=%H', ...(parted ? [`${parted}..${p}`] : [p]), '--', path], { allowFail: true })).stdout.trim();
+      if (!last) continue;
+      const signer = await commitSigner(git, last);
+      if (!signer || ctx.servers?.has(signer)) continue;
+      const gone = ctx.cutKeys?.get(signer);
+      const who = gone ? gone.person : ctx.personOf(signer);
+      if (!who) continue;
+      if (gone && !gone.heads.length) continue;
+      if (ctx.policy.cutoffs.has(who)) continue;
+      if (ctx.policy.mayWrite(who, path, ctx.space ?? null)) return false;
+    }
+    return true;
+  };
   for (const path of differs) {
     if (kept.has(path)) {
       const mine = await blobAt(git, merge, path);
@@ -314,7 +354,7 @@ async function mergeChanges(git: Git, merge: string, parents: string[], message:
       for (const p of parents) if ((await blobAt(git, p, path)) === mine) fromSide = true;
       const parted = fromSide ? null : await mergeBase();
       if (!fromSide && parted && (await blobAt(git, parted, path)) === mine) fromSide = true;
-      if (fromSide) continue;
+      if (fromSide && (await wouldRefuse(path, mine))) continue;
     }
     out.push(path);
   }

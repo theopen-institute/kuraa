@@ -4,7 +4,7 @@
 // repository's git worktrees (.claude/worktrees/<name>), run from that
 // worktree, while your own `pnpm dev` and the desktop app go on as they are.
 //
-//   pnpm try                          the worktrees, with their branches
+//   pnpm try                          the worktrees, to choose from (↑↓, Enter: pnpm dev, d: desktop)
 //   pnpm try <name>                   its pnpm dev, on a free port (never 5173), opened in the browser
 //   pnpm try <name> desktop           its desktop app, with data of its own
 //   --no-open                         the address said, the browser not opened
@@ -21,6 +21,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { emitKeypressEvents } from 'node:readline';
 import { basename, join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -103,23 +104,86 @@ function openInBrowser(url: string): void {
   } catch { /* the address is printed: open it by hand */ }
 }
 
+/**
+ * The worktrees to choose from, in the terminal: ↑ and ↓ (or k and j) move,
+ * Enter runs its pnpm dev, d its desktop app, q or Escape leaves. Null: left.
+ */
+function pick(all: Worktree[]): Promise<{ wt: Worktree; mode: 'dev' | 'desktop' } | null> {
+  const { stdin, stdout } = process;
+  const width = Math.max(40, (stdout.columns || 100) - 4);
+  const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  const rows = all.map((w) => ({ w, last: subject(w.path) }));
+  const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+  let at = 0;
+  let drawn = 0;
+  const draw = () => {
+    // Back over what was drawn, and clear it.
+    if (drawn) stdout.write(`\x1b[${drawn}A\x1b[J`);
+    const lines = ['Try which branch? ' + dim('↑↓ choose · Enter: pnpm dev · d: desktop app · q: leave'), ''];
+    rows.forEach(({ w, last }, i) => {
+      const here = i === at;
+      const head = `${here ? '\x1b[1m›' : ' '} ${w.name.padEnd(24)} ${w.branch ?? '(no branch)'}${here ? '\x1b[22m' : ''}`;
+      lines.push(cut(head, width + 10), `   ${dim(cut(last, width - 3))}`);
+    });
+    stdout.write(`${lines.join('\n')}\n`);
+    drawn = lines.length;
+  };
+  return new Promise((done) => {
+    emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdout.write('\x1b[?25l');
+    const finish = (choice: { wt: Worktree; mode: 'dev' | 'desktop' } | null) => {
+      stdin.off('keypress', onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdout.write('\x1b[?25h');
+      done(choice);
+    };
+    const onKey = (_: string, key: { name?: string; ctrl?: boolean }) => {
+      if (key.ctrl && key.name === 'c') return finish(null);
+      switch (key.name) {
+        case 'up': case 'k': at = (at - 1 + rows.length) % rows.length; return draw();
+        case 'down': case 'j': at = (at + 1) % rows.length; return draw();
+        case 'return': return finish({ wt: rows[at]!.w, mode: 'dev' });
+        case 'd': return finish({ wt: rows[at]!.w, mode: 'desktop' });
+        case 'q': case 'escape': return finish(null);
+        default: return undefined;
+      }
+    };
+    stdin.on('keypress', onKey);
+    draw();
+  });
+}
+
 const all = worktrees();
+let wt: Worktree;
+let chosenMode: 'dev' | 'desktop';
 if (!name) {
-  list(all);
-  process.exit(0);
+  // In a terminal: chosen from the list; otherwise (piped, a script), the list said.
+  if (!process.stdin.isTTY || !process.stdout.isTTY || !all.length) {
+    list(all);
+    process.exit(0);
+  }
+  const choice = await pick(all);
+  if (!choice) process.exit(0);
+  wt = choice.wt;
+  chosenMode = choice.mode;
+} else {
+  if (!mode) {
+    console.error(`try: ${modeArg} is neither dev nor desktop`);
+    process.exit(1);
+  }
+  wt = find(all, name);
+  chosenMode = mode;
 }
-if (!mode) {
-  console.error(`try: ${modeArg} is neither dev nor desktop`);
-  process.exit(1);
-}
-const wt = find(all, name);
 console.log(`[try] ${wt.name} (${wt.branch ?? 'no branch'}): ${subject(wt.path)}`);
 
 // Its packages, as its lockfile has them.
 console.log('[try] installing its packages…');
 execFileSync('pnpm', ['install', '--prefer-offline'], { cwd: wt.path, stdio: ['ignore', 'ignore', 'inherit'] });
 
-if (mode === 'dev') {
+if (chosenMode === 'dev') {
   // Workspaces added to its list from elsewhere (your own, say): said, as two apps saving to one workspace at once can go wrong.
   try {
     const listed = JSON.parse(readFileSync(join(wt.path, '.dev-workspaces', '.kuraa-workspaces.json'), 'utf8')) as { name?: string; dir?: string }[];

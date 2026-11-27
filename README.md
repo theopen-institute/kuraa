@@ -511,7 +511,7 @@ To try a feature branch from the main checkout (each is made in a git worktree,
 `.claude/worktrees/<name>`), while your own `pnpm dev` and the desktop app go on as they are:
 
 ```sh
-pnpm try                          # the worktrees, with their branches
+pnpm try                          # the worktrees to choose from: ↑↓, Enter for pnpm dev, d for the desktop app
 pnpm try words                    # its pnpm dev, on a free port (never 5173), opened in the browser
 pnpm try words desktop            # its desktop app, with data of its own
 ```

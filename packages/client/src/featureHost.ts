@@ -9,7 +9,7 @@
 // panel, layout or view drawn stays drawn and a feature started stays started.
 import { computed, ref, shallowRef, watch, type Ref } from 'vue';
 import { sourceMapOf, type DocumentType } from '@kuraa/kernel';
-import type { ClientFeature, CodeSession, CoreHost, FeatureMenuEntry, FeatureMenuItem, FeaturePanel as FeaturePanelSpec, FeatureStatus, MatchTarget, Person } from '@kuraa/feature-kit/client';
+import type { ClientFeature, CodeSession, CoreHost, FileMark, FeatureMenuEntry, FeatureMenuItem, FeaturePanel as FeaturePanelSpec, FeatureStatus, MatchTarget, Person } from '@kuraa/feature-kit/client';
 import { claimKeys, commandHelp, commandsOf, isMenuNote, menuItem, type BoundCommand, type KeyOwner, type MenuLine } from './commands.js';
 import type { EditorUi } from '@kuraa/editor-kit';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -43,6 +43,8 @@ export interface FeatureHostOptions {
   runEditorCommand?(feature: string, id: string): void;
   /** The open document's code session (0092), if it runs code. */
   codeSession?(): CodeSession | null;
+  /** A feature's marks on files changed (0093): navigation asks for them again. */
+  marksChanged?(): void;
 }
 
 /** A panel open, and how many times it has been asked for (0089). */
@@ -101,9 +103,10 @@ export function useFeatureHost(o: FeatureHostOptions) {
     search: { run: (q, caseSensitive) => api.value.search(q, caseSensitive) },
     renders: {
       info: (p) => api.value.renders(p),
-      render: (p, format) => api.value.render(p, format, o.person()),
+      render: (p, format, compile) => api.value.render(p, format, o.person(), compile),
       output: (p, format) => api.value.renderOutput(p, format),
       madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
+      bookContents: (folder) => api.value.bookContents(folder),
     },
     code: {
       session: () => o.codeSession?.() ?? null,
@@ -135,6 +138,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     explain,
     keyLabel,
     moveFile: (from, to) => o.moveFile(from, to),
+    marksChanged: () => o.marksChanged?.(),
     changed: () => void load(),
   };
   const contexts = new FeatureContexts(app, messages, () => status.value);
@@ -316,6 +320,18 @@ export function useFeatureHost(o: FeatureHostOptions) {
       }
     });
   }
+  /** Features' marks on a file or folder (0093), for navigation. */
+  function fileMarks(path: string): FileMark[] {
+    return features.value.flatMap((f) => {
+      try {
+        const m = f.feature.marks?.(path, f.ctx);
+        return m ? [m] : [];
+      } catch (e) {
+        console.error(`[kuraa] the feature ${f.feature.id} could not mark a file`, e);
+        return [];
+      }
+    });
+  }
   /** Their lines on the Markdown and shortcuts sheet, as editor modules' are given: their commands' keys, then their own lines. */
   const help = computed(() => Object.fromEntries(features.value.flatMap((f) => {
     const lines = [...commandHelp(commands.value.filter((c) => c.feature === f.feature.id)), ...(f.feature.help ?? [])];
@@ -373,7 +389,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     features, forSettings, dispose,
     sidePanel, overPanels, dialogPanels, askPanel, closePanel, panelOpen, panelButtons,
     commands, editorCommands, commandKey, menuItems, menuLines, runCommand,
-    documentMenu, fileMenu, help, pastEditors,
+    documentMenu, fileMenu, fileMarks, help, pastEditors,
     layout, fallback, views,
   };
 }

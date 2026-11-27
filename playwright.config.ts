@@ -15,7 +15,7 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: E2E.url, trace: 'retain-on-failure' },
   projects: [
-    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|search|versions|polish|tools|preferences|features|comments|coding|navigation|manuscript|feature-contexts|feature-hooks)\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|search|versions|polish|tools|preferences|features|comments|coding|navigation|compile|feature-contexts|feature-hooks)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
     { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],

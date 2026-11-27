@@ -20,7 +20,7 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join, posix, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import type { RenderFormat, RenderResult } from '@kuraa/run-kit';
 import type { MadeFrom, PresenceUser } from '@kuraa/session/server';
 import type { Runner } from './runner.js';
@@ -73,6 +73,19 @@ export const MIME: Record<RenderFormat, string> = {
   pdf: 'application/pdf',
 };
 
+/** A folder's compile, as asked (0093): what to leave out and which folders have no heading (workspace paths), and the book's title. */
+export interface CompileOptions {
+  exclude: string[];
+  noHeading: string[];
+  title: string;
+}
+
+/** What renders a path: a folder (ending in `/`: 0093) is compiled to Markdown, and rendered as that. */
+const asRendered = (path: string): string => (path.endsWith('/') ? `${path === '/' ? '' : path}book.md` : path);
+
+/** What a compiled folder's book is called (its output's name): the folder's name. */
+export const bookName = (path: string): string => (path === '/' ? 'book' : path.replace(/\/$/, '').split('/').pop() || 'book');
+
 export class Renders {
   private readonly current = new Map<string, { state: RenderState; done: Promise<RenderState> }>();
   /** One render at a time per document. */
@@ -87,8 +100,13 @@ export class Renders {
     flush(path: string): Promise<void>;
     /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
     madeFrom(path: string): Promise<MadeFrom>;
+    /** A folder's documents joined, to compile it (0093: '' the top level); a string says why not. */
+    compile(folder: string, o: CompileOptions): Promise<{ text: string; resources: string[] } | string>;
     log(m: string): void;
   }) {}
+
+  /** What a render of a folder (a path ending in `/`, the top level `/`: 0093) compiles, as it was asked. */
+  private readonly compiling = new Map<string, CompileOptions>();
 
   private dir(path: string): string {
     return join(this.o.stateDir, 'renders', createHash('sha1').update(path).digest('hex').slice(0, 20));
@@ -102,14 +120,14 @@ export class Renders {
   private async unavailable(path: string): Promise<string | null> {
     const { runner } = this.o;
     if (!runner.enabled) return 'Rendering is turned off on this host: documents are rendered where code runs, and running code is off here. Whoever runs the host can turn it on.';
-    if (!runner.rendererFor(path)) return 'Nothing on this host renders this kind of file.';
+    if (!runner.rendererFor(asRendered(path))) return 'Nothing on this host renders this kind of file.';
     const { environment } = await runner.describe();
     if (!environment?.available) return environment?.message ?? 'There is nowhere to render documents.';
     return null;
   }
 
   async info(path: string): Promise<RenderInfo> {
-    const found = this.o.runner.rendererFor(path);
+    const found = this.o.runner.rendererFor(asRendered(path));
     const renders: RenderState[] = [];
     for (const format of found?.renderer.formats ?? []) {
       const live = this.current.get(`${path}\0${format}`);
@@ -149,13 +167,14 @@ export class Renders {
   }
 
   /** Render a document, or join its render in this format under way. Resolves once it has started; `done` when it has finished. */
-  async render(path: string, format: RenderFormat, person: PresenceUser | null): Promise<{ state: RenderState; done: Promise<RenderState> }> {
+  async render(path: string, format: RenderFormat, person: PresenceUser | null, compile?: CompileOptions): Promise<{ state: RenderState; done: Promise<RenderState> }> {
     const by = person?.name ?? null;
     const key = `${path}\0${format}`;
     const under = this.current.get(key);
     if (under) return under;
+    if (path.endsWith('/')) this.compiling.set(key, compile ?? { exclude: [], noHeading: [], title: path === '/' ? 'Book' : path.slice(0, -1).split('/').pop()! });
     const why = await this.unavailable(path);
-    const found = this.o.runner.rendererFor(path);
+    const found = this.o.runner.rendererFor(asRendered(path));
     const previous = await this.saved(path, format);
     const now = new Date().toISOString();
     const state: RenderState = {
@@ -172,6 +191,7 @@ export class Renders {
       return state;
     }).then(async (s) => {
       this.current.delete(key);
+      this.compiling.delete(key);
       await this.keep(s).catch((e: Error) => this.o.log(`could not keep the render of ${path}: ${e.message}`));
       return s;
     });
@@ -187,9 +207,22 @@ export class Renders {
   private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>, person: PresenceUser | null): Promise<void> {
     const { path, format } = state;
     state.message = 'Rendering…';
+    // A folder (0093): its documents joined, each as it is now, into one in scratch.
+    const compile = this.compiling.get(`${path}\0${format}`);
+    let joined: { text: string; resources: string[] } | null = null;
+    if (compile) {
+      state.message = 'Putting the documents together…';
+      const r = await this.o.compile(path === '/' ? '' : path.slice(0, -1), compile);
+      if (typeof r === 'string') {
+        Object.assign(state, { state: 'failed', message: r, finishedAt: new Date().toISOString(), progress: null });
+        return;
+      }
+      joined = r;
+      state.message = 'Rendering…';
+    }
     // The document as it is now: what is being typed reaches the file (and a commit) first.
-    await this.o.flush(path);
-    const madeFrom = await this.o.madeFrom(path).catch((e: Error) => {
+    if (!joined) await this.o.flush(path);
+    const madeFrom = joined ? undefined : await this.o.madeFrom(path).catch((e: Error) => {
       this.o.log(`could not say what ${path} was rendered from: ${e.message}`);
       return undefined;
     });
@@ -203,8 +236,15 @@ export class Renders {
       let result: RenderResult;
       const added: string[] = [];
       for (let round = 0; ; round++) {
-        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools, path);
-        result = await found.renderer.render(ctx, { input: resolve(this.o.root, path), format });
+        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools, asRendered(path));
+        let input = resolve(this.o.root, path);
+        if (joined) {
+          // The joined document in scratch (the workspace is read-only to the render, and stays as it is).
+          input = join(scratch, 'in', `${bookName(path)}.md`);
+          await mkdir(dirname(input), { recursive: true });
+          await writeFile(input, joined.text);
+        }
+        result = await found.renderer.render(ctx, { input, format, ...(joined ? { resources: joined.resources } : {}) });
         if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;
         // Parts its tools lacked (LaTeX packages): added, then rendered again.
         const repair = await tools.repair(result.log);

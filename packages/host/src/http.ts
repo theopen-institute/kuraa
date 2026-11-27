@@ -20,6 +20,7 @@ import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 import { corsHeaders, hostAllowed, refuseHost } from './origins.js';
 import { ownerOf } from '@kuraa/feature-kit/host';
+import { ORDER_FILE, ordersAfterDelete, ordersAfterRename, readOrders, writeOrders } from './order.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -235,6 +236,20 @@ const runRoutes: Route[] = [
   })),
 ];
 
+/**
+ * Folders' orders after a rename or deletion (0093), written in a commit of
+ * their own. What was done is done: an order that cannot be written is said in
+ * the log, and its stale name passed over when it is read.
+ */
+async function followOrders(host: Host, change: (orders: Map<string, string[]>) => Map<string, string[]>, message: string): Promise<void> {
+  try {
+    const next = change(await readOrders(host, (await host.listFiles()).filter((p) => p === ORDER_FILE || p.endsWith(`/${ORDER_FILE}`))));
+    await writeOrders(host, next, message);
+  } catch (e) {
+    host.log(`could not update the order after a change: ${(e as Error).message}`);
+  }
+}
+
 const fileRoutes: Route[] = [
   route('GET', '/api/tree', async ({ host, res }) => {
     const branch = await host.git.branch();
@@ -254,7 +269,22 @@ const fileRoutes: Route[] = [
       const m = marks.files.get(f.path);
       if (m) Object.assign(f, m);
     }
-    send(res, 200, { files, folders: marks.folders });
+    // Folders in the order people arranged them (0093), by folder ('' for the top).
+    const orders = Object.fromEntries(await readOrders(host, paths));
+    send(res, 200, { files, folders: marks.folders, orders });
+  }),
+
+  // A folder's order (0093): the names of its files and folders, in the order
+  // people arranged them; none, the folder's own order file removed.
+  route('POST', '/api/order', async ({ host, req, res }) => {
+    const body = await readBody(req);
+    const folder = typeof body.folder === 'string' && body.folder.replace(/\/+$/, '') ? host.relPath(body.folder.replace(/\/+$/, '')) : '';
+    if (!Array.isArray(body.names) || body.names.some((n) => typeof n !== 'string' || !n || n.includes('/'))) throw new HttpError(400, 'names: the names of the folder’s files and folders');
+    if (folder && !existsSync(host.resolvePath(folder))) throw new HttpError(404, 'No such folder');
+    // Only what is there, each once.
+    const names = [...new Set(body.names as string[])].filter((n) => n !== ORDER_FILE && lexists(host.resolvePath(folder ? `${folder}/${n}` : n, { link: 'self' })));
+    const commit = await writeOrders(host, new Map([[folder, names]]), `Order ${folder ? `${folder}/` : 'the top level'}`, { check: true });
+    send(res, 200, { folder, names, commit });
   }),
 
   route('GET', '/api/files', async ({ host, res, q }) => {
@@ -384,6 +414,8 @@ const fileRoutes: Route[] = [
       return host.commitPaths([from, to, ...companions.flat()], moveOnly ? `Move ${from} to ${dirname(to) === '.' ? 'the top level' : `${dirname(to)}/`}` : `Rename ${from} to ${to}`);
     });
     if (host.peers) await host.peers.moved(from, to, isFolder);
+    // The orders follow (0093): the new name where the old was, or out of one folder's and at the end of another's.
+    await followOrders(host, (orders) => ordersAfterRename(orders, from, to), `Order after renaming ${from}`);
     void host.features.emit('rename', { from, to, folder: isFolder });
     send(res, 200, { from, to, commit });
   }),
@@ -415,6 +447,7 @@ const fileRoutes: Route[] = [
       for (const c of companions) await host.features.removeOwn(c);
       return host.commitPaths([path, ...companions], `Delete ${path}`);
     });
+    await followOrders(host, (orders) => ordersAfterDelete(orders, path), `Order after deleting ${path}`);
     void host.features.emit('delete', { path, folder: isFolder });
     send(res, 200, { path, commit });
   }),

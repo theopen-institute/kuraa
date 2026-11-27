@@ -36,6 +36,12 @@ export interface ClientFeature {
   documentMenu?(ctx: FeatureDocumentContext): FeatureMenuEntry[];
   /** Items for a file's right-click menu, or a folder's (its path ending in `/`). */
   fileMenu?(path: string, ctx: FeatureClientContext): FeatureMenuEntry[];
+  /**
+   * A mark it puts on a file or a folder (its path ending in `/`) wherever
+   * navigation shows them (0093: a manuscript's folder, a document left out of
+   * it), or null. Asked again when it says its marks changed (`marksChanged`).
+   */
+  marks?(path: string, ctx: FeatureClientContext): FileMark | null;
   /** Its parts of Settings: the workspace's (its settings, while it is on there) and yours. */
   settings?: { workspace?: FeatureSettingsPanel; you?: FeatureSettingsPanel };
   /**
@@ -176,6 +182,23 @@ export interface NavigationContext extends FeatureClientContext {
   remove(path: string): void;
   /** Move a file or folder into a folder ('' for the top). */
   move(path: string, folder: string): void;
+  /**
+   * A folder's order (0093), as people arranged it: the names of its files and
+   * folders ('' for the top level); null where it has none (shown by name).
+   * What it does not name follows what it does.
+   */
+  order(folder: string): string[] | null;
+  /**
+   * Put a file or folder in a folder ('' for the top) at a place: moved there
+   * if it is elsewhere, and the folder's order made `names` (the names of all
+   * in it, as they are to be shown, its own among them). Whether it was done
+   * (what went wrong is said).
+   */
+  place(path: string, folder: string, names: string[]): Promise<boolean>;
+  /** A folder's order forgotten: shown by name again. */
+  sortByName(folder: string): void;
+  /** Features' marks on a file or a folder (`path` ending in `/`), as they are now (0093). */
+  marks(path: string): FileMark[];
   /** The core's menu for a file, a folder (`path` ending in `/`) or the top level (''), at a point. */
   fileMenu(path: string, at: { x: number; y: number }): void;
   /** A file's icon, as its type defines it (0023). */
@@ -220,6 +243,30 @@ export interface FeatureClientContext {
    * saying why, where it cannot be (someone may not, a file is there already).
    */
   moveFile(from: string, to: string): Promise<void>;
+  /** Its marks on files changed (0093): navigation asks for them again. */
+  marksChanged(): void;
+}
+
+/** A feature's mark on a file or folder in navigation (0093). */
+export interface FileMark {
+  /** What it means, in words: shown on pointing, and said to screen readers. */
+  label: string;
+  /** Drawn beside the name. */
+  icon?: FileIcon;
+  /** The file shown faded (left out of something). */
+  muted?: boolean;
+  /** For tests. */
+  testid?: string;
+}
+
+/** A folder or document a folder's book could have (0093). */
+export interface BookContent {
+  kind: 'folder' | 'document';
+  path: string;
+  /** A document's title (its filename, without one), a folder's name. */
+  title: string;
+  /** How deep it is in the folder compiled: 1 in the folder itself. */
+  depth: number;
 }
 
 /** A match to open a file at (0089). */
@@ -299,14 +346,27 @@ export interface SearchService {
 
 /** Rendering documents (0041), and what their outputs were made from (0081). */
 export interface RenderService {
-  /** A document's renders: what it can be rendered to, and how its latest ones stand. */
+  /** A document's renders, or a folder's (its path ending in `/`, the top level `/`: 0093): what it can be rendered to, and how its latest ones stand. */
   info(path: string): Promise<RenderInfo>;
-  /** Render a document (as you, for the record); a render that cannot start says why, as a failed one. */
-  render(path: string, format: RenderFormat): Promise<RenderState>;
+  /**
+   * Render a document (as you, for the record); a render that cannot start says
+   * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
+   * is compiled (0093): its folders and documents in the file tree's order,
+   * but those `exclude` names (paths; a folder's, all in it), joined under
+   * `title`, how deep each is its heading's level; the folders `noHeading`
+   * names (paths) with no heading, nor a level, of their own.
+   */
+  render(path: string, format: RenderFormat, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState>;
   /** A document's latest output in a format. */
   output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
   madeFrom(path: string, format: RenderFormat): Promise<Blob>;
+  /**
+   * What a folder's book could have (its path ending in `/`, the top level
+   * `/`: 0093): its folders and documents, nothing left out, in the file
+   * tree's order, each at how deep it is (1: in the folder itself).
+   */
+  bookContents(folder: string): Promise<BookContent[]>;
 }
 
 /**

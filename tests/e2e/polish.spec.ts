@@ -251,7 +251,7 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   // A folder's menu has what goes in it.
   await row(`${dir}/inner`).focus();
   await page.keyboard.press('Shift+F10');
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner', 'New folder in inner…', 'Rename…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file in inner', 'New folder in inner…', 'Rename…', 'Compile…']);
   await page.keyboard.press('Escape');
 });
 

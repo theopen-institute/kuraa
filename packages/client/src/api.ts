@@ -2,6 +2,7 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
+import type { BookContent } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -265,7 +266,9 @@ export class HostApi {
   async renameWorkspace(name: string, by: { name: string; email: string }) {
     return (await this.json<{ name: string }>('/api/workspace/name', { method: 'PATCH', body: JSON.stringify({ name, by }) })).name;
   }
-  tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[] }>('/api/tree'); }
+  tree() { return this.json<{ files: TreeFile[]; folders?: { path: string; readers?: string; writers?: string }[]; orders?: Record<string, string[]> }>('/api/tree'); }
+  /** A folder's order (0093): its files' and folders' names as arranged ('' the top level; none: by name). */
+  setOrder(folder: string, names: string[]) { return this.json<{ folder: string; names: string[] }>('/api/order', { method: 'POST', body: JSON.stringify({ folder, names }) }); }
   /** A file's or folder's permissions (0069). */
   permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }
   /** Say a file's or folder's permissions: who may change it, who reads it (null: as its folder says; omitted: as it is). */
@@ -348,9 +351,9 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState> {
     try {
-      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by }) });
+      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) return { path, format, state: 'failed', message: e.message, progress: null, log: '', by: by.name, startedAt: '', finishedAt: null, output: null };
       throw e;
@@ -359,6 +362,10 @@ export class HostApi {
   /** A document's latest output in a format. */
   async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
+  }
+  /** What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth. */
+  async bookContents(folder: string): Promise<BookContent[]> {
+    return (await this.json<{ items: BookContent[] }>(`/api/renders/contents?path=${encodeURIComponent(folder)}`)).items;
   }
   /** The files a document's latest output in a format was made from, as they were, in a zip (0081). */
   async renderMadeFrom(path: string, format: RenderFormat): Promise<Blob> {

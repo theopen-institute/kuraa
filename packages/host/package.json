@@ -32,7 +32,7 @@
     "@kuraa/format-pandoc": "workspace:*",
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",
-    "@kuraa/manuscript": "workspace:*",
+    "@kuraa/compile": "workspace:*",
     "@kuraa/sync-git": "workspace:*",
     "@types/ws": "^8.18.2",
     "prosemirror-transform": "^1.12.5"

@@ -1,0 +1,30 @@
+// Compile's words.
+import type { CompileFormat } from './settings.js';
+
+export const S = {
+  label: 'Compile',
+  compileMenu: 'Compile…',
+  leftOut: 'Left out of Compile',
+  noHeadingMark: 'No heading in Compile: what is in it goes on at the level it is at',
+  compiledAs: (title: string) => `Compiled as “${title}”`,
+  none: 'Right-click a folder and choose Compile… to make one book of its documents, in the order the file tree shows them.',
+  folderTitle: (folder: string) => `Compile ${folder}`,
+  top: 'the whole workspace',
+  bookTitle: 'Title',
+  format: 'Format',
+  formats: { docx: 'Word', pdf: 'PDF', html: 'HTML' } as Record<CompileFormat, string>,
+  contents: 'Contents',
+  empty: 'No documents in it yet.',
+  inBook: 'In the book',
+  outWithFolder: 'Left out with the folder it is in',
+  heading: 'Heading',
+  headingTitle: 'Its name is a heading. Untick for a folder that only organises: what is in it goes on at the level it is at.',
+  levelTitle: (n: number) => `A level-${n} heading`,
+  noHeadingTitle: 'No heading',
+  compile: 'Compile',
+  compiling: 'Compiling…',
+  saveAgain: 'Save again',
+  saved: (name: string) => `Saved ${name}.`,
+  details: 'Details',
+  about: 'In the file tree’s order (drag there to change it). Folders’ names and documents’ titles become headings, one level deeper for each folder down. What is left out shows faded in the file tree too.',
+};

@@ -1,12 +1,12 @@
 {
-  "name": "@kuraa/manuscript",
+  "name": "@kuraa/compile",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./book": "./src/book.ts"
+    "./settings": "./src/settings.ts"
   },
   "dependencies": {
     "@kuraa/feature-kit": "workspace:*",

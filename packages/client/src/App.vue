@@ -84,6 +84,10 @@ const workspace = shallowRef<WorkspaceInfo | null>(null);
 const files = shallowRef<TreeFile[]>([]);
 /** Folders with permissions of their own, for the file list to mark (0069). */
 const folderMarks = shallowRef<{ path: string; readers?: string; writers?: string }[]>([]);
+/** Folders' orders, as people arranged them (0093), by folder ('' the top). */
+const orders = shallowRef<Record<string, string[]>>({});
+/** Features said their marks on files changed (0093): asked again. */
+const marksAsked = ref(0);
 const path = ref<string | null>(null);
 const status = shallowRef<EditorStatus | null>(null);
 const historyKey = ref(0);
@@ -122,7 +126,8 @@ const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;
-  const listed = files.value.some((f) => f.of) ? files.value.filter((f) => !f.of) : files.value;
+  // The app's own files in folders (`.kuraa-order`, a manuscript's: 0093) are not shown: they are about the folder.
+  const listed = files.value.filter((f) => !f.of && !f.path.slice(f.path.lastIndexOf('/') + 1).startsWith('.kuraa-'));
   if (!live && !c) return listed;
   return listed.map((f) => {
     let out = f;
@@ -159,6 +164,8 @@ const fh = useFeatureHost({
   runEditorCommand: (feature, id) => editor.value?.runFeatureCommand(feature, id),
   // The open document's code session (0092): what @kuraa/code offers, through the contract.
   codeSession: () => (status.value?.runner ? codeSessionOf(status.value.runner) : null),
+  // A feature's marks on files changed (0093): navigation asks for them again.
+  marksChanged: () => void marksAsked.value++,
 });
 watch(() => status.value?.runner, () => fh.codeChanged());
 const features = fh.features;
@@ -224,6 +231,10 @@ const navApp: NavigationApp = {
   rename: (p) => fileActions.value?.rename(p),
   remove: (p) => void fileActions.value?.remove(p),
   move: (p, folder) => void fileActions.value?.move(p, folder),
+  order: (folder) => orders.value[folder.replace(/\/+$/, '')] ?? null,
+  place: async (p, folder, names) => (await fileActions.value?.place(p, folder, names)) ?? false,
+  sortByName: (folder) => void fileActions.value?.sortByName(folder),
+  marks: (p) => fh.fileMarks(p),
   fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
   icon: (f) => (f.type ? hostRegistry.value.get(f.type)?.icon?.(f.path) : undefined),
 };
@@ -556,6 +567,7 @@ async function refreshTree(selectPath?: string | null) {
       workspace.value = ws;
       files.value = tree.files;
       folderMarks.value = tree.folders ?? [];
+      orders.value = tree.orders ?? {};
       error.value = null;
       // Which features are on may have come with the files (a merge): asked again.
       void fh.load();
@@ -809,7 +821,7 @@ onBeforeUnmount(() => fh.dispose());
 
 // What navigation is told (0087): the layout, of the workspace and what it places; the views, of the files and the open one.
 watch([workspaceTitle, connection, views, fh.panelButtons, () => fileActions.value?.newMenuOpen, ready, hub, chosen], () => navEvents.layout.tell());
-watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
+watch([shownFiles, folderMarks, orders, marksAsked, features, path], () => navEvents.files.tell());
 </script>
 
 <template>
@@ -984,6 +996,7 @@ watch([shownFiles, folderMarks, path], () => navEvents.files.tell());
       :shared="sharedWithDevices"
       :feature-items="fh.fileMenu"
       :new-items="viewItems"
+      :orders="orders"
       @document-settings="openDocumentSettings"
       @created="(p) => (titleFocus = p)"
       @permissions="openPermissions"

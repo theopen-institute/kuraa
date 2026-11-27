@@ -138,15 +138,16 @@ workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
 [0089](docs/decisions/0089-preview-search-and-outline-are-components.md),
 [0092](docs/decisions/0092-running-code-is-a-component.md)). A component's keys are said once and bound
-by the core, which refuses keys something else has ([0091](docs/decisions/0091-the-feature-runtime-commands-and-places.md)). **Manuscript**, turned on
-by a workspace, keeps documents in an order of your choosing, from anywhere in the workspace (each in one
-manuscript at most), as Quarto books (a `_quarto-<name>.yml` profile each, beside a top-level
-`_quarto.yml`): **New manuscript…** in the Manuscript beside the file tree, or **Make a manuscript** on a
-folder's right-click menu; then reorder, in parts and appendices, and add chapters with **New chapter**
-(made in the manuscript's home folder). With **Manuscripts keep their files** on (Settings › Workspace,
-under Manuscript), chapters are moved into their manuscript's home folder, a part's into a folder of its
-name
-([0088](docs/decisions/0088-a-manuscript-is-a-quarto-book.md), [0090](docs/decisions/0090-manuscripts-apart-from-folders.md)).
+by the core, which refuses keys something else has ([0091](docs/decisions/0091-the-feature-runtime-commands-and-places.md)).
+
+Any folder can be **arranged by hand**: drag a file or folder between two rows of the file tree (a line
+shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is kept in a plain
+`.kuraa-order` file in the folder (one name per line), which moves with it; whatever it does not name
+follows by name, and **Sort by name** on the folder's menu forgets it. **Compile…** on any folder's
+menu makes one book of its folders and documents, in that order (Word, PDF or HTML, rendered as documents are,
+where code runs): folders' names and documents' titles become headings, one level deeper for each folder
+down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. These choices and the book's title are kept in
+a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
 
 The sidebar shows the workspace folder, with a button for a new file (＋); right-click the space
 below the files for a new folder, and each folder has buttons for both on hover. Documents (Markdown and R Markdown) are listed by their **title**;

@@ -1,17 +1,31 @@
 // The HTTP routes for rendering documents (renders.ts) and searching the
 // workspace (search.ts), added to http.ts's table.
+import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
 import { personOf, readBody, send } from './http.js';
 import { HttpError } from './errors.js';
-import { MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
+import { bookName, MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
 import { searchWorkspace } from './search.js';
 
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
 
+/** A document's path, or a folder's to compile it (0093): ending in `/`, the top level `/`. */
 const pathOf = (c: Context, v: unknown) => {
   if (typeof v !== 'string' || !v) throw new HttpError(400, 'Missing path');
-  return c.host.relPath(v);
+  if (!v.endsWith('/')) return c.host.relPath(v);
+  if (v === '/') return '/';
+  const folder = c.host.relPath(v.replace(/\/+$/, ''));
+  if (!folder || !statSync(c.host.resolvePath(folder), { throwIfNoEntry: false })?.isDirectory()) throw new HttpError(404, 'No such folder');
+  return `${folder}/`;
+};
+
+/** What a folder's compile leaves out (workspace paths) and its title, as asked (0093). */
+const compileOf = (c: Context, path: string, body: Record<string, unknown>) => {
+  if (!path.endsWith('/')) return undefined;
+  const paths = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : []);
+  const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : bookName(path);
+  return { exclude: paths(body.exclude), noHeading: paths(body.noHeading), title };
 };
 
 const formatOf = (v: unknown): RenderFormat => {
@@ -26,10 +40,17 @@ const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsaf
 export const renderRoutes: Route[] = [
   route('GET', '/api/renders', async (c) => send(c.res, 200, await c.host.renders.info(pathOf(c, c.q.get('path'))))),
 
+  // What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth.
+  route('GET', '/api/renders/contents', async (c) => {
+    const path = pathOf(c, c.q.get('path'));
+    if (!path.endsWith('/')) throw new HttpError(400, 'A folder: its path ending in /');
+    send(c.res, 200, { items: await c.host.bookContents(path === '/' ? '' : path.slice(0, -1)) });
+  }),
+
   route('POST', '/api/renders', async (c) => {
     const body = await readBody(c.req);
     const path = pathOf(c, body.path);
-    const { state } = await c.host.renders.render(path, formatOf(body.format), personOf(body.by));
+    const { state } = await c.host.renders.render(path, formatOf(body.format), personOf(body.by), compileOf(c, path, body));
     send(c.res, state.state === 'failed' ? 422 : 202, state);
   }),
 
@@ -38,7 +59,7 @@ export const renderRoutes: Route[] = [
     const format = formatOf(c.q.get('format'));
     const bytes = await c.host.renders.output(path, format);
     if (!bytes) throw new HttpError(404, 'Not rendered yet');
-    const name = `${basename(path).replace(/\.[^.]*$/, '')}.${format}`;
+    const name = `${path.endsWith('/') ? bookName(path) : basename(path).replace(/\.[^.]*$/, '')}.${format}`;
     c.res.writeHead(200, {
       'content-type': MIME[format], 'content-length': bytes.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
       'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,

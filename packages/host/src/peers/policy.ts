@@ -58,6 +58,13 @@
 //   and what it signs from then on counts for nothing. Its own person's to make,
 //   or an admin's (the owner's, for an admin's computer). For good.
 //
+// - servers (0099): a key no person vouched for, in the workspace as itself,
+//   by its own `join` with an owner's invite link for a server (role `server`,
+//   for one). The only operation of a key that is no one's that counts. A
+//   server reads the workspace's own files and the spaces whose audiences name
+//   it, changes nothing, is in no group, and is taken out by a `drop` of its
+//   key, the owner's to make.
+//
 // Two operations made at the same time that cannot both count: the one that
 // gives less counts (0078, clash). Each time that decides, it is on record.
 //
@@ -71,11 +78,14 @@ import { ownerOf } from '@kuraa/feature-kit';
 
 export type Role = 'admin' | 'member';
 
+/** What an invite link may make its holder (0099): a person in a group, as admin or member; or a server. */
+export type JoinRole = Role | 'server';
+
 export type PolicyOp =
   | { t: 'genesis'; admins: string[]; legacy: boolean }
   | { t: 'grant'; group: string; who: string; role: Role }
   | { t: 'revoke'; group: string; who: string; cutoff?: string[] }
-  | { t: 'join'; group: string; role: Role; link: string; once: boolean; granter: string; grant: string; /** The link's expiry and maker (0071: signed in the grant, linkGrantMessage); none in a join from before. */ expires?: number; issuer?: string }
+  | { t: 'join'; group: string; role: JoinRole; link: string; once: boolean; granter: string; grant: string; /** The link's expiry and maker (0071: signed in the grant, linkGrantMessage); none in a join from before. */ expires?: number; issuer?: string }
   | { t: 'rule'; path: string; by: string[] }
   | { t: 'space'; id: string; audience: string[] }
   | { t: 'perm'; path: string; write?: string[]; read?: string[]; space?: string }
@@ -168,7 +178,7 @@ export const policyMessage = (workspace: string, op: PolicyOp, parents: string[]
 export const opHash = (workspace: string, op: PolicyOp, parents: string[], signer: string) => sha256(policyMessage(workspace, op, parents, signer).toString('latin1'));
 
 /** What an admin's signing key signed, before 0071, to let an invite link's holder into a group (the link's grant): not its expiry, nor its maker. */
-export const grantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean) =>
+export const grantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: JoinRole, once: boolean) =>
   Buffer.from(['kuraa-grant', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone'].join('\0'));
 
 /**
@@ -176,7 +186,7 @@ export const grantMessage = (workspace: string, genesis: string | null, link: st
  * (0071): with when the link stops letting people in and the device that made
  * it, so no member can sign the same grant into a link that never expires.
  */
-export const linkGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean, expires: number, issuer: string) =>
+export const linkGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: JoinRole, once: boolean, expires: number, issuer: string) =>
   Buffer.from(['kuraa-grant/2', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
 
 /**
@@ -185,7 +195,7 @@ export const linkGrantMessage = (workspace: string, genesis: string | null, link
  * join by it counts only for whom a device in the workspace let in by the link.
  * Whether the link had expired is that device's to say, as it lets them in.
  */
-export const admittedGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: Role, once: boolean, expires: number, issuer: string) =>
+export const admittedGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: JoinRole, once: boolean, expires: number, issuer: string) =>
   Buffer.from(['kuraa-grant/3', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
 
 /** Make an operation, signed with a person's signing key. */
@@ -281,10 +291,11 @@ export function readOp(v: unknown): PolicyOp | null {
       return cutoff ? { t: 'revoke', group: o.group, who: o.who, cutoff } : null;
     }
     case 'join':
-      return typeof o.group === 'string' && groupName.test(o.group) && role(o.role) && typeof o.link === 'string' && /^[0-9a-f]{16}$/.test(o.link)
+      // A server's join (0099): for the workspace alone.
+      return typeof o.group === 'string' && groupName.test(o.group) && (role(o.role) || (o.role === 'server' && o.group === WORKSPACE)) && typeof o.link === 'string' && /^[0-9a-f]{16}$/.test(o.link)
         && typeof o.once === 'boolean' && typeof o.granter === 'string' && hexKey.test(o.granter) && typeof o.grant === 'string' && hexSig.test(o.grant)
         && (o.issuer === undefined || (typeof o.issuer === 'string' && hexKey.test(o.issuer) && typeof o.expires === 'number' && Number.isSafeInteger(o.expires) && o.expires >= 0))
-        ? { t: 'join', group: o.group, role: o.role, link: o.link, once: o.once, granter: o.granter, grant: o.grant, ...(typeof o.issuer === 'string' ? { expires: o.expires as number, issuer: o.issuer } : {}) } : null;
+        ? { t: 'join', group: o.group, role: o.role as JoinRole, link: o.link, once: o.once, granter: o.granter, grant: o.grant, ...(typeof o.issuer === 'string' ? { expires: o.expires as number, issuer: o.issuer } : {}) } : null;
     case 'seal': {
       const geneses = sortedUnique(o.geneses, hexKey);
       return geneses && geneses.length ? { t: 'seal', geneses } : null;
@@ -354,7 +365,7 @@ export interface PolicyContext {
   workspace: string;
   /** The genesis this workspace is pinned to; null: none (a workspace from before 0066, until founded again: legacy.ts). */
   pin: string | null;
-  /** The person (identity ID) a signing key is, as the records show; null if no one's. */
+  /** The person (identity ID) a signing key is, as the records show; null if no one's (a server's key is no one's: 0099). */
   personOf(signingKey: string): string | null;
   /**
    * A signing key its person revoked (0072): the policy operations its revoker
@@ -397,6 +408,8 @@ export interface PolicyParts {
   unlinked?: Set<string>;
   /** The workspace it is of: what private paths are hashed with. */
   workspace?: string;
+  /** Servers in the workspace (0099): their signing keys. */
+  servers?: Set<string>;
 }
 
 export class Policy {
@@ -415,6 +428,7 @@ export class Policy {
   readonly counted: Set<string>;
   readonly unlinked: Set<string>;
   readonly workspace: string;
+  readonly servers: Set<string>;
 
   constructor(p: PolicyParts) {
     this.groups = p.groups;
@@ -432,6 +446,12 @@ export class Policy {
     this.counted = p.counted ?? new Set(p.applied);
     this.unlinked = p.unlinked ?? new Set();
     this.workspace = p.workspace ?? '';
+    this.servers = p.servers ?? new Set();
+  }
+
+  /** Whether a key is a server's in the workspace (0099): in as itself, no person's. */
+  isServer(id: string | null): boolean {
+    return !!id && this.servers.has(id);
   }
 
   /** Whether a person is the workspace's owner. */
@@ -456,6 +476,8 @@ export class Policy {
    */
   mayRead(id: string | null, space: string | null): boolean {
     if (!this.founded) return space === null;
+    // A server (0099): the workspace's own files, and a space whose audience names it.
+    if (this.isServer(id)) return space === null || !!this.spaces.get(space)?.audience.includes(id!);
     if (!id || !this.role(id)) return false;
     if (space === null) return true;
     const s = this.spaces.get(space);
@@ -525,6 +547,8 @@ export class Policy {
    * A file so named anywhere else is judged by the rules, as any other.
    */
   mayWrite(id: string | null, path: string, space: string | null = null, beside?: boolean): boolean {
+    // A server changes nothing (0099), whatever the rules say, or where they say nothing.
+    if (this.isServer(id)) return false;
     const owner = ownerOf(path);
     if (owner && (beside ?? companionShaped(path))) return !this.founded || (id === owner && this.mayRead(id, space));
     const rule = this.ruleFor(path);
@@ -667,10 +691,12 @@ interface State {
   spaceMade: Map<string, { by: string; op: string }>;
   /** Joins by a link for one person that another used at the same time. */
   once: Clash[];
+  /** Servers' signing keys (0099). */
+  servers: Set<string>;
 }
 
 /** A view of a state to judge by. */
-const view = (s: State, workspace: string) => new Policy({ groups: s.groups, geneses: ['-'], applied: s.applied, heads: [], perms: s.perms, spaces: s.spaces, owner: s.owner, workspace });
+const view = (s: State, workspace: string) => new Policy({ groups: s.groups, geneses: ['-'], applied: s.applied, heads: [], perms: s.perms, spaces: s.spaces, owner: s.owner, workspace, servers: s.servers });
 
 function freshState(genesis: PolicyEntry): State {
   const groups = new Map<string, Map<string, Role>>([[WORKSPACE, new Map()]]);
@@ -679,7 +705,7 @@ function freshState(genesis: PolicyEntry): State {
   // The genesis names its first admin, the owner (0070).
   return {
     groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(),
-    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [],
+    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(),
   };
 }
 
@@ -725,6 +751,8 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
   switch (op.t) {
     case 'grant': {
       const nested = op.who.startsWith('group:');
+      // A server is no person: in no group (0099).
+      if (s.servers.has(op.who)) return false;
       if (nested && (op.group === WORKSPACE || op.role !== 'member' || op.who.slice(6) === op.group)) return false;
       // A new group is the workspace's admins' to make.
       const may = s.groups.has(op.group) ? now.isAdmin(by, op.group) : now.isAdmin(by);
@@ -748,6 +776,11 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       // A grant since links are let in by: only for whom a device in the workspace let in by it, in its past.
       if (grant.admitted && !s.admitted.has(`${op.link} ${e.signer}`)) return false;
       const granter = grant.ok ? env.ctx.personOf(op.granter) : null;
+      // A server (0099): by the owner's link for one server, let in by a device in the workspace, signed by a key no
+      // one's (made by the key itself: by), not one already.
+      if (op.role === 'server') {
+        return grant.admitted && op.group === WORKSPACE && op.once && by === e.signer && now.isOwner(granter) && !s.servers.has(e.signer) && !s.usedLinks.has(op.link);
+      }
       // A link that makes admins of the workspace, only the owner's (0070).
       if (op.group === WORKSPACE && op.role === 'admin' && !now.mayAssignAdmins(granter)) return false;
       return !!granter && s.groups.has(op.group) && now.isAdmin(granter, op.group) && !(op.once && s.usedLinks.has(op.link));
@@ -758,6 +791,8 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'drop': {
       // One's own computer; or an admin, a member's (the owner, anyone's: 0070).
       if (s.dropped.has(op.key) || !now.role(by)) return false;
+      // A server's key: the owner's to drop (0099).
+      if (s.servers.has(op.key)) return now.isOwner(by);
       const whose = env.ctx.personOf(op.key);
       if (whose === by) return true;
       const ofAdmin = !!whose && (ws.get(whose) === 'admin' || whose === s.owner);
@@ -814,8 +849,9 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
   const past = env.anc.get(e.id)!;
   switch (op.t) {
     case 'grant':
-      // Into another group, only someone (still) in the workspace.
+      // Into another group, only someone (still) in the workspace; never a server (0099: one made at the same time).
       if (op.group !== WORKSPACE && !op.who.startsWith('group:') && !ws.has(op.who)) return false;
+      if (s.servers.has(op.who)) return false;
       group(op.group).set(op.who, op.role);
       return true;
     case 'revoke':
@@ -832,6 +868,14 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
         return false;
       }
       if (op.once) s.usedLinks.set(op.link, e.id);
+      // A server (0099): one of the servers, in no group; not a key dropped before.
+      if (op.role === 'server') {
+        if (s.dropped.has(by)) return false;
+        s.servers.add(by);
+        // Named in a group by a grant made at the same time as this join: in none, as a server.
+        for (const g of s.groups.values()) g.delete(by);
+        return true;
+      }
       if (op.group !== WORKSPACE && !ws.has(by)) ws.set(by, 'member');
       // Never less than they are already.
       if (group(op.group).get(by) !== 'admin') group(op.group).set(by, op.role);
@@ -868,6 +912,7 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
     }
     case 'drop':
       s.dropped.set(op.key, op.cutoff ?? []);
+      s.servers.delete(op.key);
       return true;
     case 'unlink':
       s.unlinked.add(`${op.link} ${op.group}`);
@@ -903,7 +948,8 @@ function claimsOf(e: PolicyEntry, by: string): Claim[] {
     case 'grant': return [{ group: op.group, who: op.who, place: op.role }];
     case 'revoke': return [{ group: op.group, who: op.who, place: 'out' }];
     case 'owner': return [{ group: WORKSPACE, who: op.who, place: 'admin' }];
-    case 'join': return op.group === WORKSPACE
+    // A server's says nothing of a place in a group (0099).
+    case 'join': return op.role === 'server' ? [] : op.group === WORKSPACE
       ? [{ group: WORKSPACE, who: by, place: op.role }]
       : [{ group: op.group, who: by, place: op.role }, { group: WORKSPACE, who: by, place: 'in' }];
     default: return [];
@@ -1132,7 +1178,8 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   const ok: PolicyEntry[] = [];
   const folds = new Map<string, State>();
   for (const e of ops) {
-    const who = ctx.personOf(e.signer);
+    // A key that is no one's: its word counts for nothing, but a server's own join (0099), made by the key itself.
+    const who = ctx.personOf(e.signer) ?? (e.op.t === 'join' && e.op.role === 'server' ? e.signer : null);
     if (!who) continue;
     // A key its person revoked: only what its revoker had seen of what it signed (0072).
     const cut = ctx.cutKey?.(e.signer);
@@ -1164,6 +1211,6 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   return new Policy({
     groups: state.groups, geneses: [genesis.id], applied: state.applied, heads, usedLinks: new Set(state.usedLinks.keys()), perms: state.perms, clashes, cutoffs,
     spaces: state.spaces, owner: state.owner, dropped: state.dropped, judged: ok.map((e) => e.id), counted: new Set([genesis.id, ...counted]),
-    unlinked: new Set([...state.unlinked].map((u) => u.split(' ')[0]!)), workspace: ctx.workspace,
+    unlinked: new Set([...state.unlinked].map((u) => u.split(' ')[0]!)), workspace: ctx.workspace, servers: state.servers,
   });
 }

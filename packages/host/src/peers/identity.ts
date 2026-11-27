@@ -1003,7 +1003,9 @@ export class Identity {
     if (!r || !was) throw new Error('No such change');
     const by = this.who(records).personOf.get(r.signer!)?.key ?? null;
     const cutoff = [...new Set(tips)].sort();
-    const again: PolicyOp = was.t === 'join' ? { t: 'grant', group: was.group, who: by ?? '', role: was.role }
+    // A server's join is its own to make (0099): no one makes it again for it.
+    if (was.t === 'join' && was.role === 'server') throw new Error('A server’s joining is the server’s own: invite it again');
+    const again: PolicyOp = was.t === 'join' ? { t: 'grant', group: was.group, who: by ?? '', role: was.role as Role }
       : was.t === 'revoke' ? { ...was, cutoff }
         : was.t === 'drop' ? { ...was, cutoff }
           : was;

@@ -7,7 +7,10 @@
 // identity, someone with an identity never let in, people taken out going on as
 // if they were not, operations made on an old view of the policy (back-dated:
 // naming old heads), naming parents no one holds, grants and joins replayed by
-// someone else, a rival genesis, and every kind of clash. Whatever happens,
+// someone else, a rival genesis, and every kind of clash. Servers (0099): keys
+// no identity vouched for, joining by links for a server (the owner's or
+// anyone's), acting as if they could, granted, dropped, named in audiences.
+// Whatever happens,
 // every device that holds the same operations must come to the same policy, and
 // that policy must keep the rules docs/policy.md sets out.
 //
@@ -15,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import crypto from 'hypercore-crypto';
-import { admittedGrantMessage, evaluate, linkGrantMessage, makeOp, WORKSPACE, type Policy, type PolicyContext, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
+import { admittedGrantMessage, evaluate, linkGrantMessage, makeOp, WORKSPACE, type JoinRole, type Policy, type PolicyContext, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
 
 const WS = 'cd'.repeat(16);
 const ISSUER = 'ee'.repeat(32);
@@ -26,6 +29,9 @@ const EVE = 5;
 /** Keys no identity vouched for: strangers. */
 const strangers = Array.from({ length: 2 }, () => crypto.keyPair());
 const strangerKeys = new Set(strangers.map((k) => k.publicKey.toString('hex')));
+/** Servers (0099): keys no identity vouched for, that join by links for a server. */
+const servers = Array.from({ length: 2 }, () => crypto.keyPair());
+const serverIds = servers.map((k) => k.publicKey.toString('hex'));
 const byKey = new Map(people.map((p) => [p.key.publicKey.toString('hex'), p.id]));
 const personOf = (k: string) => byKey.get(k) ?? null;
 const ids = people.map((p) => p.id);
@@ -42,7 +48,8 @@ type Step =
   | { k: 'stranger'; device: number; who: number; op: OpSpec }
   | { k: 'forged'; device: number; by: number; op: OpSpec }
   | { k: 'replay'; device: number; by: number; pick: number }
-  | { k: 'rival'; device: number; by: number };
+  | { k: 'rival'; device: number; by: number }
+  | { k: 'server'; device: number; which: number; op: OpSpec; letIn: number | null };
 
 type OpSpec =
   | { t: 'grant'; group: number; who: number; role: Role }
@@ -52,15 +59,22 @@ type OpSpec =
   | { t: 'owner'; who: number }
   | { t: 'perm'; path: number; write: number[]; read: number[] }
   | { t: 'space'; id: number; audience: number[] }
-  | { t: 'join'; group: number; role: Role; granter: number; link: number; once: boolean; admitted: boolean }
+  | { t: 'join'; group: number; role: JoinRole; granter: number; link: number; once: boolean; admitted: boolean }
   | { t: 'drop'; whose: number }
   | { t: 'unlink'; link: number; group: number }
-  | { t: 'admit'; link: number; who: number };
+  | { t: 'admit'; link: number; who: number }
+  | { t: 'admit-server'; link: number; which: number }
+  | { t: 'drop-server'; which: number }
+  | { t: 'grant-server'; which: number; group: number }
+  | { t: 'space-server'; id: number; audience: number[]; which: number };
 
 const honest = fc.integer({ min: 0, max: HONEST - 1 });
 const anyone = fc.integer({ min: 0, max: people.length - 1 });
 const role = fc.constantFrom<Role>('admin', 'member');
+const joinRole = fc.constantFrom<JoinRole>('admin', 'member', 'server');
 const group = fc.integer({ min: 0, max: GROUPS.length - 1 });
+const which = fc.integer({ min: 0, max: servers.length - 1 });
+const link = fc.integer({ min: 0, max: 3 });
 const opSpec: fc.Arbitrary<OpSpec> = fc.oneof(
   { weight: 4, arbitrary: fc.record({ t: fc.constant('grant' as const), group, who: honest, role }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('nest' as const) }) },
@@ -69,11 +83,22 @@ const opSpec: fc.Arbitrary<OpSpec> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ t: fc.constant('owner' as const), who: honest }) },
   { weight: 2, arbitrary: fc.record({ t: fc.constant('perm' as const), path: fc.integer({ min: 0, max: PATHS.length - 1 }), write: fc.uniqueArray(honest, { maxLength: 2 }), read: fc.uniqueArray(honest, { maxLength: 2 }) }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('space' as const), id: fc.integer({ min: 0, max: SPACES.length - 1 }), audience: fc.uniqueArray(honest, { minLength: 1, maxLength: 3 }) }) },
-  { weight: 2, arbitrary: fc.record({ t: fc.constant('join' as const), group, role, granter: anyone, link: fc.integer({ min: 0, max: LINKS.length - 1 }), once: fc.boolean(), admitted: fc.boolean() }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant('join' as const), group, role: joinRole, granter: anyone, link: fc.integer({ min: 0, max: LINKS.length - 1 }), once: fc.boolean(), admitted: fc.boolean() }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('drop' as const), whose: honest }) },
-  { weight: 1, arbitrary: fc.record({ t: fc.constant('unlink' as const), link: fc.integer({ min: 0, max: LINKS.length - 1 }), group }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant('unlink' as const), link: fc.integer({ min: 0, max: LINKS.length + 3 }), group }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('admit' as const), link: fc.integer({ min: 0, max: LINKS.length - 1 }), who: anyone }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant('admit-server' as const), link, which }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('drop-server' as const), which }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('grant-server' as const), which, group }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('space-server' as const), id: fc.integer({ min: 0, max: SPACES.length - 1 }), audience: fc.uniqueArray(honest, { maxLength: 2 }), which }) },
 );
+/** What a server does: its join, by a link for a server (anyone's grant, admitted or not), or anything else, as if it could. */
+const serverSpec: fc.Arbitrary<OpSpec> = fc.oneof(
+  { weight: 4, arbitrary: fc.record({ t: fc.constant('join' as const), group: fc.constant(0), role: fc.constant<JoinRole>('server'), granter: fc.oneof({ weight: 3, arbitrary: fc.constant(0) }, { weight: 1, arbitrary: anyone }), link, once: fc.oneof({ weight: 4, arbitrary: fc.constant(true) }, { weight: 1, arbitrary: fc.constant(false) }), admitted: fc.oneof({ weight: 4, arbitrary: fc.constant(true) }, { weight: 1, arbitrary: fc.constant(false) }) }) },
+  { weight: 1, arbitrary: opSpec },
+);
+/** Who lets a server in just before it joins, as a device does in the app (anyone, Eve too); or no one. */
+const letIn = fc.option(anyone, { freq: 4 });
 const DEVICES = 3;
 const device = fc.integer({ min: 0, max: DEVICES - 1 });
 /** How many of a device's past views back an operation is made on (0: what it holds now). */
@@ -81,6 +106,7 @@ const back = fc.oneof({ weight: 4, arbitrary: fc.constant(0) }, { weight: 1, arb
 const honestStep: fc.Arbitrary<Step> = fc.oneof(
   { weight: 3, arbitrary: fc.record({ k: fc.constant('op' as const), device, by: honest, op: opSpec, back: fc.constant(0) }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant('sync' as const), from: device, to: device }) },
+  { weight: 1, arbitrary: fc.record({ k: fc.constant('server' as const), device, which, op: serverSpec, letIn }) },
 );
 const adversarialStep: fc.Arbitrary<Step> = fc.oneof(
   { weight: 6, arbitrary: fc.record({ k: fc.constant('op' as const), device, by: anyone, op: opSpec, back }) },
@@ -89,6 +115,7 @@ const adversarialStep: fc.Arbitrary<Step> = fc.oneof(
   { weight: 1, arbitrary: fc.record({ k: fc.constant('forged' as const), device, by: anyone, op: opSpec }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant('replay' as const), device, by: anyone, pick: fc.nat() }) },
   { weight: 1, arbitrary: fc.record({ k: fc.constant('rival' as const), device, by: anyone }) },
+  { weight: 1, arbitrary: fc.record({ k: fc.constant('server' as const), device, which, op: serverSpec, letIn }) },
 );
 
 /** The workspace's start: a pinned genesis, Ada its owner; Bo and Cy admins, Dee a member, Bo an admin of the team. */
@@ -109,7 +136,11 @@ const headsOf = (held: Map<string, PolicyEntry>) => {
   return [...held.keys()].filter((id) => !named.has(id));
 };
 
-function toOp(spec: OpSpec, by: number, ctx: PolicyContext): PolicyOp {
+/** Links for servers: admitted (admit-server) and joined by (a server's join) alike. */
+const SERVER_LINKS = ['a0a0a0a0a0a0a0a0', 'b1b1b1b1b1b1b1b1', 'c2c2c2c2c2c2c2c2', 'd3d3d3d3d3d3d3d3'];
+
+/** `server`: the server making it, for its join's link. */
+function toOp(spec: OpSpec, by: number, ctx: PolicyContext, server?: number): PolicyOp {
   switch (spec.t) {
     case 'grant': return { t: 'grant', group: GROUPS[spec.group]!, who: ids[spec.who]!, role: spec.role };
     case 'nest': return { t: 'grant', group: 'team', who: 'group:readers', role: 'member' };
@@ -123,11 +154,17 @@ function toOp(spec: OpSpec, by: number, ctx: PolicyContext): PolicyOp {
     }
     case 'space': return { t: 'space', id: SPACES[spec.id]!, audience: spec.audience.map((i) => ids[i]!).sort() };
     case 'drop': return { t: 'drop', key: people[spec.whose]!.key.publicKey.toString('hex') };
-    case 'unlink': return { t: 'unlink', link: LINKS[spec.link]!, group: GROUPS[spec.group]! };
+    // A person's link, or a server's (whose joins are for the workspace).
+    case 'unlink': return spec.link < LINKS.length ? { t: 'unlink', link: LINKS[spec.link]!, group: GROUPS[spec.group]! } : { t: 'unlink', link: SERVER_LINKS[spec.link - LINKS.length]!, group: WORKSPACE };
     case 'admit': return { t: 'admit', link: LINKS[spec.link]!, key: people[spec.who]!.key.publicKey.toString('hex') };
+    case 'admit-server': return { t: 'admit', link: SERVER_LINKS[spec.link]!, key: serverIds[spec.which]! };
+    case 'drop-server': return { t: 'drop', key: serverIds[spec.which]! };
+    case 'grant-server': return { t: 'grant', group: GROUPS[spec.group]!, who: serverIds[spec.which]!, role: 'member' };
+    case 'space-server': return { t: 'space', id: SPACES[spec.id]!, audience: [...spec.audience.map((i) => ids[i]!), serverIds[spec.which]!].sort() };
     case 'join': {
-      const g = GROUPS[spec.group]!;
-      const link = LINKS[spec.link]!;
+      const g = spec.role === 'server' ? WORKSPACE : GROUPS[spec.group]!;
+      // A server's link: of its own (shared with admit-server's); a person's join by a link for a server, one of the people's.
+      const link = server !== undefined ? SERVER_LINKS[spec.link]! : LINKS[spec.link % LINKS.length]!;
       // A grant from before links were let in by (counting by itself), or one since (counting only for whom a device in let in).
       const message = spec.admitted ? admittedGrantMessage : linkGrantMessage;
       const grant = crypto.sign(message(WS, ctx.pin, link, g, spec.role, spec.once, 0, ISSUER), people[spec.granter]!.key.secretKey).toString('hex');
@@ -181,6 +218,15 @@ function play(steps: Step[]) {
       const g = makeOp(WS, { t: 'genesis', admins: [ids[s.by]!], legacy: false }, [], people[s.by]!.key);
       put(s.device, g);
       put(s.device, makeOp(WS, { t: 'grant', group: WORKSPACE, who: ids[s.by]!, role: 'admin' }, [g.id, ...heads], people[s.by]!.key));
+    } else if (s.k === 'server') {
+      const op = toOp(s.op, 0, ctx, s.which);
+      let parents = heads;
+      if (op.t === 'join' && s.letIn !== null) {
+        const admit = makeOp(WS, { t: 'admit', link: op.link, key: serverIds[s.which]! }, heads, people[s.letIn]!.key);
+        put(s.device, admit);
+        parents = [admit.id];
+      }
+      put(s.device, makeOp(WS, op, parents, servers[s.which]!));
     }
   }
   const all = new Map<string, PolicyEntry>();
@@ -203,6 +249,7 @@ function summary(p: Policy) {
     counted: [...p.counted].sort(),
     usedLinks: [...p.usedLinks].sort(),
     dropped: sorted([...p.dropped]),
+    servers: [...p.servers].sort(),
   };
 }
 
@@ -234,7 +281,7 @@ function placesOf(e: PolicyEntry): { group: string; who: string; place: Place }[
   if (op.t === 'grant') return [{ group: op.group, who: op.who, place: op.role }];
   if (op.t === 'revoke') return [{ group: op.group, who: op.who, place: 'out' }];
   if (op.t === 'owner') return [{ group: WORKSPACE, who: op.who, place: 'admin' }];
-  if (op.t === 'join') return op.group === WORKSPACE ? [{ group: WORKSPACE, who: by, place: op.role }] : [{ group: op.group, who: by, place: op.role }, { group: WORKSPACE, who: by, place: 'in' }];
+  if (op.t === 'join') return op.role === 'server' ? [] : op.group === WORKSPACE ? [{ group: WORKSPACE, who: by, place: op.role }] : [{ group: op.group, who: by, place: op.role }, { group: WORKSPACE, who: by, place: 'in' }];
   return [];
 }
 const differ = (a: Place, b: Place) => a !== b && !((a === 'in' && b !== 'out') || (b === 'in' && a !== 'out'));
@@ -257,7 +304,10 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
   }
   const counted = [...p.counted].map((id) => byId.get(id)!).filter((e) => e.op.t !== 'genesis');
   for (const e of counted) {
-    if (strangerKeys.has(e.signer) || !personOf(e.signer)) out.push('an operation signed by no one counted');
+    // A key that is no one's: only a server's own join counts (0099).
+    const serverJoin = e.op.t === 'join' && e.op.role === 'server';
+    if (!personOf(e.signer) && !serverJoin) out.push('an operation signed by no one counted');
+    if (personOf(e.signer) && serverJoin) out.push('a server’s join signed by a person’s key counted');
     if (forged.has(e.id)) out.push('an operation naming a parent no one holds counted');
     if (personOf(e.signer) === ids[EVE]) out.push('an operation of Eve’s counted');
   }
@@ -318,6 +368,22 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
     const admitted = crypto.verify(admittedGrantMessage(WS, p.geneses[0]!, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer ?? ''), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
     if (admitted && !applied.some((a) => a.op.t === 'admit' && a.op.link === op.link && a.op.key === j.signer && past.get(j.id)!.has(a.id))) out.push('a join by a grant since counted with no one letting its maker in');
   }
+  // Servers (0099): each by a join of its own counting, by the owner's link for one, with someone in letting it in first;
+  // in no group, never dropped; reading only the workspace's files and spaces naming it; changing nothing.
+  for (const sv of p.servers) {
+    for (const [g, members] of p.groups) if (members.has(sv)) out.push(`a server is in ${g}`);
+    if (p.dropped.has(sv)) out.push('a dropped key is a server');
+    if (personOf(sv)) out.push('a person’s key is a server');
+    const joins = applied.filter((j) => j.signer === sv && j.op.t === 'join' && j.op.role === 'server');
+    if (!joins.length) out.push('a server with no join of its own counting');
+    for (const j of joins) {
+      const op = j.op as Extract<PolicyOp, { t: 'join' }>;
+      if (!op.once || op.group !== WORKSPACE) out.push('a server in by a link for anyone, or for a group');
+      if (!applied.some((a) => a.op.t === 'admit' && a.op.link === op.link && a.op.key === sv && past.get(j.id)!.has(a.id))) out.push('a server in with no one letting it in');
+    }
+    for (const path of PATHS) if (p.mayWrite(sv, `${path}x.md`)) out.push('a server may change a file');
+    for (const sp of SPACES) if (p.mayRead(sv, sp) !== !!p.spaces.get(sp)?.audience.includes(sv)) out.push('a server reads a space not naming it, or not one naming it');
+  }
   // Clashes are on record: each allowed in its own past that did not count lost one; each that lost (but narrowed or once) did not count, to one that did.
   const lost = new Set(p.clashes.map((c) => c.lost));
   for (const id of p.judged) if (!p.counted.has(id) && !lost.has(id)) out.push(`${byId.get(id)!.op.t} did not count, with no clash on record`);
@@ -349,6 +415,7 @@ describe('the policy, over histories made at random', () => {
   it('makes histories with much made at the same time, and clashes of every kind', () => {
     let applied = 0;
     let withConcurrent = 0;
+    let withServer = 0;
     const whys = new Set<string>();
     const samples = fc.sample(fc.array(fc.oneof(honestStep, adversarialStep), { minLength: 10, maxLength: 24 }), { numRuns: 300, seed: 7 });
     for (const steps of samples) {
@@ -359,9 +426,12 @@ describe('the policy, over histories made at random', () => {
       applied += counted.length;
       if (counted.some((a) => counted.some((b) => a !== b && !past.get(a)!.has(b) && !past.get(b)!.has(a)))) withConcurrent++;
       for (const c of p.clashes) whys.add(c.why);
+      if (p.servers.size) withServer++;
     }
     expect(applied / samples.length).toBeGreaterThan(2);
     expect(withConcurrent / samples.length).toBeGreaterThan(0.2);
+    // Servers come in (0099), in enough histories to judge what they may do.
+    expect(withServer / samples.length).toBeGreaterThan(0.1);
     // (Two handovers at once, and what was founded on what lost, rarer, are in policy.test.ts.)
     for (const why of ['removed', 'dropped', 'less', 'unlinked', 'narrower']) expect(whys).toContain(why);
   });

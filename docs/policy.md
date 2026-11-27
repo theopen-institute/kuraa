@@ -11,19 +11,21 @@ checks what *What always holds* says, over histories made at random, honest and 
 
 Each operation is signed by a person's signing key, and names the operations its maker had seen
 (its *parents*). Its ID is the hash of what it says, its parents and its signer, in this workspace.
+The one exception is a server's join ([0099](decisions/0099-servers.md)), signed by the server's own
+key, which no person vouched for.
 
 | Operation | Says | Who may make it, in the policy its past makes |
 | --- | --- | --- |
 | `genesis` | the workspace's first admin, its owner | no one: it is the root (below) |
 | `grant` | someone is in a group, as admin or member | an admin of the group, or of the workspace (a new group: the workspace's admins). Making or unmaking a workspace admin, only the owner. Into a group other than the workspace, only someone in it. Never the owner made a member |
 | `revoke` | someone is out of a group (`cutoff`: the commits the remover had) | an admin of the group, or the person themselves (leaving). A workspace admin, only the owner (or themselves). Never the owner |
-| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past |
+| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`); a key not a server already |
 | `admit` | a device let the holder of a signing key in by an invite link (it checked, by its own clock, that the link had not expired nor been revoked) | anyone in the workspace |
 | `unlink` | an invite link lets no one into its group any more | an admin of the group |
 | `owner` | someone in the workspace is the owner now | the owner |
 | `rule`, `perm` | who may change a path; who reads what is made in a folder | the workspace's admins |
 | `space` | a space's audience | anyone in the workspace who is in that audience (to make it); whoever made it, or an admin (to change it) |
-| `drop` | a signing key (one computer) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer). For good |
+| `drop` | a signing key (one computer, or a server) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer; for a server's key, the owner alone). For good |
 
 Made before [0078](decisions/0078-restrictive-wins.md) and read only so a history that has them stays
 whole (what came after names them as parents), counting for nothing: `seal`, `verifier`, `witness`
@@ -33,7 +35,7 @@ the policy and are no longer taken: attestations (`attest`) and trustee rotation
 ## Working it out
 
 1. **Which count at all.** An operation counts only if its signature is good, its signing key is a
-   person's (as the identities say), and it descends from the genesis the workspace is pinned to
+   person's (as the identities say; or it is a server's join, by the key itself), and it descends from the genesis the workspace is pinned to
    (every invite link carries the pin). A key its person revoked (or left behind recovering their
    identity) is still theirs for what it signed in the past of the policy its revokers had
    (`policyHeads` on the revocation), and no one's for anything else; a revocation from before,
@@ -86,7 +88,7 @@ the policy and are no longer taken: attestations (`attest`) and trustee rotation
    for one person that another used at the same time (`once`: the first in the one order counts),
    and each permission narrowed.
 
-The result: groups and roles, the owner, permissions, spaces and their audiences, the links for one
+The result: groups and roles, the owner, the servers, permissions, spaces and their audiences, the links for one
 person used, the operations allowed (`judged`), that counted (`counted`) and that changed something
 (`applied`), the clashes, the heads (what a new operation names), and each person out of the
 workspace with their cutoff (the commits of theirs that still count: the write gate refuses any
@@ -107,8 +109,12 @@ holds, and on all of them together:
 - **One owner, an admin.** The workspace has exactly one owner, an admin; so always an admin.
 - **Groups inside the workspace.** No one outside the workspace is in any group; no one never let in
   is in any.
-- **Only people's word.** No operation by a key that is no one's counts, nor one by someone never
-  let in, nor one naming a parent no one holds.
+- **Only people's word.** No operation by a key that is no one's counts, but a server's own join;
+  nor one by someone never let in, nor one naming a parent no one holds; nor a server's join signed
+  by a person's key.
+- **Servers.** Each server has a join of its own counting, by a link for one server, for the
+  workspace, with someone in letting it in first. A server is in no group, its key is no person's
+  and not dropped; it may change no file, and reads a space only where its audience names it.
 - **Nothing after one is out.** Of someone out of the workspace, nothing counts that is not in the
   past of a removal of them that counts, but their leaving (or a ring of removals).
 - **Removals stand.** Nothing counts that a removal or drop counting at the same time beats, but in
@@ -122,6 +128,17 @@ holds, and on all of them together:
   its signer by that link in its past.
 - **Clashes on record.** Every operation allowed in its own past that did not count is on record as
   having lost; and each that lost (but narrowed, or by a used link) did not count, to one that did.
+
+## Servers
+
+A server ([0099](decisions/0099-servers.md)) is a key no person vouched for, in the workspace as
+itself by its own `join` (role `server`). It reads the workspace's own files, and a space whose
+audience names its key (never by `admins` or a group); it may change nothing, whatever the rules say
+or where they say nothing, not even a file named for it; it is in no group (a grant naming it counts
+for nothing, and its join takes it out of any a grant made at the same time put it in). Nothing else
+its key signs counts. A `drop` of its key, the owner's to make, takes it out for good. Restrictive
+wins as for anyone: a drop of its key at the same time as its join beats the join, as does an unlink
+of the link.
 
 ## A person's own files
 
@@ -159,7 +176,9 @@ the commits the device has now as its cutoff).
 
 Not an operation of its own ([0072](decisions/0072-ranks-devices-and-changes-not-kept.md)): a device
 is in the workspace where it signs with a key (its `signs` record), a person vouched for that key,
-the policy has that person in the workspace, and the key is neither dropped nor revoked. It is out
+the policy has that person in the workspace, and the key is neither dropped nor revoked; or where it
+signs with a key the policy has as a server (and no person vouched for it). Who a server's device is,
+where a person's has its person: the server's key. It is out
 where its key is dropped or revoked, or its person was taken out (or left); a device whose person is
 not known, or not in yet, is neither. Removals of devices made before 0072 still count. A removal
 counts on each device as soon as it holds it, and its links to the devices out close then: nothing

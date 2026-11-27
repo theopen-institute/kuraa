@@ -236,6 +236,8 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: LegacyContext): bool
       return may && !lastAdmin && !!s.groups.get(op.group)?.has(op.who);
     }
     case 'join': {
+      // Servers (0099) came after policies were pinned: a legacy policy has none.
+      if (op.role === 'server') return false;
       if (s.unlinked.has(`${op.link} ${op.group}`)) return false;
       const signed = (m: Buffer) => crypto.verify(m, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
       const admitted = op.issuer !== undefined && signed(admittedGrantMessage(ctx.workspace, null, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer));
@@ -309,6 +311,7 @@ function effect(e: PolicyEntry, by: string, s: State, at: number): boolean {
       }
       return true;
     case 'join':
+      if (op.role === 'server') return false;
       if (op.once && s.usedLinks.has(op.link)) return false;
       if (op.once) s.usedLinks.add(op.link);
       if (op.group !== WORKSPACE && !ws.has(by)) place(by, 'member');
@@ -374,7 +377,7 @@ function claimsOf(e: PolicyEntry, by: string): Claim[] {
     case 'grant': return [{ group: op.group, who: op.who, place: op.role }];
     case 'revoke': return [{ group: op.group, who: op.who, place: 'out' }];
     case 'owner': return [{ group: WORKSPACE, who: op.who, place: 'admin' }];
-    case 'join': return op.group === WORKSPACE
+    case 'join': return op.role === 'server' ? [] : op.group === WORKSPACE
       ? [{ group: WORKSPACE, who: by, place: op.role }]
       : [{ group: op.group, who: by, place: op.role }, { group: WORKSPACE, who: by, place: 'in' }];
     default: return [];

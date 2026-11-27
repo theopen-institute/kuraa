@@ -7,7 +7,7 @@
 //   [--peer-port N]                    take members' connections over TCP on this port (for networks that block UDP)
 //   [--dht-port N] [--no-serve-dht]    its DHT node on a fixed port, for members to start from; never the public DHT
 //   [--bootstrap host:port]... [--relay <key>]...   a private network's DHT nodes; relays
-//   [--port 4322] [--host 127.0.0.1] [--token T] [--static dir]   its own page and API (whoever runs it reads only)
+//   [--port 4322] [--host 127.0.0.1] [--token T]   its own API, for join and list: it serves no app (headless, for now)
 // kuraa-server join <invite link> [--data <folder>]   bring a workspace onto the running server, by a link for a server
 //                                      (its owner makes one: People and computers › Add a server…)
 // kuraa-server list [--data <folder>]  the workspaces it holds, and whether each has taken it in
@@ -36,7 +36,6 @@ const { values, positionals } = parseArgs({
     port: { type: 'string' },
     host: { type: 'string' },
     token: { type: 'string' },
-    static: { type: 'string' },
   },
 });
 
@@ -84,7 +83,6 @@ const server = await startServer({
   host: values.host,
   port,
   token: values.token ?? process.env.KURAA_TOKEN,
-  staticDir: values.static,
   publicAddress: values['public-address'],
   peerPort,
   dhtPort,
@@ -96,7 +94,7 @@ const server = await startServer({
 
 say(`key:        ${server.key}`);
 say(`data:       ${server.data}`);
-say(`url:        ${server.hub.url}  (its page, read only; token in ${server.data}/server.json)`);
+say(`api:        ${server.hub.url}  (for kuraa-server join and list; no app: headless)`);
 if (values['public-address'] && peerPort) say(`reached at: ${values['public-address']} (TCP ${peerPort})`);
 else say('no --public-address and --peer-port: members reach this server through the DHT only, as any device');
 say('bring a workspace here: kuraa-server join <invite link for a server>');

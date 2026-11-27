@@ -103,4 +103,33 @@ describe('a server, run from its folder (0099)', () => {
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/makes none of its own/);
   });
+
+  it('is headless: no app, nothing of what it holds over HTTP but its list, no rooms; its workspaces’ hosts not reachable with its code', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    const get = (path: string, token: string | null = s.hub.token) => fetch(s.hub.url + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+    // Its list, with its code; nothing without it.
+    expect((await get('/hub/api/server')).status).toBe(200);
+    expect((await get('/hub/api/server', null)).status).toBe(401);
+    // No app, no workspace's API (files, people), no hub's listing, settings or folders: not even with its code.
+    for (const path of ['/', '/index.html', `/w/${w.id}/`, `/w/${w.id}/api/peers`, `/w/${w.id}/api/files?path=notes.md`, '/hub/api/workspaces', '/hub/api/settings', '/hub/api/folders']) {
+      const res = await get(path);
+      expect(res.status, path).toBe(404);
+      expect(await res.text(), path).toMatch(/serves no app/);
+    }
+    // No rooms: a WebSocket to a workspace is closed at once.
+    const closed = await new Promise<boolean>((done) => {
+      const ws = new WebSocket(`${s.hub.url.replace(/^http/, 'ws')}/w/${w.id}/collab?token=${s.hub.token}`);
+      ws.onopen = () => done(false);
+      ws.onerror = () => done(true);
+      ws.onclose = () => done(true);
+    });
+    expect(closed).toBe(true);
+    // Its workspace's own host, on this computer, takes not the server's access code.
+    const inner = s.hub.hub.hostOf(w.id)!;
+    expect(inner.token).not.toBe(s.hub.token);
+    expect((await fetch(`${inner.url}/api/peers`, { headers: { authorization: `Bearer ${s.hub.token}` } })).status).toBe(401);
+  });
 });

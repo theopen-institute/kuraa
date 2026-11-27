@@ -90,7 +90,8 @@ export interface HubOptions {
   /**
    * A server (0099; @kuraa/server runs one): every workspace's host has no
    * person, its devices in as the server's; workspaces come by links for a
-   * server, and none is made here.
+   * server, and none is made here. Headless: no app, no workspace's API, no
+   * rooms; only what `kuraa-server join` and `list` ask (serverApi).
    */
   server?: boolean;
   log?: (m: string) => void;
@@ -103,6 +104,9 @@ interface Entry {
   dir: string;
   added: string;
 }
+
+/** What a server answers to anything but its own few routes (0099). */
+const HEADLESS = 'This is a Kuraa server: it serves no app, and shows nothing of the workspaces it holds (kuraa-server list says which)';
 
 /** The id the app gives a join, to ask how it is going by. */
 const JOIN_ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -237,6 +241,8 @@ export class Hub {
   }
 
   async start(): Promise<AddressInfo> {
+    // Headless (0099): a server serves no app, until people sign in to one somehow.
+    if (this.o.server && this.o.staticDir) throw new Error('A server serves no app: it is headless for now');
     // The environments loaded, so that a setting naming one no longer there is passed over.
     if (this.o.settings) await this.loadComponents();
     if (this.o.folder) {
@@ -363,7 +369,9 @@ export class Hub {
       const peerOptions = this.peerOptions();
       const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
-        ...this.hostOptions(), dir: e.dir, init, label: e.name, token: this.token, host: '127.0.0.1', port: 0, requests: this.gate, peers, log: (m) => this.log(`[${e.id}] ${m}`),
+        ...this.hostOptions(), dir: e.dir, init, label: e.name,
+        // A server's (0099): an access code of its own, told to no one (nothing is passed to it: headless).
+        token: this.o.server ? undefined : this.token, host: '127.0.0.1', port: 0, requests: this.gate, peers, log: (m) => this.log(`[${e.id}] ${m}`),
         // The list says what the workspace calls itself (0061), and keeps it for when it is not open.
         onName: (name) => this.named(e, name),
         // People may invite others to a hub's workspaces from the app (every member has the same say, 0038);
@@ -650,6 +658,12 @@ export class Hub {
     const w = /^\/w\/([a-z0-9-]+)(\/.*)?$/.exec(url.pathname);
     if (!hostAllowed(req, this.gate)) return refuseHost(res);
     try {
+      // A server is headless (0099): its own few routes, with the access code, and nothing else.
+      if (this.o.server) {
+        if (!url.pathname.startsWith('/hub/api/')) return send(res, 404, { error: HEADLESS });
+        if (!sameToken(tokenOf(req), this.token)) return send(res, 401, { error: 'Unauthorized' });
+        return await this.serverApi(req, res, url);
+      }
       if (w) return this.proxy(req, res, w[1]!, `${w[2] ?? '/'}${url.search}`);
       if (url.pathname.startsWith('/hub/api/')) {
         corsHeaders(req, res, this.gate);
@@ -668,6 +682,40 @@ export class Hub {
       if (!res.headersSent) send(res, status, { error: (err as Error).message });
       else res.end();
     }
+  }
+
+  /**
+   * A server's API (0099), all it answers: the workspaces it holds and whether
+   * each has taken it in (GET /hub/api/server), joining one by a link for a
+   * server (POST /hub/api/workspaces, kind join), and how a join is going.
+   * No workspace's files, history or people: whoever has the access code runs
+   * the server, and sees what it holds only by `kuraa-server list`.
+   */
+  private async serverApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const route = `${req.method} ${url.pathname}`;
+    if (route === 'GET /hub/api/server') return send(res, 200, { workspaces: await this.serverListing() });
+    if (route === 'POST /hub/api/workspaces') {
+      const b = await readBody(req);
+      if (b.kind !== 'join') throw new HttpError(403, 'A server holds workspaces shared with it: it makes none of its own');
+      if (typeof b.invitation !== 'string' || !b.invitation.trim()) throw new HttpError(400, 'Give an invite link for a server');
+      const progress = typeof b.progress === 'string' && JOIN_ID.test(b.progress) ? b.progress : undefined;
+      return send(res, 201, { workspace: await this.join(b.invitation, progress) });
+    }
+    const joining = /^\/hub\/api\/joins\/([^/]+)$/.exec(url.pathname);
+    if (joining && req.method === 'GET') {
+      const status = JOIN_ID.test(joining[1]!) ? this.joinStatus(joining[1]!) : null;
+      return status ? send(res, 200, status) : send(res, 404, { error: 'No join under way by that id' });
+    }
+    throw new HttpError(404, HEADLESS);
+  }
+
+  /** The workspaces a server holds, and whether each has taken it in: its own policy names this computer's key as a server. */
+  private async serverListing(): Promise<{ id: string; name: string; path: string; in: boolean; error?: string }[]> {
+    return Promise.all(this.listing().workspaces.map(async (w) => {
+      const peers = this.hosts.get(w.id)?.host.peers;
+      const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
+      return { id: w.id, name: w.name, path: w.path, in: !!policy?.isServer(me), ...(w.error ? { error: w.error } : {}) };
+    }));
   }
 
   private async api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
@@ -730,7 +778,8 @@ export class Hub {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const w = /^\/w\/([a-z0-9-]+)(\/.*)$/.exec(url.pathname);
     const h = w && this.hosts.get(w[1]!);
-    if (!h || !upgradeAllowed(req, this.gate)) return void socket.destroy();
+    // A server is headless (0099): no rooms for anyone.
+    if (this.o.server || !h || !upgradeAllowed(req, this.gate)) return void socket.destroy();
     const target = new URL(h.url);
     const upstream = connect(Number(target.port), target.hostname, () => {
       const lines = [`${req.method} ${w[2]}${url.search} HTTP/${req.httpVersion}`];

@@ -322,8 +322,10 @@ pnpm server list                                                 # what it holds
 ```
 
 It has a key of its own (in its folder, one for all its workspaces) and no identity; it makes no
-workspaces and runs no code. Its page (`--port 4322`, the access code in its folder's
-`server.json`) shows what it holds, read only. The owner removes it from **People and computers**.
+workspaces and runs no code. It is headless: it serves no page, and its port (`--port 4322`, the
+access code in its folder's `server.json`) answers only `join` and `list`. Run it from the
+repository: the released server below is a host, which serves the app. The owner removes it from
+**People and computers**.
 `--public-address` and `--peer-port` let members on networks that block UDP reach it (see the
 server's flags above); without them it is reached as any device is.
 

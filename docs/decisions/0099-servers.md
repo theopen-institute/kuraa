@@ -78,8 +78,8 @@ nothing, and a server that later gets an identity stops being one.
   each takes the merge when they come back.
 - **It never leads a room**, nor are its edits taken in one: only devices that may change a document
   lead its room, and a server may change none.
-- **Seen from the server** (its host's own page, for whoever runs it), everything is read only. A
-  refusal by the policy anywhere (a new document asked for there, say) is a 403, not an error.
+- **A refusal by the policy** anywhere (a new document asked for where one may not make it, say)
+  is a 403, not an error.
 - **Its devices confirm removals**, as people's do (0072's witnesses, which waited for servers): the
   removal says *confirmed by* the server once it holds it.
 
@@ -96,7 +96,19 @@ does is in a package of its own, `packages/server`:
   their person's key, and a server's join signed with it counts for nothing. Where it is reached
   (`server.json`: its address and access code) is written there too, readable by whoever runs it
   alone, for the commands below to ask it.
-- **Its page** (port 4322) shows what it holds, read only; it makes no workspace of its own.
+- **Headless, for now.** The owner, on seeing that the server's page served the app:
+
+  > "I don't want the app served at all right now. The server should be headless for the time
+  > being, until we have a chance to set up a user login infrastructure of some sort."
+
+  So a server serves no page and no workspace's API: its port (4322, on 127.0.0.1 unless `--host`
+  says otherwise) answers, with its access code, only the list of what it holds and whether each
+  workspace took it in (`GET /hub/api/server`), a join by a link for a server (`POST
+  /hub/api/workspaces`, kind `join`) and how a join is going; anything else, with the code or
+  without, is refused (404), and no WebSocket (rooms) is taken. Each workspace's own host on the
+  server (on this computer only, as in any hub) has an access code no one is told. It makes no
+  workspace of its own. Members reach it only by the peer network (as any device: the DHT, the local
+  network, its TCP address), which carries what devices of the workspace send each other.
 - **`kuraa-server join <link>`** brings a workspace onto the server, by an invite link for a server.
 - **`kuraa-server list`** says which workspaces it holds, and whether each has taken it in.
 
@@ -105,7 +117,7 @@ does is in a package of its own, `packages/server`:
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
 devices' name, how it is connected, and, for the owner, **Remove…**. The owner's **Add a server…**
 makes an invite link for one server, for a week, and says to give it to `kuraa-server join` on the
-server. Seen on the server, it says it is one. The sidebar says *Syncing with the server* where it is
+server. The sidebar says *Syncing with the server* where it is
 the only other device. Removals list *The server … removed*.
 
 ## Not yet (in the app)
@@ -123,5 +135,7 @@ the only other device. Removals list *The server … removed*.
   timers. A server should wake a workspace when a member connects, and need not announce what its
   members reach by its address.
 - **Signing in from the web**, and the other things a server can do because it is always there.
-- **The released server build** (0052, `kuraa-host` as a service) running as a server: `kuraa-server`
-  is run from the repository for now.
+- **The released server build** (0052: `kuraa-server-<version>.tar.gz`, installed as a service, which
+  updates itself) is a host that serves the app, not a server in this sense: `kuraa-server` is run
+  from the repository for now (`pnpm server`), installed by no one and updating itself never.
+- **Signing in**, and with it any page a server serves.

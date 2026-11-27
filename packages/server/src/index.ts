@@ -8,9 +8,12 @@
 //   for counts for nothing, so it is not the computer's own key;
 // - a hub of its workspaces (`workspaces/`), each host with no person, none made
 //   here: each comes by a link for a server (join);
-// - no code run, nothing changed from its page (whoever runs it reads only);
+// - no code run;
+// - headless: no app, no workspace's files, history or people over HTTP, until
+//   people can sign in to one; its port answers only what `kuraa-server join`
+//   and `list` ask (the hub's serverApi);
 // - where it is reached (`server.json`: its address and access code, readable by
-//   whoever runs it alone), for `kuraa-server join` and `list` to ask it.
+//   whoever runs it alone), for those commands to ask it.
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -21,18 +24,16 @@ import { keptKey, startHub, type KeyPair, type PeerOptions, type RunningHub } fr
 /** Where a server keeps everything, unless told: its key, its workspaces, how it is reached. */
 export const defaultServerData = () => join(homedir(), '.kuraa', 'server-data');
 
-/** The port a server's page and API listen on, unless told: beside a host's 4321. */
+/** The port a server's own API (for kuraa-server join and list) listens on, unless told: beside a host's 4321. */
 export const SERVER_PORT = 4322;
 
 export interface ServerOptions {
   /** Its folder (default ~/.kuraa/server-data). */
   data?: string;
-  /** Its page and API: where they listen (default 127.0.0.1, port 4322) and with which access code (default: a new one). */
+  /** Its own API (join, list: no app, 0099): where it listens (default 127.0.0.1, port 4322) and with which access code (default: a new one). */
   host?: string;
   port?: number;
   token?: string;
-  /** The built web client, served at `/`, to look at its workspaces. */
-  staticDir?: string;
   /**
    * Where members reach it (0053): over TCP on `peerPort`, at `publicAddress`
    * (`host` or `host:port`), told to members and put in invite links; its DHT
@@ -86,7 +87,6 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     host: o.host ?? '127.0.0.1',
     port: o.port ?? SERVER_PORT,
     token: o.token,
-    staticDir: o.staticDir,
     // Formats and features to read with; no code run on a server yet (0099: running code for a device that cannot is to come).
     hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents } },
     peers,
@@ -139,23 +139,16 @@ export interface ServerWorkspace { id: string; name: string; path: string; in: b
 /** Bring a workspace onto the running server, by an invite link for a server (0099). */
 export async function joinServer(link: string, data = defaultServerData()): Promise<ServerWorkspace> {
   const a = await readAddress(data);
-  const { workspace } = await ask<{ workspace: { id: string; name: string; path: string } }>(a, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link }) });
-  return { ...workspace, in: await taken(a, workspace.id) };
+  const { workspace } = await ask<{ workspace: { id: string } }>(a, '/hub/api/workspaces', { method: 'POST', body: JSON.stringify({ kind: 'join', invitation: link }) });
+  const held = (await listing(a)).find((w) => w.id === workspace.id);
+  if (!held) throw new Error('The server joined, but does not list the workspace: see its log');
+  return held;
 }
 
-/** Whether a workspace the server holds has it as a server: its own policy says so. */
-async function taken(a: ServerAddress, id: string): Promise<boolean> {
-  try {
-    const peers = await ask<{ enabled: boolean; people?: { servers?: { you: boolean }[] } }>(a, `/w/${id}/api/peers`);
-    return !!peers.people?.servers?.some((s) => s.you);
-  } catch {
-    return false;
-  }
-}
+/** What the running server holds (GET /hub/api/server): each workspace, and whether it has taken the server in. */
+const listing = async (a: ServerAddress) => (await ask<{ workspaces: ServerWorkspace[] }>(a, '/hub/api/server')).workspaces;
 
 /** The workspaces the running server holds. */
 export async function listServer(data = defaultServerData()): Promise<ServerWorkspace[]> {
-  const a = await readAddress(data);
-  const { workspaces } = await ask<{ workspaces: { id: string; name: string; path: string; error?: string }[] }>(a, '/hub/api/workspaces');
-  return Promise.all(workspaces.map(async (w) => ({ id: w.id, name: w.name, path: w.path, in: !w.error && (await taken(a, w.id)), ...(w.error ? { error: w.error } : {}) })));
+  return listing(await readAddress(data));
 }

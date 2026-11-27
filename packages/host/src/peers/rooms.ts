@@ -740,9 +740,17 @@ export class Rooms {
     if (!room?.session || !others.length) return this.stopMeeting(key);
     const kept = others.reduce((a, b) => (b.leader < a.leader ? b : a));
     const mine = this.leaderOf(room) ?? NO_ONE;
-    // This session is kept: the others come to it.
+    // This session is kept: the others come to it (theirs each have someone to lead them: sessionsOf).
     if (mine < kept.leader) return this.stopMeeting(key);
     if (!this.meetings.has(key)) this.meetings.set(key, setInterval(() => void this.meet(key), MEET_MS));
+    // No one in this session may change the document (0066): nothing in it is ever committed, so
+    // there is nothing to wait for; it moves now. (Not while the one leading it is only missing for now.)
+    if (mine === NO_ONE) {
+      const l = this.local.get(key);
+      if (l?.lost || l?.orphan || l?.awaiting) return;
+      if (await this.moveTo(key, room.name, kept, () => true)) this.left(key, null);
+      return;
+    }
     const me = mine === this.node.myKey;
     const committed = me ? await this.host.committedOf(room.name) : this.said(mine, key)?.session === room.session ? this.said(mine, key)!.committed : null;
     const now = this.host.sessionRelay.stateVector(room.name);
@@ -763,17 +771,22 @@ export class Rooms {
       }
     }
     if (!held) return;
-    const source = kept.links.find((l) => l.key === kept.leader) ?? kept.links[0]!;
-    const m = await this.ask(source, { type: 'room', op: 'want', key, id: '' });
-    if (!m || m.op !== 'state' || m.session !== kept.session || !m.state) return;
-    const base = typeof m.base === 'string' && /^[0-9a-f]{40,64}$/.test(m.base) ? m.base : null;
-    const moved = await this.host.switchRoom(room.name, kept.session, bytesOf(m.state), base, () => {
+    const moved = await this.moveTo(key, room.name, kept, () => {
       const v = this.host.sessionRelay.stateVector(room.name);
       return !!v && covers(committed.sv, v);
     });
-    if (!moved) return;
-    this.log(`${room.path}: moved to the session of the device with the lower key`);
-    this.left(key, committed.commit);
+    if (moved) this.left(key, committed.commit);
+  }
+
+  /** This device's room moved into the session kept, its state asked of a device in it: whether it moved. */
+  private async moveTo(key: string, name: string, kept: { session: string; leader: string; links: PeerLink[] }, ready: () => boolean): Promise<boolean> {
+    const source = kept.links.find((l) => l.key === kept.leader) ?? kept.links[0]!;
+    const m = await this.ask(source, { type: 'room', op: 'want', key, id: '' });
+    if (!m || m.op !== 'state' || m.session !== kept.session || !m.state) return false;
+    const base = typeof m.base === 'string' && /^[0-9a-f]{40,64}$/.test(m.base) ? m.base : null;
+    if (!(await this.host.switchRoom(name, kept.session, bytesOf(m.state), base, ready))) return false;
+    this.log(`${pathOf(key)}: moved to the session of the device with the lower key`);
+    return true;
   }
 
   private stopMeeting(key: string): void {

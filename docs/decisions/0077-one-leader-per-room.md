@@ -60,6 +60,12 @@ has the higher key move to the other session. Each moves once the other session 
 commit of its own and it has nothing in its room beyond that commit; its people's edits not yet
 sent are carried across by the app, as when a room is replaced.
 
+A session in which no one may change the document (0066: only those who may only read it opened
+it there) has no leader, so nothing in it is ever committed; it moves to the other session at once,
+not waiting for a commit that would never come (*later*: it waited, and two devices that opened such
+a file at the same moment never met; seen as a test that failed now and then, mostly on CI's slower
+machines). Not while the one leading it is only missing for now.
+
 Of two devices, only the one with the lower key now makes merges; the other takes them (as
 devices running another version of kuraa did already). Three devices merging each other's merges
 at once could each make a new one, and go on so.

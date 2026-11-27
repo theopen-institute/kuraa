@@ -642,7 +642,8 @@ describe('equal members, and forks', () => {
     await until(async () => (await a.host.peers!.people()).people.some((p) => p.id === boP.id), 15_000, 'Bo in the workspace');
     await a.host.peers!.setRule('notes.md', [adaP.id]);
     await until(async () => !(await b.host.peers!.access('notes.md')).canWrite, 15_000, 'the rule on Bo’s device');
-    const [ada, bo] = await together({ c: await connect(a, ADA), h: a, user: ADA }, { c: await connect(b, BO), h: b, user: BO }) as [HeadlessClient, HeadlessClient];
+    const [ca, cb] = await Promise.all([connect(a, ADA), connect(b, BO)]);
+    const [ada, bo] = await together({ c: ca, h: a, user: ADA }, { c: cb, h: b, user: BO }) as [HeadlessClient, HeadlessClient];
     ada.write(insertAt(ada.read(), 'The tide', 'Ada: '));
     await until(() => bo.read().textContent.includes('Ada: '), 15_000, 'Ada’s edit on Bo’s device');
     // Bo types anyway (as an app that let him would): his room has it, Ada's does not take it.

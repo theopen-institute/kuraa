@@ -47,6 +47,12 @@ every view and Compile reads it):
 The host gives the orders with the tree (`GET /api/tree`, `orders`) and keeps one with `POST
 /api/order`. Navigation views get `order(folder)`, `place(path, folder, names)` (moved if need be, then
 that order) and `sortByName(folder)`. The file tree shows files and folders interleaved, in the order.
+**A move or an arrangement is shown at once** (*revised*: it was shown once the host had moved the
+file, committed it, kept the order and given the list again; the owner: "moving files is a bit laggy
+… Is it possible to make the move optimistically, then revert back if it fails?"): the client's own
+list and orders are changed as they will be, the host's then taking their place; where the host
+refuses (a name there already, a folder this person may not change), its list again, and why. Not
+where the open document moves: the editor follows it once the host has moved it.
 Files whose names begin `.kuraa-` are the app's, about their folder: not shown, not searched.
 
 **Any folder is compiled into one book** (the core's render of a folder; `@kuraa/compile`, on by

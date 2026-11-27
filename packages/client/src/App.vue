@@ -231,9 +231,9 @@ const navApp: NavigationApp = {
   newFolder: (parent) => void fileActions.value?.newFolder(parent),
   rename: (p) => fileActions.value?.rename(p),
   remove: (p) => void fileActions.value?.remove(p),
-  move: (p, folder) => void fileActions.value?.move(p, folder),
+  move: (p, folder) => void movedAtOnce(p, folder, null, () => fileActions.value?.move(p, folder)),
   order: (folder) => orders.value[folder.replace(/\/+$/, '')] ?? null,
-  place: async (p, folder, names) => (await fileActions.value?.place(p, folder, names)) ?? false,
+  place: (p, folder, names) => movedAtOnce(p, folder, names, () => fileActions.value?.place(p, folder, names)),
   sortByName: (folder) => void fileActions.value?.sortByName(folder),
   marks: (p) => fh.fileMarks(p),
   fileMenu: (p, at) => fileActions.value?.fileMenu(p, at),
@@ -598,6 +598,44 @@ const folderMount = computed(() => {
     views: () => fh.folderViews.value.map((v) => ({ key: v.key, label: v.view.label })),
   }));
 });
+
+/**
+ * A file or folder moved, or a folder arranged, shown at once (0093): the file
+ * list and the folders' orders as they will be, while the host moves it,
+ * commits it and keeps the order; then the host's own list, as after any
+ * change (refreshTree). Where it fails, the list as the host has it again, and
+ * why (FileActions says). Not where the open document moves with it: the
+ * editor follows it once the host has moved it, as before.
+ */
+async function movedAtOnce(from: string, folder: string, names: string[] | null, done: () => Promise<boolean | undefined> | undefined): Promise<boolean> {
+  from = from.replace(/\/+$/, '');
+  folder = folder.replace(/\/+$/, '');
+  const open = path.value;
+  if (!(open && (open === from || open.startsWith(`${from}/`)))) showMoved(from, folder, names);
+  const ok = (await done()) ?? false;
+  if (!ok) await refreshTree();
+  return ok;
+}
+function showMoved(from: string, folder: string, names: string[] | null) {
+  const name = from.slice(from.lastIndexOf('/') + 1);
+  const fromDir = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '';
+  const to = folder ? `${folder}/${name}` : name;
+  const moved = (p: string) => (p === from ? to : p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+  if (to !== from) {
+    files.value = files.value.map((f) => {
+      const p = moved(f.path);
+      if (p === f.path && !f.of) return f;
+      return { ...f, path: p, ...(f.of ? { of: moved(f.of) } : {}) };
+    });
+  }
+  const next: Record<string, string[]> = {};
+  // A folder's own order, and those of the folders in it, go with it.
+  for (const [k, v] of Object.entries(orders.value)) next[to !== from ? moved(k) : k] = v;
+  if (fromDir !== folder && next[fromDir]) next[fromDir] = next[fromDir].filter((n) => n !== name);
+  if (names) next[folder] = names;
+  else if (next[folder] && !next[folder].includes(name)) next[folder] = [...next[folder], name];
+  orders.value = next;
+}
 
 /** Open a file (if it is not open), and Settings at its section. */
 function openDocumentSettings(next: string) {

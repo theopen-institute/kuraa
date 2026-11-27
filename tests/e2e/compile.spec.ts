@@ -126,3 +126,32 @@ test('a folder compiled to HTML: in the tree’s order, how deep each is its hea
   // Its title and format kept for the folder: a book by its name.
   await expect(page.getByTestId(`mark:compiled:${folder}`)).toBeAttached();
 });
+
+test('a move is shown at once, before the host has made it; one the host refuses goes back', async ({ page }) => {
+  const id = Date.now().toString(36);
+  const folder = `at-once-${id}`;
+  expect((await doc(`${folder}/a.md`, 'Arrival')).status).toBe(201);
+  expect((await doc(`${folder}/b.md`, 'Boats')).status).toBe(201);
+  expect((await doc(`${folder}-from/tide.md`, 'Tide')).status).toBe(201);
+  expect((await doc(`${folder}-from/a.md`, 'Another arrival')).status).toBe(201);
+  await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
+  await expect.poll(rowsIn(page, folder)).toBe('a.md b.md');
+
+  // The host slow to move it: the file is in its new place in the tree long before.
+  await page.route('**/api/files', async (route) => {
+    if (route.request().method() === 'PATCH') await new Promise((r) => setTimeout(r, 2000));
+    await route.continue();
+  });
+  const row = (path: string) => page.getByTestId(`file:${path}`);
+  const box = (await row(`${folder}/a.md`).boundingBox())!;
+  await row(`${folder}-from/tide.md`).dragTo(row(`${folder}/a.md`), { targetPosition: { x: 20, y: Math.round(box.height * 0.75) } });
+  await expect.poll(rowsIn(page, folder), { timeout: 1000 }).toBe('a.md tide.md b.md');
+  await expect.poll(() => readIn(`${folder}/tide.md`), { timeout: 10_000 }).toContain('Tide');
+  await expect.poll(orderOf(folder), { timeout: 10_000 }).toBe('a.md tide.md b.md');
+
+  // Onto a name the folder has already: shown there at once, then back where it was, saying why.
+  await row(`${folder}-from/a.md`).dragTo(row(`${folder}/b.md`), { targetPosition: { x: 20, y: Math.round(box.height * 0.75) } });
+  await expect(row(`${folder}-from/a.md`)).toHaveCount(0, { timeout: 1000 });
+  await expect(row(`${folder}-from/a.md`)).toBeVisible({ timeout: 10_000 });
+  await expect.poll(rowsIn(page, folder)).toBe('a.md tide.md b.md');
+});

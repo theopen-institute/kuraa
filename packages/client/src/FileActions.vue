@@ -234,16 +234,16 @@ async function sortByName(folder: string) {
 const canMove = (from: string, folder: string) => !!from && from !== folder && !folder.startsWith(`${from}/`) && folderOf(from) !== folder;
 
 /** Move a file or folder into a folder ('' for the top): a rename, saved as everything is. */
-async function move(from: string, folder: string) {
+async function move(from: string, folder: string): Promise<boolean> {
   from = from.replace(/\/+$/, '');
   folder = folder.replace(/\/+$/, '');
-  if (!canMove(from, folder)) return;
+  if (!canMove(from, folder)) return false;
   const to = `${folder ? `${folder}/` : ''}${from.slice(from.lastIndexOf('/') + 1)}`;
   // The open file follows: itself moved, or inside a folder that moved.
   const selected = props.selected;
   const follow = selected === from ? to : selected?.startsWith(`${from}/`) ? to + selected.slice(from.length) : selected;
   if (folder) emit('reveal', `${folder}/`);
-  await act(() => props.api.renameFile(from, to), follow);
+  return act(() => props.api.renameFile(from, to), follow);
 }
 
 // The menus: a file has what is done to that file (opening it is a click); a

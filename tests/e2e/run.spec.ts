@@ -149,7 +149,8 @@ test('the Packages panel installs and removes packages for the workspace', async
   await page.getByTestId('document-menu-button').click();
   await page.getByTestId('document-menu').getByRole('menuitem', { name: 'Packages…' }).click();
   const dialog = page.getByTestId('packages');
-  await expect(dialog.getByRole('heading')).toHaveText('R packages');
+  // Its own heading (the list's, In this workspace, comes once the packages are known).
+  await expect(dialog.getByRole('heading', { level: 2 })).toHaveText('R packages');
   await dialog.getByLabel('Packages to install').fill('hellno');
   await dialog.getByRole('button', { name: 'Install' }).click();
   await expect(dialog.locator('.packages-result')).toHaveText('Installed hellno.', { timeout: 240_000 });

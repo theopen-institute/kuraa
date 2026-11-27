@@ -82,7 +82,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Settings: Running code › Advanced |
 | `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Settings: Running code › Advanced |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Settings: Kinds of documents |
-| `--feature` | all | The features that are on here ([decision 0082](docs/decisions/0082-annotations.md)); each workspace turns on those it uses, in Settings › Workspace | Settings: Features |
+| `--feature` | all | The features that are on here ([decision 0082](docs/decisions/0082-annotations.md)); each workspace turns on those it uses, in Settings › Components (its Workspace column) | Settings: Features |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Settings: Running code › Advanced |
 | `--allow-installs` | on | Let people install packages and download tools such as TeX (`--no-allow-installs` to refuse) | Settings: Running code |
 | `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Settings: Running code › Advanced |
@@ -132,7 +132,7 @@ pressed, from the same tables the editor binds its keys from
 
 The sidebar, the file tree in it, Preview, Search, the Outline and **Running code** (the code session
 in the document's ⋯ menu, and **Packages…**) are **components**, each a feature
-on by default that a workspace can turn off (Settings › Workspace, under Features): the core draws no
+on by default that a workspace can turn off (Settings › Components, in the Workspace column): the core draws no
 navigation, only what is done to files, and with no layout on, a menu at the upper left (the
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
@@ -243,7 +243,7 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
 component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Settings › Host**, under its components, the online copy's **Settings…** (for the open workspace;
+In **Settings › Components**, the online copy's **Settings…**, in its Workspace column (for the open workspace;
 wherever the host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
@@ -530,18 +530,23 @@ To try a feature branch from the main checkout (each is made in a git worktree,
 
 ```sh
 pnpm try                          # the worktrees to choose from: ↑↓, Enter for pnpm dev, d for the desktop app
-pnpm try words                    # its pnpm dev, on a free port (never 5173), its address printed (--open: the browser too)
+pnpm try words                    # its pnpm dev, on a free port (never 5173), with your pnpm dev's workspaces (--open: the browser too)
+pnpm try words --own              # its pnpm dev with workspaces of its own (the worktree's .dev-workspaces: a Scratch)
 pnpm try words desktop            # its desktop app, with data of its own
 ```
 
 A name is the worktree's folder or branch, or the start of only one. Its packages are installed
-first. Its `pnpm dev` has the worktree's own `.dev-workspaces` (said, if a workspace from elsewhere
-has been added there: close it in the app that has it open first); its desktop app keeps its
+first. Its `pnpm dev` serves your `pnpm dev`'s workspaces, the main checkout's `.dev-workspaces`
+(its list and its settings), so a branch is tried on what you work with, and what you do there is
+kept. If your `pnpm dev` is serving them at the same time, it says so and goes on: both hosts save
+to them, each taking the other's saves as changes made outside the app, so typing in one document
+through both at once can double or drop a little of it (git keeps every version committed).
+`--own` gives the branch the worktree's own `.dev-workspaces` instead. Its desktop app keeps its
 preferences and workspaces in the worktree (`.try-desktop/`), never with yours.
 
 Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
 Settings and **Open a folder…** in the page; its settings are kept in
-`.dev-workspaces/settings.json` (beside `--workspaces`, if given). The first time, it starts with a
+`.dev-workspaces/settings.json` (beside `--workspaces`, if given, or where `--settings` says). The first time, it starts with a
 Scratch workspace.
 
 R chunks run in Podman, as everywhere. `--allow-write` and `--allow-network` let the workspace ask

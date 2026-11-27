@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
-import { openSettings } from './settings.js';
+import { openComponents } from './settings.js';
 
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${E2E.url}${path}`, { ...init, headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' } });
@@ -19,7 +19,7 @@ const annotations = (path: string): { motivation: string; body: { value: string 
 };
 
 async function annotationsOn(page: Page, on: boolean) {
-  await openSettings(page);
+  await openComponents(page);
   const box = page.getByTestId('feature-annotations');
   const saved = page.waitForResponse((r) => r.url().endsWith('/api/features/annotations') && r.request().method() === 'PATCH');
   if (on) await box.check();
@@ -117,7 +117,7 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await expect(panel).toHaveCount(0);
 
   // Comments off on their own (under Annotations, in the list of features): nothing of them shown, coding's switch beside it.
-  await openSettings(page);
+  await openComponents(page);
   await expect(page.getByTestId('annotations-coding')).toBeVisible();
   let saved = page.waitForResponse((r) => r.url().endsWith('/api/features/annotations') && r.request().method() === 'PATCH');
   await page.getByTestId('annotations-comments').uncheck();
@@ -128,7 +128,7 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await editor.locator('p', { hasText: 'council' }).selectText();
   // Nothing beside the selection: coding is off here too.
   await expect(page.getByTestId('selection-actions')).toHaveCount(0);
-  await openSettings(page);
+  await openComponents(page);
   saved = page.waitForResponse((r) => r.url().endsWith('/api/features/annotations') && r.request().method() === 'PATCH');
   await page.getByTestId('annotations-comments').check();
   expect((await saved).status()).toBe(200);

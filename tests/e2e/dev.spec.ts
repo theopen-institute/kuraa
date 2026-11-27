@@ -2,7 +2,7 @@
 // host behind Vite's proxy, and a clean stop on Ctrl+C.
 import { expect, test } from '@playwright/test';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { NOTES } from './env.js';
@@ -125,4 +125,65 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await exited;
   }
   expect(log).not.toContain('Force killing');
+});
+
+test('pnpm dev inside a git repository (a checkout of Kuraa): Scratch a repository of its own, never the checkout, and a list naming the checkout mended', async () => {
+  // A checkout, its workspaces folder inside it, as .dev-workspaces is.
+  const checkout = mkdtempSync(join(tmpdir(), 'kuraa-dev-checkout-'));
+  git(checkout, 'init', '-q', '-b', 'main');
+  git(checkout, 'config', 'user.name', 'Dev Person');
+  git(checkout, 'config', 'user.email', 'dev@example.org');
+  writeFileSync(join(checkout, 'README.md'), '# A checkout\n');
+  git(checkout, 'add', '-A');
+  git(checkout, 'commit', '-q', '-m', 'Initial');
+  const root = join(checkout, '.dev-workspaces');
+  const listFile = join(root, '.kuraa-workspaces.json');
+  const scratch = join(root, 'scratch');
+  const listed = () => (JSON.parse(readFileSync(listFile, 'utf8')) as { name: string; dir: string }[]).map((w) => [w.name, realpathSync(w.dir)]);
+
+  /** pnpm dev over `root` until its hub is up, then stopped as Ctrl+C would. */
+  async function runDev(): Promise<void> {
+    const person = join(mkdtempSync(join(tmpdir(), 'kuraa-dev-person-')), 'person.json');
+    const dev: ChildProcess = spawn(join(ROOT, 'node_modules/.bin/tsx'), ['scripts/dev.ts', '--workspaces', root, '--port', String(PORT)], {
+      cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KURAA_PERSON: person },
+    });
+    let log = '';
+    dev.stdout!.on('data', (d: Buffer) => (log += d));
+    dev.stderr!.on('data', (d: Buffer) => (log += d));
+    const exited = new Promise<void>((done) => dev.on('exit', () => done()));
+    try {
+      await expect.poll(() => log, { timeout: 30_000 }).toContain('[kuraa] url:');
+    } finally {
+      process.kill(-dev.pid!, 'SIGINT');
+      await exited;
+    }
+  }
+  /** Scratch on the list (after any others), a repository of its own; the checkout neither a workspace nor changed. */
+  const scratchApart = (others: [string, string][] = []) => {
+    expect(listed()).toEqual([...others, ['Scratch', realpathSync(scratch)]]);
+    expect(realpathSync(git(scratch, 'rev-parse', '--show-toplevel'))).toBe(realpathSync(scratch));
+    expect(git(checkout, 'log', '--format=%s')).toBe('Initial');
+    expect(existsSync(join(checkout, '.kuraa'))).toBe(false);
+  };
+
+  // The first time.
+  await runDev();
+  scratchApart();
+
+  // A list from before the fix, naming the checkout as Scratch beside another workspace: the checkout taken off,
+  // the other kept, and Scratch as it should be added again.
+  const notes = join(root, 'field-notes');
+  mkdirSync(notes);
+  writeFileSync(join(notes, 'notes.md'), NOTES);
+  git(notes, 'init', '-q', '-b', 'main');
+  git(notes, 'add', '-A');
+  git(notes, 'commit', '-q', '-m', 'Initial');
+  const added = new Date().toISOString();
+  writeFileSync(listFile, `${JSON.stringify([
+    { id: 'scratch-2', name: 'Scratch', dir: checkout, added },
+    { id: 'field-notes', name: 'Field notes', dir: notes, added },
+  ], null, 2)}\n`);
+  rmSync(scratch, { recursive: true, force: true });
+  await runDev();
+  scratchApart([['Field notes', realpathSync(notes)]]);
 });

@@ -888,7 +888,7 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
     }
     body.replaceChildren();
     if (!commenting(pctx)) {
-      body.append(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Workspace › Features). Those made are kept.' }));
+      body.append(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Components, under Annotations). Those made are kept.' }));
       return;
     }
     if (!s || !view) {
@@ -1039,7 +1039,7 @@ function mountRecent(root: HTMLElement, pctx: FeaturePanelContext): () => void {
   let live = true;
   const draw = async () => {
     if (!commenting(pctx)) {
-      body.replaceChildren(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Workspace › Features). Those made are kept.' }));
+      body.replaceChildren(el('p', { cls: 'kuraa-note', text: 'Comments are off for this workspace (Settings › Components, under Annotations). Those made are kept.' }));
       return;
     }
     body.replaceChildren(el('p', { cls: 'kuraa-note', text: 'Looking…' }));
@@ -1153,7 +1153,7 @@ function mountCodes(root: HTMLElement, pctx: FeaturePanelContext): () => void {
     const caret = focusKey ? [active!.selectionStart ?? null, active!.selectionEnd ?? null] as const : null;
     body.replaceChildren();
     if (!coding(pctx)) {
-      body.append(el('p', { cls: 'kuraa-note', text: 'Coding is off for this workspace. Turn it on in Settings › Workspace, under Annotations.' }));
+      body.append(el('p', { cls: 'kuraa-note', text: 'Coding is off for this workspace. Turn it on in Settings › Components, under Annotations.' }));
       return;
     }
     if (focusKey) {
@@ -1364,7 +1364,7 @@ const swatch = (color: string | undefined) => {
   return s;
 };
 
-/** Settings › Workspace › Features, under Annotations: comments and coding, each on or off for the workspace. */
+/** Settings › Components, under Annotations (drawn in its row): comments and coding, each on or off for the workspace. */
 function mountSettings(root: HTMLElement, ctx: FeatureClientContext): () => void {
   injectStyle();
   const body = el('div', { cls: 'kuraa-settings' });

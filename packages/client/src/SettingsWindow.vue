@@ -1,16 +1,18 @@
 <script setup lang="ts">
-// Settings, in one window of four sections (decisions 0060, 0064), by who each
+// Settings, in one window (decisions 0060, 0064), its sections by who each
 // applies to and where it is kept:
 //
 // - You (SettingsYou): yours alone, in this browser.
 // - Document (SettingsDocument): the open document's, in its file.
 // - Workspace (SettingsWorkspace): the open workspace's, in the workspace.
 // - Host (SettingsHost): the host's, for everyone using it.
+// - Components (SettingsComponents, 0095): every component, with a column for
+//   each of those it is switched at: the host, the workspace and you.
 //
 // Each place that opens it opens it at one (`section`); the list on the left
 // goes to the others. Each section says first who it applies to. A section that
 // does not apply now (no document open, say) says why, and stays in the list,
-// so the window is always the same four. All four stay as they are while
+// so the window is always the same five. All four stay as they are while
 // another is shown, so going between them loses nothing.
 //
 // Nothing changed here is lost by closing it (Done, Escape, a click outside, all
@@ -24,13 +26,13 @@ import type { FormatEditor, HeaderSpec } from '@kuraa/editor-kit';
 import type { EditorView } from 'prosemirror-view';
 import type { HostApi, HubApi, WorkspaceInfo } from './api.js';
 import type { Settings } from './settings.js';
-import { SETTINGS_SECTIONS, SUB_SECTIONS, type SettingsSection } from './settingsSections.js';
+import { SETTINGS_SECTIONS, type SettingsSection } from './settingsSections.js';
 import { useHostSettings } from './hostSettings.js';
 import type { Shell } from './shell.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import SettingsDocument from './SettingsDocument.vue';
-import SettingsComponents from './SettingsComponents.vue';
+import SettingsComponents, { type ComponentsAvailable } from './SettingsComponents.vue';
 import SettingsHost from './SettingsHost.vue';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsYou from './SettingsYou.vue';
@@ -89,18 +91,19 @@ const host = useTemplateRef<InstanceType<typeof SettingsHost>>('host');
 /** The host's settings as its owner changes them: one form for Host and Components, applied as the window closes. */
 const hostForm = useHostSettings(props.hub, props.canChangeSettings, () => emit('saved'));
 
-/** What each section is called in the list, with what it is about now beneath; Components under Host, as part of it. */
+/** How many components are available at the highest level you switch them at (SettingsComponents says, once it knows). */
+const available = ref<ComponentsAvailable | null>(null);
+/** What each section is called in the list, with what it is about now beneath. */
 const nav = computed(() => SETTINGS_SECTIONS.map((id) => ({
   id,
   label: S.sections[id],
   about: id === 'you' ? props.settings.name
-    : id === 'document' ? props.docName ?? ''
+    : id === 'document' ? props.docName ?? S.sections.noDocumentOpen
     : id === 'workspace' ? props.workspace?.name ?? ''
     : id === 'host' ? (props.canChangeSettings ? S.sections.thisComputer : S.sections.elsewhere)
-    : '',
-  /** Nothing here to change now: shown, but quieter. */
-  idle: (id === 'document' && !props.path) || (id === 'workspace' && !props.workspace) || (id === 'host' && !props.canChangeSettings),
-  sub: !!SUB_SECTIONS[id],
+    : available.value ? S.sections.componentsAvailable(available.value.n, available.value.level) : '',
+  /** Nothing here to change now: shown, but quieter. A document not open is not that: it says so beneath, in the same colour. */
+  idle: (id === 'workspace' && !props.workspace) || (id === 'host' && !props.canChangeSettings),
 })));
 
 /** The section's heading, and who it applies to. */
@@ -173,7 +176,7 @@ useDialog(root, () => {
             v-for="n in nav"
             :key="n.id"
             type="button"
-            :class="['settings-tab', { active: section === n.id, idle: n.idle, sub: n.sub }]"
+            :class="['settings-tab', { active: section === n.id, idle: n.idle }]"
             :aria-current="section === n.id ? 'page' : undefined"
             :data-testid="`settings-tab-${n.id}`"
             @click="section = n.id"
@@ -197,14 +200,7 @@ useDialog(root, () => {
             :api="api"
             :shell="shell"
             :settings="settings"
-            :editors="editors"
-            :editors-off="editorsOff"
-            :features="features ?? []"
-            :feature-parts="featureParts ?? []"
-            :hidden-features="hiddenFeatures ?? []"
             @save-settings="(s) => emit('saveSettings', s)"
-            @editors-off="(ids) => emit('editorsOff', ids)"
-            @hidden-features="(ids) => emit('hiddenFeatures', ids)"
           />
           <SettingsDocument v-show="section === 'document'" ref="documentPart" :path="path" :header="header" :opening="opening" />
           <SettingsWorkspace
@@ -212,9 +208,6 @@ useDialog(root, () => {
             :api="api"
             :workspace="workspace"
             :can-remove="canRemoveWorkspace"
-            :features="features ?? []"
-            :feature-parts="featureParts ?? []"
-            :turn-feature="turnFeature ?? (async () => undefined)"
             @remove="thenClose(() => emit('removeWorkspace'))"
             @invite="thenClose(() => emit('invite'))"
             @permissions="(p) => thenClose(() => emit('permissions', p))"
@@ -235,7 +228,15 @@ useDialog(root, () => {
             :can-change-settings="canChangeSettings"
             :tools-key="toolsKey"
             :workspace-name="workspace?.name ?? null"
-            :features="features"
+            :features="features ?? []"
+            :feature-parts="featureParts ?? []"
+            :hidden-features="hiddenFeatures ?? []"
+            :turn-feature="turnFeature ?? (async () => undefined)"
+            :editors="editors"
+            :editors-off="editorsOff"
+            @editors-off="(ids) => emit('editorsOff', ids)"
+            @hidden-features="(ids) => emit('hiddenFeatures', ids)"
+            @available="(a) => (available = a)"
           />
         </div>
       </div>

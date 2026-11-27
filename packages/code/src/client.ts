@@ -1,6 +1,6 @@
 // Running code's client half (0092): the open document's code session in its ⋯
 // menu (how it stands, Run all, Interrupt, Restart, Packages…), the Packages
-// dialog, and a way to it in Settings › Workspace. All through the host's code
+// dialog, and a way to it in Settings › Components, in its row. All through the host's code
 // service (CodeService), the session the core follows for the open document.
 import { createApp } from 'vue';
 import { defineClientFeature, type CodeSession, type FeatureClientContext, type FeatureMenuEntry } from '@kuraa/feature-kit/client';
@@ -24,7 +24,7 @@ function stateLine(session: CodeSession): FeatureMenuEntry {
   };
 }
 
-/** Settings › Workspace: the way to the packages, while a document that runs code is open. */
+/** Settings › Components, in its row: the way to the packages, while a document that runs code is open. */
 function mountSettings(el: HTMLElement, ctx: FeatureClientContext): () => void {
   let offChange: (() => void) | undefined;
   const draw = () => {

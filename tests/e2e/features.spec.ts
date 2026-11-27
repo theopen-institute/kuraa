@@ -9,7 +9,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
-import { openSettings } from './settings.js';
+import { openComponents } from './settings.js';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const api = (path: string, init: RequestInit = {}) =>
@@ -22,7 +22,7 @@ const marksIn = (path: string): { quote: string }[] => {
 };
 
 async function workspaceFeature(page: Page, on: boolean) {
-  await openSettings(page);
+  await openComponents(page);
   const box = page.getByTestId('feature-marks');
   await expect(box).toBeVisible();
   // Saved in the workspace (committed) before it says so.
@@ -82,22 +82,20 @@ test('a feature: on for the workspace, in the document, its panel, menus and set
   await expect(page.getByTestId('help')).toContainText('Show the marks in this document');
   await page.keyboard.press('Escape');
 
-  // Hidden for you (in this browser): gone from the page, on for everyone else.
-  await openSettings(page);
-  await page.getByTestId('settings-tab-you').click();
+  // Hidden for you (in this browser; Components' You column): gone from the page, on for everyone else.
+  await openComponents(page);
   await page.getByTestId('feature-shown-marks').uncheck();
   await page.getByTestId('settings-close').click();
   await expect(page.getByTestId('feature-mark')).toHaveCount(0);
   await expect(page.getByTestId('editor').locator('.example-mark')).toHaveCount(0);
   expect(marksIn(path)).toHaveLength(1);
-  await openSettings(page);
-  await page.getByTestId('settings-tab-you').click();
+  await openComponents(page);
   await page.getByTestId('feature-shown-marks').check();
   await page.getByTestId('settings-close').click();
   await expect(page.getByTestId('feature-mark')).toHaveCount(1);
 
-  // Its settings for the workspace, drawn by it in Settings › Workspace.
-  await openSettings(page);
+  // Its settings for the workspace, drawn by it in a subpanel of Settings › Components, from its row.
+  await openComponents(page);
   await page.getByTestId('open-feature-marks').click();
   await page.getByTestId('example-marks-label').fill('✱');
   await page.getByTestId('example-marks-save').click();

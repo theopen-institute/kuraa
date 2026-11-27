@@ -45,12 +45,13 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     await expect(page.getByTestId('settings-scope')).toContainText('Only you, its owner, can change it');
     const prefs = page.getByTestId('preferences');
     await expect(prefs.getByTestId('pref-workspaces')).toHaveValue(/workspaces$/);
-    // Its components, a section beneath Host (0084): its owner's switches with the components they switch (0083).
+    // Its components, a section of their own (0084, 0095): its owner's switches in the Host column, with the components they switch (0083).
     const switches = page.getByTestId('preferences-components');
     await expect(switches).toBeHidden();
-    await expect(page.getByTestId('settings-tab-components')).toHaveClass(/\bsub\b/);
+    // Beneath it in the list, how many there are at the highest level its owner switches them at: the host (0095).
+    await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · Host/);
     await page.getByTestId('settings-tab-components').click();
-    await expect(page.getByTestId('settings-scope')).toContainText('Only you, its owner, switch them');
+    await expect(page.getByTestId('settings-scope')).toContainText('Only you, the host’s owner, switch the Host column');
     await expect(switches.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeChecked();
     await expect(switches.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
     await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();

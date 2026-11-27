@@ -585,9 +585,30 @@ export const S = {
   },
 
   components: {
-    /** Settings › Components (decisions 0083, 0084): every component the host has, by kind. */
+    /** Settings › Components (decisions 0083, 0084, 0095): every component, by kind, with a column for each level it is switched at. */
     title: 'Components',
-    about: 'Loaded as the host starts, each of one kind:',
+    component: 'Component',
+    /** The columns: where a component is switched, and for whom. */
+    levels: {
+      host: 'Host',
+      hostWho: 'everyone',
+      hostAbout: 'On for everyone using this host, and every workspace on it. Only its owner switches these.',
+      workspace: 'Workspace',
+      workspaceWho: 'everyone in it',
+      workspaceAbout: 'On for everyone in the open workspace. Saved in the workspace at once.',
+      you: 'You',
+      youWho: 'this browser',
+      youAbout: 'On for you alone. Kept in this browser.',
+      notHere: 'Not switched at this level',
+    },
+    forLevel: (label: string, level: string) => `${label} · ${level}`,
+    editorTitle: (label: string, about: string) => (about ? `${label}: ${about}` : label),
+    noWorkspace: 'Open a workspace to switch components for it.',
+    workspaceMayNot: 'Only someone who may change the workspace’s settings turns its features on and off.',
+    shownWhenOn: 'Shown or hidden for you once it is on for this workspace.',
+    featureOffOnHost: 'On for this workspace, but off on the host: it does nothing until it is on there too.',
+    featureSettingsFor: (workspace: string) => `For ${workspace}: everyone in it.`,
+    featureSettingsYou: 'For you alone, in this browser.',
     kindsLabel: 'Kinds of component',
     /** Each kind: its name, and one line saying what a component of that kind is. */
     kinds: {
@@ -599,8 +620,8 @@ export const S = {
       syncs: 'Syncs',
     },
     kindAbout: {
-      formats: 'The kinds of document the app opens and edits. A file whose format is off opens as a Text file, while that is on.',
-      features: 'What workspaces can do beyond writing. On here, each workspace still turns on the ones it uses.',
+      formats: 'The kinds of document the app opens and edits. A file whose format is off on the host opens as a Text file. Under You, its editing (formatting as you type): off, you edit its text as written.',
+      features: 'What workspaces can do beyond writing. On for the host, each workspace turns on those it uses, keeping what they make in files beside the documents; you may hide one for yourself.',
       engines: 'The languages code in documents is written in.',
       environments: 'Where code runs, kept apart from the rest of this computer unless it says not.',
       tools: 'Downloaded when needed: kept once on this computer, for every workspace, and used only where code runs.',
@@ -618,7 +639,6 @@ export const S = {
     unavailable: (why: string) => `Not available: ${why}`,
     noEnvironment: 'No environment is loaded, so no code runs here.',
     files: (ext: string) => `${ext} files`,
-    editing: 'Editing · just you',
     syncSettings: 'Settings…',
     syncFor: (workspace: string) => `For ${workspace}: each workspace has its own.`,
     syncTargets: (urls: string[]) => `This workspace: ${urls.join(', ')}`,
@@ -637,17 +657,9 @@ export const S = {
   },
 
   features: {
-    /** Settings › Workspace: which features this workspace uses (0082). */
-    title: 'Features',
-    about: 'What this workspace does beyond writing, for everyone in it: turning one on or off is saved in the workspace, and each one keeps what it makes in files of its own, beside the documents.',
-    offHere: 'Off on this computer’s host: turn it on in Settings › Components.',
-    mayNotChange: 'Only someone who may change the workspace’s settings turns features on and off.',
+    /** Turned on or off for the workspace (Settings › Components, 0095). */
     turnedOn: (label: string) => `${label} is on for this workspace.`,
     turnedOff: (label: string) => `${label} is off for this workspace. What it made is kept.`,
-    settings: 'Settings…',
-    /** Settings › You. */
-    shown: 'Features · just you',
-    shownAbout: 'Hide a feature for yourself: it stays on for everyone else, and nothing it made changes.',
     /** Beside a selection. */
     selection: 'What to do with the selection',
     closePanel: (label: string) => `Close ${label}`,
@@ -790,9 +802,9 @@ export const S = {
     workspaceScope: (name: string) => `Everyone in ${quote(name)}. Kept in the workspace.`,
     hostScope: 'Everyone using it, and every workspace on it. Only you, its owner, can change it.',
     hostElsewhere: 'Everyone using it, and every workspace on it. Only whoever runs it can change its settings.',
-    /** Settings › Components (0084): the host's, beneath it in the list. */
-    componentsScope: 'What this host can do, for everyone using it and every workspace on it. Only you, its owner, switch them.',
-    componentsElsewhere: 'What this host can do, for everyone using it and every workspace on it. Only whoever runs it switches them.',
+    /** Settings › Components (0095): every component, switched for the host, the workspace and you. */
+    componentsScope: 'What the app can do, and where each part is on: for this host, for the open workspace, and for you. Only you, the host’s owner, switch the Host column.',
+    componentsElsewhere: 'What the app can do, and where each part is on: for this host, for the open workspace, and for you. Only whoever runs the host switches the Host column.',
     /** Beneath Host in the list: whose it is. */
     thisComputer: 'This computer',
     elsewhere: 'Shown only',
@@ -801,6 +813,11 @@ export const S = {
     noWorkspace: 'Open a workspace to change its settings.',
     name: 'Name',
     components: 'Components',
+    /** Beneath Document in the list, with none open. */
+    noDocumentOpen: 'No document open',
+    /** Beneath Components in the list: how many are available at the highest level you switch them at (0095). */
+    componentsAvailable: (n: number, level: 'host' | 'workspace' | 'you') =>
+      `${n} available · ${level === 'host' ? 'Host' : level === 'workspace' ? 'Workspace' : 'You'}`,
     engines: 'Languages',
   },
 

@@ -30,7 +30,8 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   const id = Date.now().toString(36);
   const folder = `book-${id}`;
   for (const [name, title] of [['a.md', 'Arrival'], ['b.md', 'Boats'], ['c.md', 'Coast']] as const) expect((await doc(`${folder}/${name}`, title)).status).toBe(201);
-  expect((await doc(`loose-${id}/tide.md`, 'Tide')).status).toBe(201);
+  // Beside the book in the tree (book-<id>-loose sorts after book-<id>): both in view, a drag between them never scrolls.
+  expect((await doc(`${folder}-loose/tide.md`, 'Tide')).status).toBe(201);
   const row = (path: string) => page.getByTestId(`file:${path}`);
 
   await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
@@ -48,9 +49,11 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
   const box = (await target.boundingBox())!;
   await row(`${folder}/c.md`).dragTo(target, { targetPosition: { x: 20, y: 2 } });
   await expect.poll(orderOf(folder)).toBe('c.md b.md a.md');
+  // The tree drawn in that order before the next drag: dragged onto rows still moving, it lands elsewhere.
+  await expect.poll(rowsIn(page, folder)).toBe('c.md b.md a.md');
 
   // From another folder, onto the lower half of Coast: moved there, after it.
-  await row(`loose-${id}/tide.md`).dragTo(row(`${folder}/c.md`), { targetPosition: { x: 20, y: Math.round(box.height * 0.75) } });
+  await row(`${folder}-loose/tide.md`).dragTo(row(`${folder}/c.md`), { targetPosition: { x: 20, y: Math.round(box.height * 0.75) } });
   await expect.poll(orderOf(folder)).toBe('c.md tide.md b.md a.md');
   await expect(row(`${folder}/tide.md`)).toBeVisible();
 

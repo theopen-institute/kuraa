@@ -15,7 +15,7 @@
 // A feature is on where three say so: the host loads it and has it on (its
 // operator: Settings › Host, --feature), the workspace has it on (its
 // .kuraa/features.json, committed, the same for everyone in it), and the person
-// has not hidden it (Settings › You, in their browser). Off never changes a file.
+// has not hidden it (Settings › Components, You column, in their browser). Off never changes a file.
 //
 // Two rules hold whatever a feature does: it never writes a document (only its
 // own companions and the files it declares), and it cannot refuse or hold up

@@ -11,7 +11,7 @@ import type { HostApi } from './api.js';
 
 const HIDDEN_KEY = 'kuraa:features-hidden';
 
-/** The features this person has hidden, in this browser (Settings › You). */
+/** The features this person has hidden, in this browser (Settings › Components, You). */
 export function loadHiddenFeatures(): string[] {
   try {
     const v = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as unknown;

@@ -3,14 +3,14 @@
 // not taken down and drawn again, so what was typed in it is kept.
 import { expect, test } from '@playwright/test';
 import { E2E } from './env.js';
-import { openSettings } from './settings.js';
+import { openComponents } from './settings.js';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${E2E.url}${path}`, { ...init, headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' } });
 
 async function marksOn(page: import('@playwright/test').Page, on: boolean) {
-  await openSettings(page);
+  await openComponents(page);
   const box = page.getByTestId('feature-marks');
   await expect(box).toBeVisible();
   const saved = page.waitForResponse((r) => r.url().endsWith('/api/features/marks') && r.request().method() === 'PATCH');

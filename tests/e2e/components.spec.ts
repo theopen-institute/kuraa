@@ -54,13 +54,13 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     await expect(page.getByTestId('editor')).toHaveClass(/lines-doc/);
     await expect(page.getByTestId('editor')).toContainText('```{r}');
 
-    // Host: how the host itself works, not this page's to change; its components a section of their own, beneath it (0084).
+    // Host: how the host itself works, not this page's to change; its components a section of their own (0084, 0095).
     await openSettingsAt(page, 'host');
     await expect(page.getByTestId('host-settings').getByTestId('settings-owner-off')).toBeVisible();
     await expect(page.getByTestId('components')).toBeHidden();
     await page.getByTestId('settings-tab-components').click();
     await expect(page.getByTestId('settings-title')).toHaveText('Components');
-    await expect(page.getByTestId('settings-scope')).toContainText('Only whoever runs it switches them');
+    await expect(page.getByTestId('settings-scope')).toContainText('Only whoever runs the host switches the Host column');
     await expect(page.getByTestId('components')).toContainText('--format');
     // Each component once, under its kind (0083).
     for (const kind of ['Document formats', 'Languages', 'Environments', 'Syncs']) await expect(page.getByTestId('component-kinds')).toContainText(kind);
@@ -106,7 +106,7 @@ test('a link in a document reaches the page only if it is a web or mail address'
   }
 });
 
-test('editing behaviour is yours alone, and kept', async ({ page }) => {
+test('editing behaviour is yours alone (Components, under You), and kept', async ({ page }) => {
   const host = await ownHost();
   try {
     await page.goto(`${host.url}/?token=${host.token}&name=Owner`);
@@ -114,7 +114,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     const editor = page.getByTestId('editor');
     await expect(editor).toContainText('Plain text here.');
 
-    await openSettingsAt(page, 'you');
+    await openSettingsAt(page, 'components');
     await box(page, 'Markdown editing').uncheck();
     await page.keyboard.press('Escape');
     await editor.locator('p', { hasText: 'Plain text here.' }).click();
@@ -127,7 +127,7 @@ test('editing behaviour is yours alone, and kept', async ({ page }) => {
     // Kept in this browser; turned back on, typing formats again.
     await page.reload();
     await page.getByTestId('file:notes.md').click();
-    await openSettingsAt(page, 'you');
+    await openSettingsAt(page, 'components');
     await expect(box(page, 'Markdown editing')).not.toBeChecked();
     await box(page, 'Markdown editing').check();
     await page.keyboard.press('Escape');
@@ -149,6 +149,6 @@ test('on the shared host too, only your editing behaviour can change', async ({ 
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();
   await expect(box(page, 'R Markdown')).toBeDisabled();
-  await page.getByTestId('settings-tab-you').click();
+  // The You column is yours, wherever the host is.
   await expect(box(page, 'Markdown editing')).toBeEnabled();
 });

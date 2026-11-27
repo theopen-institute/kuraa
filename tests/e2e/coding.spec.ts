@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
-import { openSettings } from './settings.js';
+import { openComponents } from './settings.js';
 
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${E2E.url}${path}`, { ...init, headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' } });
@@ -39,7 +39,7 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
   const editor = page.getByTestId('editor');
 
   // Annotations on, and coding with it (its own switch, shown under Annotations once it is on).
-  await openSettings(page);
+  await openComponents(page);
   await expect(page.getByTestId('annotations-coding')).toHaveCount(0);
   await settingsSave(page, 'feature-annotations', true, '/api/features/annotations');
   await expect(page.getByTestId('annotations-comments')).toBeChecked();
@@ -130,7 +130,7 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
   await expect(tags).toHaveCount(1);
 
   // Coding off, then annotations: nothing of them shown; the codebook kept.
-  await openSettings(page);
+  await openComponents(page);
   await settingsSave(page, 'annotations-coding', false, '/api/features/annotations');
   await settingsSave(page, 'feature-annotations', false, '/api/features/annotations');
   await page.getByTestId('settings-close').click();

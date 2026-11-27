@@ -82,7 +82,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--disk` | `2g` | The most a code session may write (its scratch folder and `/tmp`); past it, the session is stopped | Settings: Running code › Advanced |
 | `--r-image` | the default | Further base images a workspace may name for R in `.kuraa/run.json` (repeatable) | Settings: Running code › Advanced |
 | `--format` | all | The document formats that are on: `--format pandoc-markdown --format text` | Settings: Kinds of documents |
-| `--feature` | all | The features that are on here ([decision 0082](docs/decisions/0082-annotations.md)); each workspace turns on those it uses, in Settings › Workspace | Settings: Features |
+| `--feature` | all | The features that are on here ([decision 0082](docs/decisions/0082-annotations.md)); each workspace turns on those it uses, in Settings › Components (its Workspace column) | Settings: Features |
 | `--allow-write`, `--allow-network` | off | Let a workspace ask for write access to itself, or for the network | Settings: Running code › Advanced |
 | `--allow-installs` | on | Let people install packages and download tools such as TeX (`--no-allow-installs` to refuse) | Settings: Running code |
 | `--data-dir` | your app data folder | Where package versions and tools are stored, shared by workspaces (an empty folder, or one already used for them) | Settings: Running code › Advanced |
@@ -132,7 +132,7 @@ pressed, from the same tables the editor binds its keys from
 
 The sidebar, the file tree in it, Preview, Search, the Outline and **Running code** (the code session
 in the document's ⋯ menu, and **Packages…**) are **components**, each a feature
-on by default that a workspace can turn off (Settings › Workspace, under Features): the core draws no
+on by default that a workspace can turn off (Settings › Components, in the Workspace column): the core draws no
 navigation, only what is done to files, and with no layout on, a menu at the upper left (the
 workspaces, **New file**, **Files…** and **Settings…**:
 [decisions 0087](docs/decisions/0087-navigation-is-made-of-components.md),
@@ -235,7 +235,7 @@ what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the doc
 
 A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
 component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Settings › Host**, under its components, the online copy's **Settings…** (for the open workspace;
+In **Settings › Components**, the online copy's **Settings…**, in its Workspace column (for the open workspace;
 wherever the host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
 `git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
 <workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,

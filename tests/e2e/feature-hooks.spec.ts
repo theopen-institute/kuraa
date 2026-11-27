@@ -5,14 +5,14 @@
 // upper left stays).
 import { expect, test, type Page } from '@playwright/test';
 import { E2E } from './env.js';
-import { openSettings } from './settings.js';
+import { openComponents } from './settings.js';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${E2E.url}${path}`, { ...init, headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' } });
 
 async function marksOn(page: Page, on: boolean) {
-  await openSettings(page);
+  await openComponents(page);
   const box = page.getByTestId('feature-marks');
   await expect(box).toBeVisible();
   const saved = page.waitForResponse((r) => r.url().endsWith('/api/features/marks') && r.request().method() === 'PATCH');
@@ -88,7 +88,7 @@ test('Running code: the session in the document’s menu, and Packages over Sett
   await expect(page.getByTestId('menu-packages')).toHaveText('Packages…');
   await page.keyboard.press('Escape');
 
-  await openSettings(page);
+  await openComponents(page);
   await page.getByTestId('settings-packages').click();
   const dialog = page.getByTestId('packages');
   await expect(dialog.getByRole('heading')).toHaveText('R packages');

@@ -155,7 +155,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
   const features = computed(() => activeFeatures(o.clients(), status.value, hidden.value, contexts));
   /** Every client half on for the workspace, hidden or not: for their parts of Settings. */
   const forSettings = computed(() => activeFeatures(o.clients(), status.value, [], contexts));
-  /** Turn a feature on or off for the workspace (Settings › Workspace), and follow it once it is. */
+  /** Turn a feature on or off for the workspace (Settings › Components), and follow it once it is. */
   async function turn(id: string, on: boolean) {
     const at = api.value;
     const s = await at.setFeature(id, { on }, o.person());

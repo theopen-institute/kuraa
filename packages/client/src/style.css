@@ -343,18 +343,11 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* Components: one row per component, a box to turn it on, what it is beneath its name. */
 .components-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .components-group h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.component { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; cursor: pointer; }
-.component > input[type='checkbox'] { margin: 3px 0 0; }
-.component:has(input:disabled), .component:has(input:disabled) .component-text { cursor: default; }
-.component-text { display: grid; gap: 1px; min-width: 0; cursor: pointer; }
-/* A feature's own switches, under its checkbox (0082): indented to its name. */
-.feature-inline { margin: -2px 0 4px 23px; }
+/* A feature's own switches, under its row (0082, 0095). */
+.feature-inline { margin: 0 0 4px 12px; }
 .component-name { font-weight: 500; }
 .component-about { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .component-unavailable { color: var(--warn); }
-.component.tool { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
-.component.tool .component-text { cursor: default; }
-.tool-actions { display: flex; gap: 6px; align-items: start; }
 .component-warn { font-weight: 400; color: var(--warn); }
 .components-note code { font-size: 12px; }
 .components-note { margin: 0; font-size: 12.5px; }
@@ -726,23 +719,47 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .settings-content .settings-host > form > .settings-part:first-of-type, .settings-content .settings-components > form > .settings-part:first-of-type { border-top: 0; padding-top: 4px; }
 .components-part { gap: 10px; }
 /* Components in the list: under Host, as part of it. */
-.settings-tab.sub { margin-left: 14px; padding-left: 10px; border-left: 2px solid var(--border); border-radius: 0 6px 6px 0; }
-@media (max-width: 640px) { .settings-tab.sub { margin-left: 0; border-left: 0; border-radius: 6px; } }
 /* The kinds it has, with how many of each: a way to each. */
 .component-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
 .component-kind-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
 .component-kind-chip:hover { background: var(--selected); }
 .component-kind-n { color: var(--muted); font-variant-numeric: tabular-nums; }
 /* One kind: its name and how many are on, what it is, its owner's switches, then each component. */
-.component-kind { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); scroll-margin-top: 8px; min-width: 0; }
 .component-kind-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .component-kind-head h4 { flex: 1; margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text); }
 .component-kind-state { font-size: 12px; color: var(--muted); }
-.component-kind-about { margin: -4px 0 0; font-size: 12.5px; color: var(--muted); }
-.component-kind .flag { color: var(--warn); }
+.component-kind-about { margin: 0; font-size: 12.5px; color: var(--muted); }
 .component-switches { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--bg); }
-.component-list { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .settings-components .components-note { display: grid; gap: 4px; }
+/* Settings › Components (0095): one table, a column for each level a component is switched at (Host, Workspace, You). Its column heads stay in view, against the top of the scrolling content (its padding, 20px, above). */
+.component-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.component-table thead th { position: sticky; top: -20px; z-index: 1; background: var(--surface); box-shadow: 0 -20px 0 var(--surface); padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; font-weight: 600; text-align: center; vertical-align: bottom; cursor: help; }
+.component-table thead th.component-col-name { text-align: left; padding-left: 0; cursor: default; }
+.component-table thead th > span { display: block; }
+.component-col-about { font-size: 11px; font-weight: 400; color: var(--muted); }
+.component-table th:not(.component-col-name), .component-table .component-cell { width: 84px; }
+.component-kind-row > th { text-align: left; font-weight: 400; padding: 16px 0 6px; scroll-margin-top: 48px; }
+.component-kind-row > th > * + * { margin-top: 6px; }
+.component-kind-row .component-kind-about { margin: 2px 0 0; }
+.component-kind-row .flag { color: var(--warn); }
+.component-row > td { padding: 7px 4px; border-top: 1px solid var(--border); vertical-align: top; }
+.component-row > td.component-text { padding-left: 0; min-width: 0; }
+.component-row > td.component-text > span { display: block; }
+.component-row > td.component-text > span + span { margin-top: 1px; }
+.component-row:hover > td { background: var(--selected); }
+.component-cell { text-align: center; }
+.component-cell > input[type='checkbox'] { margin: 3px 0 0; cursor: pointer; }
+.component-cell > input[type='checkbox']:disabled { cursor: default; }
+.component-none { color: var(--muted); opacity: 0.6; cursor: default; }
+.component-action { font-size: 12px; padding: 2px 8px; }
+.component-links { display: flex !important; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px !important; }
+.component-links .link { border: 0; background: none; padding: 0; color: var(--accent, var(--text)); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.component-more > td { padding: 0 0 8px; }
+@media (max-width: 640px) {
+  .component-table th:not(.component-col-name), .component-table .component-cell { width: 76px; }
+  .component-table thead th { font-size: 12px; }
+  .component-col-about { display: none !important; }
+}
 /* The document's ⋯ menu (decision 0065): its button in the document's top-right corner, and the menu under it. */
 .centre-stack { position: relative; }
 /* Along the document's foot (0094): what components keep in view, small, to the right. */

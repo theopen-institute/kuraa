@@ -911,6 +911,8 @@ export const S = {
     syncNow: 'Sync now',
     syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
     syncing: 'Syncing…',
+    /** How syncing a workspace that is not open went, said with its name. */
+    syncedOther: (name: string, message: string) => `${quote(name)}: ${message}`,
   },
 
   errors: {

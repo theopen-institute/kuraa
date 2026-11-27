@@ -6,7 +6,7 @@
 // navigation, the core's own menu at the upper left (FallbackMenu.vue).
 import type { ConnectionInfo, FeatureClientContext, FeatureMenuItem, FileMark, FolderViewContext, LayoutContext, NavigationContext, NavigationFile } from '@kuraa/feature-kit/client';
 import type { FileIcon } from '@kuraa/kernel';
-import type { HostApi } from './api.js';
+import { ApiError, type HostApi } from './api.js';
 import type { EditorStatus, WorkspaceLink } from './types.js';
 import { connectionLabel, S } from './strings.js';
 
@@ -142,6 +142,37 @@ export function viewNewItems(items: (() => FeatureMenuItem[])[]): FeatureMenuIte
 }
 
 /**
+ * How a workspace syncs, asked of its host: its other devices (how many are
+ * connected) and its online copies (the saves they lack, whether one is
+ * syncing, whether the last sync failed). The open workspace's, every few
+ * seconds; the others', as the workspaces' menu opens (0101).
+ */
+export async function loadWorkspaceLink(api: HostApi): Promise<WorkspaceLink> {
+  try {
+    const [peers, syncs] = await Promise.all([api.peers(), api.syncs().catch(() => null)]);
+    const devices = peers.enabled ? peers.devices.filter((d) => !d.related) : [];
+    const targets = syncs?.syncs.flatMap((s) => s.targets) ?? [];
+    return {
+      reachable: true,
+      devices: devices.length ? { online: devices.filter((d) => d.online).length, total: devices.length, servers: devices.filter((d) => d.server).length } : null,
+      online: targets.length ? { pending: targets.reduce((n, t) => n + (t.pending ?? 0), 0), busy: targets.some((t) => t.busy), failed: targets.some((t) => !!t.error) } : null,
+    };
+  } catch (e) {
+    // Answered, but refused (not allowed here, say): reachable all the same.
+    return { reachable: e instanceof ApiError && e.status > 0, devices: null, online: null };
+  }
+}
+
+/** How a workspace syncs, in words: a line for its devices, and one for its online copy if it has one. */
+export function syncLines(link: WorkspaceLink): string[] {
+  if (!link.reachable) return [];
+  const lines = [link.devices ? S.connection.devices(link.devices.online, link.devices.total, link.devices.servers) : S.connection.alone];
+  const o = link.online;
+  if (o) lines.push(o.busy ? S.connection.onlineSyncing : o.failed ? S.connection.onlineFailed : o.pending ? S.connection.onlinePending(o.pending) : S.connection.onlineUpToDate);
+  return lines;
+}
+
+/**
  * How the open document is connected, or with none open the host (green while
  * it answers: it goes on syncing then too), in words, with who else is here and
  * how the workspace syncs.
@@ -151,12 +182,7 @@ export function connectionInfo(status: EditorStatus | null, hasDocument: boolean
   const peers = hasDocument ? status?.peers ?? [] : [];
   const others = peers.filter((p) => !p.self);
   const label = hasDocument ? connectionLabel(state) : !link ? connectionLabel('connecting') : link.reachable ? S.connection.host : S.connection.noHost;
-  const syncing: string[] = [];
-  if (link?.reachable) {
-    syncing.push(link.devices ? S.connection.devices(link.devices.online, link.devices.total, link.devices.servers) : S.connection.alone);
-    const o = link.online;
-    if (o) syncing.push(o.busy ? S.connection.onlineSyncing : o.failed ? S.connection.onlineFailed : o.pending ? S.connection.onlinePending(o.pending) : S.connection.onlineUpToDate);
-  }
+  const syncing = link ? syncLines(link) : [];
   const first = others.length ? `${label} · ${S.connection.here(others.length)}: ${others.map((p) => p.name || S.common.anonymous).join(', ')}` : label;
   return {
     state,

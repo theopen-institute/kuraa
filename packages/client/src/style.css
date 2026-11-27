@@ -373,6 +373,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu .context-row > button:first-child { flex: 1; }
 .context-menu .context-icon { display: inline-flex; align-items: center; gap: 3px; padding: 5px 6px; color: var(--muted); }
 .context-menu .context-icon:hover, .context-menu .context-icon:focus-visible { color: var(--text); }
+.context-menu .context-icon.warn { color: var(--warn); }
+.context-menu .context-icon { white-space: nowrap; }
 .context-menu .context-icon svg { display: block; }
 .context-menu .context-icon.spinning svg { animation: spin 1s linear infinite; }
 .context-count { font-size: 11px; font-variant-numeric: tabular-nums; }

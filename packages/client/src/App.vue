@@ -36,8 +36,8 @@ import FolderPicker from './FolderPicker.vue';
 import SettingsWindow from './SettingsWindow.vue';
 import type { SettingsSection } from './settingsSections.js';
 import InviteDialog from './InviteDialog.vue';
-import { connectionInfo, folderViewContext, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
-import { workspaceMenuItems } from './workspaceMenu.js';
+import { connectionInfo, loadWorkspaceLink, syncLines, folderViewContext, layoutContext, navigationContext, navigationEvents, Prefetcher, viewNewItems, type NavigationApp } from './navigation.js';
+import { workspaceMenuItems, type WorkspaceSync } from './workspaceMenu.js';
 import type { MatchTarget } from './docActions.js';
 import { useFeatureHost } from './featureHost.js';
 import { takenKeys } from './commands.js';
@@ -188,21 +188,65 @@ const coreMenu = shallowRef<{ x: number; y: number; items: MenuItem[] } | null>(
 /** Files…: the plain list of the workspace's files (the menu at the upper left). */
 const listingFiles = ref(false);
 const workspaceTitle = computed(() => (ready.value ? workspace.value?.name || hub.value?.find((w) => w.id === chosen.value)?.name || (hub.value ? S.app.workspace : S.app.files) : S.app.workspaces));
-const workspaceItems = (): MenuItem[] => (hub.value ? workspaceMenuItems(
-  {
-    workspaces: hub.value,
-    current: ready.value ? chosen.value : null,
-    name: workspaceTitle.value,
-    canAdd: canAdd.value,
-    sync: ready.value && link.value && (link.value.devices || link.value.online) ? { pending: link.value.online?.pending ?? 0, busy: syncing.value } : null,
-  },
-  {
-    switch: (id) => void switchWorkspace(id),
-    add: () => (addingWorkspace.value = true),
-    settings: () => openSettings(ready.value ? 'workspace' : 'you'),
-    sync: () => void syncNow(),
-  },
-) : []);
+/** How a workspace syncs, for its row in the menu: null where it syncs with nothing (or that is not known yet). */
+const syncOf = (l: WorkspaceLink | null | undefined, busy: boolean): WorkspaceSync | null =>
+  l && (l.devices || l.online) ? { pending: l.online?.pending ?? 0, busy: busy || !!l.online?.busy, failed: !!l.online?.failed, lines: syncLines(l) } : null;
+const workspaceItems = (): MenuItem[] => {
+  if (!hub.value) return [];
+  const current = ready.value ? chosen.value : null;
+  const syncs: Record<string, WorkspaceSync> = {};
+  for (const w of hub.value) {
+    const sync = w.id === current ? syncOf(link.value, syncing.value) : syncOf(otherLinks.value.get(w.id), othersSyncing.value.has(w.id));
+    if (sync) syncs[w.id] = sync;
+  }
+  return workspaceMenuItems(
+    { workspaces: hub.value, current, name: workspaceTitle.value, canAdd: canAdd.value, syncs },
+    {
+      switch: (id) => void switchWorkspace(id),
+      add: () => (addingWorkspace.value = true),
+      settings: () => openSettings(ready.value ? 'workspace' : 'you'),
+      sync: (id) => void (id === current ? syncNow() : syncOther(id)),
+    },
+  );
+};
+/** The workspaces' menu drawn again, if it is open, with how each syncs now. */
+const redrawWorkspaceMenu = () => {
+  if (coreMenu.value) coreMenu.value = { ...coreMenu.value, items: workspaceItems() };
+};
+
+// The other workspaces' syncing (0101): asked of each as the menu opens, so it
+// says how each stands, and syncs any of them, without switching to it.
+const otherLinks = shallowRef(new Map<string, WorkspaceLink>());
+const othersSyncing = shallowRef(new Set<string>());
+function loadOtherLinks() {
+  const current = ready.value ? chosen.value : null;
+  for (const w of hub.value ?? []) {
+    if (w.id === current || w.error) continue;
+    void loadWorkspaceLink(hubApi.value.workspaceApi(w.id)).then((l) => {
+      otherLinks.value = new Map(otherLinks.value).set(w.id, l);
+      redrawWorkspaceMenu();
+    });
+  }
+}
+async function syncOther(id: string) {
+  if (othersSyncing.value.has(id)) return;
+  const name = hub.value?.find((w) => w.id === id)?.name ?? id;
+  othersSyncing.value = new Set(othersSyncing.value).add(id);
+  const other = hubApi.value.workspaceApi(id);
+  try {
+    const r = await other.sync();
+    notice.value = { kind: r.ok ? 'info' : 'warn', text: S.workspaceSwitcher.syncedOther(name, r.message) };
+  } catch (e) {
+    const said = e instanceof ApiError && (e.body as { message?: string } | undefined)?.message;
+    notice.value = { kind: 'warn', text: S.workspaceSwitcher.syncedOther(name, said || (e as Error).message) };
+  } finally {
+    const next = new Set(othersSyncing.value);
+    next.delete(id);
+    othersSyncing.value = next;
+    otherLinks.value = new Map(otherLinks.value).set(id, await loadWorkspaceLink(other));
+    redrawWorkspaceMenu();
+  }
+}
 const connection = computed(() => connectionInfo(status.value, !!path.value && !!type.value, link.value));
 const navApp: NavigationApp = {
   workspace: () => ({ name: workspaceTitle.value, open: ready.value, menu: !!hub.value }),
@@ -210,6 +254,7 @@ const navApp: NavigationApp = {
   workspaceMenu: (at) => {
     const box = at.getBoundingClientRect();
     coreMenu.value = { x: box.left, y: box.bottom + 4, items: workspaceItems() };
+    loadOtherLinks();
   },
   newMenu: (at) => fileActions.value?.newMenu(at),
   newMenuOpen: () => !!fileActions.value?.newMenuOpen,
@@ -718,20 +763,7 @@ let linkTimer: ReturnType<typeof setTimeout> | undefined;
 async function loadLink() {
   clearTimeout(linkTimer);
   const asked = api.value;
-  let next: WorkspaceLink;
-  try {
-    const [peers, syncs] = await Promise.all([asked.peers(), asked.syncs().catch(() => null)]);
-    const devices = peers.enabled ? peers.devices.filter((d) => !d.related) : [];
-    const targets = syncs?.syncs.flatMap((s) => s.targets) ?? [];
-    next = {
-      reachable: true,
-      devices: devices.length ? { online: devices.filter((d) => d.online).length, total: devices.length, servers: devices.filter((d) => d.server).length } : null,
-      online: targets.length ? { pending: targets.reduce((n, t) => n + (t.pending ?? 0), 0), busy: targets.some((t) => t.busy), failed: targets.some((t) => !!t.error) } : null,
-    };
-  } catch (e) {
-    // Answered, but refused (not allowed here, say): reachable all the same.
-    next = { reachable: e instanceof ApiError && e.status > 0, devices: null, online: null };
-  }
+  const next = await loadWorkspaceLink(asked);
   if (asked !== api.value) return;
   link.value = next;
   linkTimer = setTimeout(() => void loadLink(), document.hidden ? 30_000 : 5_000);
@@ -796,6 +828,8 @@ async function syncNow() {
     if (asked === api.value) void loadLink();
   }
 }
+// The workspaces' menu, if open, follows how the open one syncs.
+watch([link, syncing], () => redrawWorkspaceMenu());
 
 // Whether it syncs with other devices: asked of each workspace as it opens.
 watch([api, ready], () => {

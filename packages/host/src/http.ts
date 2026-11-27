@@ -958,7 +958,8 @@ export function createRequestHandler(host: Host) {
       if (!found) throw new HttpError(404, `No route: ${req.method} ${path}`);
       await found.route.handle({ host, req, res, url, q: url.searchParams, params: found.params });
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      // Refused by the policy, wherever (a server's page, say, asking for a new document: 0099): 403, not an error.
+      const status = err instanceof HttpError ? err.status : err instanceof NotAllowed ? 403 : 500;
       if (status === 500) host.log(`error: ${(err as Error).stack ?? err}`);
       if (!res.headersSent) send(res, status, { error: (err as Error).message });
       else res.end();

@@ -82,7 +82,7 @@ export type PeersInfo =
       /** What this computer's network is like for connecting (0053). */
       network?: { kind: 'starting' | 'open' | 'router' | 'hard' | 'unreachable'; tcp: string | null; lan: boolean };
       workspace: { id: string; forkedFrom: string | null };
-      devices: { name: string; key: string; person: string | null; online: boolean; /** Not connected here, but to these devices (keys), which say so. */ through: string[]; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean; /** It runs a kuraa that does not sync with this one until one of them is updated. */ kuraa?: 'newer' | 'older' | null; /** How it is connected here (0053). */ via?: 'lan' | 'tcp' | 'tunnel' | 'internet' | null; /** When it was last connected here (ms since 1970). */ lastSeen?: number | null }[];
+      devices: { name: string; key: string; person: string | null; online: boolean; /** Not connected here, but to these devices (keys), which say so. */ through: string[]; related: boolean; /** It merges differently (another version of kuraa, or other document types). */ otherVersion: boolean; /** It runs a kuraa that does not sync with this one until one of them is updated. */ kuraa?: 'newer' | 'older' | null; /** How it is connected here (0053). */ via?: 'lan' | 'tcp' | 'tunnel' | 'internet' | null; /** When it was last connected here (ms since 1970). */ lastSeen?: number | null; /** A server's device (0099): in as itself, no person's. */ server?: boolean }[];
       /** This device was removed from the workspace, and no longer syncs. */
       removed?: boolean;
       /** Since when no other device has been connected here (ms since 1970); null while one is, or if there are none. */
@@ -139,9 +139,12 @@ export interface PeopleInfo {
   /** Whether you make, unmake and take out admins: the owner. */
   assignsAdmins?: boolean;
   people: { id: string; role: 'owner' | 'admin' | 'member'; name: string | null; devices: string[]; you: boolean }[];
-  /** People whose devices' acknowledgements confirm removals (0072). */
-  /** The latest removals (0072): people taken out, computers dropped; who has confirmed each so far. */
-  removals?: { kind: 'person' | 'computer'; who: string; by: string | null; confirmedBy: string[] }[];
+  /** The servers in the workspace (0099): each by its key, what its devices call themselves, its devices, and whether this is one. */
+  servers?: { key: string; name: string; devices: string[]; you: boolean }[];
+  /** Whether you invite and remove servers: the owner (0099). */
+  managesServers?: boolean;
+  /** The latest removals (0072): people taken out, computers dropped, servers removed (0099); who has confirmed each so far. */
+  removals?: { kind: 'person' | 'computer' | 'server'; who: string; by: string | null; confirmedBy: string[] }[];
 }
 
 /** A place this workspace keeps a copy on and syncs with: an online copy's git server (a sync's target, decision 0059). */
@@ -323,9 +326,11 @@ export class HostApi {
   makeOwner(id: string) { return this.json<PeopleInfo>(`/api/peers/owner/${id}`, { method: 'POST' }); }
   /** Take someone out of the workspace, with their devices (an admin's to do; or yourself). */
   removePerson(id: string) { return this.json<PeopleInfo>(`/api/peers/people/${id}`, { method: 'DELETE' }); }
-  createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member' }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
+  createLink(o: { hours: number | null; once: boolean; role?: 'admin' | 'member' | 'server' }) { return this.json<InviteLinkInfo & { link: string }>('/api/peers/links', { method: 'POST', body: JSON.stringify(o) }); }
   revokeLink(id: string) { return this.json(`/api/peers/links/${id}`, { method: 'DELETE' }); }
   /** Remove a device from the workspace, for good (it keeps its copy). */
+  /** Take a server out of the workspace, for good (0099): the owner's. */
+  removeServer(key: string) { return this.json<PeopleInfo>(`/api/peers/servers/${key}`, { method: 'DELETE' }); }
   removeDevice(key: string) { return this.json<{ ok: boolean; revoked?: boolean }>(`/api/peers/devices/${key}`, { method: 'DELETE' }); }
   renameDevice(name: string) { return this.json<{ name: string }>('/api/peers/name', { method: 'POST', body: JSON.stringify({ name }) }); }
   /** The syncs the host's components bring (the online copy), their targets, and whether people here may add and remove them. */

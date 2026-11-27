@@ -153,7 +153,7 @@ export function connectionInfo(status: EditorStatus | null, hasDocument: boolean
   const label = hasDocument ? connectionLabel(state) : !link ? connectionLabel('connecting') : link.reachable ? S.connection.host : S.connection.noHost;
   const syncing: string[] = [];
   if (link?.reachable) {
-    syncing.push(link.devices ? S.connection.devices(link.devices.online, link.devices.total) : S.connection.alone);
+    syncing.push(link.devices ? S.connection.devices(link.devices.online, link.devices.total, link.devices.servers) : S.connection.alone);
     const o = link.online;
     if (o) syncing.push(o.busy ? S.connection.onlineSyncing : o.failed ? S.connection.onlineFailed : o.pending ? S.connection.onlinePending(o.pending) : S.connection.onlineUpToDate);
   }

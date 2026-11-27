@@ -151,7 +151,7 @@ describe('a server in a workspace (0099)', () => {
     const bo = await person('Bo');
     const boKey = crypto.keyPair();
     const dirB = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), bo, boKey, 'bee');
-    let b = await start(dirB, bo, boKey);
+    const b = await start(dirB, bo, boKey);
     await until(async () => (await s.host.peers!.status()).devices.filter((d) => d.online).length === 2, 20_000, 'both members online to the server');
     // Each works apart, the other away.
     await stop(b);
@@ -161,7 +161,7 @@ describe('a server in a workspace (0099)', () => {
     writeFileSync(join(dirB, 'b.md'), '# B\n');
     git(dirB, 'add', '-A');
     git(dirB, '-c', 'user.name=Bo', '-c', 'user.email=bo@example.org', 'commit', '-q', '-m', 'B, apart');
-    b = await start(dirB, bo, boKey);
+    await start(dirB, bo, boKey);
     // Bo's copy and the server's come to one history with both.
     await until(() => read(dirB, 'a.md') !== null && read(dirS, 'b.md') !== null, 20_000, 'both works on both');
     await until(() => git(dirB, 'rev-parse', 'HEAD') === git(dirS, 'rev-parse', 'HEAD'), 20_000, 'one history');

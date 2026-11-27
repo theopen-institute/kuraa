@@ -6,7 +6,9 @@
 // computer lost or no longer used is removed, for good (it keeps its copy), by
 // its own person (whose identity, kept here, also revokes its key) or an admin.
 // Computers no identity says whose are listed apart. Anyone renames this one.
-// With no policy yet, everyone has the same say (0038).
+// With no policy yet, everyone has the same say (0038). Servers (0099), in as
+// themselves, are listed beneath the people; the owner adds one (an invite link
+// for one server, to give to kuraa-server join) and removes one.
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
@@ -70,8 +72,38 @@ type Info = Extract<PeersInfo, { enabled: true }>;
 const whose = (d: Device) => (info.value?.enabled ? info.value.people?.people.find((p) => p.devices.includes(d.key)) : undefined);
 /** A person's computers, but this one (shown apart, as this computer). */
 const devicesOf = (i: Info, p: Someone) => i.devices.filter((d) => p.devices.includes(d.key));
-/** Computers no person here is known to be: listed apart (all of them, where there is no policy). */
-const others = (i: Info) => i.devices.filter((d) => !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
+/** Computers no person here is known to be, nor a server: listed apart (all of them, where there is no policy). */
+const others = (i: Info) => i.devices.filter((d) => !d.server && !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
+
+type Server = NonNullable<Info['people']>['servers'] extends (infer T)[] | undefined ? T : never;
+/** Each server, with its device here (the server's for this workspace), if this device knows it. */
+const serverRows = (i: Info) => (i.people?.servers ?? []).map((s) => ({ s, d: i.devices.find((d) => s.devices.includes(d.key)) }));
+/** Whether you add and remove servers: the owner (0099), on a device still in. */
+const managesServers = (i: Info) => !!i.people?.managesServers && i.canInvite && !i.removed;
+
+/** An invite link for a server just made (0099), to give to kuraa-server join. */
+const serverLink = ref<string | null>(null);
+const copiedLink = ref(false);
+async function addServer() {
+  copiedLink.value = false;
+  await act(async () => {
+    serverLink.value = (await props.api.createLink({ hours: 24 * 7, once: true, role: 'server' })).link;
+  });
+}
+async function copyServerLink() {
+  if (!serverLink.value) return;
+  try {
+    await navigator.clipboard.writeText(serverLink.value);
+    copiedLink.value = true;
+  } catch {
+    // No clipboard here: select the text, to copy by hand.
+    (document.querySelector('[data-testid=server-link]') as HTMLTextAreaElement | null)?.select();
+  }
+}
+async function removeServer(s: Server) {
+  const ok = await askConfirm(S.servers.removeAsk(s.name), S.common.remove, true);
+  if (ok) await act(() => props.api.removeServer(s.key));
+}
 /** Whether you may remove a computer: an admin, or it is yours (0068). */
 const mayRemove = (i: Info, d: Device) => {
   if (!i.canInvite || i.removed) return false;
@@ -210,6 +242,41 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
       </li>
     </ul>
 
+    <!-- Servers (0099): in as themselves, beneath the people. -->
+    <template v-if="info.people?.founded && (info.people.servers?.length || managesServers(info))">
+      <h4 class="menu-subhead" :title="S.servers.about">{{ S.servers.title }}</h4>
+      <p v-if="info.people.servers?.some((s) => s.you)" class="menu-facts" data-testid="this-is-a-server">{{ S.servers.youAre }}</p>
+      <ul v-if="info.people.servers?.length" class="menu-devices" data-testid="servers">
+        <li v-for="{ s, d } in serverRows(info)" :key="s.key" :data-testid="`server:${s.name}`">
+          <span :class="['device-dot', { online: s.you || d?.online, through: d && !d.online && d.through.length }]" aria-hidden="true" />
+          <span class="device-who">{{ s.name }}</span>
+          <span v-if="s.you" class="device-state">{{ S.devices.thisComputer }}</span>
+          <template v-else-if="d">
+            <span v-if="d.kuraa" class="device-tag warn" :title="d.kuraa === 'newer' ? S.devices.newerTitle : S.devices.olderTitle">{{ d.kuraa === 'newer' ? S.devices.newer : S.devices.older }}</span>
+            <span v-if="d.online" class="device-state" :title="viaTitle(d)" :data-testid="`server-state:${s.name}`">{{ viaText(d) }}</span>
+            <span v-else-if="d.through.length" class="device-state" :data-testid="`server-state:${s.name}`">{{ S.devices.through(via(info, d)) }}</span>
+            <span v-else class="device-state" :data-testid="`server-state:${s.name}`">{{ d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline }}</span>
+          </template>
+          <span v-else class="device-state" :data-testid="`server-state:${s.name}`">{{ S.devices.isOffline }}</span>
+          <button v-if="managesServers(info) && !s.you" type="button" class="danger" :disabled="busy" :data-testid="`remove-server:${s.name}`" @click="removeServer(s)">{{ S.servers.remove }}</button>
+        </li>
+      </ul>
+      <div v-if="serverLink" class="server-link" data-testid="server-link-box">
+        <label class="field">
+          <span>{{ S.servers.linkFor }}</span>
+          <textarea :value="serverLink" readonly rows="3" spellcheck="false" data-testid="server-link" @focus="($event.target as HTMLTextAreaElement).select()" />
+        </label>
+        <p class="menu-facts">{{ S.servers.howToUse }}</p>
+        <div class="menu-actions">
+          <button type="button" data-testid="copy-server-link" @click="copyServerLink">{{ copiedLink ? S.servers.copied : S.servers.copy }}</button>
+          <button type="button" @click="serverLink = null">{{ S.servers.done }}</button>
+        </div>
+      </div>
+      <div v-else-if="managesServers(info)" class="menu-actions">
+        <button type="button" :disabled="busy" data-testid="add-server" @click="addServer">{{ S.servers.add }}</button>
+      </div>
+    </template>
+
     <!-- Computers no identity here says whose (all of them, with no policy yet). -->
     <template v-if="others(info).length">
       <h4 v-if="info.people?.founded" class="menu-subhead">{{ S.devices.others }}</h4>
@@ -238,7 +305,7 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
         </li>
       </ul>
     </template>
-    <p v-if="!admin && !info.removed" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
+    <p v-if="!admin && !info.removed && !info.people?.servers?.some((s) => s.you)" class="menu-facts" data-testid="not-admin">{{ S.devices.notAdmin }}</p>
     <!-- A removed device's invitations and removals are refused by the others: none offered. -->
     <div v-if="info.canInvite && !info.removed" class="menu-actions">
       <button v-if="admin" type="button" data-testid="invite-button" @click="emit('invite')">{{ S.devices.invite }}</button>
@@ -247,3 +314,7 @@ const via = (i: Extract<PeersInfo, { enabled: true }>, d: Device) => d.through.m
     <ErrorBanner v-if="error" :error="error" inline />
   </section>
 </template>
+
+<style scoped>
+.server-link .menu-facts { margin-top: 6px; }
+</style>

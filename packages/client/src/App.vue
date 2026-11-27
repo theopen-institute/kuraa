@@ -725,7 +725,7 @@ async function loadLink() {
     const targets = syncs?.syncs.flatMap((s) => s.targets) ?? [];
     next = {
       reachable: true,
-      devices: devices.length ? { online: devices.filter((d) => d.online).length, total: devices.length } : null,
+      devices: devices.length ? { online: devices.filter((d) => d.online).length, total: devices.length, servers: devices.filter((d) => d.server).length } : null,
       online: targets.length ? { pending: targets.reduce((n, t) => n + (t.pending ?? 0), 0), busy: targets.some((t) => t.busy), failed: targets.some((t) => !!t.error) } : null,
     };
   } catch (e) {

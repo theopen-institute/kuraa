@@ -78,7 +78,10 @@ nothing, and a server that later gets an identity stops being one.
   each takes the merge when they come back.
 - **It never leads a room**, nor are its edits taken in one: only devices that may change a document
   lead its room, and a server may change none.
-- **Seen from the server** (its host's own page, for whoever runs it), everything is read only.
+- **Seen from the server** (its host's own page, for whoever runs it), everything is read only. A
+  refusal by the policy anywhere (a new document asked for there, say) is a 403, not an error.
+- **Its devices confirm removals**, as people's do (0072's witnesses, which waited for servers): the
+  removal says *confirmed by* the server once it holds it.
 
 ## The module: `@kuraa/server`
 
@@ -86,8 +89,14 @@ The rules above are in the host's peer layer (`policy.ts`, `identity.ts`, `node.
 because every device must keep them, server or not: they are the published contract. What a server
 does is in a package of its own, `packages/server`:
 
-- **`kuraa-server`** runs a host as a server: its workspaces in a folder of its own, no identity made
-  or used, and a server's flags (`--public-address`, `--peer-port`, `--dht-port`) said up front.
+- **`kuraa-server`** (`pnpm server`) runs a host as a server: everything in a folder of its own
+  (`~/.kuraa/server-data`, or `--data`), no identity made or used, no code run, and a server's flags
+  (`--public-address`, `--peer-port`, `--dht-port`) said up front. **Its key is its own**, kept in
+  that folder, not the computer's (`~/.kuraa/signing.json`): run on someone's laptop, that would be
+  their person's key, and a server's join signed with it counts for nothing. Where it is reached
+  (`server.json`: its address and access code) is written there too, readable by whoever runs it
+  alone, for the commands below to ask it.
+- **Its page** (port 4322) shows what it holds, read only; it makes no workspace of its own.
 - **`kuraa-server join <link>`** brings a workspace onto the server, by an invite link for a server.
 - **`kuraa-server list`** says which workspaces it holds, and whether each has taken it in.
 
@@ -95,8 +104,14 @@ does is in a package of its own, `packages/server`:
 
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
 devices' name, how it is connected, and, for the owner, **Remove…**. The owner's **Add a server…**
-makes an invite link for a server and says to give it to `kuraa-server join` on the server. Who reads
-a folder may name a server, as it names people.
+makes an invite link for one server, for a week, and says to give it to `kuraa-server join` on the
+server. Seen on the server, it says it is one. The sidebar says *Syncing with the server* where it is
+the only other device. Removals list *The server … removed*.
+
+## Not yet (in the app)
+
+- **Naming a server among a folder's readers** in Permissions: the policy takes it (an audience
+  naming its key), the dialog does not offer it yet.
 
 ## Not yet
 

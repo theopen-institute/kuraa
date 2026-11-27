@@ -73,7 +73,7 @@ export const S = {
     /** With no document open: the host, and how the workspace syncs. */
     host: 'Connected to the host',
     noHost: 'Cannot reach the host',
-    devices: (online: number, total: number) => (total === 1 ? (online ? 'Syncing with your other device' : 'Your other device is not connected') : `Syncing with ${online.toLocaleString()} of ${total.toLocaleString()} devices`),
+    devices: (online: number, total: number, servers = 0) => (total === 1 && servers === 1 ? (online ? 'Syncing with the server' : 'The server is not connected') : total === 1 ? (online ? 'Syncing with your other device' : 'Your other device is not connected') : `Syncing with ${online.toLocaleString()} of ${total.toLocaleString()} devices`),
     alone: 'Not shared with other devices',
     onlineSyncing: 'Online copy: syncing…',
     onlineFailed: 'Online copy: the last sync did not go through',
@@ -420,6 +420,22 @@ export const S = {
     lostNotRevoked: (name: string) => `${name} is removed. Its key is not revoked: your identity is not on this computer. Revoke it from a computer that has it (Settings › You › Advanced).`,
   },
 
+  // Servers (0099): always-on computers in the workspace as themselves, with no person.
+  servers: {
+    title: 'Servers',
+    about: 'A server is a computer that is always on: it keeps everyone’s work and passes it on while you are apart. It reads what this workspace’s people all read, and folders that name it; it changes nothing.',
+    add: 'Add a server…',
+    linkFor: 'An invite link for one server, for a week:',
+    howToUse: 'On the server, run kuraa-server join with this link. It joins as a server, not as anyone.',
+    copy: 'Copy',
+    copied: 'Copied',
+    done: 'Done',
+    youAre: 'This computer is a server here: it keeps and passes on the workspace’s work, and changes nothing.',
+    remove: 'Remove…',
+    removeAsk: (name: string) => `Remove the server ${name} from this workspace? This is permanent: it no longer syncs with anyone here. What it holds stays on it.`,
+    onlyOwner: 'Only the workspace’s owner adds and removes servers.',
+  },
+
   access: {
     readOnly: (by: string[]) => (by.length ? `Only ${list(by)} can change this document. You can read it.` : 'You cannot change this document. You can read it.'),
     notKept: (date: string) => `Your changes of ${date} were not kept: you could not change this document by then. They are in its history.`,
@@ -521,7 +537,7 @@ export const S = {
     removeAsk: (who: string) => `Remove ${who} from this workspace? Their devices are removed too, for good: they keep their copy of everything up to now, but no longer sync with anyone here.`,
     removals: 'Recent removals',
     removalsAbout: 'A removal counts at once on each device that has it. Until the others have it too, a device that has not heard of it may still sync with whoever was removed.',
-    removal: (kind: 'person' | 'computer', who: string, by: string | null) => (kind === 'person' ? `${who} taken out` : `A computer of ${who}’s removed`) + (by ? ` by ${by}` : ''),
+    removal: (kind: 'person' | 'computer' | 'server', who: string, by: string | null) => (kind === 'person' ? `${who} taken out` : kind === 'server' ? `The server ${who} removed` : `A computer of ${who}’s removed`) + (by ? ` by ${by}` : ''),
     confirmed: (names: string[]) => (names.length ? `confirmed by ${list(names)}` : 'not confirmed by anyone else yet'),
   },
 

@@ -307,6 +307,7 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
     // A key that is no one's: only a server's own join counts (0099).
     const serverJoin = e.op.t === 'join' && e.op.role === 'server';
     if (!personOf(e.signer) && !serverJoin) out.push('an operation signed by no one counted');
+    if (strangerKeys.has(e.signer)) out.push('a stranger’s operation counted');
     if (personOf(e.signer) && serverJoin) out.push('a server’s join signed by a person’s key counted');
     if (forged.has(e.id)) out.push('an operation naming a parent no one holds counted');
     if (personOf(e.signer) === ids[EVE]) out.push('an operation of Eve’s counted');

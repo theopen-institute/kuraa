@@ -307,6 +307,26 @@ service starts it again; the version before is kept. `~/.kuraa/server/kuraa-host
 latest by hand, for the next start; `--version` says which runs. Run from the repository (`pnpm
 host`), a server does not update itself: `git pull`, `pnpm install` and `pnpm web:build`.
 
+## A server in your workspaces
+
+A server is in a workspace as itself, not as anyone's computer
+([decision 0099](docs/decisions/0099-servers.md)): always on, it keeps everyone's work and passes it
+on while people are apart; it reads the workspace's own files and any folder whose readers name it,
+and changes nothing. Only the workspace's owner adds one: **People and computers › Add a server…**
+makes an invite link for one server. On the server:
+
+```sh
+pnpm server --public-address kuraa.example.org --peer-port 443   # its folder: ~/.kuraa/server-data (--data)
+pnpm server join 'kuraa-invite:…'                                # the owner's link for a server
+pnpm server list                                                 # what it holds, and whether each took it in
+```
+
+It has a key of its own (in its folder, one for all its workspaces) and no identity; it makes no
+workspaces and runs no code. Its page (`--port 4322`, the access code in its folder's
+`server.json`) shows what it holds, read only. The owner removes it from **People and computers**.
+`--public-address` and `--peer-port` let members on networks that block UDP reach it (see the
+server's flags above); without them it is reached as any device is.
+
 ## On several devices
 
 A workspace can be on several devices at once, each running its own host, with no server in
@@ -764,6 +784,7 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | `packages/formats` | `standardTypes`, which the host and the web client both load; `/editor`: their editor modules |
 | `packages/session` | The only package that touches Yjs, y-prosemirror and Hocuspocus |
 | `packages/host` | Relay, bridge between rooms and files, committer, git peer, merges (`merging.ts`), devices (`peers/`), hub of many workspaces (`hub.ts`), HTTP API, CLI, run component registry |
+| `packages/server` | `kuraa-server` (`pnpm server`): a host as a server in workspaces, with its own key and no person ([decision 0099](docs/decisions/0099-servers.md)); what a server may do is the host's (`peers/`) |
 | `packages/client` | The client (Vue): file tree, editor, menu, history, settings ([decision 0016](docs/decisions/0016-vue-client.md)) |
 | `apps/web` | Web shell for the client (Vite) |
 | `apps/desktop` | Electron shell, embedding the host |

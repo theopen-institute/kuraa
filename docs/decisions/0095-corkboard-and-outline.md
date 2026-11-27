@@ -34,7 +34,7 @@ title (click: it opens), its synopsis (click: written in place), its label (the 
 label's colour, and its name), its status, and its words (of its target). A folder's card says how
 many documents are in it, all through it, and their words (click: that folder's corkboard). Another
 file's card has only its name. Drag a card before or after another (the side of it the pointer is on):
-the folder's order, which the file tree follows.
+the folder's order, which the file tree follows. Folders stand apart from documents ("folders need to be visually distinct from files"): a folder's card is a stack of cards, of its own colour, its name beside a folder's icon; its row tinted; documents beside their type's icon.
 
 **The outline**: the same, as rows: title, label, status, words, target across the width, the
 label's colour by the title, and **the synopsis on a second line of its own, indented** (*revised*:

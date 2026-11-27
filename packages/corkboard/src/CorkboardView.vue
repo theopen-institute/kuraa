@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { FolderViewContext, NavigationFile } from '@kuraa/feature-kit/client';
 import { buildTree, shownName, type Folder } from '@kuraa/files/tree';
+import FileIcon from '@kuraa/feature-ui/FileIcon.vue';
 import { DEFAULT_STATUSES, labelColour } from '@kuraa/details/details';
 import type { DocumentCard, FolderCard } from './index.js';
 import { S } from './strings.js';
@@ -19,6 +20,8 @@ const ctx = props.ctx;
 const folder = ctx.folder();
 
 const DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
+/** A folder's icon, as the file tree draws it. */
+const FOLDER = { paths: ['M1.5 12.5v-9h4.25l1.5 1.5h7.25v7.5z'] };
 const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
 // What navigation says (the files, the folders' orders), asked again when it says they changed.
@@ -56,9 +59,9 @@ const items = computed(() => {
   let dir: Folder | undefined = buildTree(files.value, (f) => ctx.order(f));
   for (const part of folder ? folder.split('/') : []) dir = dir?.folders.get(part);
   return (dir?.children ?? []).map((c) => {
-    if (c.folder) return { kind: 'folder' as const, path: c.folder.path, name: c.name, title: c.name, card: cards.value.folders[c.folder.path] ?? null };
+    if (c.folder) return { kind: 'folder' as const, path: c.folder.path, name: c.name, title: c.name, card: cards.value.folders[c.folder.path] ?? null, icon: FOLDER };
     const isDoc = DOCUMENT.test(c.file.path) && !!c.file.type;
-    return { kind: isDoc ? ('document' as const) : ('file' as const), path: c.file.path, name: c.name, title: shownName(c.file), card: cards.value.documents[c.file.path] ?? null, type: c.file.type };
+    return { kind: isDoc ? ('document' as const) : ('file' as const), path: c.file.path, name: c.name, title: shownName(c.file), card: cards.value.documents[c.file.path] ?? null, type: c.file.type, icon: ctx.icon(c.file) };
   });
 });
 type Item = (typeof items.value)[number];
@@ -203,7 +206,7 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
         @dragend="dragEnd"
         @dragover="dragOver($event, i)"
       >
-        <button type="button" class="cork-card-title" :title="i.kind === 'folder' ? S.openFolder(i.title) : S.open(i.title)" :data-testid="`card-open:${i.path}`" @click="openItem(i)">{{ i.title }}</button>
+        <button type="button" class="cork-card-title" :title="i.kind === 'folder' ? S.openFolder(i.title) : S.open(i.title)" :data-testid="`card-open:${i.path}`" @click="openItem(i)"><FileIcon class="cork-icon" :icon="i.icon" />{{ i.title }}</button>
         <template v-if="i.kind === 'document'">
           <textarea
             v-if="editing?.path === i.path && editing.field === 'synopsis'"
@@ -249,7 +252,7 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
       >
         <span class="cork-row-title" role="cell">
           <span v-if="docCard(i)?.label" class="cork-dot" :style="{ background: labelColour(docCard(i)!.label!) }" :title="docCard(i)!.label!" />
-          <button type="button" :data-testid="`row-open:${i.path}`" @click="openItem(i)">{{ i.title }}</button>
+          <button type="button" :data-testid="`row-open:${i.path}`" @click="openItem(i)"><FileIcon class="cork-icon" :icon="i.icon" />{{ i.title }}</button>
         </span>
         <template v-if="i.kind === 'document'">
           <span role="cell"><input :value="fieldValue(i, 'label')" list="cork-labels" :aria-label="S.columns.label" :data-testid="`row-label:${i.path}`" @input="typed(i, 'label', ($event.target as HTMLInputElement).value)" @change="save(i, 'label', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="save(i, 'label', ($event.target as HTMLInputElement).value)" /></span>
@@ -298,7 +301,16 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
   background: var(--panel); border: 1px solid var(--border); border-top: 4px solid var(--label, var(--border)); border-radius: 6px;
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent); cursor: grab;
 }
-.cork-card.cork-folder { background: color-mix(in srgb, var(--selected) 50%, var(--panel)); }
+/* A folder: a stack of cards, of its own colour, its name beside a folder's icon. */
+.cork-card.cork-folder {
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); border-top-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 4px 4px 0 -1px var(--panel), 4px 4px 0 0 color-mix(in srgb, var(--accent) 30%, var(--border)), 8px 8px 0 -1px var(--panel), 8px 8px 0 0 color-mix(in srgb, var(--accent) 20%, var(--border));
+  margin: 0 8px 8px 0;
+}
+.cork-card.cork-folder .cork-card-title { color: color-mix(in srgb, var(--accent) 70%, var(--text)); }
+.cork-card.cork-file { background: none; border-style: dashed; min-height: 80px; }
+.cork-icon { width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; color: var(--muted); flex: none; }
+.cork-card.cork-folder .cork-icon, .cork-row.cork-folder .cork-icon { color: color-mix(in srgb, var(--accent) 70%, var(--text)); }
 .cork-card.dragging, .cork-row.dragging { opacity: 0.45; }
 .cork-card.drop-before::before, .cork-card.drop-after::after { content: ''; position: absolute; top: 0; bottom: 0; width: 3px; border-radius: 2px; background: var(--accent); }
 .cork-card.drop-before::before { left: -9px; }
@@ -314,6 +326,9 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 .cork-rows-head, .cork-row { display: grid; grid-template-columns: minmax(12em, 3fr) minmax(8em, 2fr) minmax(8em, 2fr) 6em 7em; column-gap: 10px; align-items: center; }
 .cork-rows-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--border); }
 .cork-row { padding: 4px 6px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); cursor: grab; position: relative; }
+/* A folder's row: tinted, its name in the folder's colour. */
+.cork-row.cork-folder { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.cork-row.cork-folder .cork-row-title button { color: color-mix(in srgb, var(--accent) 70%, var(--text)); }
 .cork-rows .num { text-align: right; font-variant-numeric: tabular-nums; }
 .cork-rows input { width: 100%; box-sizing: border-box; border: 1px solid transparent; background: none; font: inherit; padding: 2px 4px; }
 .cork-rows input:hover, .cork-rows input:focus { border-color: var(--border); background: var(--panel); }

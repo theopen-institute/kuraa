@@ -16,7 +16,10 @@
 // the workspace or for you, open in a subpanel from its row (or are drawn under
 // it, where the feature says so); a sync's too. Which components the host has is
 // decided as it starts (--component); what may not be changed here is shown, not
-// offered.
+// offered. How many are available at the highest level this person switches
+// them at is said to the window, for the list (`available`): to the host's owner,
+// every one the host has; to whoever may change the workspace's settings, those
+// on for the host; to anyone else, those on for them.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { FormatEditor } from '@kuraa/editor-kit';
 import type { FeatureStatus } from '@kuraa/feature-kit/client';
@@ -51,7 +54,8 @@ const props = defineProps<{
   editors: Record<string, FormatEditor>;
   editorsOff: string[];
 }>();
-const emit = defineEmits<{ editorsOff: [ids: string[]]; hiddenFeatures: [ids: string[]] }>();
+export type ComponentsAvailable = { n: number; level: 'host' | 'workspace' | 'you' };
+const emit = defineEmits<{ editorsOff: [ids: string[]]; hiddenFeatures: [ids: string[]]; available: [available: ComponentsAvailable | null] }>();
 const { view, f, editable, flagged } = props.form;
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
 
@@ -190,6 +194,19 @@ const kinds = computed(() => {
   ];
   return all.filter(([, n]) => n > 0).map(([id, n]) => ({ id, n, label: S.components.kinds[id] }));
 });
+/** How many components are available at the highest level this person switches them at; null until the host has said. */
+const available = computed<ComponentsAvailable | null>(() => {
+  const c = components.value;
+  if (!c) return null;
+  if (editable.value) return { n: kinds.value.reduce((sum, k) => sum + k.n, 0), level: 'host' };
+  // Beneath the host: what it has on (the environment in use; every tool and sync, each there when needed).
+  const below = c.formats.filter((t) => t.on).length + c.engines.filter((e) => e.on).length
+    + c.environments.filter((e) => e.on).length + (tools.value?.tools.length ?? 0) + syncs.value.length;
+  if (props.workspaceName && props.features.some((x) => x.mayChange)) return { n: below + props.features.filter((x) => x.host).length, level: 'workspace' };
+  return { n: below + props.features.filter((x) => x.on).length, level: 'you' };
+});
+watch(available, (a) => emit('available', a), { immediate: true });
+
 const root = ref<HTMLElement | null>(null);
 function goTo(kind: Kind) {
   root.value?.querySelector(`[data-kind="${kind}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });

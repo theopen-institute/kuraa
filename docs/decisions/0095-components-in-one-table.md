@@ -22,7 +22,11 @@ hid, with their settings for you. A feature, which has all three, was in all thr
 ## One table
 
 **Components** is a section of its own, the last in the list (no longer indented under Host: it
-is the host's, the workspace's and yours). Beneath its name in the list: *Host · Workspace · You*.
+is the host's, the workspace's and yours). Beneath its name in the list, how many components are
+available at the highest level the person switches them at, named as its column is: to the host's
+owner, every one the host has (*15 available · Host*); to whoever may change the workspace's
+settings, those on for the host (*· Workspace*); to anyone else, those on for them (*· You*). Of
+languages and environments, those on (in use) count beneath the host; every tool and sync does.
 It is one table, its column heads kept in view as it scrolls:
 
 | Column | Who it is for | Kept |
@@ -50,6 +54,9 @@ switched at that level, a dash where it is not.
 
 With no workspace open, the Workspace and You cells of features are dashes, and the table says to
 open one.
+
+**Document**, with no document open, is no longer quieter in the list: it looks as the others do,
+with *No document open* beneath its name.
 
 ## What the others keep
 

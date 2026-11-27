@@ -145,6 +145,11 @@ test('on the shared host too, only your editing behaviour can change', async ({ 
   await page.goto(`/?token=${E2E.token}&name=Guest`);
   await expect(page.getByTestId('workspace-name')).toBeVisible();
   await openSettingsAt(page, 'components');
+  // Not the host's owner: how many are available to them, at the highest level they switch components at.
+  await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · (Workspace|You)/);
+  // No document open: Document says so beneath it, not quieter than the others.
+  await expect(page.getByTestId('settings-tab-document')).toContainText('No document open');
+  await expect(page.getByTestId('settings-tab-document')).not.toHaveClass(/\bidle\b/);
   await expect(box(page, 'R')).toBeChecked();
   await expect(box(page, 'R')).toBeDisabled();
   await expect(box(page, 'In a Podman container')).toBeChecked();

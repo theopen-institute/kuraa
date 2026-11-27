@@ -819,8 +819,11 @@ export const S = {
     noWorkspace: 'Open a workspace to change its settings.',
     name: 'Name',
     components: 'Components',
-    /** Beneath Components in the list: the levels it switches them at. */
-    componentsAbout: 'Host · Workspace · You',
+    /** Beneath Document in the list, with none open. */
+    noDocumentOpen: 'No document open',
+    /** Beneath Components in the list: how many are available at the highest level you switch them at (0095). */
+    componentsAvailable: (n: number, level: 'host' | 'workspace' | 'you') =>
+      `${n} available · ${level === 'host' ? 'Host' : level === 'workspace' ? 'Workspace' : 'You'}`,
     engines: 'Languages',
   },
 

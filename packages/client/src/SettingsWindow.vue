@@ -32,7 +32,7 @@ import type { Shell } from './shell.js';
 import { S } from './strings.js';
 import { useDialog } from './vue.js';
 import SettingsDocument from './SettingsDocument.vue';
-import SettingsComponents from './SettingsComponents.vue';
+import SettingsComponents, { type ComponentsAvailable } from './SettingsComponents.vue';
 import SettingsHost from './SettingsHost.vue';
 import SettingsWorkspace from './SettingsWorkspace.vue';
 import SettingsYou from './SettingsYou.vue';
@@ -91,17 +91,19 @@ const host = useTemplateRef<InstanceType<typeof SettingsHost>>('host');
 /** The host's settings as its owner changes them: one form for Host and Components, applied as the window closes. */
 const hostForm = useHostSettings(props.hub, props.canChangeSettings, () => emit('saved'));
 
+/** How many components are available at the highest level you switch them at (SettingsComponents says, once it knows). */
+const available = ref<ComponentsAvailable | null>(null);
 /** What each section is called in the list, with what it is about now beneath. */
 const nav = computed(() => SETTINGS_SECTIONS.map((id) => ({
   id,
   label: S.sections[id],
   about: id === 'you' ? props.settings.name
-    : id === 'document' ? props.docName ?? ''
+    : id === 'document' ? props.docName ?? S.sections.noDocumentOpen
     : id === 'workspace' ? props.workspace?.name ?? ''
     : id === 'host' ? (props.canChangeSettings ? S.sections.thisComputer : S.sections.elsewhere)
-    : S.sections.componentsAbout,
-  /** Nothing here to change now: shown, but quieter. */
-  idle: (id === 'document' && !props.path) || (id === 'workspace' && !props.workspace) || (id === 'host' && !props.canChangeSettings),
+    : available.value ? S.sections.componentsAvailable(available.value.n, available.value.level) : '',
+  /** Nothing here to change now: shown, but quieter. A document not open is not that: it says so beneath, in the same colour. */
+  idle: (id === 'workspace' && !props.workspace) || (id === 'host' && !props.canChangeSettings),
 })));
 
 /** The section's heading, and who it applies to. */
@@ -234,6 +236,7 @@ useDialog(root, () => {
             :editors-off="editorsOff"
             @editors-off="(ids) => emit('editorsOff', ids)"
             @hidden-features="(ids) => emit('hiddenFeatures', ids)"
+            @available="(a) => (available = a)"
           />
         </div>
       </div>

@@ -25,7 +25,8 @@ before.
 
 **Until it is made, a draft is the browser's alone.** It has no row in the file tree, no name in the
 window's title (the workspace's only), and is not remembered as the open file across a reload: a
-reload starts a new blank page. Once the file is made it is an ordinary document, its row marked as
+reload starts a new blank page. Settings › Document says no document is open (a document's settings
+kept for a file that may never be made would be left behind). Once the file is made it is an ordinary document, its row marked as
 the open file.
 
 **Nothing open is a blank document.** Where the "Nothing open yet" page was, a draft is opened, the

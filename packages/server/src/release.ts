@@ -16,7 +16,7 @@
 // service org.kuraa.server) are what installed computers look for and run: they stay.
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { currentVersion, defaultServerRoot, installServer, installedRoot, updateFrom, type ServerBuild } from '@kuraa/host';
+import { currentVersion, defaultServerRoot, installServer, installedRoot, setKuraaVersion, updateFrom, type ServerBuild } from '@kuraa/host';
 import { roleOf } from './roles.js';
 import { runServerCli } from './cli.js';
 
@@ -51,6 +51,8 @@ try {
   done([`[kuraa] ${(e as Error).message}`], 1);
 }
 
+// Said to other devices, as either role (0099): one on an older release learns a newer is out.
+await setKuraaVersion(build.version);
 const role = roleOf(process.argv.slice(2));
 if (role.role === 'server') {
   // A server (0099): headless, so no web client, whatever it came with.

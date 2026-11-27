@@ -105,6 +105,8 @@ export type ControlMessage =
       name: string;
       /** The version of what it says (PROTOCOL); none: 1. */
       protocol?: number;
+      /** The version of kuraa it runs, as released (`0.10.0`); none from a build that is not one (pnpm dev). */
+      version?: string;
       /** An invite link, from a device that joined (or is joining) by one. */
       link?: string;
       /** How it merges (merging.ts, mergeSignature). */

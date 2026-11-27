@@ -222,8 +222,8 @@ if (values['auto-update']) {
   if (!released) console.log('[kuraa] --auto-update: this host runs from the repository; update it with git pull');
   else {
     const { autoUpdate } = await import('./selfupdate.js');
-    const { onNewerVersion } = await import('./index.js');
-    autoUpdate({ ...released, log: (m) => console.log(`[kuraa] ${m}`), restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn) });
+    const { onNewerVersion, onNewerRelease } = await import('./index.js');
+    autoUpdate({ ...released, log: (m) => console.log(`[kuraa] ${m}`), restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
   }
 }
 

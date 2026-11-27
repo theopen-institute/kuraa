@@ -46,6 +46,9 @@ export interface Release {
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
+/** Whether a string is a version (semver, as releases are named): what a device says it runs is taken only so. */
+export const isVersion = (v: string) => v.length <= 64 && SEMVER.test(v);
+
 /** Compare two versions as semver does (a pre-release comes before its release). */
 export function compareVersions(a: string, b: string): number {
   const x = SEMVER.exec(a);
@@ -314,7 +317,12 @@ export function autoUpdate(o: {
   build: ServerBuild;
   log(m: string): void;
   restart(): void;
+  /** A device speaks a newer protocol: not syncing until updated, so at once. */
   newer(fn: () => void): void;
+  /** A device runs a newer release, speaking the same protocol (0099): looked for now, restarting at night. */
+  newerRelease?(fn: (version: string) => void): void;
+  /** Where the latest release is found (tests); default: the build's repository. */
+  latest?: () => Promise<Release | null>;
 }): void {
   const root = installedRoot(o.here);
   if (!root) return o.log('not updating itself: not run from an installed release (kuraa-host install)');
@@ -339,11 +347,18 @@ export function autoUpdate(o: {
     void look();
   });
   let looking = false;
+  let lookedAt = 0;
+  o.newerRelease?.((version) => {
+    if (!isVersion(version) || compareVersions(version, o.build.version) <= 0 || Date.now() - lookedAt < 3600_000) return;
+    o.log(`a device runs kuraa ${version}: looking for it now`);
+    void look();
+  });
   const look = async () => {
     if (looking || ready) return;
     looking = true;
+    lookedAt = Date.now();
     try {
-      const v = await updateFrom({ root, build: o.build });
+      const v = await updateFrom({ root, build: o.build, ...(o.latest ? { latest: o.latest } : {}) });
       if (v) {
         ready = v;
         restartSoon();

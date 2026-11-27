@@ -41,7 +41,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, onNewerVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import type { ShellConfig } from '@kuraa/client';
@@ -199,6 +199,8 @@ async function startOwnHub(): Promise<RunningHub> {
   // --workspaces keeps the list in that folder; otherwise it lives with the app's own data, so it survives choosing another folder.
   const custom = typeof flags.workspaces === 'string';
   const engines = list(flags.engine);
+  // Which version this is, said to other devices (0099): one on an older release learns a newer is out.
+  await setKuraaVersion(app.isPackaged ? app.getVersion() : null);
   const started = await startHub({
     ...(custom ? { root: flags.workspaces as string } : { registry: join(app.getPath('userData'), 'workspaces.json') }),
     defaultRoot: defaultWorkspaces(),
@@ -500,6 +502,8 @@ app.whenReady().then(async () => {
   });
   // A device of a workspace runs a newer kuraa: this one does not sync with it until updated, so look now.
   void onNewerVersion(() => void updates?.check());
+  // One runs a newer release, speaking the same protocol (0099): looked for now too, as installed apps would later.
+  void onNewerRelease(() => void updates?.check());
   window = new BrowserWindow({
     width: 1280,
     height: 820,

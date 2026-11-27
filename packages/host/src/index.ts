@@ -19,6 +19,18 @@ export { SettingsStore, DEFAULT_SETTINGS, DATA_MARKER, settingsFrom, readSetting
 export type { PeerOptions, PeersStatus, DeviceInfo, LinkInfo } from './peers/peers.js';
 
 /** Call `fn` when a device of a workspace runs a newer kuraa than this one (it will not sync until this one is updated). */
+/** Say which version of kuraa this process runs, as released (0099): devices on an older one learn a newer is out. */
+export async function setKuraaVersion(version: string | null): Promise<void> {
+  (await import('./peers/node.js')).setKuraaVersion(version);
+}
+
+/** A device runs a newer release of kuraa, speaking the same protocol (0099): at most once an hour. */
+export async function onNewerRelease(fn: (version: string) => void): Promise<() => void> {
+  const { versionNews } = await import('./peers/node.js');
+  versionNews.on('release', fn);
+  return () => versionNews.off('release', fn);
+}
+
 export async function onNewerVersion(fn: () => void): Promise<() => void> {
   const { versionNews } = await import('./peers/node.js');
   versionNews.on('newer', fn);

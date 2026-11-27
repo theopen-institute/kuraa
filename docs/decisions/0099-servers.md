@@ -33,7 +33,7 @@ commits theirs. Now it can be in as itself.
 | Reads | what its person reads | the workspace's own files, and each space whose audience names it |
 | Writes | what its person may change | nothing |
 | Acts in the policy | as its person may | never, but its own join |
-| Taken out by | a `drop` of its key: its person, an admin (the owner, for an admin's) | a `drop` of its key: the owner |
+| Taken out by | its person taken out (a `revoke`), or one computer dropped (a `drop` of its key, for good) | the owner: taken out (a `revoke`, to be invited back), or its key dropped (lost or stolen, for good) |
 | Each workspace's device | its own key, which `signs` with the computer's key | the same |
 
 **One key for all its workspaces** is what people's computers have already: anyone in two
@@ -57,8 +57,12 @@ nothing, and a server that later gets an identity stops being one.
 - **A server signs nothing else that counts.** Its key is no person's, so the policy takes no other
   operation of it, as with any key that is no one's. "Only people's word" holds, with the one
   exception of a server's own join.
-- **Taken out by a `drop`** of its key, the owner's to make, for good, as a computer is. A drop at the
-  same time as its join beats it (a drop beats what its key signs).
+- **Taken out as a person is**, by the owner: a `revoke` of the workspace naming its key. It is out,
+  its cutoff on record, and may be invited back: its join by a new link counts again. (So since
+  `PROTOCOL` 10; before, a server was taken out only by a drop.)
+- **Its key dropped, for good**, by the owner, when someone else may have it (lost or stolen), as a
+  computer's is: no link lets that key in again. A drop, or a taking out, at the same time as its
+  join beats it.
 - **Not a person in any group.** A grant naming a server's key counts for nothing. Audiences may name
   it, by its key: that is how it reads a space.
 - **`mayRead`**: a server reads the workspace's own files, and a space whose audience names it.
@@ -160,10 +164,36 @@ both on this computer only).
 ## In the app
 
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
-devices' name, how it is connected, and, for the owner, **Remove…**. The owner's **Add a server…**
-makes an invite link for one server, for a week, and says to give it to `kuraa-server join` on the
-server. The sidebar says *Syncing with the server* where it is
-the only other device. Removals list *The server … removed*.
+devices' name (one online first, of several), how it is connected, and, for the owner, **Remove…**
+(taken out; invited back with **Add a server…**) and **Key lost or stolen…** (for good, asking first).
+A server's devices are not listed among other computers, so none is removed by "Lost or no longer
+used…", which would drop the whole server's key. The owner's **Add a server…** makes an invite link
+for one server, for a week, and says to give it to `kuraa-host server join` on the server (`pnpm
+server join` from the repository). The sidebar says *Syncing with the server* where it is the only
+other device. Removals list *The server … taken out*, or *The server …'s key removed for good*.
+
+## Joining, as it goes
+
+The owner, after a server's join that went quiet, gave up, and was found to have been removed:
+
+> "So, once a server has been removed, it can never be joined again? That seems like a bad design."
+
+So, besides being taken out to be invited back (above):
+
+- **A device joining waits for its own join** before it takes itself to be out. The records it is
+  sent first say what was (a server taken out, someone invited back); its join comes after. Out even
+  then, the join stops at once and says why: its key removed for good, or a link that did not let it
+  back in (it used to stop silently, and the join report a copy that "could not fetch").
+- **`kuraa-host server join` waits however long the copy takes** (it gave up after five minutes, the
+  join going on unseen), and says how it goes: looking, being let in, copying with git's own words
+  (`Receiving objects: 45% (…), 12.3 MiB | 1.2 MiB/s`) at each tenth of each stage, and in the
+  server's log too. The first copy is stopped only once it has been quiet for five minutes, not after
+  ten minutes, however long it is. `join` and `list` wait a while for a server that is (re)starting.
+- **A device on a newer release tells the others** (`version` in its hello, from releases and the
+  desktop app; never from `pnpm dev`): a server then looks for the update at once (restarting at
+  night, as it is not urgent), and the desktop app checks. Once an hour at most, whatever devices say,
+  and only signed releases are taken (0052), so a device that says so falsely makes nothing happen
+  but a look.
 
 ## Not yet (in the app)
 

@@ -17,7 +17,7 @@
 // server list [--data <folder>]        the workspaces it holds, and whether each has taken it in
 // server key [--data <folder>]         its key: what workspaces know it by
 import { parseArgs } from 'node:util';
-import { lastResort, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
+import { lastResort, onNewerRelease, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
 import { defaultServerData, joinServer, listServer, serverKey, startServer, PEER_PORT, SERVER_PORT } from './index.js';
 
 export interface ServerCliOptions {
@@ -145,7 +145,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
   lastResort({ log: (m) => console.error(`[kuraa-server] ${m}`), save: () => server.hub.hub.saveAll(), stop: () => stop('too many errors') });
   if (o.autoUpdate || values['auto-update']) {
     if (!o.released) say('--auto-update: this server runs from the repository; update it with git pull');
-    else autoUpdate({ ...o.released, log: say, restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn) });
+    else autoUpdate({ ...o.released, log: say, restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
   }
 }
 

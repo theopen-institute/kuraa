@@ -35,6 +35,7 @@ import { dialTcp, listenTcp, parseAddress } from './tcp.js';
 import { recordKey, revokeKeyMessage, shortKey, type MemberRecord } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
+import { compareVersions, isVersion } from '../selfupdate.js';
 import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
 
 export interface NodeOptions {
@@ -166,6 +167,22 @@ export function uploadPackEnv(): NodeJS.ProcessEnv {
  * (PROTOCOL), so this kuraa is out of date.
  */
 export const versionNews = new EventEmitter();
+
+/** The version of kuraa this process runs, as released (setKuraaVersion); null: not a release (pnpm dev, tests). */
+let ownVersion: string | null = null;
+
+/**
+ * Say which version of kuraa this is (the desktop app's, a release's: 0099), in
+ * hellos: a device that runs an older one then knows a newer one is out. Not a
+ * version (`dev`), said not.
+ */
+export function setKuraaVersion(version: string | null): void {
+  ownVersion = version && isVersion(version) ? version : null;
+}
+
+/** When a newer version was last told of (versionNews, `release`): once an hour at most, whatever devices say. */
+let releaseToldAt = 0;
+const RELEASE_TOLD_MS = 3600_000;
 
 /** Which records a device holds, as one hash: the same records, the same hash, in any order (by what each says, recordKey: 0071). */
 export function digestOf(records: MemberRecord[]): string {
@@ -1239,6 +1256,7 @@ export class PeerNode {
     return {
       type: 'hello',
       protocol: PROTOCOL,
+      ...(ownVersion ? { version: ownVersion } : {}),
       workspace: this.ws.id,
       forkedFrom: this.ws.forkedFrom,
       name: this.name,
@@ -1354,6 +1372,11 @@ export class PeerNode {
   private async hello(link: PeerLink, h: Extract<ControlMessage, { type: 'hello' }>): Promise<void> {
     // Another version of what devices say: no syncing, and each says why (an older device, which
     // does not know of this, sees only that it was turned away). The newer one's kuraa is the one to have.
+    // A device on a newer release (0099): told, so this one may update sooner (speaking the same protocol, it need not).
+    if (ownVersion && typeof h.version === 'string' && isVersion(h.version) && compareVersions(h.version, ownVersion) > 0 && Date.now() - releaseToldAt > RELEASE_TOLD_MS) {
+      releaseToldAt = Date.now();
+      versionNews.emit('release', h.version);
+    }
     const theirs = typeof h.protocol === 'number' && Number.isInteger(h.protocol) ? h.protocol : 1;
     if (theirs !== PROTOCOL) {
       const known = this.versions.get(link.key);

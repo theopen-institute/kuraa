@@ -339,9 +339,10 @@ its port (`--port 4322`, on this computer only unless `--host` says otherwise) a
 access code, only `join` and `list`. Members reach it on **5872**, TCP for their connections and UDP
 for its DHT node (`--peer-port`, `--dht-port` say otherwise; 0, any free port). `--public-address`
 tells them where, so devices on networks that block UDP reach it too; without it, it is reached as
-any device is. The owner
-removes it from **People and computers**. One service per computer: installing one as a server
-replaces a host's.
+any device is. `server join` says how it goes, the copy included, however long it takes. The owner
+takes it out from **People and computers** (**Remove…**), and may invite it back with a new link;
+**Key lost or stolen…** removes its key for good (a computer with a new key may join again). One
+service per computer: installing one as a server replaces a host's.
 
 ## On several devices
 

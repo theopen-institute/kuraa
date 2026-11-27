@@ -8,7 +8,7 @@ import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkArchive, compareVersions, currentVersion, installServer, installedRoot, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
+import { autoUpdate, checkArchive, compareVersions, currentVersion, installServer, installedRoot, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
 
 const temps: string[] = [];
 const temp = () => {
@@ -151,6 +151,33 @@ describe('a released server', () => {
     }
     const early = new Date(2026, 10, 21, 1, 0);
     expect(new Date(early.getTime() + untilNight(early)).getDate()).toBe(21);
+  });
+
+  it('looks for an update at once when a device runs a newer release, at most once an hour; not for one older or the same (0099)', async () => {
+    const root = installed();
+    let looked = 0;
+    let told: ((version: string) => void) | null = null;
+    autoUpdate({
+      here: join(root, 'versions', '0.1.0'), build: build(), log: () => undefined, restart: () => undefined, newer: () => undefined,
+      newerRelease: (fn) => void (told = fn),
+      latest: async () => {
+        looked++;
+        return null;
+      },
+    });
+    expect(told).not.toBeNull();
+    told!('0.1.0');
+    told!('0.0.9');
+    told!('not a version');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(looked).toBe(0);
+    told!('0.2.0');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(looked).toBe(1);
+    // Within the hour, not again, whatever a device says.
+    told!('0.3.0');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(looked).toBe(1);
   });
 
   it('compares versions as semver does', () => {

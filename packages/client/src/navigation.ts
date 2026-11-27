@@ -17,6 +17,8 @@ export interface NavigationApp {
   workspaceMenu(at: HTMLElement): void;
   newMenu(at: HTMLElement): void;
   newMenuOpen(): boolean;
+  newDocument(): void;
+  blank(): void;
   panelButtons(): ReturnType<LayoutContext['panelButtons']>;
   askPanel(feature: string, id: string): void;
   views(): ReturnType<LayoutContext['views']>;
@@ -79,6 +81,7 @@ export function layoutContext(base: FeatureClientContext, app: NavigationApp, ev
     workspaceMenu: (at) => app.workspaceMenu(at),
     newMenu: (at) => app.newMenu(at),
     newMenuOpen: () => app.newMenuOpen(),
+    newDocument: () => app.newDocument(),
     panelButtons: () => app.panelButtons(),
     askPanel: (feature, id) => app.askPanel(feature, id),
     views: () => app.views(),
@@ -99,6 +102,7 @@ export function navigationContext(base: FeatureClientContext, app: NavigationApp
     open: (path) => app.open(path),
     openConflicts: (path) => app.openConflicts(path),
     prefetch: (path, now) => app.prefetch(path, now),
+    blank: () => app.blank(),
     newFile: (folder) => app.newFile(folder),
     newFolder: (parent) => app.newFolder(parent),
     rename: (path) => app.rename(path),

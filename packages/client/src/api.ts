@@ -275,7 +275,8 @@ export class HostApi {
   permissions(path: string) { return this.json<PermissionsInfo>(`/api/permissions?path=${encodeURIComponent(path)}`); }
   /** Say a file's or folder's permissions: who may change it, who reads it (null: as its folder says; omitted: as it is). */
   setPermissions(path: string, change: { write?: string[] | null; read?: string[] | null }) { return this.json<PermissionsInfo>('/api/permissions', { method: 'POST', body: JSON.stringify({ path, ...change }) }); }
-  room(path: string) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}`); }
+  /** A document's room; with `draft`, one with no file yet may open, empty (0096). */
+  room(path: string, draft = false) { return this.json<RoomInfo>(`/api/rooms?path=${encodeURIComponent(path)}${draft ? '&draft=1' : ''}`); }
   async fileText(path: string) { return (await this.req(`/api/files?path=${encodeURIComponent(path)}`)).text(); }
   /** A workspace file as it is (an image to show), with its type. */
   async rawFile(path: string) { return (await this.req(`/api/raw?path=${encodeURIComponent(path)}`)).blob(); }

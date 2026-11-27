@@ -104,10 +104,6 @@ export const S = {
     addWorkspace: 'Add a workspace…',
     openFolder: 'Open a folder…',
     cannotOpenFolder: 'Folders cannot be opened here: this host holds one workspace.',
-    emptyTitle: 'Nothing open yet',
-    emptyBody: 'Choose a document on the left, or start a new one.',
-    newDocument: 'New document…',
-    shortcuts: 'Markdown and shortcuts',
     noType: (path: string) => `Kuraa cannot open ${path}: no kind of document it knows uses this name.`,
     versionMismatch: (label: string) => `This app and the host read ${label} documents differently, as one of them is newer. Update the app, or ask whoever runs the host to update it, before editing.`,
     versionMismatchDetails: (label: string, mine: number, theirs: number) => `${label}: version ${mine} here, ${theirs} on the host.`,
@@ -276,8 +272,6 @@ export const S = {
   tree: {
     label: 'Files',
     newFile: 'New file',
-    /** ＋ in the sidebar's header: a menu of a new file or a new folder. */
-    newMenu: 'New file or folder',
     newFileIn: (name: string) => `New file in ${name}`,
     newFolderIn: (name: string) => `New folder in ${name}`,
     newFileMenu: (where: string) => `New file${where}`,

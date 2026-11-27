@@ -116,6 +116,24 @@ describe('host', () => {
     expect(tree.files).toContainEqual({ path: 'notes.md', type: 'pandoc-markdown', title: 'Field notes' });
   });
 
+  it('a draft (0096): a new document with no file until something is written in it, then made and committed', async () => {
+    const draftRoom = (path: string) => api(`/api/rooms?path=${encodeURIComponent(path)}&draft=1`);
+    expect((await draftRoom('a<b.md')).status).toBe(400);
+    const { room } = (await (await draftRoom('drafts/harbour.md')).json()) as { room: string };
+    const c = connectHeadless({ url: running.url.replace(/^http/, 'ws') + '/collab', room, token: running.token, user: ALICE, schema });
+    clients.push(c);
+    await c.ready;
+    expect(c.read().textContent).toBe('');
+    // Opened and left untouched: nothing on disk, nothing in the file list.
+    await new Promise((r) => setTimeout(r, 600));
+    expect(existsSync(join(dir, 'drafts'))).toBe(false);
+    expect((await (await api('/api/tree')).json()).files.map((f: { path: string }) => f.path)).not.toContain('drafts/harbour.md');
+    // Written in: the file (and its folder) made, then committed.
+    c.write(pandocMarkdown.parse('Harbour log\n').doc);
+    await until(() => existsSync(join(dir, 'drafts/harbour.md')) && file('drafts/harbour.md').includes('Harbour log'), 15_000, 'the file made');
+    await until(() => git(dir, 'log', '--format=%H', '--', 'drafts/harbour.md') !== '', 15_000, 'the file committed');
+  });
+
   it('M2: two clients converge and see each other', async () => {
     const a = await connect('notes.md', ALICE);
     const b = await connect('notes.md', BOB);

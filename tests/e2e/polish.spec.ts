@@ -23,7 +23,7 @@ async function create(path: string, content: string): Promise<void> {
 async function openApp(page: Page, name = 'Polisher'): Promise<void> {
   page.on('pageerror', (e) => console.error(`page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${name}&email=polish%40example.org`);
-  await expect(page.getByRole('button', { name: 'New file or folder', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New document', exact: true })).toBeVisible();
 }
 
 async function openFile(page: Page, path: string): Promise<void> {
@@ -40,9 +40,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await create(path, '');
   await openApp(page);
 
-  // Nothing open: the empty state offers a new document and the shortcuts.
-  await expect(page.getByTestId('no-document')).toContainText('Nothing open yet');
-  await page.getByTestId('new-document').click();
+  // Nothing open: a blank document (no file until something is written in it), the cursor in its title (0096).
   await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
 
   await openFile(page, path);

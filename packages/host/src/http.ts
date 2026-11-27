@@ -159,7 +159,15 @@ const workspaceRoutes: Route[] = [
   route('GET', '/api/components', async ({ host, res }) => send(res, 200, await host.components())),
 
   route('GET', '/api/rooms', async ({ host, res, q }) => {
-    const rec = await host.room(str(q.get('path'), 'path'));
+    // A new document with no file yet (draft=1, 0096): opened empty, its file made when there is first something
+    // in it; only where a file could be made by this person (a name that travels, a folder they may change).
+    const draft = q.get('draft') === '1';
+    if (draft) {
+      const path = host.relPath(str(q.get('path'), 'path'));
+      checkPortable(path);
+      if (host.peers && !existsSync(host.resolvePath(path)) && !(await host.peers.access(path)).canWrite) throw new NotAllowed(`You may not make ${path}`);
+    }
+    const rec = await host.room(str(q.get('path'), 'path'), { draft });
     send(res, 200, host.describe(rec));
   }),
 

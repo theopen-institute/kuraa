@@ -330,6 +330,7 @@ revealFolderOf(selected.value);
       :role="items.length ? undefined : 'button'"
       :aria-label="items.length ? undefined : S.space"
       @keydown="onSpaceKey"
+      @click="ctx.blank()"
       @contextmenu="contextMenu($event, '', 'top')"
     />
   </div>

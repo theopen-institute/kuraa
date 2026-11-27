@@ -54,7 +54,8 @@ test('a feature’s commands, view, item in ＋ and layout', async ({ page }) =>
   // A navigation view, in the sidebar beside the file tree; its item in ＋, a command done anywhere.
   await page.getByTestId('sidebar-view:marks:marked').click();
   await expect(page.getByTestId(`example-view:${path}`)).toHaveText(`Hooks ${id}`);
-  await page.getByTestId('new-menu').click();
+  // ＋ makes a document at once (0096); its menu, with what views add, right-clicked.
+  await page.getByTestId('new-menu').click({ button: 'right' });
   await page.getByTestId('context:example-hello').click();
   await expect(page.getByTestId('notice')).toContainText('Hello from Marks (example).');
 

@@ -205,13 +205,17 @@ interface RoomRecord {
   companions: Set<string>;
   /** Companions' text kept with edits not written when the host last stopped: the room's features start from these. */
   keptCompanions: Record<string, string | null> | null;
+  /** A new document with no file yet (0096): its file made when there is first something in it. */
+  draft?: boolean;
+  /** Its file just made, in a folder fewer read: committed into that space, not the workspace's own branch (0069). */
+  madeInSpace?: string | null;
   /** What this host's person did in the room's session (features.ts, Mine): their file is written with this alone. */
   mine: import('./features.js').Mine;
   timers: { flush?: NodeJS.Timeout; commit?: NodeJS.Timeout; max?: NodeJS.Timeout; drop?: NodeJS.Timeout; retry?: NodeJS.Timeout; lead?: NodeJS.Timeout; own?: NodeJS.Timeout };
 }
 
 /** What a new room starts from, read apart from the queue (Host.prepareRecord). */
-interface PreparedRecord extends Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'previous' | 'state' | 'baseCommit' | 'lastHash' | 'dirty' | 'needsOutsideCheck' | 'keptCompanions'> {
+interface PreparedRecord extends Pick<RoomRecord, 'key' | 'path' | 'branch' | 'type' | 'previous' | 'state' | 'baseCommit' | 'lastHash' | 'dirty' | 'needsOutsideCheck' | 'keptCompanions' | 'draft'> {
   /** The file's text as read. */
   text: string;
 }
@@ -644,13 +648,13 @@ export class Host {
    * ever). Only edits kept from before, whose file changed since, need the
    * queue, to merge that change in.
    */
-  async room(path: string): Promise<RoomRecord> {
+  async room(path: string, o: { draft?: boolean } = {}): Promise<RoomRecord> {
     const rel = this.relPath(path);
     let rec = await this.warmRecord(rel);
     if (!rec) {
       let opening = this.opening.get(rel);
       if (!opening) {
-        opening = this.openApart(rel).finally(() => this.opening.delete(rel));
+        opening = this.openApart(rel, !!o.draft).finally(() => this.opening.delete(rel));
         this.opening.set(rel, opening);
       }
       rec = await opening;
@@ -678,15 +682,15 @@ export class Host {
     rec.usedAt = Date.now();
   }
 
-  private async openApart(path: string): Promise<RoomRecord> {
+  private async openApart(path: string, draft = false): Promise<RoomRecord> {
     const st = await this.readGitState();
-    const prep = st.branch ? await this.prepareRecord(path, st.branch).catch(() => null) : null;
+    const prep = st.branch ? await this.prepareRecord(path, st.branch, draft).catch(() => null) : null;
     if (prep && !prep.needsOutsideCheck) {
       const now = await this.readGitState();
       const existing = this.records.get(prep.key);
       if (existing) return existing;
       // Taken only if the branch and the file are as they were read: else made in the queue, read again.
-      const text = now.branch === prep.branch ? await this.readText(this.resolvePath(path), path).catch(() => null) : null;
+      const text = prep.draft ? (existsSync(this.resolvePath(path)) ? null : '') : now.branch === prep.branch ? await this.readText(this.resolvePath(path), path).catch(() => null) : null;
       if (text !== null && text === prep.text && !this.records.has(prep.key)) {
         const rec = this.installRecord(prep);
         this.noteCommitted(rec, prep.text);
@@ -694,10 +698,10 @@ export class Host {
       }
     }
     // Errors (no such file, a link, no branch) are said from here, as they always were.
-    return this.serial(() => this.ensureRecord(path));
+    return this.serial(() => this.ensureRecord(path, draft));
   }
 
-  private async ensureRecord(path: string): Promise<RoomRecord> {
+  private async ensureRecord(path: string, draft = false): Promise<RoomRecord> {
     const st = await this.readGitState();
     // No branch to save to (an earlier version is checked out, or a rebase is under way): nothing new opens.
     if (!st.branch) throw new HttpError(409, pausedBecause(st)!);
@@ -708,7 +712,7 @@ export class Host {
       this.keepRecord(existing);
       return existing;
     }
-    const prep = await this.prepareRecord(path, branch);
+    const prep = await this.prepareRecord(path, branch, draft);
     const rec = this.installRecord(prep);
     if (rec.needsOutsideCheck) await this.applyOutside(rec, prep.text);
     else this.noteCommitted(rec, prep.text);
@@ -720,12 +724,23 @@ export class Host {
    * to it not yet written when the host last stopped, if any (for the same type
    * version). Only reads: safe apart from the queue.
    */
-  private async prepareRecord(path: string, branch: string): Promise<PreparedRecord> {
+  private async prepareRecord(path: string, branch: string, draft = false): Promise<PreparedRecord> {
     const key = `${branch}:${path}`;
     const type = this.typeFor(path);
     if (!type) throw new HttpError(415, `No document type for ${path}`);
     const abs = this.resolvePath(path);
-    if (!existsSync(abs)) throw new HttpError(404, `No such file: ${path}`);
+    if (!existsSync(abs)) {
+      if (!draft) throw new HttpError(404, `No such file: ${path}`);
+      // A new document with no file yet (0096): empty, its file made when there is first something in it
+      // (flushNow writes only what differs from what it started with). Edits kept from before a restart, if any.
+      const head = await this.git.head();
+      const kept = await this.readUnsaved(key, type);
+      const empty = type.parse('');
+      return {
+        key, path, branch, type, text: '', previous: empty, state: kept ? encodeDoc(type.parse(kept.pending).doc) : null,
+        baseCommit: head, lastHash: blobId(''), dirty: !!kept, needsOutsideCheck: false, keptCompanions: null, draft: true,
+      };
+    }
     const text = await this.readText(abs, path);
     const head = await this.git.head();
     const kept = await this.readUnsaved(key, type);
@@ -747,6 +762,7 @@ export class Host {
     rec.dirty = p.dirty;
     rec.needsOutsideCheck = p.needsOutsideCheck;
     rec.keptCompanions = p.keptCompanions;
+    rec.draft = p.draft;
     this.records.set(p.key, rec);
     this.byRoom.set(rec.room, rec);
     return rec;
@@ -1139,8 +1155,17 @@ export class Host {
     const text = rec.type.serialize(doc, rec.previous);
     rec.dirty = false;
     if (text !== rec.previous.text || notText) {
+      // A draft's file is made now (0096): in its folder's space where that is one (as POST /api/files makes one).
+      const making = rec.draft && !existsSync(abs);
+      if (making) rec.madeInSpace = this.peers ? await this.peers.spaceForNew(rec.path) : null;
       try {
+        if (making) await mkdir(dirname(abs), { recursive: true });
         await this.writeAtomic(abs, text);
+        if (making) {
+          rec.draft = false;
+          const at = new Date().toISOString();
+          for (const r of this.records.values()) this.broadcast(r, { type: 'files-changed', at });
+        }
       } catch (e) {
         // Not written (on Windows another program may hold the file): the edits wait, and it is tried again.
         rec.dirty = true;
@@ -1238,7 +1263,10 @@ export class Host {
           })));
           text = describeEdit(rec.type, rec.path, before.code === 0 ? before.stdout : null, rec.previous.text, people.map((u) => u.name), beside);
         }
-        committed = await this.commitPaths([rec.path, ...companions], text, people, extra);
+        // Made just now in a folder fewer read: committed into its space (0069), never onto the workspace's own branch.
+        const space = rec.madeInSpace;
+        rec.madeInSpace = null;
+        committed = space ? await this.commitIntoSpace(space, [rec.path], withTrailers(text, people, extra)) : await this.commitPaths([rec.path, ...companions], text, people, extra);
         for (const c of companions) rec.companions.delete(c);
       } else {
         const now = rec.type.serialize(this.current(rec), rec.previous);

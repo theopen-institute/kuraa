@@ -5,7 +5,7 @@ export const S = {
   label: 'Files',
   workspaces: 'Workspaces',
   /** ＋ in the header: a menu of a new file or a new folder. */
-  newMenu: 'New file or folder',
+  newDocument: 'New document',
   /** The row of the views' names, with more than one. */
   views: 'Ways of seeing the files',
 };

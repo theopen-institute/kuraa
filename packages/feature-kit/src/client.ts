@@ -126,6 +126,8 @@ export interface LayoutContext extends FeatureClientContext {
   newMenu(at: HTMLElement): void;
   /** Whether ＋'s menu is open (for its button's aria-expanded). */
   newMenuOpen(): boolean;
+  /** A new document, at once (0096: ＋): opened with the cursor in its title, no file until something is written in it. */
+  newDocument(): void;
   /** The workspace's panels with an icon (Search), to offer as buttons. */
   panelButtons(): { feature: string; id: string; label: string; keys?: string; icon: FileIcon }[];
   askPanel(feature: string, id: string): void;
@@ -185,6 +187,8 @@ export interface NavigationContext extends FeatureClientContext {
   openConflicts(path: string): void;
   /** The pointer rests on a file (null: it left): it is got ready ahead, to open sooner. */
   prefetch(path: string | null, now?: boolean): void;
+  /** Nothing open: a blank page, a new document with no file until something is written in it (0096: the space below the files clicked). */
+  blank(): void;
   /** A new document, in a folder (none: the top level), opened with the cursor in its title: its path once made, or null if it was not. */
   newFile(folder?: string): Promise<string | null>;
   /** A new folder, its name asked for, in a folder (none: the top level). */

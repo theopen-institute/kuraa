@@ -39,6 +39,8 @@ const props = defineProps<{
   api: HostApi;
   settings: Settings;
   path: string;
+  /** A new document with no file yet (0096): its room opens empty, its file made when there is first something in it. */
+  draft?: boolean;
   type: DocumentType;
   /** Show the file's markdown source (editable) instead of the rich view. */
   showSource: boolean;
@@ -263,7 +265,8 @@ function open(carried: Carried | null = null): () => void {
   emit('status', status);
   const slowTimer = setTimeout(() => (slow.value = true), SLOW_MS);
   // The file from disk, apart from the room (which can wait behind the host's other work): shown until the room is ready.
-  api.fileText(path).then((text) => {
+  // A draft (0096) has no file yet: nothing to read.
+  if (!props.draft) api.fileText(path).then((text) => {
     if (!cancelled && loading.value) preview.value = text;
   }, () => undefined);
 
@@ -277,7 +280,7 @@ function open(carried: Carried | null = null): () => void {
   };
 
   (async () => {
-    const room = await api.room(path);
+    const room = await api.room(path, props.draft);
     if (cancelled) return;
     update({ room, lastFlushAt: room.lastFlushAt, lastCommitAt: room.lastCommitAt, lastCommit: room.lastCommit });
     const conn = connectRoom({
@@ -291,7 +294,7 @@ function open(carried: Carried | null = null): () => void {
         // Refused: perhaps the room was replaced while this was away from it (a laptop asleep), and the
         // host knows only the new one. Then moved to it, with the edits made meanwhile, as when told so.
         if (s === 'unauthorized') {
-          void api.room(path).then((now) => {
+          void api.room(path, props.draft).then((now) => {
             if (!cancelled && now.room !== room.room) void replaced(null);
           }, () => undefined);
         }
@@ -731,7 +734,7 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
   if (!showSource || !v) return;
   const { api, path, type } = props;
   let cancelled = false;
-  api.fileText(path).catch(() => '').then((onDisk) => {
+  (props.draft ? Promise.resolve('') : api.fileText(path).catch(() => '')).then((onDisk) => {
     if (cancelled || !sourceMount.value || v.isDestroyed) return;
     const initial = type.serialize(v.state.doc, onDisk ? type.parse(onDisk) : undefined);
     source = new SourceEditor(sourceMount.value, v, type, initial, !!props.readOnly);

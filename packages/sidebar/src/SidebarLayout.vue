@@ -86,14 +86,14 @@ function drop(e: DragEvent) {
           :data-testid="`${b.id}-button`"
           @click="ctx.askPanel(b.feature, b.id)"
         ><FileIcon :icon="b.icon" /></button>
+        <!-- A new document at once (0096). Its menu (a file of another kind, a folder, what the views add), right-clicked. -->
         <button
           type="button"
-          :title="S.newMenu"
-          :aria-label="S.newMenu"
-          aria-haspopup="menu"
-          :aria-expanded="newOpen"
+          :title="S.newDocument"
+          :aria-label="S.newDocument"
           data-testid="new-menu"
-          @click="ctx.newMenu($event.currentTarget as HTMLElement)"
+          @click="ctx.newDocument()"
+          @contextmenu.prevent="ctx.newMenu($event.currentTarget as HTMLElement)"
         >＋</button>
       </span>
     </div>

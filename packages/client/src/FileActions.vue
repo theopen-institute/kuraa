@@ -39,6 +39,8 @@ const emit = defineEmits<{
   documentSettings: [path: string];
   /** A new document was made by New file: it opens with the cursor in its title. */
   created: [path: string];
+  /** A new document opened with no file yet (0096): made when there is first something in it. */
+  draft: [path: string];
   /** This file's permissions: who can read it, and who can change it (0066, 0067). */
   permissions: [path: string];
   /** A place to show: made or moved there (its folder opened), or a folder renamed from `from`. */
@@ -99,15 +101,9 @@ async function create(folder = ''): Promise<string | null> {
   const path = pathForTitle(`${S.tree.untitledName} ${freshLetters()}`, type.extension, dir, paths.value);
   emit('reveal', path);
   emit('created', path);
-  // In a folder arranged by hand (0093): after the open file, where it is in it, else at the end.
-  const order = props.orders?.[folder];
-  const after = props.selected && folderOf(props.selected) === folder ? nameOf(props.selected) : null;
-  const name = nameOf(path);
-  const placed = order ? (after && order.includes(after) ? order.flatMap((n) => (n === after ? [n, name] : [n])) : [...order, name]) : null;
-  return (await act(async () => {
-    await props.api.createFile(path, '');
-    if (placed) await props.api.setOrder(folder, placed).catch(() => undefined);
-  }, path)) ? path : null;
+  // Nothing written yet (0096): opened as a draft, its file made when there is first something in it.
+  emit('draft', path);
+  return path;
 }
 
 // A new document's title, while it is open; once it is left, its filename is made from that title.
@@ -281,7 +277,9 @@ function menuItems(path: string, plus = false): ContextItem[] {
 
 /** The menu for a file, a folder (ending in `/`) or the top level (''), at a point. */
 function fileMenu(path: string, at: { x: number; y: number }) {
-  menu.value = { x: at.x, y: at.y, items: menuItems(path) };
+  // The top level's: what the views add to ＋ too (0096: ＋ itself makes a document at once).
+  const extra = path === '' ? (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 })) : [];
+  menu.value = { x: at.x, y: at.y, items: [...menuItems(path), ...extra] };
 }
 
 /** ＋ (decision 0086): the top level's menu, a new file or folder, and what the views add, under the button. */

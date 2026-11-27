@@ -13,7 +13,7 @@ import { webShell } from './shell.js';
 import { useWorkspaces } from './workspaces.js';
 import { ensureIdentity, personShellFor } from './hostPerson.js';
 import { dialogOpen } from './focus.js';
-import { APP_KEYS, keyLabel, keyMatches } from './keys.js';
+import { APP_KEYS, keyMatches } from './keys.js';
 import { S } from './strings.js';
 import type { AppProps, EditorStatus, Notice, WorkspaceLink } from './types.js';
 import Editor from './Editor.vue';
@@ -213,6 +213,8 @@ const navApp: NavigationApp = {
   },
   newMenu: (at) => fileActions.value?.newMenu(at),
   newMenuOpen: () => !!fileActions.value?.newMenuOpen,
+  newDocument: () => newDocument(),
+  blank: () => blankPage(),
   panelButtons: () => fh.panelButtons.value,
   askPanel: (feature, id) => fh.askPanel(feature, id),
   views: () => views.value.map(({ active, view }) => ({
@@ -637,6 +639,37 @@ function showMoved(from: string, folder: string, names: string[] | null) {
   orders.value = next;
 }
 
+/**
+ * New documents with no file yet (0096), by path: open in the editor, their
+ * room empty, their file made by the host when there is first something in
+ * them. One left untouched is never written. Gone from here once the file list
+ * has the file.
+ */
+const drafts = ref(new Set<string>());
+function openDraft(p: string) {
+  drafts.value = new Set([...drafts.value, p]);
+  select(p);
+}
+watch(files, (list) => {
+  if (!drafts.value.size) return;
+  const made = new Set(list.map((f) => f.path));
+  const left = [...drafts.value].filter((p) => !made.has(p));
+  if (left.length !== drafts.value.size) drafts.value = new Set(left);
+});
+/** ＋ (0096): a new document at once, in the folder shown, else at the top; the cursor in its title. */
+function newDocument() {
+  void fileActions.value?.create(shownFolderView.value?.folder ?? '');
+}
+/** Nothing open: a blank page, a new document with no file until something is written in it (0096). */
+function blankPage() {
+  mainView.value = null;
+  if (path.value && drafts.value.has(path.value)) return;
+  select(null);
+}
+watch([ready, path, mainView, () => fileActions.value], () => {
+  if (ready.value && !path.value && !mainView.value && fileActions.value && !editingSettings.value) void fileActions.value.create('');
+});
+
 /** Open a file (if it is not open), and Settings at its section. */
 function openDocumentSettings(next: string) {
   select(next);
@@ -780,9 +813,10 @@ const openKey = () => `${OPEN_KEY}:${api.value.baseUrl}`;
 watch(api, () => {
   try { path.value = sessionStorage.getItem(openKey()); } catch { path.value = null; }
 }, { immediate: true });
-watch(path, (p) => {
+// A draft is not (0096): reloaded, a blank one again; once it has its file, it is.
+watch([path, drafts], ([p]) => {
   try {
-    if (p) sessionStorage.setItem(openKey(), p);
+    if (p && !drafts.value.has(p)) sessionStorage.setItem(openKey(), p);
     else sessionStorage.removeItem(openKey());
   } catch { /* storage unavailable */ }
 });
@@ -792,10 +826,14 @@ const file = computed(() => shownFiles.value.find((f) => f.path === path.value) 
 const fileName = computed(() => (file.value?.title || path.value?.slice(path.value.lastIndexOf('/') + 1)) ?? null);
 
 watchEffect(() => {
-  document.title = [fileName.value, workspace.value?.name, S.app.title].filter(Boolean).join(' · ');
+  // A draft (0096) has no name of its own yet: the workspace's alone.
+  const own = path.value && drafts.value.has(path.value) ? null : fileName.value;
+  document.title = [own, workspace.value?.name, S.app.title].filter(Boolean).join(' · ');
 });
-const type = computed(() => (file.value?.type ? registry.value.get(file.value.type) : undefined));
-const hostType = computed(() => workspace.value?.types.find((t) => t.id === file.value?.type));
+/** The open document's type: as the file list says it, or for a draft (no file yet, 0096), as its name says it. */
+const typeId = computed(() => file.value?.type ?? (path.value && drafts.value.has(path.value) ? hostRegistry.value.resolve(path.value)?.id ?? null : null));
+const type = computed(() => (typeId.value ? registry.value.get(typeId.value) : undefined));
+const hostType = computed(() => workspace.value?.types.find((t) => t.id === typeId.value));
 const versionMismatch = computed(() => !!type.value && !!hostType.value && hostType.value.version !== type.value.version);
 // The types the host has on: offered for new files. (Files report their own type.)
 const hostRegistry = computed(() => {
@@ -962,16 +1000,6 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
         <div v-else-if="!path && ready && shownFolderView && folderMount" class="folder-view-pane">
           <FeatureMount :key="`${shownFolderView.key}|${shownFolderView.folder}`" class="folder-view" testid="folder-view" :mount="folderMount" />
         </div>
-        <div v-else-if="!path && ready" class="empty">
-          <div class="no-workspace" data-testid="no-document">
-            <h2>{{ S.app.emptyTitle }}</h2>
-            <p>{{ S.app.emptyBody }}</p>
-            <div class="actions">
-              <button type="button" class="primary" data-testid="new-document" @click="fileActions?.create()">{{ S.app.newDocument }}</button>
-              <button type="button" data-testid="empty-help" @click="toggleHelp">{{ S.app.shortcuts }} <kbd>{{ keyLabel(APP_KEYS.help) }}</kbd></button>
-            </div>
-          </div>
-        </div>
         <div v-if="path && !type && file" class="empty">{{ S.app.noType(path) }}</div>
         <ErrorBanner v-if="versionMismatch" :error="S.app.versionMismatch(type!.label)" />
         <details v-if="versionMismatch" class="banner-details">
@@ -1010,6 +1038,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
               :jump-to-conflict="conflictJump === path"
               @jumped="conflictJump = null"
               :focus-title="titleFocus === path"
+              :draft="drafts.has(path)"
               @title-focused="titleFocus = null"
               @status="(s) => (status = s)"
               @title="(t) => (liveTitle = { path: path!, title: t })"
@@ -1098,6 +1127,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
       :orders="orders"
       @document-settings="openDocumentSettings"
       @created="(p) => (titleFocus = p)"
+      @draft="openDraft"
       @permissions="openPermissions"
       @changed="refreshTree"
       @error="fail"

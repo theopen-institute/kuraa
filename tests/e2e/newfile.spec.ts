@@ -9,7 +9,7 @@ import { E2E } from './env.js';
 
 async function openApp(page: Page): Promise<void> {
   await page.goto(`/?token=${E2E.token}&name=Maker&email=make%40example.org`);
-  await expect(page.getByRole('button', { name: 'New file or folder', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New document', exact: true })).toBeVisible();
 }
 
 const dialog = (page: Page) => page.getByTestId('ask');
@@ -24,18 +24,20 @@ test('New file makes an untitled document at once: its title is typed in the pag
   })).status).toBe(201);
   await openApp(page);
 
-  // No dialog: an untitled Markdown document, open, with the cursor in its title.
-  await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
-  await page.getByTestId('context:new-file').click();
+  // ＋, no menu: an untitled Markdown document, open, with the cursor in its title; no file yet (0096).
+  const untitledRows = page.locator('[role="treeitem"][data-path^="untitled-"]');
+  const before = await untitledRows.count();
+  await page.getByRole('button', { name: 'New document', exact: true }).click();
   const current = page.locator('[role="treeitem"][aria-current="page"]');
-  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
-  const untitled = (await current.getAttribute('data-path'))!;
-  expect(readFileSync(join(E2E.dir, untitled), 'utf8')).toBe('');
   const title = page.getByTestId('editor').locator('h1.doc-title');
   await expect(title).toBeFocused();
+  await expect(current).toHaveCount(0);
+  await expect(untitledRows).toHaveCount(before);
 
-  // The title, typed in the page: the header has it, and the sidebar shows it.
+  // The title, typed in the page: now the file is made, the header has it, and the sidebar shows it.
   await page.keyboard.type(`Tidal notes: Café ${stamp}`);
+  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
+  const untitled = (await current.getAttribute('data-path'))!;
   await expect(page.getByTestId(`file:${untitled}`)).toContainText(`Tidal notes: Café ${stamp}`);
   await expect.poll(() => readFileSync(join(E2E.dir, untitled), 'utf8')).toContain(`title: "Tidal notes: Café ${stamp}"`);
   await page.keyboard.press('Enter');
@@ -50,12 +52,11 @@ test('New file makes an untitled document at once: its title is typed in the pag
   expect(readFileSync(join(E2E.dir, named), 'utf8')).toBe(`---\ntitle: "Tidal notes: Café ${stamp}"\n---\n\nBody.\n`);
 
   // Given its title, then the app closed and opened again (it forgets what it made): still named after its title when left.
-  await page.getByRole('button', { name: 'New file or folder', exact: true }).click();
-  await page.getByTestId('context:new-file').click();
-  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
-  const second = (await current.getAttribute('data-path'))!;
+  await page.getByRole('button', { name: 'New document', exact: true }).click();
   await expect(title).toBeFocused();
   await page.keyboard.type(`Ebb tables ${stamp}`);
+  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
+  const second = (await current.getAttribute('data-path'))!;
   await expect.poll(() => readFileSync(join(E2E.dir, second), 'utf8')).toContain(`title: Ebb tables ${stamp}`);
   await page.reload();
   await expect(current).toHaveAttribute('data-path', second);
@@ -151,26 +152,21 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
 
   // A new folder: committed (with a placeholder git keeps), shown, and a place for new files.
   const folder = `runs/folder-${Date.now().toString(36)}`;
-  // ＋ in the header is a menu (decision 0086): a new file or a new folder, at the top level.
-  // A second click closes it, as does Escape.
-  const plus = page.getByRole('button', { name: 'New file or folder', exact: true });
+  // ＋ in the header makes a document at once (0096); its menu, right-clicked: a new file or a new folder, at the
+  // top level. Escape closes it.
+  const plus = page.getByRole('button', { name: 'New document', exact: true });
   const menu = page.getByTestId('context-menu');
-  await plus.click();
+  await plus.click({ button: 'right' });
   await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
-  await expect(plus).toHaveAttribute('aria-expanded', 'true');
-  await plus.click();
-  await expect(menu).toHaveCount(0);
-  await plus.click();
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
-  await expect(plus).toBeFocused();
   // The space below the files has the same menu, by right-click.
   const space = page.getByTestId('tree-space');
   await space.scrollIntoViewIfNeeded();
   await space.click({ button: 'right' });
   await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
   await page.keyboard.press('Escape');
-  await plus.click();
+  await plus.click({ button: 'right' });
   await page.getByTestId('context:new-folder').click();
   await expect(page.getByTestId('ask').locator('input')).toHaveValue('new-folder');
   await page.getByTestId('ask').locator('input').fill(folder);
@@ -181,6 +177,9 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.locator('[data-testid$="/.gitkeep"]')).toHaveCount(0);
   await row.hover();
   await row.getByRole('button', { name: /^New file in/ }).click();
+  // In the folder, once something is written in it (0096).
+  await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
+  await page.keyboard.type('Field day');
   await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', new RegExp(`^${folder}/untitled-[a-z0-9]{5}\\.md$`));
 
   // ⌘, (Ctrl+, elsewhere) opens Settings, at the open document (decision 0065); Escape closes it.
@@ -253,4 +252,36 @@ test('right-clicking a folder renames it, with what is in it', async ({ page }) 
   await expect.poll(() => execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' }).trim()).toBe(`Rename ${folder} to ${folder}-renamed`);
   await expect(page.locator('.tree-file.selected')).toContainText('inside.md');
   await expect(page.getByTestId('editor')).toContainText('Inside');
+});
+
+test('nothing open is a blank document: untouched, never written; written in, a file; the space below the files, a blank one again', async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const untitledRows = page.locator('[role="treeitem"][data-path^="untitled-"]');
+  await openApp(page);
+  const before = await untitledRows.count();
+  const title = page.getByTestId('editor').locator('h1.doc-title');
+  const current = page.locator('[role="treeitem"][aria-current="page"]');
+
+  // Nothing open: a blank document, the cursor in its title; no file, nothing in the tree.
+  await expect(title).toBeFocused();
+  await expect(current).toHaveCount(0);
+
+  // Written in: its file made, in the tree, open.
+  await page.keyboard.type(`Blank page ${stamp}`);
+  await expect(current).toHaveAttribute('data-path', /^untitled-[a-z0-9]{5}(-\d+)?\.md$/);
+  const made = (await current.getAttribute('data-path'))!;
+  await expect.poll(() => (existsSync(join(E2E.dir, made)) ? readFileSync(join(E2E.dir, made), 'utf8') : '')).toContain(`Blank page ${stamp}`);
+  await expect(untitledRows).toHaveCount(before + 1);
+
+  // The space below the files clicked: nothing open, a blank document again; left untouched, nothing written.
+  await page.getByTestId('tree-space').click();
+  await expect(current).toHaveCount(0);
+  await expect(title).toHaveText('');
+  await page.getByRole('button', { name: 'New document', exact: true }).click();
+  await expect(title).toBeFocused();
+  await page.reload();
+  await expect(page.getByTestId('editor').locator('h1.doc-title')).toBeFocused();
+  // The one written in, named after its title once left; the untouched ones, nowhere.
+  await expect(untitledRows).toHaveCount(before);
+  await expect(page.getByTestId(`file:blank-page-${stamp}.md`)).toBeVisible();
 });

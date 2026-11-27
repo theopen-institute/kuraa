@@ -1,7 +1,8 @@
 // @kuraa/server (decision 0099): a server run from its folder, with its own key; a workspace brought
 // onto it by its owner's link for a server, through the running server; listed, and taken in.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { connect, createServer } from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,7 +58,8 @@ async function owner(): Promise<RunningHost> {
 }
 
 async function server(data = tmp('data')): Promise<RunningServer> {
-  const s = await startServer({ data, port: 0, bootstrap: testnet.bootstrap as never });
+  // Any free ports: tests run side by side, and beside a server this computer may run on 5872.
+  const s = await startServer({ data, port: 0, peerPort: 0, dhtPort: 0, bootstrap: testnet.bootstrap as never });
   running.push(s);
   return s;
 }
@@ -94,6 +96,31 @@ describe('a server, run from its folder (0099)', () => {
     const personLink = await a.host.peers!.inviteLink({ hours: 24, once: true });
     await expect(joinServer(personLink, data)).rejects.toThrow('A server joins by an invite link for a server');
     expect((await listServer(data)).length).toBe(1);
+  });
+
+  it('takes members’ connections on its port from the first workspace it joins, not only after a restart (its own process)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    // A free port: the test's own, and this computer may run a server on 5872.
+    const port = await new Promise<number>((done) => {
+      const probe = createServer().listen(0, '127.0.0.1', () => {
+        const p = (probe.address() as { port: number }).port;
+        probe.close(() => done(p));
+      });
+    });
+    const bootstrap = (testnet.bootstrap as { host: string; port: number }[]).map((b) => `${b.host}:${b.port}`);
+    const child = spawn(join(import.meta.dirname, '../../../node_modules/.bin/tsx'), ['packages/server/src/main.ts', '--data', data, '--port', '0', '--peer-port', String(port), '--dht-port', '0', ...bootstrap.flatMap((b) => ['--bootstrap', b])], {
+      cwd: join(import.meta.dirname, '../../..'), stdio: 'ignore',
+    });
+    running.push({ close: () => new Promise<void>((done) => { child.once('exit', () => done()); child.kill('SIGTERM'); }) });
+    await until(() => existsSync(join(data, 'server.json')), 20_000, 'the server started');
+    await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    const listening = () => new Promise<boolean>((done) => {
+      const sock = connect(port, '127.0.0.1');
+      sock.once('connect', () => { sock.destroy(); done(true); });
+      sock.once('error', () => done(false));
+    });
+    await until(listening, 20_000, `the server listening on ${port}`);
   });
 
   it('makes no workspace of its own', async () => {

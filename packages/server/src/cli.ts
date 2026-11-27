@@ -6,8 +6,9 @@
 //   [--data <folder>]                  where it keeps its key, its workspaces and how it is reached
 //                                      (default ~/.kuraa/server-data)
 //   [--public-address host[:port]]     where members reach it over TCP: told to them, and put in invite links
-//   [--peer-port N]                    take members' connections over TCP on this port (for networks that block UDP)
-//   [--dht-port N] [--no-serve-dht]    its DHT node on a fixed port, for members to start from; never the public DHT
+//   [--peer-port 5872]                 take members' connections over TCP on this port (for networks that block UDP)
+//   [--dht-port 5872] [--no-serve-dht] its DHT node on this UDP port, for members to start from; never the public DHT
+//                                      (open TCP and UDP 5872 in the firewall; 0 for either: any free port)
 //   [--bootstrap host:port]... [--relay <key>]...   a private network's DHT nodes; relays
 //   [--port 4322] [--host 127.0.0.1] [--token T]   its own API, for join and list: it serves no app (headless, for now)
 //   [--auto-update]                    a release, installed, updates itself (0052)
@@ -17,7 +18,7 @@
 // server key [--data <folder>]         its key: what workspaces know it by
 import { parseArgs } from 'node:util';
 import { lastResort, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
-import { defaultServerData, joinServer, listServer, serverKey, startServer, SERVER_PORT } from './index.js';
+import { defaultServerData, joinServer, listServer, serverKey, startServer, PEER_PORT, SERVER_PORT } from './index.js';
 
 export interface ServerCliOptions {
   /** How it is called, in what it says: `kuraa-server` (default), or `kuraa-host server` released. */
@@ -81,8 +82,8 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     fail((e as Error).message);
   }
 
-  const peerPort = whole('peer-port', values['peer-port']);
-  const dhtPort = whole('dht-port', values['dht-port']);
+  const peerPort = whole('peer-port', values['peer-port'], 0) ?? PEER_PORT;
+  const dhtPort = whole('dht-port', values['dht-port'], 0) ?? PEER_PORT;
   const port = whole('port', values.port, 0) ?? SERVER_PORT;
   const server = await startServer({
     data,
@@ -103,8 +104,9 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
   say(`key:        ${server.key}`);
   say(`data:       ${server.data}`);
   say(`api:        ${server.hub.url}  (for ${name} join and list; no app: headless)`);
-  if (values['public-address'] && peerPort) say(`reached at: ${values['public-address']} (TCP ${peerPort})`);
-  else say('no --public-address and --peer-port: members reach this server through the DHT only, as any device');
+  say(`ports:      TCP ${peerPort || 'any'} (members' connections), UDP ${dhtPort || 'any'} (its DHT node)`);
+  if (values['public-address']) say(`reached at: ${values['public-address']}`);
+  else say('no --public-address: members are not told where it is, and reach it through the DHT, as any device');
   say(`bring a workspace here: ${name} join <invite link for a server>`);
 
   // Save everything, then exit (for its service to start it again, after an update). A signal often comes twice

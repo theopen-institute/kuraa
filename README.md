@@ -72,8 +72,8 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--workspaces` | Settings, else `Documents/kuraa` | Where new workspaces go (their list kept in it). See below | Settings: New workspaces |
 | `--bootstrap` | Hyperswarm's | DHT nodes for finding devices (`host:port`), for a private network | Settings: Other computers › Advanced |
 | `--relay` | none | Relays to connect through when computers cannot connect directly, by key (`pnpm host relay` runs one) | Settings: Other computers › Advanced |
-| `--peer-port`, `--public-address` | none | A server's: take devices' connections over TCP on this port, and where they reach it (`host` or `host:port`), for networks that block UDP; told to members and put in invite links | Command line only |
-| `--dht-port`, `--no-serve-dht` | any, serving | A server's: its DHT node on a fixed port, for members to start from; never serving the public DHT | Command line only |
+| `--peer-port`, `--public-address` | none (`kuraa-host server`: 5872) | A server's: take devices' connections over TCP on this port, and where they reach it (`host` or `host:port`), for networks that block UDP; told to members and put in invite links | Command line only |
+| `--dht-port`, `--no-serve-dht` | any (`kuraa-host server`: 5872), serving | A server's: its DHT node on a fixed port, for members to start from; never serving the public DHT | Command line only |
 | `--flush-ms`, `--commit-ms` | 2000, 30000 | Write to disk after this long idle; commit after this long idle | Settings: Saving › Advanced (in seconds) |
 | `--engine` | `r` | Which engines run code: `--engine r`, or `--engine none`. See below | Settings: Run R code |
 | `--env` | the only one loaded | Where code runs, by environment: `--env podman` | Settings: Where code runs (shown when there is a choice) |
@@ -297,8 +297,9 @@ systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it 
 
 The flags after `--` are the server's (`--host`, `--port`, `--workspaces`, as above). For devices on
 networks that block UDP (many companies and universities), and to be where the workspace's devices
-start from, give it a public address: `-- --workspaces ~/kuraa --peer-port 443 --public-address
-kuraa.example.org --dht-port 49737`, with those ports open in its firewall (TCP 443, UDP 49737).
+start from, give it a public address: `-- --workspaces ~/kuraa --peer-port 5872 --public-address
+kuraa.example.org --dht-port 5872`, with that port open in its firewall (TCP and UDP 5872: kuraa's
+own number, as a server's below; a service cannot listen on one below 1024, such as 443).
 Members learn them from it, and invite links made from then on carry them. With
 `--auto-update`, it looks for a newer release every six hours, takes it only if it is signed with
 the release key, puts it beside the one running, and restarts to use it at night (between 3 and 5),
@@ -320,7 +321,8 @@ that runs one unattended, install the release (as above) with a service that run
 updating itself and started again whenever it stops:
 
 ```sh
-node kuraa-server-*/kuraa-host.mjs install --service -- server --public-address kuraa.example.org --peer-port 443
+sudo ufw allow 5872/tcp && sudo ufw allow 5872/udp                      # members' connections, and its DHT node
+node kuraa-server-*/kuraa-host.mjs install --service -- server --public-address kuraa.example.org
 systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it says (launchd on macOS)
 loginctl enable-linger "$USER"                                         # to run while no one is logged in
 ~/.kuraa/server/kuraa-host server join 'kuraa-invite:…'                # the owner's link for a server
@@ -332,8 +334,10 @@ From the repository, `pnpm server` is the same (`pnpm server join …`, `pnpm se
 (one for all its workspaces; no identity), its workspaces, and `server.json` (where its API is, and
 its access code). It makes no workspaces and runs no code. It is headless: it serves no page, and
 its port (`--port 4322`, on this computer only unless `--host` says otherwise) answers, with its
-access code, only `join` and `list`. `--public-address` and `--peer-port` let members on networks
-that block UDP reach it (open that TCP port); without them it is reached as any device is. The owner
+access code, only `join` and `list`. Members reach it on **5872**, TCP for their connections and UDP
+for its DHT node (`--peer-port`, `--dht-port` say otherwise; 0, any free port). `--public-address`
+tells them where, so devices on networks that block UDP reach it too; without it, it is reached as
+any device is. The owner
 removes it from **People and computers**. One service per computer: installing one as a server
 replaces a host's.
 

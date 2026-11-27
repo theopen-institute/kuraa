@@ -144,6 +144,19 @@ So there is one program, released as before (0052), and a server is that program
   server package; the server package is the host with its constraints and, later, what it adds
   (relaying, signing in).
 
+## Its port: 5872
+
+The owner, asked for a default port: "Not something like 8443 that's used by many other programs."
+
+Members reach a server on **5872** unless told otherwise: TCP for their connections (`--peer-port`),
+UDP for its DHT node (`--dht-port`), one number for both, as the two are apart. It spells KURA on a
+phone's keys, and IANA's registry has it, and 5871 and 5873 to 5876, assigned to nothing, for TCP or
+UDP. It is a registered port (1024 to 49151): a service may listen on it, as it may not on one below
+1024 (443, say), and the system never hands it out for its own connections, as it may one above
+49151 (the README's example DHT port before, 49737). 0 asks for any free port (the tests do). A server joining its first workspace takes these ports at once: the connection the join makes goes on as the workspace's, and it opens the process's TCP listener and DHT node, so it is given the server's ports too (before, the first workspace joined left them on any port until a restart, `--peer-port` or not). The
+host's own ports are unchanged (4321, assigned to `rwhois`; the server's API 4322, to `trim-event`:
+both on this computer only).
+
 ## In the app
 
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its

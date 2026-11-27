@@ -27,6 +27,13 @@ export const defaultServerData = () => join(homedir(), '.kuraa', 'server-data');
 /** The port a server's own API (for kuraa-server join and list) listens on, unless told: beside a host's 4321. */
 export const SERVER_PORT = 4322;
 
+/**
+ * Where members reach a server, unless told (0099): TCP for their connections,
+ * UDP for its DHT node, the same number. KURA on a phone's keys; unassigned by
+ * IANA for both, as are its neighbours.
+ */
+export const PEER_PORT = 5872;
+
 export interface ServerOptions {
   /** Its folder (default ~/.kuraa/server-data). */
   data?: string;
@@ -38,7 +45,8 @@ export interface ServerOptions {
    * Where members reach it (0053): over TCP on `peerPort`, at `publicAddress`
    * (`host` or `host:port`), told to members and put in invite links; its DHT
    * node on `dhtPort`, for members to start from; `serveDht: false`, never the
-   * public DHT. And DHT nodes and relays of a private network.
+   * public DHT. And DHT nodes and relays of a private network. Both ports are
+   * PEER_PORT (5872) unless told; 0, any free one.
    */
   publicAddress?: string;
   peerPort?: number;
@@ -75,8 +83,8 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     signing,
     person: null,
     publicAddress: o.publicAddress,
-    peerPort: o.peerPort,
-    dhtPort: o.dhtPort,
+    peerPort: o.peerPort ?? PEER_PORT,
+    dhtPort: o.dhtPort ?? PEER_PORT,
     serveDht: o.serveDht,
     bootstrap: o.bootstrap,
     relays: o.relays,

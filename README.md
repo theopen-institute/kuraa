@@ -507,6 +507,20 @@ pnpm dev --workspaces ~/research  # another folder of workspaces
 pnpm dev --dir ~/research/notes   # one folder, as `pnpm host --dir` serves it
 ```
 
+To try a feature branch from the main checkout (each is made in a git worktree,
+`.claude/worktrees/<name>`), while your own `pnpm dev` and the desktop app go on as they are:
+
+```sh
+pnpm try                          # the worktrees, with their branches
+pnpm try words                    # its pnpm dev, on a free port (never 5173), opened in the browser
+pnpm try words desktop            # its desktop app, with data of its own
+```
+
+A name is the worktree's folder or branch, or the start of only one. Its packages are installed
+first. Its `pnpm dev` has the worktree's own `.dev-workspaces` (said, if a workspace from elsewhere
+has been added there: close it in the app that has it open first); its desktop app keeps its
+preferences and workspaces in the worktree (`.try-desktop/`), never with yours.
+
 Like the desktop app, `pnpm dev` serves a folder of workspaces you can add to from the app, with
 Settings and **Open a folder…** in the page; its settings are kept in
 `.dev-workspaces/settings.json` (beside `--workspaces`, if given). The first time, it starts with a

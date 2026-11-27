@@ -8,10 +8,15 @@
 //
 // Installed (`kuraa-host install`), it lives in a folder of its own:
 //
-//   <root>/kuraa-host.mjs        starts the version `current` names (never changes)
+//   <root>/kuraa-host.mjs        starts the version `current` names, or goes back to the last
+//                                good one if it fails to start three times (rewritten by a
+//                                version that has run well, when it is not the launcher it has)
 //   <root>/kuraa-host, .cmd      the same, for the shell and for Windows
 //   <root>/current               the version to run
-//   <root>/versions/<version>/   each version, as released (this one and the one before)
+//   <root>/good                  the last version that ran well (for two minutes)
+//   <root>/tries                 how often `current` has been started since it last ran well
+//   <root>/failed                a version that did not start: never taken again
+//   <root>/versions/<version>/   each version, as released (this one, and the good one)
 //
 // `kuraa-host update` puts the latest release beside the others and names it in
 // `current`, which takes effect when the server next starts. With
@@ -123,9 +128,53 @@ function setCurrent(root: string, version: string): void {
   renameSync(join(root, 'current.next'), join(root, 'current'));
 }
 
-/** Keep the version to run, and the one before it; remove the rest. */
+/** Keep the version to run, the one before it and the last good one; remove the rest. */
 function prune(root: string, keep: string[]): void {
-  for (const v of readdirSync(join(root, 'versions'))) if (!keep.includes(v)) rmSync(join(root, 'versions', v), { recursive: true, force: true });
+  const good = readMark(root, 'good');
+  const kept = good ? [...keep, good] : keep;
+  for (const v of readdirSync(join(root, 'versions'))) if (!kept.includes(v)) rmSync(join(root, 'versions', v), { recursive: true, force: true });
+}
+
+/** One of the folder's marks (`good`, `failed`, `tries`), or null. */
+function readMark(root: string, name: string): string | null {
+  try {
+    return readFileSync(join(root, name), 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write a mark whole. */
+function writeMark(root: string, name: string, value: string): void {
+  writeFileSync(join(root, `${name}.next`), `${value}\n`);
+  renameSync(join(root, `${name}.next`), join(root, name));
+}
+
+/**
+ * This version has run well (0052, 0099): the one to go back to should a later
+ * one fail to start; and the launcher made the one that goes back, if it is an
+ * older one that never does (installed before it could). Whether the launcher
+ * was rewritten.
+ */
+export function markGood(root: string, version: string): boolean {
+  writeMark(root, 'good', version);
+  writeMark(root, 'tries', '0');
+  const file = join(root, 'kuraa-host.mjs');
+  if (readMark(root, 'kuraa-host.mjs') === LAUNCHER.trim()) return false;
+  writeFileSync(`${file}.next`, LAUNCHER);
+  renameSync(`${file}.next`, file);
+  return true;
+}
+
+/** The major version of Node a release says it needs (its package.json's engines.node: `>=24`), or null. */
+function nodeNeeded(dir: string): number | null {
+  try {
+    const wants = (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { engines?: { node?: string } }).engines?.node;
+    const m = wants ? /^>=\s*(\d+)/.exec(wants) : null;
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -141,6 +190,10 @@ export function installArchive(root: string, archive: Buffer, version: string): 
     execFileSync('tar', ['-xzf', file, '-C', tmp]);
     const unpacked = join(tmp, `kuraa-server-${version}`);
     if (!existsSync(join(unpacked, 'kuraa-host.mjs')) || readFileSync(join(unpacked, 'VERSION'), 'utf8').trim() !== version) throw new Error('The archive is not the server it says it is');
+    // One that needs a newer Node than runs it would not start (the service names this Node): not put in place.
+    const needs = nodeNeeded(unpacked);
+    const have = Number(process.versions.node.split('.')[0]);
+    if (needs !== null && have < needs) throw new Error(`kuraa ${version} needs Node ${needs} or later, and this is Node ${process.versions.node}: update Node, then run kuraa-host install again`);
     const to = join(root, 'versions', version);
     rmSync(to, { recursive: true, force: true });
     renameSync(unpacked, to);
@@ -149,6 +202,7 @@ export function installArchive(root: string, archive: Buffer, version: string): 
   }
   const before = existsSync(join(root, 'current')) ? currentVersion(root) : null;
   setCurrent(root, version);
+  writeMark(root, 'tries', '0');
   prune(root, [version, ...(before && before !== version ? [before] : [])]);
 }
 
@@ -167,6 +221,8 @@ export async function updateFrom(o: {
   if (!r) return null;
   const running = currentVersion(o.root);
   if (compareVersions(r.version, running) <= 0) return null;
+  // One that did not start here (the launcher went back from it): not again; a later one, yes.
+  if (r.version === readMark(o.root, 'failed')) return null;
   const archive = await get(r.archive);
   const why = checkArchive(archive, {
     publicKey: o.build.publicKey,
@@ -180,12 +236,28 @@ export async function updateFrom(o: {
 
 // Installing -----------------------------------------------------------------
 
-const LAUNCHER = `// Starts the kuraa server version named in ./current (kuraa-host update changes it). Never changes itself.
-import { readFileSync } from 'node:fs';
+const LAUNCHER = `// Starts the kuraa version named in ./current (kuraa-host update changes it). If that one has
+// been started three times without running well (the version writes ./good once it has, for two
+// minutes), goes back to the last good one, and marks the other ./failed, never to be taken again
+// (selfupdate.ts, decisions 0052 and 0099).
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = dirname(fileURLToPath(import.meta.url));
-const version = readFileSync(join(root, 'current'), 'utf8').trim();
+const read = (name) => { try { return readFileSync(join(root, name), 'utf8').trim() || null; } catch { return null; } };
+const write = (name, value) => { writeFileSync(join(root, name + '.next'), value + '\\n'); renameSync(join(root, name + '.next'), join(root, name)); };
+let version = read('current');
+const good = read('good');
+if (version && good && version !== good) {
+  const tries = (Number(read('tries')) || 0) + 1;
+  if (tries > 3 && existsSync(join(root, 'versions', good, 'kuraa-host.mjs'))) {
+    console.error('[kuraa] kuraa ' + version + ' did not start three times: going back to ' + good);
+    write('failed', version);
+    write('current', good);
+    write('tries', '0');
+    version = good;
+  } else write('tries', String(tries));
+}
 await import(pathToFileURL(join(root, 'versions', version, 'kuraa-host.mjs')).href);
 `;
 
@@ -323,10 +395,22 @@ export function autoUpdate(o: {
   newerRelease?(fn: (version: string) => void): void;
   /** Where the latest release is found (tests); default: the build's repository. */
   latest?: () => Promise<Release | null>;
+  /** How long it must run before it is the one to go back to (tests); default two minutes. */
+  goodAfterMs?: number;
 }): void {
   const root = installedRoot(o.here);
   if (!root) return o.log('not updating itself: not run from an installed release (kuraa-host install)');
+  // Run well for two minutes: the one to go back to, should a later one not start (and the launcher that would).
+  setTimeout(() => {
+    try {
+      if (markGood(root, o.build.version)) o.log('the launcher now goes back to this version should a later one not start');
+    } catch (e) {
+      o.log(`could not mark this version as good: ${(e as Error).message}`);
+    }
+  }, o.goodAfterMs ?? 2 * 60_000).unref();
   if (!o.build.repo) return o.log('not updating itself: built without a place to look for releases');
+  // Built without the release key (0052): any archive matching GitHub's checksum would be taken. Not unattended.
+  if (!o.build.publicKey) return o.log('not updating itself: built without the release key, so an update could not be checked as the release’s');
   let ready: string | null = null;
   let restartTimer: NodeJS.Timeout | undefined;
   let outdated = false;

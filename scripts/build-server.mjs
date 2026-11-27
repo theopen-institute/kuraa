@@ -31,6 +31,8 @@ const gh = /^github:([\w.-]+\/[\w.-]+)$/.exec(where);
 if (where && !gh) throw new Error(`KURAA_UPDATES should be github:<owner>/<repo> for the server, not "${where}"`);
 const key = process.env.SERVER_SIGNING_KEY ? createPrivateKey(process.env.SERVER_SIGNING_KEY) : null;
 if (key && key.asymmetricKeyType !== 'ed25519') throw new Error('SERVER_SIGNING_KEY should be an Ed25519 private key');
+// A release servers update to (KURAA_UPDATES) is signed, or not made: unsigned, a server would take any archive matching GitHub's checksum (0099).
+if (gh && !key) throw new Error('KURAA_UPDATES names where servers update from, so SERVER_SIGNING_KEY must sign the release');
 const publicKey = key ? createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() : null;
 
 const web = join(ROOT, 'apps/web/dist');
@@ -92,7 +94,8 @@ for (const pkg of NATIVE) {
 }
 cpSync(web, join(dir, 'web'), { recursive: true });
 writeFileSync(join(dir, 'VERSION'), `${version}\n`);
-writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server', version, type: 'module', private: true }, null, 2)}\n`);
+// The Node it needs: a server does not switch to a release its Node cannot run (selfupdate.ts).
+writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server', version, type: 'module', private: true, engines: { node: '>=24' } }, null, 2)}\n`);
 
 const archive = join(out, `${name}.tar.gz`);
 execFileSync('tar', ['-czf', archive, '-C', out, name]);

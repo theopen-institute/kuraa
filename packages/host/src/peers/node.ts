@@ -180,9 +180,10 @@ export function setKuraaVersion(version: string | null): void {
   ownVersion = version && isVersion(version) ? version : null;
 }
 
-/** When a newer version was last told of (versionNews, `release`): once an hour at most, whatever devices say. */
+/** When a newer release, or protocol, was last told of (versionNews): once an hour at most, whatever devices say. */
 let releaseToldAt = 0;
-const RELEASE_TOLD_MS = 3600_000;
+let protocolToldAt = 0;
+const NEWS_MS = 3600_000;
 
 /** Which records a device holds, as one hash: the same records, the same hash, in any order (by what each says, recordKey: 0071). */
 export function digestOf(records: MemberRecord[]): string {
@@ -1372,8 +1373,11 @@ export class PeerNode {
   private async hello(link: PeerLink, h: Extract<ControlMessage, { type: 'hello' }>): Promise<void> {
     // Another version of what devices say: no syncing, and each says why (an older device, which
     // does not know of this, sees only that it was turned away). The newer one's kuraa is the one to have.
-    // A device on a newer release (0099): told, so this one may update sooner (speaking the same protocol, it need not).
-    if (ownVersion && typeof h.version === 'string' && isVersion(h.version) && compareVersions(h.version, ownVersion) > 0 && Date.now() - releaseToldAt > RELEASE_TOLD_MS) {
+    // What a device says of its version is news only from one known to be in the workspace (0099: anyone can reach
+    // a server's address and say anything), and once an hour at most, whatever it says.
+    const inWorkspace = (await this.identity.members()).some((m) => m.key === link.key);
+    // A device on a newer release: told, so this one may update sooner (speaking the same protocol, it need not).
+    if (inWorkspace && ownVersion && typeof h.version === 'string' && isVersion(h.version) && compareVersions(h.version, ownVersion) > 0 && Date.now() - releaseToldAt > NEWS_MS) {
       releaseToldAt = Date.now();
       versionNews.emit('release', h.version);
     }
@@ -1385,7 +1389,10 @@ export class PeerNode {
       // The oldest forgotten: any device can say hello.
       if (this.versions.size > MAX_VERSIONS) this.versions.delete(this.versions.keys().next().value!);
       if (known !== theirs) this.o.log(`peers: ${h.name} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
-      if (theirs > PROTOCOL) versionNews.emit('newer');
+      if (theirs > PROTOCOL && inWorkspace && Date.now() - protocolToldAt > NEWS_MS) {
+        protocolToldAt = Date.now();
+        versionNews.emit('newer');
+      }
       link.send({ type: 'bye', reason: theirs > PROTOCOL ? 'this device runs an older kuraa: update it to sync' : 'the other device runs an older kuraa: update that one to sync' });
       setTimeout(() => link.close(), 100);
       return;

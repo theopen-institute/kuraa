@@ -8,7 +8,7 @@ import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { autoUpdate, checkArchive, compareVersions, currentVersion, installServer, installedRoot, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
+import { autoUpdate, checkArchive, compareVersions, currentVersion, installServer, installedRoot, markGood, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
 
 const temps: string[] = [];
 const temp = () => {
@@ -178,6 +178,56 @@ describe('a released server', () => {
     told!('0.3.0');
     await new Promise((r) => setTimeout(r, 10));
     expect(looked).toBe(1);
+  });
+
+  it('goes back to the last good version when a new one does not start three times, and never takes that one again (0099)', async () => {
+    const root = installed();
+    // 0.1.0 ran well; 0.2.0, put in place by an update, throws as it starts.
+    markGood(root, '0.1.0');
+    const bad = releaseDir('0.2.0');
+    writeFileSync(join(bad, 'kuraa-host.mjs'), "throw new Error('broken');\n");
+    execFileSync('cp', ['-R', bad, join(root, 'versions', '0.2.0')]);
+    writeFileSync(join(root, 'current'), '0.2.0\n');
+    const start = () => {
+      try {
+        return { ok: true, out: execFileSync(process.execPath, [join(root, 'kuraa-host.mjs')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() };
+      } catch {
+        return { ok: false, out: '' };
+      }
+    };
+    for (let i = 0; i < 3; i++) expect(start().ok).toBe(false);
+    expect(currentVersion(root)).toBe('0.2.0');
+    // The fourth start: back to 0.1.0, which runs; 0.2.0 marked failed.
+    expect(start()).toEqual({ ok: true, out: '0.1.0' });
+    expect(currentVersion(root)).toBe('0.1.0');
+    expect(readFileSync(join(root, 'failed'), 'utf8').trim()).toBe('0.2.0');
+    // An update offering 0.2.0 again is passed over; a later one is taken.
+    expect(await update(root, published('0.2.0'))).toBeNull();
+    expect(await update(root, published('0.3.0'))).toBe('0.3.0');
+  });
+
+  it('rewrites a launcher from before (one that never goes back) once a version has run well', () => {
+    const root = installed();
+    writeFileSync(join(root, 'kuraa-host.mjs'), '// an older launcher\n');
+    expect(markGood(root, '0.1.0')).toBe(true);
+    expect(readFileSync(join(root, 'kuraa-host.mjs'), 'utf8')).toContain('going back to');
+    expect(markGood(root, '0.1.0')).toBe(false);
+    expect(readFileSync(join(root, 'good'), 'utf8').trim()).toBe('0.1.0');
+  });
+
+  it('does not put in place a release that needs a newer Node than runs it', async () => {
+    const root = installed();
+    const p = published('0.2.0');
+    // The same release, saying it needs Node 999.
+    const dir = releaseDir('0.2.0');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ engines: { node: '>=999' } }));
+    const archive = join(dir, '..', 'kuraa-server-0.2.0.tar.gz');
+    execFileSync('tar', ['-czf', archive, '-C', join(dir, '..'), 'kuraa-server-0.2.0']);
+    const bytes = readFileSync(archive);
+    p.files.set('archive', bytes);
+    p.files.set('sig', Buffer.from(sign(null, bytes, privateKey).toString('base64')));
+    await expect(update(root, p)).rejects.toThrow('needs Node 999');
+    expect(currentVersion(root)).toBe('0.1.0');
   });
 
   it('compares versions as semver does', () => {

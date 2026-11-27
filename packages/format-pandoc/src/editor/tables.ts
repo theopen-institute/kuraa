@@ -1,4 +1,6 @@
-// Tables in the editor: pipe tables, a header row and then rows of cells.
+// Tables in the editor: a header row and then rows of cells, written as pipe
+// tables, or as grid tables where a cell has lines (Shift+Enter breaks one) or
+// the table was read from one (0102).
 //
 // `| a | b |` then Enter makes a table with those headings and an empty row to
 // type in; Insert table (in the menu) makes an empty one. In a table, Tab and
@@ -88,6 +90,15 @@ const withTable = (fn: (state: EditorState, at: CellAt) => ReturnType<typeof rep
 
 const alignOf = (t: PMNode) => String(t.attrs.align ?? '');
 
+/** A grid table's columns' widths (0102) with a column put in at `at` (its width to be found from its text), or taken out; '' kept. */
+function widthsWith(t: PMNode, change: { add: number } | { remove: number }): string {
+  const widths = String(t.attrs.widths ?? '').split(' ').filter(Boolean);
+  if (!widths.length) return '';
+  if ('add' in change) widths.splice(change.add, 0, '3');
+  else widths.splice(change.remove, 1);
+  return widths.join(' ');
+}
+
 export const addRow = (below: boolean): Command => withTable((state, at) => {
   const grid: Cells = gridOf(at.table);
   const r = below ? at.row + 1 : at.row;
@@ -99,7 +110,7 @@ export const addColumn = (right: boolean): Command => withTable((state, at) => {
   const c = right ? at.col + 1 : at.col;
   const grid: Cells = gridOf(at.table).map((cells) => [...cells.slice(0, c), null, ...cells.slice(c)]);
   const align = alignOf(at.table).padEnd(at.table.firstChild!.childCount, '-');
-  return replaceTable(state, at, buildTable(state.schema, grid, { ...at.table.attrs, align: align.slice(0, c) + '-' + align.slice(c) }), at.row, c);
+  return replaceTable(state, at, buildTable(state.schema, grid, { ...at.table.attrs, align: align.slice(0, c) + '-' + align.slice(c), widths: widthsWith(at.table, { add: c }) }), at.row, c);
 });
 
 export const deleteTable: Command = withTable((state, at) => {
@@ -123,7 +134,7 @@ export const deleteColumn: Command = (state, dispatch, view) => {
   if (at.table.firstChild!.childCount === 1) return deleteTable(state, dispatch, view);
   const grid = gridOf(at.table).map((cells) => cells.filter((_, c) => c !== at.col));
   const align = alignOf(at.table);
-  const table = buildTable(state.schema, grid, { ...at.table.attrs, align: align.slice(0, at.col) + align.slice(at.col + 1) });
+  const table = buildTable(state.schema, grid, { ...at.table.attrs, align: align.slice(0, at.col) + align.slice(at.col + 1), widths: widthsWith(at.table, { remove: at.col }) });
   dispatch?.(replaceTable(state, at, table, at.row, Math.min(at.col, table.firstChild!.childCount - 1)));
   return true;
 };

@@ -1,5 +1,9 @@
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { matches, type ParsedDocument } from '@kuraa/kernel';
+import { writeGrid } from './grid.js';
+
+/** In a table, or not: a pipe table's cell is one line (`true`); a grid table's may have several. */
+type InTable = boolean | 'grid';
 
 export interface SerializeContext {
   /** Canonical markdown for a block, without a trailing newline. */
@@ -107,7 +111,21 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
     return items.join(tight ? '\n' : '\n\n');
   }
 
+  /**
+   * A table: a grid table where a cell has lines (a line break, or text over
+   * several lines) or it was read from one (its columns' widths kept: 0102);
+   * else a pipe table, each cell a line.
+   */
   function table(node: PMNode): string {
+    const widths = String(node.attrs.widths ?? '').split(' ').filter(Boolean).map(Number);
+    let lines = false;
+    node.descendants((d) => {
+      if (d.type.name === 'hard_break' || (d.isText && d.text!.includes('\n'))) lines = true;
+      return !lines;
+    });
+    const grid = lines || widths.length > 0 ? gridTable(node, widths) : null;
+    const caption = String(node.attrs.caption ?? '').replace(/\n+/g, ' ');
+    if (grid) return !caption ? grid : node.attrs.captionBefore ? `${caption}\n\n${grid}` : `${grid}\n\n${caption}`;
     const rows: string[][] = [];
     node.forEach((row) => {
       const cells: string[] = [];
@@ -122,16 +140,31 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
     });
     const line = (cells: string[]) => `| ${Array.from({ length: cols }, (_, i) => cells[i] ?? '').join(' | ')} |`;
     const [head = [], ...body] = rows;
-    const grid = [line(head), `|${sep.join('|')}|`, ...body.map(line)].join('\n');
-    const caption = String(node.attrs.caption ?? '').replace(/\n+/g, ' ');
-    if (!caption) return grid;
-    return node.attrs.captionBefore ? `${caption}\n\n${grid}` : `${grid}\n\n${caption}`;
+    const pipe = [line(head), `|${sep.join('|')}|`, ...body.map(line)].join('\n');
+    if (!caption) return pipe;
+    return node.attrs.captionBefore ? `${caption}\n\n${pipe}` : `${pipe}\n\n${caption}`;
+  }
+
+  /** A grid table: each cell its lines, a line break ending a line with `\`; the widths it was read with, where its columns are as many. */
+  function gridTable(node: PMNode, widths: number[]): string {
+    const rows: string[][] = [];
+    node.forEach((row) => {
+      const cells: string[] = [];
+      row.forEach((cell) => {
+        // A break at the end has no markdown form (a backslash there is a backslash); nor has an empty line, in one paragraph.
+        const md = inlinesToMd(cell, 'grid').replace(/(?:\\\n\s*)+$/, '');
+        cells.push(escapeLineStarts(md.split('\n').map((l) => l.trim()).filter((l) => l !== '').join('\n')));
+      });
+      rows.push(cells);
+    });
+    const cols = Math.max(...rows.map((r) => r.length), 1);
+    return writeGrid(rows, String(node.attrs.align ?? ''), widths.length === cols ? widths : []);
   }
 
   // -------------------------------------------------------------------------
   // Inline content
 
-  function inlinesToMd(parent: PMNode, inTable: boolean, oneLine = false): string {
+  function inlinesToMd(parent: PMNode, inTable: InTable, oneLine = false): string {
     // Pieces of the output, joined at the end: only the tail is ever looked at
     // again, so a long paragraph is not rescanned at every closing mark.
     const out: string[] = [];
@@ -193,7 +226,7 @@ export function createSerializer(hooks: SerializeHooks[] = []) {
     return out.join('');
   }
 
-  function inlineContent(node: PMNode, code: Mark | undefined, inTable: boolean): string {
+  function inlineContent(node: PMNode, code: Mark | undefined, inTable: InTable): string {
     const a = node.attrs;
     switch (node.type.name) {
       case 'text': {
@@ -381,7 +414,7 @@ function markClose(mark: Mark, auto: boolean): string {
 }
 
 /** Escape characters that would otherwise be read as markup. */
-export function escapeText(text: string, inTable: boolean): string {
+export function escapeText(text: string, inTable: InTable): string {
   let s = text
     .replace(/[\\`*[\]<$^~]/g, '\\$&')
     .replace(/(^|[^\w])_|_(?=[^\w]|$)/g, (m) => m.replace('_', '\\_'))
@@ -390,7 +423,8 @@ export function escapeText(text: string, inTable: boolean): string {
     .replace(/&(?=#?\w+;)/g, '\\&')
     // Two trailing spaces before a newline would become a hard break.
     .replace(/ +\n/g, '\n');
-  if (inTable) s = s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  if (inTable) s = s.replace(/\|/g, '\\|');
+  if (inTable === true) s = s.replace(/\n/g, ' ');
   return s;
 }
 

@@ -45,8 +45,10 @@ export const DOCUMENT_ICON: FileIcon = {
  * Part of a room's name (and its seed): a client or device of another version
  * never joins its rooms. 3: marks on what is not text (an image, maths, a
  * citation) go through rooms, so a room made before, without them, is not resumed.
+ * 4: a grid table the editor can hold is a table (its cells' lines, its
+ * columns' widths), not raw text, so merges of one differ (0102).
  */
-export const PANDOC_VERSION = 3;
+export const PANDOC_VERSION = 4;
 
 export const pandocNodeViews: Record<string, NodeViewHint> = {
   code_block: { kind: 'code', languageAttr: 'info' },

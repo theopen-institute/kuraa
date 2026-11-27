@@ -56,7 +56,9 @@ const PUNCT = ['*', '_', '`', '[', ']', '#', '$', '@', '^', '~', '<', '>', '|', 
 
 /**
  * Normalise what markdown cannot express: edge whitespace, empty paragraphs,
- * and list tightness (two paragraphs in one item always make a list loose).
+ * and list tightness (two paragraphs in one item always make a list loose);
+ * and a grid table's columns' widths, which are as written (a column widened
+ * for its text reads back wider: 0102).
  */
 export function normalise(doc: PMNode): unknown {
   const walk = (json: Record<string, unknown>, textblock: boolean): Record<string, unknown> => {
@@ -104,7 +106,7 @@ export function normalise(doc: PMNode): unknown {
     if (Array.isArray(j)) return j.map(stripTight);
     if (!j || typeof j !== 'object') return j;
     const o: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(j)) o[k] = k === 'attrs' && v && typeof v === 'object' ? { ...(v as object), tight: undefined, auto: undefined } : stripTight(v);
+    for (const [k, v] of Object.entries(j)) o[k] = k === 'attrs' && v && typeof v === 'object' ? { ...(v as object), tight: undefined, auto: undefined, widths: undefined } : stripTight(v);
     return o;
   };
   return stripTight(walkTyped(doc.toJSON() as Record<string, unknown>, doc));

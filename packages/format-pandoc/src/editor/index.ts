@@ -303,7 +303,7 @@ export const PANDOC_HELP: HelpItem[] = [
 
   { group: EDITING, does: 'List item in, out', keys: ['Tab', 'Shift-Tab'] },
   { group: EDITING, does: 'Out of a list or quote', keys: ['Mod-['] },
-  { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph' },
+  { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph; in a table, a new line in the cell' },
   { group: EDITING, does: 'Leave a code block or table', keys: ['Mod-Enter'] },
   { group: EDITING, does: 'Next cell, previous cell', keys: ['Tab', 'Shift-Tab'], note: 'in a table' },
   { group: EDITING, does: 'Rows and columns', keys: ['Shift-F10'], note: 'in a table; or right-click' },

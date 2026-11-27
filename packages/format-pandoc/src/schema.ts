@@ -129,7 +129,8 @@ export const pandocNodes: Record<string, NodeSpec> = {
   dl_def: { attrs: { loose: { default: false } }, content: 'block+', defining: true, parseDOM: [{ tag: 'dd' }], toDOM: () => ['dd', 0] },
 
   table: {
-    attrs: { align: { default: '' }, caption: { default: '' }, captionBefore: { default: false } },
+    // widths: a grid table's columns' widths as written (their dashes), kept for writing it again (0102); '' for a pipe table.
+    attrs: { align: { default: '' }, caption: { default: '' }, captionBefore: { default: false }, widths: { default: '' } },
     content: 'table_row+',
     group: 'block',
     isolating: true,

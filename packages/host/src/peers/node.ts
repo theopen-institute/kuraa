@@ -1274,7 +1274,13 @@ export class PeerNode {
     link.said = this.helloFor(link).then((h) => link.send(h), (e: Error) => this.o.log(`peers: ${e.message}`));
   }
 
-  private async helloFor(link: PeerLink): Promise<ControlMessage> {
+  /**
+   * A hello for a device. `same`: what is the same in every device's (branches,
+   * spaces listed, outputs, the records' hash), read once for all of them (0099:
+   * three git processes a device, a device each, on every change, made a server
+   * of many members spend its time on hellos).
+   */
+  private async helloFor(link: PeerLink, same?: { heads: Record<string, string>; spaces: string; outputs: Record<string, string>; digest: string }): Promise<ControlMessage> {
     const shown = await this.linkToShow();
     const paired = link.accepted || (await this.identity.members()).some((m) => m.key === link.key);
     return {
@@ -1286,13 +1292,13 @@ export class PeerNode {
       name: this.name,
       // Which records it holds (who is in, and who people are), as a hash: a device that holds
       // others asks for what it lacks (want). Nothing for a device not known yet (it may never be let in).
-      digest: paired ? digestOf(await this.identity.records()) : '',
+      digest: paired ? same?.digest ?? digestOf(await this.identity.records()) : '',
       merges: this.o.merges ?? '',
       // Its branches, only to a device it is paired with (0071): anyone on the local network can connect.
-      ...(paired ? { heads: await this.heads() } : {}),
+      ...(paired ? { heads: same?.heads ?? (await this.heads()) } : {}),
       // The spaces its person may read, as this device has them (0066): fetched when they differ.
-      ...(paired ? { spaces: await this.spaceHeads(link.key) } : {}),
-      ...(paired ? { outputs: await outputRefs(this.o.git) } : {}),
+      ...(paired ? { spaces: await this.spaceHeads(link.key, same?.spaces) } : {}),
+      ...(paired ? { outputs: same?.outputs ?? (await outputRefs(this.o.git)) } : {}),
       // For members only: how to reach this device besides the DHT (a device not known yet learns
       // nothing of it): the relay it offers and whether it is on a public address, the relays named in
       // its settings, where it takes TCP (a server), and its DHT node to start from.
@@ -1680,6 +1686,29 @@ export class PeerNode {
    * missing one asks for it).
    */
   async membersChanged(except?: PeerLink): Promise<void> {
+    // One run at a time, and one waiting at most: a call while one waits joins it (0099: each member's acknowledgement
+    // of a change comes on its own, and each would have every device told again, M times M hellos). The run waited
+    // for begins after the call, so it holds what the caller changed.
+    if (this.changeWaiting) {
+      if (this.changeWaitingExcept !== except) this.changeWaitingExcept = undefined;
+      return this.changeWaiting;
+    }
+    this.changeWaitingExcept = except;
+    const run = this.changeRunning.catch(() => undefined).then(() => {
+      this.changeWaiting = null;
+      const now = this.changeNow(this.changeWaitingExcept);
+      this.changeRunning = now;
+      return now;
+    });
+    this.changeWaiting = run;
+    return run;
+  }
+
+  private changeWaiting: Promise<void> | null = null;
+  private changeWaitingExcept: PeerLink | undefined;
+  private changeRunning: Promise<void> = Promise.resolve();
+
+  private async changeNow(except?: PeerLink): Promise<void> {
     await this.refresh();
     // How much of the policy this device holds, if that changed (0072): its person confirms the removals in it.
     await this.identity.acknowledge().catch((e: Error) => this.o.log(`peers: could not acknowledge the policy: ${e.message}`));
@@ -1689,11 +1718,18 @@ export class PeerNode {
     const fresh = all.filter((r) => !this.told.has(r.sig));
     for (const r of fresh) this.told.add(r.sig);
     const removed = new Set(await this.identity.removed());
+    // What every device's hello says alike, read once.
+    const same = {
+      heads: await this.heads(),
+      spaces: (await this.o.git.run(['for-each-ref', '--format=%(refname)%00%(objectname)', SPACES], { allowFail: true })).stdout,
+      outputs: await outputRefs(this.o.git),
+      digest: digestOf(all),
+    };
     for (const l of this.links.values()) {
       if (!l.accepted || l === except) continue;
       const records = forDevice(fresh, l.key, removed);
       if (records.length && l.hello?.workspace === this.ws.id) l.send({ type: 'records', records });
-      l.send(await this.helloFor(l));
+      l.send(await this.helloFor(l, same));
     }
     this.events.members?.();
   }

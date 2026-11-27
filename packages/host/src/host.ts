@@ -124,6 +124,13 @@ export interface HostOptions {
    * listens only on this computer (0047). Everyone sees them, and Sync syncs with them.
    */
   manageOnline?: boolean;
+  /**
+   * Watch the folder for edits made outside the app (default yes). Not a
+   * server's (0099): nothing edits its folder, and on Linux watching a folder
+   * whole holds one watch for every file in it, .git included, which runs out
+   * with a few dozen workspaces.
+   */
+  watchFiles?: boolean;
   /** Your identity changed through this host's API: tell every workspace that syncs (the hub's), not just this one. */
   personChanged?: () => Promise<void>;
   /** The signing keys the workspaces know to be this identity's (a hub: all of its workspaces'); else this workspace's. */
@@ -476,7 +483,7 @@ export class Host {
       }
       rec.mine.set(id, set);
     });
-    this.startWatcher();
+    if (this.options.watchFiles !== false) this.startWatcher();
     // Branches switched and operations run outside the app are seen here (and by the watcher, sooner).
     this.gitPoll = setInterval(() => {
       if (this.records.size) void this.checkGit();
@@ -1735,6 +1742,13 @@ export class Host {
           this.watchTimers.delete(rel);
           (gitFile ? this.checkGit() : this.checkPath(rel)).catch((e) => this.log(`checking ${rel} failed: ${e}`));
         }, 50));
+      });
+      // Watches run out (Linux, a large folder): said once, the watching given up, rather than an error nothing catches
+      // each time a file is made.
+      this.watcher.on('error', (err) => {
+        this.log(`file watching stopped: ${err.message} (edits made outside the app are taken up when the app next saves the file)`);
+        this.watcher?.close();
+        this.watcher = null;
       });
     } catch (err) {
       this.log(`file watching unavailable: ${err}`);

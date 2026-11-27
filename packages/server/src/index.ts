@@ -90,6 +90,8 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
   const peers: PeerOptions = Object.fromEntries(Object.entries({
     signing,
     person: null,
+    // No local network to find devices on (a VPS): members reach it by its address or the DHT (0099).
+    lan: false,
     publicAddress: o.publicAddress,
     peerPort: o.peerPort ?? PEER_PORT,
     dhtPort: o.dhtPort ?? PEER_PORT,
@@ -111,7 +113,8 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     port: o.port ?? SERVER_PORT,
     token: o.token,
     // Formats and features to read with; no code run on a server yet (0099: running code for a device that cannot is to come).
-    hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents } },
+    // No online copy either: syncs are a person's, with their credentials (0059); a server's would only cost a timer each.
+    hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents.map((c) => ({ ...c, syncs: [] })) } },
     peers,
     log: o.log,
     });

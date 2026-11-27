@@ -431,6 +431,8 @@ export class Hub {
       const peers = joined ? { ...peerOptions, node: joined } : (await shared(e.dir)) ? peerOptions : undefined;
       const h = await startHost({
         ...this.hostOptions(), dir: e.dir, init, label: e.name,
+        // A server's (0099): nothing edits its folders.
+        ...(this.o.server ? { watchFiles: false } : {}),
         // A server's (0099): an access code of its own, told to no one (nothing is passed to it: headless).
         token: this.o.server ? undefined : this.token, host: '127.0.0.1', port: 0, requests: this.gate, peers, log: (m) => this.log(`[${e.id}] ${m}`),
         // The list says what the workspace calls itself (0061), and keeps it for when it is not open.

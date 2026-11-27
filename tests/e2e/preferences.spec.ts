@@ -49,14 +49,18 @@ test('Settings in the browser: a wrong value refused, a kind of document turned 
     const switches = page.getByTestId('preferences-components');
     await expect(switches).toBeHidden();
     // Beneath it in the list, how many there are at the highest level its owner switches them at: the host (0095).
-    await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · Host/);
+    await expect(page.getByTestId('settings-tab-components')).toContainText(/\d+ available · This computer/);
     await page.getByTestId('settings-tab-components').click();
-    await expect(page.getByTestId('settings-scope')).toContainText('Only you, the host’s owner, switch the Host column');
+    await expect(page.getByTestId('settings-scope')).toContainText('on this computer, for every workspace on it');
     await expect(switches.getByTestId('components-formats').getByTestId('pref-format-rmarkdown')).toBeChecked();
     // One kind at a time, a tab each (0104); the arrow keys move between them.
     await page.getByTestId('kind:formats').press('ArrowRight');
     await expect(page.getByTestId('kind:features')).toBeFocused();
     await expect(page.getByTestId('kind:features')).toHaveAttribute('aria-selected', 'true');
+    // Its owner's columns (0105): This computer and Workspace; no You (hiding one for yourself, on your own host, is turning it off).
+    await expect(page.getByTestId('column:host')).toHaveText(/This computer/);
+    await expect(page.getByTestId('column:workspace')).toBeVisible();
+    await expect(page.getByTestId('column:you')).toHaveCount(0);
     await page.getByTestId('kind:engines').click();
     await expect(switches.getByTestId('components-run').getByTestId('pref-run')).toBeVisible();
     await expect(switches.getByTestId('pref-environments')).not.toBeEmpty();

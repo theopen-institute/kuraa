@@ -234,6 +234,27 @@ function tabKey(e: KeyboardEvent) {
   root.value?.querySelector<HTMLElement>(`[data-testid="kind:${kind}"]`)?.focus();
 }
 const L = S.components.levels;
+
+// ── The columns (0105): only the levels a kind is switched at, as this person switches them. The host's owner
+// (on their own computer, as a rule its only user) has This computer, not You: hiding a feature for yourself
+// on a host only you use is turning it off. Anyone else has You, not the host's: a note in a row says what
+// the host has off. Formatting as you type is a column of its own, not You.
+type Level = 'host' | 'workspace' | 'you' | 'editing';
+const owner = computed(() => props.canChangeSettings);
+const columns = computed<Level[]>(() => {
+  switch (shown.value) {
+    case 'formats': return owner.value ? ['host', 'editing'] : ['editing'];
+    case 'features': return owner.value ? ['host', 'workspace'] : ['workspace', 'you'];
+    case 'syncs': return ['workspace'];
+    default: return ['host'];
+  }
+});
+const heads = computed<Record<Level, { label: string; who: string; about: string }>>(() => ({
+  host: owner.value ? { label: L.thisComputer, who: L.thisComputerWho, about: L.thisComputerAbout } : { label: L.host, who: L.hostWho, about: L.hostAbout },
+  workspace: { label: L.workspace, who: L.workspaceWho, about: L.workspaceAbout },
+  you: { label: L.you, who: L.youWho, about: L.youAbout },
+  editing: { label: L.editing, who: L.editingWho, about: L.editingAbout },
+}));
 </script>
 
 <template>
@@ -328,24 +349,22 @@ const L = S.components.levels;
             <thead>
               <tr>
                 <th scope="col" class="component-col-name">{{ S.components.component }}</th>
-                <th scope="col" :title="L.hostAbout"><span>{{ L.host }}</span><span class="component-col-about">{{ L.hostWho }}</span></th>
-                <th scope="col" :title="L.workspaceAbout"><span>{{ L.workspace }}</span><span class="component-col-about">{{ L.workspaceWho }}</span></th>
-                <th scope="col" :title="L.youAbout"><span>{{ L.you }}</span><span class="component-col-about">{{ L.youWho }}</span></th>
+                <th v-for="c in columns" :key="c" scope="col" :title="heads[c].about" :data-testid="`column:${c}`"><span>{{ heads[c].label }}</span><span class="component-col-about">{{ heads[c].who }}</span></th>
               </tr>
             </thead>
 
-            <!-- Document formats: on for the host; their editor, yours. -->
+            <!-- Document formats: on for the host (its owner's column); formatting as you type, yours. -->
             <tbody v-if="shown === 'formats'">
               <tr v-for="t in formatRows" :key="t.id" class="component-row" :data-testid="`component:format:${t.id}`">
                 <td class="component-text">
                   <span class="component-name">{{ t.label }}</span>
                   <span class="component-about">{{ t.description || S.components.files(t.extensions.join(', ')) }}</span>
+                  <span v-if="!owner && !t.on" class="component-about component-unavailable">{{ S.components.formatOffOnHost }}</span>
                 </td>
-                <td class="component-cell" :data-testid="editable ? 'pref-formats' : undefined">
+                <td v-if="owner" class="component-cell" :data-testid="editable ? 'pref-formats' : undefined">
                   <input v-if="editable" v-model="f.formats" type="checkbox" :value="t.id" :aria-label="t.label" :data-testid="`pref-format-${t.id}`">
                   <input v-else type="checkbox" :checked="t.on" disabled :aria-label="t.label">
                 </td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
                 <td class="component-cell">
                   <input
                     v-if="editors[t.id]"
@@ -361,14 +380,19 @@ const L = S.components.levels;
               </tr>
             </tbody>
 
-            <!-- Features: on for the host, for the workspace, and shown for you. -->
+            <!-- Features: on for the host (its owner's column), for the workspace, and shown for you (anyone else's). -->
             <tbody v-else-if="shown === 'features'">
               <template v-for="x in featureRows" :key="x.id">
                 <tr class="component-row" :data-testid="`component:feature:${x.id}`">
                   <td class="component-text">
                     <span class="component-name">{{ x.label }}</span>
                     <span v-if="x.description" class="component-about">{{ x.description }}</span>
-                    <span v-if="x.status?.workspace && !x.host" class="component-about component-unavailable">{{ S.components.featureOffOnHost }}</span>
+                    <span v-if="owner ? x.status?.workspace && !x.host : !x.host" class="component-about component-unavailable" :data-testid="`feature-off-on-host-${x.id}`">{{ owner ? S.components.featureOffHere : S.components.featureOffOnHost }}</span>
+                    <!-- Hidden in this browser before its owner's view had no You column: still said, and undone here. -->
+                    <span v-if="owner && x.status && hiddenFeatures.includes(x.id)" class="component-about">
+                      {{ S.components.hiddenHere }}
+                      <button type="button" class="link" :data-testid="`feature-unhide-${x.id}`" @click="toggleShown(x.id, true)">{{ S.components.showIt }}</button>
+                    </span>
                     <span v-if="x.part && (x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline || x.part.feature.settings?.you)" class="component-links">
                       <button
                         v-if="x.part.feature.settings?.workspace && !x.part.feature.settings.workspace.inline"
@@ -386,7 +410,7 @@ const L = S.components.levels;
                       >{{ x.part.feature.settings.you.label }} ›</button>
                     </span>
                   </td>
-                  <td class="component-cell" :data-testid="editable ? 'pref-features' : undefined">
+                  <td v-if="owner" class="component-cell" :data-testid="editable ? 'pref-features' : undefined">
                     <input v-if="editable" v-model="f.features" type="checkbox" :value="x.id" :aria-label="x.label" :data-testid="`pref-feature-${x.id}`">
                     <input v-else type="checkbox" :checked="x.host" disabled :aria-label="x.label">
                   </td>
@@ -403,7 +427,7 @@ const L = S.components.levels;
                     >
                     <span v-else class="component-none" :title="workspaceName ? L.notHere : S.components.noWorkspace">–</span>
                   </td>
-                  <td class="component-cell">
+                  <td v-if="!owner" class="component-cell">
                     <input
                       v-if="x.status && workspaceName"
                       type="checkbox"
@@ -418,13 +442,13 @@ const L = S.components.levels;
                   </td>
                 </tr>
                 <tr v-if="x.status?.workspace && inlineMounts.get(x.id)" class="component-more">
-                  <td colspan="4">
+                  <td :colspan="columns.length + 1">
                     <FeatureMount class="feature-inline" :mount="inlineMounts.get(x.id)!" :testid="`feature-inline-${x.id}`" />
                   </td>
                 </tr>
               </template>
               <tr v-if="featureError || (workspaceName && features.some((x) => !x.mayChange)) || !workspaceName" class="component-more">
-                <td colspan="4">
+                <td :colspan="columns.length + 1">
                   <p v-if="!workspaceName" class="muted components-note">{{ S.components.noWorkspace }}</p>
                   <p v-else-if="features.some((x) => !x.mayChange)" class="muted components-note">{{ S.components.workspaceMayNot }}</p>
                   <div v-if="featureError" class="components-error" role="alert">{{ featureError }}</div>
@@ -441,8 +465,6 @@ const L = S.components.levels;
                     <span class="component-about">{{ e.description }}</span>
                   </td>
                   <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="e.label"></td>
-                  <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-                  <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
                 </tr>
               </tbody>
 
@@ -455,8 +477,6 @@ const L = S.components.levels;
                     <span v-if="e.on && !e.available" class="component-about component-unavailable">{{ S.components.unavailable(e.message) }}</span>
                   </td>
                   <td class="component-cell"><input type="checkbox" :checked="e.on" disabled :aria-label="envName(e.label)"></td>
-                  <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-                  <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
                 </tr>
               </tbody>
             </template>
@@ -495,8 +515,6 @@ const L = S.components.levels;
                   </template>
                   <input v-else type="checkbox" :checked="t.state === 'ready'" disabled :aria-label="t.label">
                 </td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
               </tr>
             </tbody>
 
@@ -508,7 +526,6 @@ const L = S.components.levels;
                   <span class="component-about">{{ x.description }}</span>
                   <span class="component-about">{{ x.targets.length ? S.components.syncTargets(x.targets.map((t) => t.url)) : S.components.syncNone }}</span>
                 </td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
                 <td class="component-cell">
                   <button
                     type="button"
@@ -519,7 +536,6 @@ const L = S.components.levels;
                     @click="sub = { kind: 'sync', id: x.id }"
                   >{{ S.components.syncSettings }}</button>
                 </td>
-                <td class="component-cell"><span class="component-none" :title="L.notHere">–</span></td>
               </tr>
             </tbody>
           </table>

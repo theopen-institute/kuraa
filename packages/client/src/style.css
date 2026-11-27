@@ -751,7 +751,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-table thead th.component-col-name { text-align: left; padding-left: 0; cursor: default; }
 .component-table thead th > span { display: block; }
 .component-col-about { font-size: 11px; font-weight: 400; color: var(--muted); }
-.component-table th:not(.component-col-name), .component-table .component-cell { width: 84px; }
+.component-table th:not(.component-col-name), .component-table .component-cell { width: 112px; }
 .component-row > td { padding: 7px 4px; border-top: 1px solid var(--border); vertical-align: top; }
 .component-row > td.component-text { padding-left: 0; min-width: 0; }
 .component-row > td.component-text > span { display: block; }
@@ -763,10 +763,10 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-none { color: var(--muted); opacity: 0.6; cursor: default; }
 .component-action { font-size: 12px; padding: 2px 8px; }
 .component-links { display: flex !important; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px !important; }
-.component-links .link { border: 0; background: none; padding: 0; color: var(--accent, var(--text)); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.component-links .link, .component-about .link { border: 0; background: none; padding: 0; color: var(--accent, var(--text)); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .component-more > td { padding: 0 0 8px; }
 @media (max-width: 640px) {
-  .component-table th:not(.component-col-name), .component-table .component-cell { width: 76px; }
+  .component-table th:not(.component-col-name), .component-table .component-cell { width: 92px; }
   .component-table thead th { font-size: 12px; }
   .component-col-about { display: none !important; }
 }

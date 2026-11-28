@@ -48,7 +48,7 @@ read everything, no *Only you*, and only a space's maker or the owner changes it
   workspace's owner, you read everything in it*). The texts that said no one else's device is sent a
   file now name the owner. **Servers are not named there:** a server works for the owner, who is in
   control, so who reads a file is said as the owner's; what a server reads is said where servers are
-  (People and computers › Servers: *Like the owner, it reads everything in the workspace*), as the
+  (People › Servers: *Like the owner, it reads everything in the workspace*), as the
   owner asked: "I don't think it's necessary to foreground the server so much […] since the server
   really "works for" the owner, who has full control."
 - **A group's readers are its admins' to say.** A workspace's admins, and a group's own, put people in

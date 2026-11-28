@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // Settings › Workspace (decision 0064): the open workspace's own settings, kept
-// in the workspace, for everyone in it: its devices, and inviting people
-// (DevicesSection); its groups and permissions (RulesSection); and, where the
+// in the workspace, for everyone in it: its people and servers, and inviting
+// people (DevicesSection); its groups and permissions (RulesSection); blocking a
+// lost or stolen computer's or server's key, set apart and closed (KeysSection,
+// 0107); and, where the
 // host allows it, taking it off this host's list (its folder stays). Its name is
 // the section's heading, renamed there (SettingsWindow, 0061). Which components
 // it uses (its features, and their settings; its online copy) is in Settings ›
@@ -12,6 +14,7 @@ import type { HostApi, WorkspaceInfo } from './api.js';
 import { S } from './strings.js';
 import DevicesSection from './DevicesSection.vue';
 import RulesSection from './RulesSection.vue';
+import KeysSection from './KeysSection.vue';
 
 defineProps<{
   api: HostApi;
@@ -27,6 +30,7 @@ const emit = defineEmits<{ remove: []; invite: []; permissions: [path: string] }
     <template v-if="workspace">
       <DevicesSection :api="api" @invite="emit('invite')" />
       <RulesSection :api="api" @permissions="(p) => emit('permissions', p)" />
+      <KeysSection :api="api" />
       <details class="settings-part menu-details">
         <summary>{{ S.common.details }}</summary>
         <span class="menu-facts" data-testid="workspace-details">{{ S.menu.workspaceDetails(workspace.branch, workspace.head?.slice(0, 7) ?? null) }}</span>

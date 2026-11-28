@@ -829,7 +829,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-state { flex: none; min-width: 28px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
 .component-state.on { color: #30a46c; }
 /* A person's role, as a menu for whoever may change it (DevicesSection): the size of the tag it replaces, not a form's field. */
-.preferences .person-line .role-menu, .role-menu {
+.preferences .person-line .role-menu, .preferences .people-list .role-menu, .role-menu {
   width: auto; flex: none; box-sizing: border-box; font: 12px var(--font); color: var(--text);
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1px 4px; cursor: pointer;
 }

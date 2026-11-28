@@ -164,6 +164,8 @@ both on this computer only).
 
 ## In the app
 
+*(Since [0107](0107-people-first.md): **People** › Servers, with **Remove…** only; **Block…**, for a
+key someone else may have, under **Lost or stolen computers and servers**, at the end.)*
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
 devices' name (one online first, of several), how it is connected, and, for the owner, **Remove…**
 (taken out; invited back with **Add a server…**) and **Key lost or stolen…** (for good, asking first).

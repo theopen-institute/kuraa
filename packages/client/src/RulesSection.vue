@@ -61,7 +61,7 @@ const listed = computed(() => (rules.value?.permissions ?? []).filter((p) => p.p
 /** What the whole workspace's permission says (who may change anything; anyone, where it says nothing). */
 const everythingWords = computed(() => {
   const own = rules.value?.permissions?.find((p) => p.path === '');
-  return own?.write ? S.rules.says(null, own.write.map(nameOf)) : S.rules.none;
+  return own?.write ? S.rules.says(null, own.write.map(nameOf)) : S.rules.anyone;
 });
 
 const refounded = ref(false);
@@ -73,7 +73,7 @@ function refound() {
 }
 
 const newGroup = ref('');
-const groupPerson = ref<Record<string, string>>({});
+const groupPerson = ref<Record<string, string>>({ '': '' });
 function addToGroup(group: string, who: string, role: 'admin' | 'member') {
   if (!who) return;
   void act(async () => {
@@ -121,6 +121,7 @@ function addToGroup(group: string, who: string, role: 'admin' | 'member') {
     <form v-if="rules.admin" class="person-row rule-new-group" @submit.prevent="addToGroup(newGroup.trim(), groupPerson[''] ?? '', 'admin')">
       <input v-model="newGroup" :placeholder="S.rules.newGroup" spellcheck="false" data-testid="new-group">
       <select v-model="groupPerson['']" :aria-label="S.rules.newGroupWho" :title="S.rules.newGroupWho" data-testid="new-group-person">
+        <option value="" disabled>{{ S.rules.newGroupWho }}</option>
         <option v-for="p in people.people" :key="p.id" :value="p.id">{{ p.name ?? `${p.id.slice(0, 8)}…` }}</option>
       </select>
       <button type="submit" :disabled="busy || !newGroup.trim()" data-testid="new-group-add">{{ S.rules.addTo }}</button>

@@ -1,10 +1,11 @@
-// Words written by day (0094), as the host reads them from the history (every
+// Words written by day (0094), as its host half reads them from the history (every
 // commit but merges, credited to everyone credited on it, on its own day; and
 // what is typed and not committed yet): yours, today and the days before, and
 // everyone's today. Asked again a few seconds after typing, and every minute.
 // A target for a day is yours, kept in this browser.
 import { ref, shallowRef } from 'vue';
-import type { FeatureClientContext, WordsDay } from '@kuraa/feature-kit/client';
+import type { FeatureClientContext } from '@kuraa/feature-kit/client';
+import type { WordsDay } from './wordlog.js';
 
 const TARGET_KEY = 'kuraa:words:day-target';
 /** How many days back the panel shows. */
@@ -56,7 +57,7 @@ export async function load(ctx: FeatureClientContext): Promise<void> {
   const since = new Date();
   since.setDate(since.getDate() - (DAYS - 1));
   try {
-    const r = await ctx.host.history.wordsByDay(day(since));
+    const r = ((await ctx.request('GET', `days?since=${day(since)}`)) as unknown as { days: WordsDay[] }).days;
     if (n === asked) days.value = r;
   } catch {
     // The host away, or older: what was known stays.

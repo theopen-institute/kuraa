@@ -1,4 +1,4 @@
-# 0123 · A Tauri shell, prototyped
+# 0127 · A Tauri shell, prototyped
 
 **Status: a prototype, on macOS (Apple silicon).** `apps/tauri` is the desktop app as a Tauri 2
 shell: the web client in the system's webview (WKWebView), the host as released run by a Node the

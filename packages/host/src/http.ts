@@ -15,7 +15,7 @@ import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError, NotAllowed } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
-import { renderRoutes, searchRoutes } from './render-routes.js';
+import { renderRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 import { corsHeaders, hostAllowed, refuseHost } from './origins.js';
@@ -520,12 +520,6 @@ function sameFile(a: string, b: string): boolean {
 }
 
 const historyRoutes: Route[] = [
-  // Words written each day, by person, from a day on (0094): the history, and what is typed here not committed yet.
-  route('GET', '/api/words', async ({ host, res, q }) => {
-    const since = q.get('since') ?? '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new HttpError(400, 'since: a day, as YYYY-MM-DD');
-    send(res, 200, { days: await host.wordsByDay(since) });
-  }),
   route('GET', '/api/history', async ({ host, res, q }) => {
     const path = host.relPath(str(q.get('path'), 'path'));
     // --follow crosses renames, so each entry also gives the path the file had in that commit
@@ -917,7 +911,7 @@ const featureRoutes: Route[] = [
   })),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes, ...featureRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes, ...featureRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

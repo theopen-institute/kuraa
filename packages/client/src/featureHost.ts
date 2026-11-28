@@ -52,6 +52,8 @@ export interface FeatureHostOptions {
   codeSession?(): CodeSession | null;
   /** A feature's marks on files changed (0093): navigation asks for them again. */
   marksChanged?(): void;
+  /** A workspace file's type, as the client opens it (0123). */
+  typeOf(path: string): DocumentType | undefined;
 }
 
 /** A panel open, and how many times it has been asked for (0089). */
@@ -107,15 +109,12 @@ export function useFeatureHost(o: FeatureHostOptions) {
   const codeChanged = () => tell(codeListeners, 'the code session changing');
   /** The host's own services, offered to components (0089, 0091): always the open workspace's. */
   const coreHost: CoreHost = {
-    search: { run: (q, caseSensitive) => api.value.search(q, caseSensitive) },
     renders: {
       info: (p) => api.value.renders(p),
       render: (p, format, compile) => api.value.render(p, format, o.person(), compile),
       output: (p, format) => api.value.renderOutput(p, format),
       madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
-      bookContents: (folder) => api.value.bookContents(folder),
     },
-    history: { wordsByDay: (since) => api.value.wordsByDay(since) },
     documents: {
       setHeader: async (p, fields) => {
         await api.value.setHeader(p, fields, o.person());
@@ -159,6 +158,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     keyLabel,
     moveFile: (from, to) => o.moveFile(from, to),
     marksChanged: () => o.marksChanged?.(),
+    typeOf: (p) => o.typeOf(p),
     changed: () => void load(),
   };
   const contexts = new FeatureContexts(app, messages, () => status.value);

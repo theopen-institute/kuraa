@@ -142,6 +142,75 @@ export interface FeatureEvents {
 
 export type FeatureEvent = keyof FeatureEvents;
 
+/** Someone named on a commit: as git names them. */
+export interface CommitPerson {
+  name: string;
+  email: string;
+}
+
+/** A commit of the workspace's history (FeatureHistory.log). */
+export interface HistoryCommit {
+  id: string;
+  /** When its author made it, where they made it: ISO 8601 with its offset (2026-01-10T10:00:00+02:00). */
+  date: string;
+  author: CommitPerson;
+  /** Those it names as co-authors (`Co-authored-by:`): an automatic save names whoever changed its documents since the last. */
+  coAuthors: CommitPerson[];
+  /** It brought two lines of work together. */
+  merge: boolean;
+}
+
+/** A file a commit changed, against its first parent: where it was (null: added) and where it is (null: deleted); a rename has both. */
+export interface FileChange {
+  from: string | null;
+  to: string | null;
+}
+
+/** A file at a commit, for FeatureHistory.read: `before`, in the commit's first parent instead. */
+export interface FileAt {
+  commit: string;
+  path: string;
+  before?: boolean;
+}
+
+/** The workspace's history, read only (FeatureContext.history, 0125). */
+export interface FeatureHistory {
+  /** The commits on the branch checked out, newest first: from a moment on (ISO 8601), merges left out where `merges` is false. */
+  log(o?: { since?: string; merges?: boolean }): Promise<HistoryCommit[]>;
+  /** What each commit changed against its first parent, renames followed, by commit id. */
+  changes(commits: string[]): Promise<{ [commit: string]: FileChange[] }>;
+  /** Files as they were, all asked at once, in the order asked: their text, or null where there was none or it was not text. */
+  read(files: FileAt[]): Promise<(string | null)[]>;
+}
+
+/** A document changed in its room here since its last commit (FeatureContext.edited). */
+export interface EditedDocument {
+  path: string;
+  /** Its text at its last commit; null where it was not there. */
+  before: string | null;
+  /** Its text as its room has it now. */
+  after: string;
+  /** Who changed it since. */
+  people: CommitPerson[];
+}
+
+/** What a feature keeps on this device (FeatureContext.store): JSON by name. */
+export interface FeatureStore {
+  /** What it kept under a name (STORE_NAME), or null. */
+  get(name: string): Promise<Json | null>;
+  /** Keep a value under a name, or forget it (null). */
+  set(name: string, value: Json | null): Promise<void>;
+}
+
+/** A name a feature keeps something under in its store. */
+export const STORE_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
+
+/** How FeatureContext.read reads a file. */
+export interface ReadOptions {
+  /** Not read where larger than this many bytes (null is returned). */
+  maxBytes?: number;
+}
+
 /** A file converted into Markdown (FeatureContext.convert), or why not. */
 export type ConvertedFile =
   | { ok: true; markdown: string; media: { name: string; bytes: Uint8Array }[] }
@@ -159,8 +228,18 @@ export interface FeatureContext {
   readonly id: string;
   /** Its settings for the workspace, as they are now. */
   settings(): FeatureSettings;
-  /** A workspace file's text, if this device holds it and it is text; null otherwise. */
-  read(path: string): Promise<string | null>;
+  /**
+   * A workspace file's text, if this device holds it and it is text (UTF-8,
+   * not through a link); null otherwise. `maxBytes`: null for a file larger
+   * than this, which is then not read.
+   */
+  read(path: string, o?: ReadOptions): Promise<string | null>;
+  /**
+   * A document's text as its room here has it now (0124), what was typed a
+   * moment ago, before it is written to its file; null where it has no room
+   * here (read its file).
+   */
+  live(path: string): Promise<string | null>;
   /**
    * Write one of its own files (this host's person's own file beside a
    * document that exists, or one it declared), whole, or remove it (null):
@@ -179,6 +258,13 @@ export interface FeatureContext {
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
   /**
+   * The type of a file, as this host opens it (among the formats it has on),
+   * or undefined: what it is, asked of its type rather than guessed from its
+   * name (0123): whether it has words (`prose`), header fields (`header`), or
+   * is Markdown a book is made of (`markdown`).
+   */
+  typeOf(path: string): DocumentType | undefined;
+  /**
    * A file (by its name, for its kind: report.docx) converted into Markdown by
    * whatever here converts its kind (0116: pandoc for Word, OpenDocument, RTF,
    * EPUB, HTML), given nothing of the workspace: pandoc's Markdown and the
@@ -194,6 +280,24 @@ export interface FeatureContext {
    * it may not add.
    */
   create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
+  /**
+   * The workspace's history as this device holds it, read only (0125): its
+   * commits on the branch checked out, what each changed, and files as they
+   * were. The spaces' histories are not in it.
+   */
+  history: FeatureHistory;
+  /**
+   * The documents open in rooms here, on the branch checked out, that people
+   * have changed since their last commit (0125): each as it was at that commit
+   * (null: not there) and as its room has it now, and who changed it.
+   */
+  edited(): Promise<EditedDocument[]>;
+  /**
+   * What it keeps on this device for this workspace (0125): a cache, say, of
+   * what it worked out from the history. Never synced, never committed; gone
+   * when the workspace's folder goes. Its own, apart from every other feature's.
+   */
+  store: FeatureStore;
   /** You: this host's person's identity ID; null until there is one (then nothing of yours can be written). */
   me(): string | null;
   /** A person's own file beside a document (by default yours, by this feature's first suffix and its room's extension, or `.json`). */
@@ -202,6 +306,12 @@ export interface FeatureContext {
   companions(doc: string, suffix?: string): Promise<{ person: string; path: string; text: string }[]>;
   /** The document a companion file of this feature belongs to, or null. */
   documentOf(path: string): string | null;
+  /**
+   * The document any file is kept beside (0124), or null: any feature's
+   * companion (0082) or a document's own files (0109). Such files are shown,
+   * counted and searched with their document, not on their own.
+   */
+  belongsTo(path: string): string | null;
   /** Be told after something happens. Returns how to stop. */
   on<E extends FeatureEvent>(event: E, fn: (payload: FeatureEvents[E]) => void | Promise<void>): () => void;
   /** Tell its client halves: those with `path` open, or every one with any document open. */
@@ -233,9 +343,29 @@ export interface FeatureRoute {
   handle(req: FeatureRequest): FeatureResponse | Promise<FeatureResponse>;
 }
 
+/**
+ * A folder compiled into one document to render (FeatureSession.compileFolder,
+ * 0126): its text, pandoc's Markdown; the workspace's folders where what it
+ * refers to is found (its documents' images, say); and workspace files to put
+ * beside it by a name its text gives them (a Word template, a cover: 0106).
+ */
+export interface CompiledFolder {
+  text: string;
+  folders: string[];
+  files: { name: string; path: string }[];
+}
+
 /** A feature opened for one workspace. */
 export interface FeatureSession {
   routes?: FeatureRoute[];
+  /**
+   * A folder ('' the top level) joined into one document, to render it in a
+   * format (`html`, `docx`, `pdf`, `epub`), as `request` asks (what that holds
+   * is the feature's to say: 0126). The core renders a folder (a path ending
+   * in `/`) by asking the first feature on that has this, and keeps its
+   * outputs as for a document. A string says why there is nothing to render.
+   */
+  compileFolder?(folder: string, request: Json, format: string): Promise<CompiledFolder | string>;
   close?(): void | Promise<void>;
 }
 

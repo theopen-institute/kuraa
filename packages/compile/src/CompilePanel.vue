@@ -11,7 +11,8 @@
 // are headings) are kept as each is changed.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { Json } from '@kuraa/feature-kit';
-import type { BookContent, FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
+import type { FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
+import type { BookContent, CompileRequest } from './compiling.js';
 import { excludedBy, excludedPaths, FORMATS, NUMBERINGS, noHeadingPaths, noTitlesPaths, type CompileFormat, type Numbering } from './settings.js';
 import { known, load, settingsOf, target } from './store.js';
 import { S } from './strings.js';
@@ -30,7 +31,7 @@ async function loadContents() {
     return;
   }
   try {
-    const items = await ctx.host.renders.bookContents(p);
+    const items = ((await ctx.request('GET', `contents?folder=${encodeURIComponent(p === '/' ? '' : p.replace(/\/$/, ''))}`)) as unknown as { items: BookContent[] }).items;
     if (n === contentsAsked.n) contents.value = items;
   } catch (e) {
     if (n === contentsAsked.n) error.value = ctx.explain(e).text;
@@ -245,7 +246,7 @@ async function compile() {
   }
   try {
     const under = (x: string) => !f || x === f || x.startsWith(`${f}/`);
-    state.value = await ctx.host.renders.render(p, format.value, {
+    const request: CompileRequest = {
       exclude: leftOut.value,
       noHeading: noHeadingPaths(known.value).filter((x) => x !== f && under(x)),
       noTitles: noTitlesPaths(known.value).filter(under),
@@ -257,7 +258,8 @@ async function compile() {
       ...(separator.value.trim() ? { separator: separator.value.trim() } : {}),
       ...(referenceDoc.value ? { referenceDoc: referenceDoc.value } : {}),
       ...(cover.value ? { cover: cover.value } : {}),
-    });
+    };
+    state.value = await ctx.host.renders.render(p, format.value, request as unknown as Json);
     if (state.value.state !== 'failed') await follow(true);
   } catch (e) {
     error.value = ctx.explain(e).text;

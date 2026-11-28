@@ -426,12 +426,19 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       vue:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+    devDependencies:
+      '@kuraa/format-pandoc':
+        specifier: workspace:*
+        version: link:../format-pandoc
 
   packages/composition:
     dependencies:
@@ -477,12 +484,12 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       vue:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
 
   packages/editor-kit:
     dependencies:
@@ -831,9 +838,15 @@ importers:
       '@kuraa/render-pandoc':
         specifier: workspace:*
         version: link:../render-pandoc
+      '@kuraa/search':
+        specifier: workspace:*
+        version: link:../search
       '@kuraa/sync-git':
         specifier: workspace:*
         version: link:../sync-git
+      '@kuraa/words':
+        specifier: workspace:*
+        version: link:../words
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2

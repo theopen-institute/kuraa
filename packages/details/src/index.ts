@@ -22,10 +22,11 @@ export const detailsFeature = defineFeature({
     let known: Map<string, Details> | null = null;
     const readAll = async () => {
       const out = new Map<string, Details>();
-      for (const p of (await ctx.list()).filter(hasDetails)) {
-        if (ctx.documentOf(p) !== null) continue;
+      for (const p of await ctx.list()) {
+        const type = ctx.typeOf(p);
+        if (!hasDetails(type) || ctx.documentOf(p) !== null) continue;
         const text = await ctx.read(p);
-        const d = text === null ? null : detailsOfText(text);
+        const d = text === null ? null : detailsOfText(type, text);
         if (d && !isEmpty(d)) out.set(p, d);
       }
       return out;
@@ -33,8 +34,9 @@ export const detailsFeature = defineFeature({
     const all = async () => (known ??= await readAll());
     /** A document's details again, from its text: said to the client halves if they changed. */
     const again = async (path: string, text: string | null) => {
-      if (!known || !hasDetails(path)) return;
-      const d = text === null ? null : detailsOfText(text);
+      const type = ctx.typeOf(path);
+      if (!known || !hasDetails(type)) return;
+      const d = text === null ? null : detailsOfText(type, text);
       const was = known.get(path);
       if (JSON.stringify(was ?? null) === JSON.stringify(d && !isEmpty(d) ? d : null)) return;
       if (d && !isEmpty(d)) known.set(path, d);

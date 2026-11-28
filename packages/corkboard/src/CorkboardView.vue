@@ -19,7 +19,6 @@ const props = defineProps<{ ctx: FolderViewContext; mode: 'cards' | 'rows' }>();
 const ctx = props.ctx;
 const folder = ctx.folder();
 
-const DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
 /** A folder's icon, as the file tree draws it. */
 const FOLDER = { paths: ['M1.5 12.5v-9h4.25l1.5 1.5h7.25v7.5z'] };
 const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
@@ -60,7 +59,7 @@ const items = computed(() => {
   for (const part of folder ? folder.split('/') : []) dir = dir?.folders.get(part);
   return (dir?.children ?? []).map((c) => {
     if (c.folder) return { kind: 'folder' as const, path: c.folder.path, name: c.name, title: c.name, card: cards.value.folders[c.folder.path] ?? null, icon: FOLDER };
-    const isDoc = DOCUMENT.test(c.file.path) && !!c.file.type;
+    const isDoc = !!c.file.type && !!ctx.typeOf(c.file.path)?.prose;
     return { kind: isDoc ? ('document' as const) : ('file' as const), path: c.file.path, name: c.name, title: shownName(c.file), card: cards.value.documents[c.file.path] ?? null, type: c.file.type, icon: ctx.icon(c.file) };
   });
 });

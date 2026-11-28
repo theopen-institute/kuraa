@@ -2,7 +2,6 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
-import type { BookContent, CompileRequest, WordsDay } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -224,10 +223,6 @@ export interface RenderInfo {
   unavailable: string | null;
   renders: RenderState[];
 }
-/** Where a phrase was found (the host's search.ts). */
-export interface SearchMatch { line: number; column: number; text: string; at: number }
-export interface SearchFile { path: string; type: string | null; title?: string | null; live: boolean; matches: SearchMatch[] }
-export interface SearchResult { files: SearchFile[]; truncated: boolean }
 
 export class ApiError extends Error {
   /** `body`: the whole answer, where it says more than its message. */
@@ -366,9 +361,9 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: CompileRequest): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: Json): Promise<RenderState> {
     try {
-      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
+      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...(compile !== undefined ? { compile } : {}) }) });
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) return { path, format, state: 'failed', message: e.message, progress: null, log: '', by: by.name, startedAt: '', finishedAt: null, output: null };
       throw e;
@@ -378,20 +373,11 @@ export class HostApi {
   async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
   }
-  /** Words written each day from a day on, by person (0094). */
-  async wordsByDay(since: string): Promise<WordsDay[]> {
-    return (await this.json<{ days: WordsDay[] }>(`/api/words?since=${encodeURIComponent(since)}`)).days;
-  }
-  /** What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth. */
-  async bookContents(folder: string): Promise<BookContent[]> {
-    return (await this.json<{ items: BookContent[] }>(`/api/renders/contents?path=${encodeURIComponent(folder)}`)).items;
-  }
   /** The files a document's latest output in a format was made from, as they were, in a zip (0081). */
   async renderMadeFrom(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/made-from?path=${encodeURIComponent(path)}&format=${format}`)).blob();
   }
   /** Search the workspace's text files, and open documents as they are now. */
-  search(query: string, caseSensitive: boolean) { return this.json<SearchResult>(`/api/search?q=${encodeURIComponent(query)}${caseSensitive ? '&case=1' : ''}`); }
   /** Features (0082): how each the host has stands for this workspace. */
   features() { return this.json<{ features: FeatureStatus[] }>('/api/features').then((r) => r.features); }
   /** Turn a feature on or off for this workspace, or change its settings there: committed, for everyone in it. */

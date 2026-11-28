@@ -1,4 +1,4 @@
-// Kuraa's desktop app as a Tauri shell: a prototype (decision 0123), on macOS.
+// Kuraa's desktop app as a Tauri shell: a prototype (decision 0127), on macOS.
 //
 // It opens a window on a loading page, starts the host as released
 // (kuraa-host.mjs, scripts/build-server.mjs) with the Node it carries, on

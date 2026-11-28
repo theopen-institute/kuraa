@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { detailsOfText, isEmpty, keywordsOf, labelColour } from '../src/details.js';
+import type { DocumentType } from '@kuraa/kernel';
+import { detailsOfText, hasDetails, isEmpty, keywordsOf, labelColour } from '../src/details.js';
+
+/** A type whose header is a line of `key=value` pairs (0123: any type's header will do). */
+const plain = {
+  header: {
+    read: (text: string) => (text.startsWith('%') ? Object.fromEntries(text.split('\n')[0]!.slice(1).split(';').map((kv) => kv.split('=').map((x) => x.trim()))) : text.startsWith('!') ? null : {}),
+    write: (text: string) => text,
+  },
+} as unknown as DocumentType;
 
 describe('a document’s details (0094)', () => {
-  it('are read from its header: synopsis, label, status, keywords', () => {
-    const d = detailsOfText('---\ntitle: The harbour\nsynopsis: They arrive at night.\nlabel: Chapter\nstatus: First draft\nkeywords: [harbour, night, harbour]\n---\n\nText.\n');
+  it('are read from its header, as its type reads it: synopsis, label, status, keywords', () => {
+    const d = detailsOfText(plain, '%title=The harbour; synopsis=They arrive at night.; label=Chapter; status=First draft; keywords=harbour, night\n\nText.\n');
     expect(d).toEqual({ synopsis: 'They arrive at night.', label: 'Chapter', status: 'First draft', keywords: ['harbour', 'night'] });
-    expect(isEmpty(detailsOfText('No header.\n'))).toBe(true);
-    expect(isEmpty(detailsOfText('---\ntitle: [unclosed\n---\n'))).toBe(true);
+    expect(isEmpty(detailsOfText(plain, 'No header.\n'))).toBe(true);
+    expect(isEmpty(detailsOfText(plain, '! a header that cannot be read\n'))).toBe(true);
+  });
+
+  it('are had by documents whose type has header fields (0123), none other', () => {
+    expect(hasDetails(plain)).toBe(true);
+    expect(hasDetails({} as DocumentType)).toBe(false);
+    expect(hasDetails(undefined)).toBe(false);
+    expect(isEmpty(detailsOfText(undefined, '%synopsis=x\n'))).toBe(true);
   });
 
   it('take keywords as a list or words with commas between', () => {

@@ -46,7 +46,7 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await openFile(page, path);
   const placeholder = page.getByTestId('editor').locator('.empty-placeholder');
   await expect(placeholder).toHaveAttribute('data-placeholder', 'Start writing…');
-  // Drawn, but not text for screen readers and apps that read the screen: the editor's placeholder (0117).
+  // Drawn, but not text for screen readers and apps that read the screen: the editor's placeholder (0118).
   const editor = page.getByTestId('editor');
   await expect(editor).toHaveAttribute('aria-placeholder', 'Start writing…');
   expect(await placeholder.evaluate((el) => getComputedStyle(el, '::before').content)).toContain('Start writing…');

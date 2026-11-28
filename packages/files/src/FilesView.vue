@@ -6,7 +6,7 @@
 // arrows to move and open folders, Enter to open, F2 to rename, Delete to
 // delete, Shift+F10 for the menu (tree.ts, treeKey). Drag a file or folder onto
 // a folder (or the space below the files) to move it there.
-import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, useTemplateRef } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onUpdated, provide, ref, shallowRef, useTemplateRef } from 'vue';
 import type { NavigationContext } from '@kuraa/feature-kit/client';
 import { buildTree, folderOf, nudgeName, placeName, TREE, treeKey, visibleItems, type Folder } from './tree.js';
 import { S } from './strings.js';
@@ -172,6 +172,7 @@ function drop(e: DragEvent, folder: string, row?: { path: string; folder: boolea
   if (folder) expand(folder);
   const name = nameOf(from);
   if (lastFocused.value === from) lastFocused.value = `${folder ? `${folder}/` : ''}${name}`;
+  glideFrom(from, folder);
   if (at.beside) {
     // Before a row, or before the one after it (none: at the end).
     const rest = namesIn(folder).filter((n) => n !== name);
@@ -186,8 +187,52 @@ function drop(e: DragEvent, folder: string, row?: { path: string; folder: boolea
 function nudge(path: string, by: -1 | 1) {
   const folder = folderOf(path);
   const names = nudgeName(namesIn(folder), nameOf(path), by);
-  if (names) void ctx.place(path, folder, names).then(() => focusRow(path));
+  if (!names) return;
+  glideFrom(path, folder);
+  void ctx.place(path, folder, names).then(() => focusRow(path));
 }
+
+// Motion (0117): when you move a row (a drop, or Alt+↑/↓), the rows whose
+// place changed glide there from where they were, the moved one too, across
+// folders as well. Nothing moves otherwise, nor where motion is reduced. Only
+// rows in sight are animated, and the tree is measured once before and once
+// after the move.
+const GLIDE: KeyframeAnimationOptions = { duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)' };
+let glide: { tops: Map<string, number>; after: number; until: number } | null = null;
+/** The rows in sight, by path: a file's row is its item; a folder's, its own line (what is in it, rows of their own). */
+function rowsInSight(): Map<string, { el: HTMLElement; top: number }> {
+  const rows = new Map<string, { el: HTMLElement; top: number }>();
+  const scroll = list.value?.parentElement;
+  if (!scroll) return rows;
+  const view = scroll.getBoundingClientRect();
+  for (const li of scroll.querySelectorAll<HTMLElement>('li[data-path]')) {
+    const el = li.classList.contains('tree-dir') ? (li.firstElementChild as HTMLElement) : li;
+    const box = el.getBoundingClientRect();
+    if (box.bottom >= view.top && box.top <= view.bottom) rows.set(li.dataset.path!, { el, top: box.top });
+  }
+  return rows;
+}
+/** Before a move into a folder: where each row is, by the path it will have. */
+function glideFrom(from: string, folder: string) {
+  glide = null;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const to = `${folder ? `${folder}/` : ''}${nameOf(from)}`;
+  const renamed = (p: string) => (p === from ? to : p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+  const tops = new Map<string, number>();
+  for (const [p, { top }] of rowsInSight()) tops.set(renamed(p), top);
+  glide = { tops, after: changes.value, until: performance.now() + 1000 };
+}
+// Once the core has said the tree changed (the move is shown at once) and it is drawn: each row from where it was.
+onUpdated(() => {
+  if (!glide || changes.value === glide.after) return;
+  const { tops, until } = glide;
+  glide = null;
+  if (performance.now() > until) return;
+  for (const [p, { el, top }] of rowsInSight()) {
+    const was = tops.get(p);
+    if (was !== undefined && Math.abs(was - top) >= 1) el.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }], GLIDE);
+  }
+});
 
 // The right-click menu (also Shift+F10 or the menu key on a row): the core's,
 // for a file, a folder (its path ending in /) or the top level ('').

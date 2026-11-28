@@ -5,7 +5,7 @@
 // Only this view draws it; nothing is added to the document until someone types.
 // Screen readers and apps that read the screen get it as the editor's
 // placeholder (aria-placeholder), not as text: the drawn words are hidden from
-// them (style.css), so they don't take it for something written (0117).
+// them (style.css), so they don't take it for something written (0118).
 import type { Node as PMNode } from 'prosemirror-model';
 import { Plugin, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';

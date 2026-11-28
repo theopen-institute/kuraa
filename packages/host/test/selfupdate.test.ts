@@ -8,7 +8,9 @@ import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { autoUpdate, checkArchive, compareVersions, currentVersion, installServer, installedRoot, markGood, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
+import { createServer } from 'node:http';
+import { MAX_SIGNATURE_BYTES, autoUpdate, checkArchive, compareVersions, currentVersion, download, installServer, installedRoot, markGood, runsAsService, untilNight, updateFrom, type Release, type ServerBuild } from '../src/selfupdate.js';
+import { PROTOCOL } from '../src/peers/link.js';
 
 const temps: string[] = [];
 const temp = () => {
@@ -25,17 +27,18 @@ const PUBLIC = publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const other = generateKeyPairSync('ed25519').privateKey;
 
 /** A release's folder, as build-server.mjs makes it (the little of it that matters here). */
-function releaseDir(version: string): string {
+function releaseDir(version: string, protocol?: number): string {
   const dir = join(temp(), `kuraa-server-${version}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'kuraa-host.mjs'), `console.log(${JSON.stringify(version)});\n`);
   writeFileSync(join(dir, 'VERSION'), `${version}\n`);
+  if (protocol !== undefined) writeFileSync(join(dir, 'PROTOCOL'), `${protocol}\n`);
   return dir;
 }
 
 /** A release as published: its archive, signed (with the release key unless said), and the checksum GitHub lists. */
-function published(version: string, key = privateKey): { release: Release; files: Map<string, Buffer> } {
-  const dir = releaseDir(version);
+function published(version: string, key = privateKey, protocol?: number): { release: Release; files: Map<string, Buffer> } {
+  const dir = releaseDir(version, protocol);
   const archive = join(dir, '..', `kuraa-server-${version}.tar.gz`);
   execFileSync('tar', ['-czf', archive, '-C', join(dir, '..'), `kuraa-server-${version}`]);
   const bytes = readFileSync(archive);
@@ -178,6 +181,73 @@ describe('a released server', () => {
     told!('0.3.0');
     await new Promise((r) => setTimeout(r, 10));
     expect(looked).toBe(1);
+  });
+
+  it('holds a release that changes how devices sync, until a device runs it; takes one that does not at once (0112)', async () => {
+    const root = installed();
+    const holds: [string, number | null][] = [];
+    const hold = (v: string, p: number | null) => void holds.push([v, p]);
+    const same = published('0.2.0', privateKey, PROTOCOL);
+    expect(await updateFrom({ root, build: build(), latest: async () => same.release, fetch: async (url) => same.files.get(url)!, hold })).toBe('0.2.0');
+    expect(currentVersion(root)).toBe('0.2.0');
+    // The next changes the protocol: unpacked beside, not put in place, and said.
+    const next = published('0.3.0', privateKey, PROTOCOL + 1);
+    let fetched = 0;
+    const fetchNext = async (url: string) => (fetched++, next.files.get(url)!);
+    expect(await updateFrom({ root, build: build(), latest: async () => next.release, fetch: fetchNext, hold })).toBeNull();
+    expect(currentVersion(root)).toBe('0.2.0');
+    expect(existsSync(join(root, 'versions', '0.3.0', 'kuraa-host.mjs'))).toBe(true);
+    expect(holds).toEqual([['0.3.0', PROTOCOL + 1]]);
+    // Held: not downloaded again.
+    fetched = 0;
+    expect(await updateFrom({ root, build: build(), latest: async () => next.release, fetch: fetchNext, hold, held: '0.3.0' })).toBeNull();
+    expect(fetched).toBe(0);
+    // Asked for (kuraa-host update, no hold): put in place whatever it speaks.
+    expect(await updateFrom({ root, build: build(), latest: async () => next.release, fetch: fetchNext })).toBe('0.3.0');
+    expect(currentVersion(root)).toBe('0.3.0');
+  });
+
+  it('puts a held release in place, and restarts at once, when a device runs the newer protocol (0112)', async () => {
+    const root = installed();
+    const next = published('0.2.0', privateKey, PROTOCOL + 1);
+    let newer: (() => void) | null = null;
+    let release: ((v: string) => void) | null = null;
+    let restarted = 0;
+    const said: string[] = [];
+    autoUpdate({
+      here: join(root, 'versions', '0.1.0'), build: build(), log: (m) => void said.push(m), restart: () => void restarted++,
+      newer: (fn) => void (newer = fn), newerRelease: (fn) => void (release = fn),
+      latest: async () => next.release, fetch: async (url) => next.files.get(url)!,
+    });
+    // A device says a newer release is out: looked for, found, held (it changes the protocol).
+    release!('0.2.0');
+    for (let i = 0; i < 50 && !said.some((m) => m.includes('held until')); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(currentVersion(root)).toBe('0.1.0');
+    expect(said.some((m) => m.includes('kuraa 0.2.0 changes how devices sync'))).toBe(true);
+    // A device runs the newer protocol: in place, and restarted at once.
+    newer!();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(currentVersion(root)).toBe('0.2.0');
+    expect(restarted).toBe(1);
+  });
+
+  it('downloads no more than it may, and from GitHub or where it was asked (0112)', async () => {
+    const body = Buffer.alloc(MAX_SIGNATURE_BYTES + 1, 'x');
+    const server = createServer((req, res) => {
+      if (req.url === '/away') return void res.writeHead(302, { location: 'http://example.invalid/x' }).end();
+      // No length said: read with a limit all the same.
+      res.writeHead(200);
+      res.end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const at = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      await expect(download(`${at}/sig`, MAX_SIGNATURE_BYTES)).rejects.toThrow('larger than');
+      expect((await download(`${at}/sig`, body.length)).length).toBe(body.length);
+      await expect(download(`${at}/away`, 100)).rejects.toThrow();
+    } finally {
+      server.close();
+    }
   });
 
   it('goes back to the last good version when a new one does not start three times, and never takes that one again (0099)', async () => {

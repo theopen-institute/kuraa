@@ -29,7 +29,9 @@
 //                 [--no-serve-dht]             never serve the public DHT (a public address does, by default)
 //                 (see peers/cli.ts for invite, join, devices, online, fork)
 //   saving:       [--flush-ms N] [--commit-ms N]
-//   updating:     [--auto-update]   a release (@kuraa/server, release.ts) updates itself and restarts (0052)
+//   updating:     [--auto-update]   a release (@kuraa/server, release.ts) updates itself and restarts (0052);
+//                                   one that changes how devices sync, once a device of its runs it (0112)
+//                 [--auto-update-all]  and such a release at once
 //
 // Flags only, because they choose what code runs with your rights (0046, 0047):
 //   --component <path or package>...   more run components; @kuraa/run-components always loads
@@ -102,6 +104,7 @@ const { values } = parseArgs({
     'serve-dht': { type: 'boolean' },
     'flush-ms': { type: 'string' },
     'auto-update': { type: 'boolean', default: false },
+    'auto-update-all': { type: 'boolean', default: false },
     'commit-ms': { type: 'string' },
   },
 });
@@ -221,12 +224,12 @@ const stop = (signal: string) => {
 };
 // A released server updating itself (selfupdate.ts): it stops, saving everything, for its service to start the new version.
 const released = (globalThis as { kuraaServer?: { here: string; build: import('./selfupdate.js').ServerBuild } }).kuraaServer;
-if (values['auto-update']) {
+if (values['auto-update'] || values['auto-update-all']) {
   if (!released) console.log('[kuraa] --auto-update: this host runs from the repository; update it with git pull');
   else {
     const { autoUpdate } = await import('./selfupdate.js');
     const { onNewerVersion, onNewerRelease } = await import('./index.js');
-    autoUpdate({ ...released, log: (m) => console.log(`[kuraa] ${m}`), restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
+    autoUpdate({ ...released, all: values['auto-update-all'], log: (m) => console.log(`[kuraa] ${m}`), restart: () => stop('update'), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
   }
 }
 

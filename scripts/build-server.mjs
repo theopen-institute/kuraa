@@ -99,6 +99,11 @@ cpSync(web, join(dir, 'web'), { recursive: true });
 // this archive uses one the computer has (on PATH), else makes PDFs where code runs.
 cpSync(await fetchPandoc(), join(dir, 'render'), { recursive: true, filter: (p) => !p.endsWith('.kuraa-fetched') });
 writeFileSync(join(dir, 'VERSION'), `${version}\n`);
+// How its devices speak to each other (link.ts, PROTOCOL): a server waits to take a release that changes it until a
+// device of its workspaces runs it (selfupdate.ts, 0112), as one that changes it no longer syncs with older devices.
+const protocol = /export const PROTOCOL = (\d+);/.exec(readFileSync(join(ROOT, 'packages/host/src/peers/link.ts'), 'utf8'))?.[1];
+if (!protocol) throw new Error('No PROTOCOL in packages/host/src/peers/link.ts');
+writeFileSync(join(dir, 'PROTOCOL'), `${protocol}\n`);
 // The Node it needs: a server does not switch to a release its Node cannot run (selfupdate.ts).
 writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server', version, type: 'module', private: true, engines: { node: '>=24' } }, null, 2)}\n`);
 

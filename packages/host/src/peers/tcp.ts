@@ -44,27 +44,52 @@ function open(port: number, log: (m: string) => void): Promise<Listener | null> 
 /** Connections that have not said which device they are for yet: at most this many, and this many from one address (0099). */
 const MAX_WAITING = 256;
 const MAX_WAITING_FROM = 16;
-let waiting = 0;
+/** How long a connection has, from when it is taken, to say which device it is for (0112): a deadline, not an idle time. */
+const PRELUDE_MS = 5000;
+/** The connections waiting, oldest first; and how many from each address (an IPv6 one by its /64). */
+const waiting = new Set<Socket>();
 const waitingFrom = new Map<string, number>();
+
+/**
+ * Where a connection is from, as the limits count it (0112): an IPv4 address as
+ * it is; an IPv6 one by its first 64 bits, which a single network is given
+ * whole, so one holder of a /64 counts as one, not as 2^64.
+ */
+export function addressGroup(addr: string): string {
+  const v4 = /^(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/i.exec(addr);
+  if (v4) return v4[1]!;
+  if (!addr.includes(':')) return addr;
+  // Expand :: to the missing groups, then keep the first four.
+  const [head, tail = ''] = addr.split('%')[0]!.split('::') as [string, string?];
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const groups = addr.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return `${groups.slice(0, 4).map((g) => (parseInt(g || '0', 16) || 0).toString(16)).join(':')}::/64`;
+}
 
 function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): void {
   sock.on('error', () => undefined);
-  // A server's port is open to anyone (0099): connections that say nothing hold a socket each, so only so many.
-  const from = sock.remoteAddress ?? '';
-  if (waiting >= MAX_WAITING || (waitingFrom.get(from) ?? 0) >= MAX_WAITING_FROM) return void sock.destroy();
-  waiting++;
+  // A server's port is open to anyone (0099): connections that say nothing hold a socket each, so only so many; each
+  // address, only so many of those; and when all are taken, the one waiting longest makes way (0112), as an honest
+  // device says which device it is for at once.
+  const from = addressGroup(sock.remoteAddress ?? '');
+  if ((waitingFrom.get(from) ?? 0) >= MAX_WAITING_FROM) return void sock.destroy();
+  if (waiting.size >= MAX_WAITING) waiting.values().next().value?.destroy();
+  waiting.add(sock);
   waitingFrom.set(from, (waitingFrom.get(from) ?? 0) + 1);
   let counted = true;
+  const deadline = setTimeout(() => sock.destroy(), PRELUDE_MS);
+  deadline.unref?.();
   const done = () => {
     if (!counted) return;
     counted = false;
-    waiting--;
+    clearTimeout(deadline);
+    waiting.delete(sock);
     const left = (waitingFrom.get(from) ?? 1) - 1;
     if (left) waitingFrom.set(from, left);
     else waitingFrom.delete(from);
   };
   sock.once('close', done);
-  sock.setTimeout(10_000, () => sock.destroy());
   let head = Buffer.alloc(0);
   const onReadable = () => {
     for (let chunk: Buffer | null; (chunk = sock.read() as Buffer | null) !== null;) {
@@ -81,7 +106,6 @@ function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): vo
       const rest = head.subarray(nl + 1);
       if (rest.length) sock.unshift(rest);
       done();
-      sock.setTimeout(0);
       return handler(sock);
     }
   };

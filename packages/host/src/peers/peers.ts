@@ -40,6 +40,8 @@ export interface PeerOptions {
   bootstrap?: (string | { host: string; port: number })[];
   /** The most one fetch from a device may bring, in bytes. */
   maxFetchBytes?: number;
+  /** How many connections the swarm keeps (node.ts): more for a server (0112). */
+  maxPeers?: number;
   /** How long publishing run outputs waits after a change, in ms (outputs.ts; tests). */
   outputsPublishMs?: number;
   /** This computer's person's identity (person.ts); default: the one this computer keeps, if any. Tests give their own. */
@@ -325,7 +327,8 @@ export class Peers {
       dir: host.dir,
       stateDir,
       bootstrap: opts.bootstrap,
-      maxFetchBytes: opts.maxFetchBytes,
+      // A server's larger limit is for its first copy of a workspace (hub.ts, joining): each fetch after, the usual (0112).
+      maxPeers: opts.maxPeers,
       dialMs: opts.dialMs,
       lookupsMs: opts.lookupsMs,
       relays: opts.relays,

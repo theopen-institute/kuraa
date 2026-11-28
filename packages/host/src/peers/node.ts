@@ -18,7 +18,7 @@ import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
 import type { KeyPair } from '../keys.js';
-import { stat } from 'node:fs/promises';
+import { stat, statfs } from 'node:fs/promises';
 import { pipeline, type Duplex } from 'node:stream';
 import Hyperswarm, { type Discovery, type SwarmConnection } from 'hyperswarm';
 import { gitEnv, gitPath, spawnGit, type Git } from '../git.js';
@@ -48,6 +48,8 @@ export interface NodeOptions {
   bootstrap?: unknown[];
   /** The most one fetch from a device may bring, in bytes. Default 2 GiB. */
   maxFetchBytes?: number;
+  /** How many connections the swarm keeps (Hyperswarm's maxPeers; 64 by default): more for a server (0112). */
+  maxPeers?: number;
   /** The branch a joining device should start on. */
   branch(): Promise<string>;
   log(m: string): void;
@@ -127,6 +129,21 @@ const LET_IN_MS = 10 * 60_000;
 
 /** How long a device that connected may take to be let in (its hello, an invite link) before its link is closed (0071). */
 const HELLO_MS = 60_000;
+
+/**
+ * What another device said, fit to log or show (0112): a string, no control
+ * characters (no new lines, no terminal escapes, so no forged log lines), and
+ * not long.
+ */
+export function saidByPeer(x: unknown, max = 200): string {
+  const s = String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+/** On a server, whose port anyone reaches (0112): a stranger's time to be let in, and how many may wait at once. */
+const SERVER_HELLO_MS = 15_000;
+const MAX_UNACCEPTED = 64;
+/** Space a fetch leaves on the disk (0112): below it, a device's work is not fetched until there is more. */
+const MIN_FREE_BYTES = 1024 ** 3;
 
 /** On the local network, how long the device with the higher key waits for the lower to connect before it does (0071: the lower one's firewall may refuse). */
 const LAN_FALLBACK_MS = 5_000;
@@ -409,6 +426,9 @@ export class PeerNode {
         return this.refuse(key) || this.keepsOwn(key) || this.o.direct?.(key) === false;
       },
       relayThrough: (force) => this.relayFor(force),
+      // A server connects to every member of a workspace, and strangers can connect to it (0112): more than the 64 a
+      // device's swarm keeps, so connections no one lets in yet do not stop it reaching members.
+      ...(this.o.maxPeers ? { maxPeers: this.o.maxPeers } : {}),
     });
     if (this.o.offerRelay !== false) {
       // Offered once it is up, never waited for: on a network that blocks the DHT (a school's, say) it takes
@@ -969,6 +989,16 @@ export class PeerNode {
   }
 
   /** What a member's hello says about reaching it: its servers' TCP addresses, relays named in its settings, its DHT node to start from. */
+  /**
+   * Whether to take where to reach others (relays, DHT nodes, addresses) from a
+   * device: only one that is someone here, a person's or a server's (0099), not
+   * one let in by a link a moment ago; at its first hello and every one after
+   * (0112: the second was taken from anyone accepted).
+   */
+  private hintsFrom(key: string): boolean {
+    return !this.access?.policy.founded || this.access.personOf.has(key);
+  }
+
   private noteHints(key: string, h: Extract<ControlMessage, { type: 'hello' }>): void {
     const before = JSON.stringify([this.hints.tcp[key] ?? [], this.hints.relays]);
     // Said only to devices it is paired with: a hello without it says nothing either way.
@@ -1275,10 +1305,17 @@ export class PeerNode {
     // Through the DHT: gone quiet (its keepalives stop) counts as gone, as for this layer's own (QUIET_MS).
     if (!this.kinds.has(conn)) (conn as unknown as { setTimeout?(ms: number): void }).setTimeout?.(QUIET_MS);
     this.links.get(key)?.close();
-    // Not let in a while after connecting (no hello, or none that lets it in): closed, not kept up by keepalives for good.
+    // So many not let in yet at once (0112): past that, the one waiting longest makes way, as a device that is in is let in
+    // at its hello, a moment after connecting.
+    if (!this.o.joining) {
+      const waiting = [...this.links.values()].filter((l) => !l.accepted && !l.closed);
+      if (waiting.length >= MAX_UNACCEPTED) waiting[0]!.close();
+    }
+    // Not let in a while after connecting (no hello, or none that lets it in): closed, not kept up by keepalives for good;
+    // on a server, sooner.
     const helloTimer = setTimeout(() => {
       if (!link.accepted && !link.closed && !this.o.joining) link.close();
-    }, HELLO_MS);
+    }, this.isServerDevice(this.myKey) ? SERVER_HELLO_MS : HELLO_MS);
     helloTimer.unref();
     const link: PeerLink = new PeerLink(conn, () => {
       clearTimeout(helloTimer);
@@ -1334,7 +1371,8 @@ export class PeerNode {
       // For members only: how to reach this device besides the DHT (a device not known yet learns
       // nothing of it): the relay it offers and whether it is on a public address, the relays named in
       // its settings, where it takes TCP (a server), and its DHT node to start from.
-      ...(paired && this.relayOffered ? { relay: this.relayOffered, relayPublic: this.relayPublic } : {}),
+      // The relay this device runs: only to someone here (0112), not to a device let in by a link a moment ago.
+      ...(paired && this.relayOffered && this.hintsFrom(link.key) ? { relay: this.relayOffered, relayPublic: this.relayPublic } : {}),
       ...(paired && this.o.relays?.length ? { relays: this.o.relays.filter(isRelayKey).slice(0, 4) } : {}),
       ...(paired ? { tcp: this.publicAddress ? [this.publicAddress] : [] } : {}),
       ...(paired && this.dhtAddress ? { dht: this.dhtAddress } : {}),
@@ -1392,8 +1430,10 @@ export class PeerNode {
     if (m.type === 'welcome') return this.welcomed(link, m);
     // Turned away, whether this device took the other in or not: a device joining has not yet (0072).
     if (m.type === 'bye') {
-      this.o.log(`peers: ${link.remote ?? link.hello?.name ?? link.key.slice(0, 8)} left: ${m.reason}`);
-      this.events.refused?.(link, String(m.reason));
+      // Logged from a device let in, or while joining (whoever turns this one away says why): not a stranger's words (0112).
+      const reason = saidByPeer(m.reason);
+      if (link.accepted || this.o.joining) this.o.log(`peers: ${saidByPeer(link.remote ?? link.hello?.name ?? link.key.slice(0, 8))} left: ${reason}`);
+      this.events.refused?.(link, reason);
       link.close();
       return;
     }
@@ -1449,7 +1489,7 @@ export class PeerNode {
       this.versions.set(link.key, theirs);
       // The oldest forgotten: any device can say hello.
       if (this.versions.size > MAX_VERSIONS) this.versions.delete(this.versions.keys().next().value!);
-      if (known !== theirs) this.o.log(`peers: ${h.name} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
+      if (known !== theirs) this.o.log(`peers: ${saidByPeer(h.name)} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
       if (theirs > PROTOCOL && inWorkspace && Date.now() - protocolToldAt > NEWS_MS) {
         protocolToldAt = Date.now();
         versionNews.emit('newer');
@@ -1468,7 +1508,7 @@ export class PeerNode {
       link.heads = readHeads(h.heads);
       link.spaces = readHeads(h.spaces);
       link.outputs = readOutputs(h.outputs);
-      if (h.workspace === this.ws.id) this.noteHints(link.key, h);
+      if (h.workspace === this.ws.id && this.hintsFrom(link.key)) this.noteHints(link.key, h);
       if (h.workspace === this.ws.id) await this.gossip(link, h);
       // Its branches or the spaces this device may read changed (it may have been let read one): fetched (0071).
       if (JSON.stringify([link.heads, link.spaces]) !== before) this.events.refs?.(link);
@@ -1554,7 +1594,7 @@ export class PeerNode {
     if (same) await this.gossip(link, h);
     // Where to reach others (relays, DHT nodes, addresses): only from a device that is someone here, a person's or a
     // server's (0099), not from one let in by a link a moment ago.
-    if (same && (!this.access?.policy.founded || this.access.personOf.has(link.key))) this.noteHints(link.key, h);
+    if (same && this.hintsFrom(link.key)) this.noteHints(link.key, h);
     this.hints.seen[link.key] = Date.now();
     this.events.accepted?.(link);
     this.tellPresence();
@@ -1839,6 +1879,8 @@ export class PeerNode {
   }
 
   private readonly fetches = new Map<string, Promise<boolean>>();
+  /** The disk was found all but full at the last fetch: said once, until there is room again. */
+  private lowOnSpace = false;
 
   /**
    * Fetch a paired device's branches into `<its remote>/…`, and the spaces it
@@ -1879,6 +1921,14 @@ export class PeerNode {
    */
   private async fetchNow(remote: string, refspecs: string[], progress?: (said: string) => void): Promise<boolean> {
     if (this.closing) return false;
+    // Not where the disk is all but full (0112): a device sending more and more would fill it, refused or not.
+    const free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    if (free < MIN_FREE_BYTES) {
+      if (!this.lowOnSpace) this.o.log(`peers: not fetching from ${remote}: less than 1 GB is free on this disk`);
+      this.lowOnSpace = true;
+      return false;
+    }
+    this.lowOnSpace = false;
     const r = await this.o.git.run([
       '-c', `core.hooksPath=${devNull}`, '-c', 'fetch.recurseSubmodules=false', '-c', 'protocol.version=2',
       'fetch', '--prune', '--no-write-fetch-head', ...(progress ? ['--progress'] : []), remote, ...refspecs,

@@ -94,6 +94,8 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     lan: false,
     // A workspace's whole history, copied as it joins, may be large: not cut off at a desktop's 2 GiB.
     maxFetchBytes: 64 * 1024 ** 3,
+    // Every member of every workspace, and strangers: more than a device's 64 (0112).
+    maxPeers: 1024,
     publicAddress: o.publicAddress,
     peerPort: o.peerPort ?? PEER_PORT,
     dhtPort: o.dhtPort ?? PEER_PORT,

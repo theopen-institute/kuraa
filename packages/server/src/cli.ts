@@ -11,7 +11,9 @@
 //                                      (open TCP and UDP 5872 in the firewall; 0 for either: any free port)
 //   [--bootstrap host:port]... [--relay <key>]...   a private network's DHT nodes; relays
 //   [--port 4322] [--host 127.0.0.1] [--token T]   its own API, for join and list: it serves no app (headless, for now)
-//   [--auto-update]                    a release, installed, updates itself (0052)
+//   [--auto-update]                    a release, installed, updates itself (0052); a release that
+//                                      changes how devices sync, once one of its devices runs it (0112)
+//   [--auto-update-all]                and such a release at once
 // server join <invite link | -> [--data <folder>]   bring a workspace onto the running server, by a link for a server
 //                                      (-: read from standard input, so it is not on the command line)
 //                                      (its owner makes one: People and computers › Add a server…)
@@ -27,6 +29,8 @@ export interface ServerCliOptions {
   name?: string;
   /** Update itself (a release, installed, run by its service with --auto-update). */
   autoUpdate?: boolean;
+  /** And take releases that change the protocol at once (--auto-update-all, 0112). */
+  autoUpdateAll?: boolean;
   /** What this release is, and where it was unpacked: none, run from the repository. */
   released?: { here: string; build: ServerBuild };
 }
@@ -166,7 +170,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
 
   // Save everything, then exit (for its service to start it again, after an update). A signal often comes twice
   // at once (the terminal and a supervisor): repeats are let go; a second a moment later exits at once.
-  if (o.autoUpdate || values['auto-update']) {
+  if (o.autoUpdate || values['auto-update'] || values['auto-update-all']) {
     if (!o.released) say('--auto-update: this server runs from the repository; update it with git pull');
     else {
       // Restarting to update waits for a join under way (an hour at most): else it would be cut off, half done (0099).
@@ -175,7 +179,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
         if (!running.hub.hub.joinsUnderWay || Date.now() - since > 3600_000) return fn();
         setTimeout(() => whenIdle(fn, since), 5000).unref();
       };
-      autoUpdate({ ...o.released, log: say, restart: () => whenIdle(() => stop('update')), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
+      autoUpdate({ ...o.released, all: !!(o.autoUpdateAll || values['auto-update-all']), log: say, restart: () => whenIdle(() => stop('update')), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
     }
   }
 }
@@ -204,6 +208,7 @@ function parse(argv: string[]) {
       host: { type: 'string' },
       token: { type: 'string' },
       'auto-update': { type: 'boolean' },
+      'auto-update-all': { type: 'boolean' },
     },
   });
 }

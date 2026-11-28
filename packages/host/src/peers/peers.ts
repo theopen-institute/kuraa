@@ -1568,7 +1568,8 @@ export class Peers {
     };
   }
 
-  async close(): Promise<void> {
+  /** Stop. The write rules go on judging what syncs bring in until `judging` (a push to the online copies under way) is done. */
+  async close(judging?: Promise<unknown>): Promise<void> {
     this.closed = true;
     clearTimeout(this.announceTimer);
     clearInterval(this.holdingTimer);
@@ -1582,9 +1583,9 @@ export class Peers {
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([Promise.allSettled([...this.fetching.values(), ...this.fetchingOutputs.values()]), new Promise((r) => (timer = setTimeout(r, 5000)))]);
     clearTimeout(timer);
+    this.rooms.close();
+    await Promise.all([this.node.close(), judging?.catch(() => undefined)]);
     // Only now (0071): work a sync still brings in is judged by the write rules as ever.
     this.host.gate = null;
-    this.rooms.close();
-    await this.node.close();
   }
 }

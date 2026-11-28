@@ -163,6 +163,10 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 /* What features put beside the text (0082): marks in the margin at their lines, and actions beside a selection. */
 .feature-mark { position: absolute; width: 22px; height: 20px; padding: 0; border: 0; background: none; font: 12px/20px var(--font); cursor: pointer; text-align: center; border-radius: 4px; }
 .feature-mark:hover, .feature-mark:focus-visible { background: var(--accent-soft); }
+/* A mark drawn as line art (0129: a comment's bubble): larger than a character, thin strokes in its colour, filled faintly while open. */
+.feature-mark.feature-icon { width: 26px; height: 22px; margin-top: -1px; color: var(--muted); }
+.feature-mark.feature-icon svg { display: block; width: 20px; height: 20px; margin: 1px auto; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+.feature-mark.feature-icon.active svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
 /* A tag (a code, say): its name beside the line, in its colour, as wide as it needs; tinted while it, or what it is about, is pointed at. */
 .feature-mark.feature-tag {
   width: auto; height: 18px; margin-top: 1px; padding: 0 7px 0 6px; font: 12px/18px var(--font); text-align: left;
@@ -374,6 +378,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button.danger { color: var(--warn); }
 .menu-actions button.danger { color: var(--warn); }
 .context-menu .context-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+/* An item's button spans the menu's width, so the whole row takes the pointer, not only its words. */
+.context-menu .context-item { display: grid; }
 /* An item with icons at the right of its row (the open workspace's sync and ⚙). */
 .context-menu .context-row { display: flex; align-items: center; gap: 2px; }
 .context-menu .context-row > button:first-child { flex: 1; }

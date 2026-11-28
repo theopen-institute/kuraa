@@ -6,10 +6,11 @@
 // arrows to move and open folders, Enter to open, F2 to rename, Delete to
 // delete, Shift+F10 for the menu (tree.ts, treeKey). Drag a file or folder onto
 // a folder (or the space below the files) to move it there.
-import { computed, nextTick, onBeforeUnmount, onUpdated, provide, ref, shallowRef, useTemplateRef } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onUpdated, provide, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import type { NavigationContext } from '@kuraa/feature-kit/client';
 import { buildTree, folderOf, nudgeName, placeName, TREE, treeKey, visibleItems, type Folder } from './tree.js';
 import { S } from './strings.js';
+import { readFolds, saveFolds } from './folds.js';
 import TreeFolder from './TreeFolder.vue';
 
 const props = defineProps<{ ctx: NavigationContext }>();
@@ -28,7 +29,10 @@ const stopChange = ctx.onChange(() => {
   files.value = ctx.files();
   folders.value = ctx.folders();
   shownFolder.value = ctx.shownFolder();
-  workspaceName.value = ctx.workspaceName();
+  if (ctx.workspaceName() !== workspaceName.value) {
+    workspaceName.value = ctx.workspaceName();
+    collapsed.value = loaded = readFolds(workspaceName.value);
+  }
   if (ctx.selected() !== selected.value) {
     selected.value = ctx.selected();
     revealFolderOf(selected.value);
@@ -48,7 +52,14 @@ function folderAt(path: string): Folder | null {
 /** The names in a folder, in the order shown. */
 const namesIn = (folder: string) => folderAt(folder)?.children.map((c) => c.name) ?? [];
 const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
-const collapsed = ref(new Set<string>());
+// Folders closed, as they were left in this workspace (folds.ts): kept as they change.
+// What was just read is not written back, so a workspace's folds are not let go of
+// against another workspace's tree while its files are on their way.
+let loaded = readFolds(workspaceName.value);
+const collapsed = shallowRef(loaded);
+watch(collapsed, (c) => {
+  if (c !== loaded) saveFolds(workspaceName.value, c, tree.value);
+});
 const expand = (folder: string) => {
   if (!collapsed.value.has(folder)) return;
   const next = new Set(collapsed.value);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aboutOf, describePages, findPassage, fromCodePoints, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
+import { aboutOf, creatorColourOf, describePages, findPassage, fromCodePoints, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
 
 const ME = 'a'.repeat(64);
 const comment = (id: string, value: string, modified = '2026-11-25T10:00:00Z', target: Item['target'] = '../p01.md'): Item => ({
@@ -22,6 +22,15 @@ describe('an annotation page', () => {
     // None: no file.
     expect(writePage([], ME)).toBeNull();
     expect(readPage('not json')).toEqual([]);
+  });
+
+  it("keeps its maker's colour, as #rrggbb, and reads none where there is none or it is not one", () => {
+    const a = comment('urn:uuid:a', 'coloured');
+    expect(creatorColourOf(a)).toBeNull();
+    a.creator = { ...(a.creator as object), color: '#1a7f5A' };
+    expect(creatorColourOf(readPage(writePage([a], ME))[0]!)).toBe('#1a7f5A');
+    a.creator = { ...(a.creator as object), color: 'red; background: url(x)' };
+    expect(creatorColourOf(a)).toBeNull();
   });
 
   it('keeps annotations of kinds it does not know, and whatever else they hold', () => {

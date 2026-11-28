@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
   <div ref="menu" class="context-menu" role="menu" :style="pos" data-testid="context-menu" @keydown="onKey">
     <template v-for="item in items" :key="item.label">
       <div v-if="item.divided" class="context-divider" role="separator" />
-      <div :class="{ 'context-row': item.icons?.length }">
+      <div :class="item.icons?.length ? 'context-row' : 'context-item'">
         <button
           type="button"
           role="menuitem"

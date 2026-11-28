@@ -1,5 +1,7 @@
 # 0039 · One online copy, pushed to and fetched from
 
+> Changed by [0131](0131-closing-says-so.md): each save is pushed 5 s after the last, not half a minute.
+
 > Changed by [0115](0115-a-personal-backup.md): the online copy is a **personal backup**, one person's; what
 > comes in from it is judged as work from one of their own devices, and it is no meeting place for
 > other people (servers are).
@@ -11,7 +13,7 @@ Supersedes the sync remote (0032) and backups (0036). People met two settings fo
 with different rules (one fetched and merged on Sync, the other only pushed to), and had to choose.
 Now there is one: an **online copy** (GitHub, GitLab or any git server, or a folder).
 
-- **Each save is pushed to it,** a while after the last (half a minute), and everything at start.
+- **Each save is pushed to it,** a while after the last (half a minute; 5 s since 0131), and everything at start.
 - **It is fetched from and merged** on **Sync** and every five minutes: its branches come in by
   the same deterministic merges as another device's (0025), and the result is pushed. So devices
   that cannot reach each other directly still meet through it.

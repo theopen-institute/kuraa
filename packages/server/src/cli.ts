@@ -120,11 +120,11 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
       const ago = (ms: number) => { const m = Math.round((Date.now() - ms) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
       const size = (b: number | null) => (b === null ? '?' : b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${(b / 1024 ** 3).toFixed(1)} GB`);
       console.log(`kuraa ${st.version ?? '(from the repository)'}, process ${st.pid}, running since ${new Date(st.started).toISOString()} (${ago(st.started)})`);
-      console.log(`updates: ${st.updates === 'off' ? 'not updating itself (kuraa-host update)' : st.updates === 'all' ? 'updating itself, a protocol change at once' : 'updating itself, a protocol change once a device runs it'}`);
+      console.log(`updates: ${st.updates === 'off' ? 'not updating itself (kuraa-host update)' : st.updates === 'all' ? 'updating itself, a protocol change at once' : 'updating itself, a protocol change once devices of two of its workspaces run it (of one, if it holds one)'}`);
       console.log(`key: ${st.key}`);
       if (!st.workspaces.length) console.log(`no workspaces yet: ${name} join <invite link>`);
       for (const w of st.workspaces) {
-        const state = w.out ? `${w.out === 'blocked' ? 'blocked' : 'taken out'} by its owner: deleting its copy` : w.in ? 'in' : 'not taken in yet';
+        const state = w.out === 'blocked' ? 'blocked by its owner: deleting its copy' : w.out === 'removed' ? 'taken out by its owner: its copy kept a while, then deleted' : w.out === 'retired' ? 'its key given up (new-key): kept until new-key finishes' : w.in ? 'in' : 'not taken in yet';
         console.log(`${w.id}  ${w.name}  ${state}; members' devices online ${w.online} of ${w.devices}; work last brought in ${w.lastBrought ? ago(w.lastBrought) : 'not since it started'}; ${size(w.bytes)}`);
       }
       process.exit(0);

@@ -328,9 +328,11 @@ Members learn them from it, and invite links made from then on carry them. With
 `--auto-update`, it looks for a newer release every six hours, takes it only if it is signed with
 the release key, puts it beside the one running, and restarts to use it at night (between 3 and 5),
 or at once when a device of a workspace runs a newer kuraa (the two do not sync until then). A
-release that changes how devices sync (its protocol) is held until a device of its workspaces runs
-it, so it does not leave every member behind overnight; `--auto-update-all` takes it at once
-([decision 0112](docs/decisions/0112-server-hardening.md)). `install --service --no-auto-update`
+release that changes how devices sync (its protocol) is held until devices of two of its workspaces
+run it (of its one, if it holds one), so it does not leave every member behind overnight, nor take
+it on one member's word; `--auto-update-all` takes it at once
+([decisions 0112](docs/decisions/0112-server-hardening.md), [0115](docs/decisions/0115-server-review.md)). Removed
+from a workspace by its owner, a server keeps its copy a week (`--keep-removed-days`), then deletes it. `install --service --no-auto-update`
 makes a service that does not update itself: whoever runs it updates it, as below. Its
 service starts it again; the version before is kept. `~/.kuraa/server/kuraa-host update` takes the
 latest by hand, for the next start; `--version` says which runs. Run from the repository (`pnpm

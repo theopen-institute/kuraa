@@ -1,6 +1,8 @@
 // Images: one pasted is shown in a dialog (0106: its size as kept, what was in
-// its file and is removed, smaller sizes), then kept in images/ beside the
-// document and shown from the workspace; `![alt](src)` typed becomes an image too.
+// its file and is removed, smaller sizes), then kept as one of the document's
+// own files (0107: `report.md.files/`, not shown in the file list) and shown
+// from the workspace; `![alt](src)` typed becomes an image too; renaming the
+// document takes its files and their references with it.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -10,7 +12,7 @@ import { E2E } from './env.js';
 const MAC = process.platform === 'darwin';
 const PNG = '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082';
 
-test('a pasted image is kept beside the document and shown; a typed one too', async ({ page }) => {
+test('a pasted image is kept with the document and shown; a typed one too; both follow a rename', async ({ page }) => {
   const dir = `img-${Date.now().toString(36)}`;
   const res = await fetch(`${E2E.url}/api/files`, {
     method: 'POST',
@@ -48,12 +50,15 @@ test('a pasted image is kept beside the document and shown; a typed one too', as
   const image = editor.getByTestId('image').first();
   await expect(image.locator('img')).toHaveAttribute('src', /^blob:/);
   await expect(image.locator('img')).toHaveAttribute('alt', 'Growth Curve');
-  expect(existsSync(join(E2E.dir, dir, 'images', 'growth-curve.png'))).toBe(true);
+  expect(existsSync(join(E2E.dir, dir, 'report.md.files', 'growth-curve.png'))).toBe(true);
+  // Not in the file list: it is the document's.
+  await expect(page.getByTestId(`folder:${dir}/report.md.files`)).toHaveCount(0);
+  await expect(page.getByTestId(`file:${dir}/report.md.files/growth-curve.png`)).toHaveCount(0);
 
   // A typed image, pointing at it.
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
-  await page.keyboard.type('Again: ![the curve](images/growth-curve.png) and a missing ![x](images/none.png)', { delay: 10 });
+  await page.keyboard.type('Again: ![the curve](report.md.files/growth-curve.png) and a missing ![x](images/none.png)', { delay: 10 });
   await expect(editor.getByTestId('image')).toHaveCount(3);
   await expect(editor.getByTestId('image').nth(1).locator('img')).toHaveAttribute('src', /^blob:/);
   await expect(editor.getByTestId('image').nth(2)).toHaveClass(/image-missing/);
@@ -61,8 +66,24 @@ test('a pasted image is kept beside the document and shown; a typed one too', as
   const file = join(E2E.dir, dir, 'report.md');
   await expect.poll(() => readFileSync(file, 'utf8'), { timeout: 10_000 }).toContain('none.png');
   const text = readFileSync(file, 'utf8');
-  expect(text).toContain('![Growth Curve](images/growth-curve.png)');
-  expect(text).toContain('Again: ![the curve](images/growth-curve.png) and a missing ![x](images/none.png)');
+  expect(text).toContain('![Growth Curve](report.md.files/growth-curve.png)');
+  expect(text).toContain('Again: ![the curve](report.md.files/growth-curve.png) and a missing ![x](images/none.png)');
+
+  // Renamed (as the file list's Rename does): its files go with it, and both references follow.
+  const renamed = await fetch(`${E2E.url}/api/files`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: `${dir}/report.md`, to: `${dir}/findings.md` }),
+  });
+  expect(renamed.status).toBe(200);
+  const after = readFileSync(join(E2E.dir, dir, 'findings.md'), 'utf8');
+  expect(after).toContain('![Growth Curve](findings.md.files/growth-curve.png)');
+  expect(after).toContain('Again: ![the curve](findings.md.files/growth-curve.png) and a missing ![x](images/none.png)');
+  expect(existsSync(join(E2E.dir, dir, 'findings.md.files', 'growth-curve.png'))).toBe(true);
+  await page.reload();
+  await page.getByTestId(`file:${dir}/findings.md`).click();
+  await expect(page.getByTestId('editor').getByTestId('image').first().locator('img')).toHaveAttribute('src', /^blob:/);
+  await expect(page.getByTestId(`folder:${dir}/findings.md.files`)).toHaveCount(0);
 });
 
 test('an image at a web address is shown only once asked for', async ({ page }) => {
@@ -159,12 +180,12 @@ test('a photo is kept without where it was taken, at a smaller size if chosen; c
   await expect(image.locator('img')).toHaveAttribute('src', /^blob:/);
   await expect(image.locator('img')).toHaveAttribute('alt', 'The bay from the hill');
   await expect.poll(() => image.locator('img').evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1600);
-  const kept = readFileSync(join(E2E.dir, dir, 'images', 'img-0042.jpg'));
+  const kept = readFileSync(join(E2E.dir, dir, 'trip.md.files', 'img-0042.jpg'));
   expect(kept.includes(Buffer.from('Apple'))).toBe(false);
   expect(kept.includes(Buffer.from('Exif'))).toBe(false);
   // What the dialog said it adds is what was kept.
   const n = kept.length;
   const shown = n < 10 * 1024 ? `${(n / 1024).toFixed(1)} KB` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
   expect(total).toContain(`Adds ${shown} to the workspace.`);
-  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' })).toContain(`Add image ${dir}/images/img-0042.jpg`);
+  expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: E2E.dir, encoding: 'utf8' })).toContain(`Add image ${dir}/trip.md.files/img-0042.jpg`);
 });

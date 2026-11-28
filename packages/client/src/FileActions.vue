@@ -35,6 +35,8 @@ const emit = defineEmits<{
   /** Something changed: refresh, and open this file afterwards (null: none; omitted: as is). */
   changed: [selectPath?: string | null];
   error: [error: unknown];
+  /** Something to say in passing (0107: references a move left as they were). */
+  notice: [text: string];
   /** Open this file and its Document settings. */
   documentSettings: [path: string];
   /** A new document was made by New file: it opens with the cursor in its title. */
@@ -50,7 +52,10 @@ const emit = defineEmits<{
 /** Do something to files, then refresh (opening `select`, if given); whether it was done. */
 async function act(fn: () => Promise<unknown>, select?: string | null): Promise<boolean> {
   try {
-    await fn();
+    const result = await fn();
+    // A move whose references in others' documents were not this person's to write again (0107).
+    const left = (result as { left?: unknown } | undefined)?.left;
+    if (Array.isArray(left) && left.length) emit('notice', S.tree.referencesLeft(left as string[]));
     emit('changed', select);
     return true;
   } catch (e) {

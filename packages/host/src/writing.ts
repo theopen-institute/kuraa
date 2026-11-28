@@ -1,6 +1,6 @@
 // What the editor needs while people write (decision 0040): a workspace file as
 // it is, to show an image the document points at; images pasted or dropped into
-// a document, kept in the workspace beside it with their details removed (0106);
+// a document, kept as its own files (0107) with their details removed (0106);
 // how much the workspace's history takes; and who made a commit and when, for
 // the labels on a conflict's versions.
 //
@@ -19,7 +19,7 @@ import type { Host } from './host.js';
 import type { Context, Route } from './http.js';
 import { HttpError } from './errors.js';
 import { unportablePath } from './files.js';
-import { cleanImage, MAX_IMAGE_BYTES, sniffImage as sniff, type ImageDetail } from '@kuraa/kernel';
+import { cleanImage, filesFolderOf, MAX_IMAGE_BYTES, relativeTarget, sniffImage as sniff, type ImageDetail } from '@kuraa/kernel';
 
 export { MAX_IMAGE_BYTES };
 
@@ -94,9 +94,11 @@ export interface AddedImage {
 }
 
 /**
- * Keep an image next to a document: in its folder's `images/`, under a name not
- * yet taken (or the same image's), with its details removed (0106). Whatever
- * the page did already, the host cleans it: what it keeps is clean.
+ * Keep an image as one of a document's own files (0107): in `report.md.files/`
+ * beside it, under a name not yet taken (or the same image's), with its details
+ * removed (0106). Whatever the page did already, the host cleans it: what it
+ * keeps is clean. Only someone who may change the document adds to its files,
+ * and they are read by whoever reads it: in its space, where it is in one.
  */
 export async function addImage(host: Host, doc: string, name: string, given: Buffer, by?: { name: string; email: string; color: string } | null): Promise<AddedImage> {
   if (!given.length) throw new HttpError(400, 'The image is empty.');
@@ -107,7 +109,8 @@ export async function addImage(host: Host, doc: string, name: string, given: Buf
   const bytes = Buffer.from(clean.bytes.buffer, clean.bytes.byteOffset, clean.bytes.byteLength);
   if (bytes.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'The image is larger than 20 MB, the most an image may be.');
   const docPath = host.relPath(doc);
-  const folder = docPath.includes('/') ? `${docPath.slice(0, docPath.lastIndexOf('/'))}/images` : 'images';
+  if (host.peers && !(await host.peers.access(docPath)).canWrite) throw new HttpError(403, `You may not change ${docPath}, so you cannot add to its files.`);
+  const folder = filesFolderOf(docPath);
   const base = safeImageName(name, ext);
   const stem = base.slice(0, -(ext.length + 1));
   const hash = createHash('sha256').update(bytes).digest('hex');
@@ -126,13 +129,18 @@ export async function addImage(host: Host, doc: string, name: string, given: Buf
       if (existing === null) {
         await mkdir(host.resolvePath(folder), { recursive: true });
         await writeFile(abs, bytes, { flag: 'wx' });
-        await host.commitPaths([path], `Add image ${path}`, by && by.email ? [by] : []);
+        // In the document's space (a document of its own audience), else where a file made there goes (0069).
+        const space = host.spaceOf(docPath) ?? (host.peers ? await host.peers.spaceForNew(path) : null);
+        const coAuthors = by && by.email ? [by] : [];
+        if (space) await host.commitIntoSpace(space, [path], `Add image ${path}`, coAuthors);
+        else await host.commitPaths([path], `Add image ${path}`, coAuthors);
         break;
       }
       // The same image already there: use it.
       if (createHash('sha256').update(existing).digest('hex') === hash) break;
     }
-    const src = path.slice(folder.length - 'images'.length);
+    // As the document writes it: relative to its folder (spaces and the like made safe).
+    const src = encodeURI(relativeTarget(docPath, path));
     return { path, src, size: bytes.length, removed: clean.removed };
   });
 }

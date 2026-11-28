@@ -280,6 +280,7 @@ export const S = {
     label: 'Files',
     newFile: 'New file',
     newFileIn: (name: string) => `New file in ${name}`,
+    referencesLeft: (paths: string[]) => `Moved. ${listOf(paths)} ${paths.length === 1 ? 'still points' : 'still point'} to the old place: ${paths.length === 1 ? 'it is' : 'they are'} not yours to change.`,
     newFolderIn: (name: string) => `New folder in ${name}`,
     newFileMenu: (where: string) => `New file${where}`,
     /** The space below the files, with none yet: its menu has a new file or folder. */

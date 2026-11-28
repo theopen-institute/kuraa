@@ -2,10 +2,10 @@
 import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { markdownWords, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { documentOfFiles, filesFolderOf, markdownWords, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { COMPANIONS_FILE, FEATURES_FILE, type HostFeature } from '@kuraa/feature-kit/host';
@@ -2512,7 +2512,8 @@ export class Host {
     if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
     // What is kept beside a document goes where it goes (0082).
     // Only this person's own: others' are theirs to move (0082), and stay where those who read the document could read them.
-    for (const p of [path, ...(await this.features.ownFilesOf(path))]) await this.moveOneToSpace(p, target);
+    // Its own files (0107: `report.md.files/`) all go: they are the document's, read by whoever reads it.
+    for (const p of [path, ...(await this.features.ownFilesOf(path)), ...(await this.filesOfDocument(path))]) await this.moveOneToSpace(p, target);
   }
 
   private async moveOneToSpace(path: string, target: string | null): Promise<void> {
@@ -2559,11 +2560,11 @@ export class Host {
   }
 
   /** Commit new files into a space (0069: made in a folder fewer read), never onto the workspace's own branch. Call inside serial(). */
-  async commitIntoSpace(id: string, paths: string[], message: string): Promise<string | null> {
+  async commitIntoSpace(id: string, paths: string[], message: string, coAuthors: PresenceUser[] = []): Promise<string | null> {
     await this.requireWritable();
     const branch = await this.git.branch();
     if (!branch) throw new Error('No branch is checked out');
-    const commit = await this.spaces.commit(id, branch, paths.map((path) => ({ path })), withTrailers(message, [], await this.policyTrailer()), (raw) => this.signRaw(raw));
+    const commit = await this.spaces.commit(id, branch, paths.map((path) => ({ path })), withTrailers(message, coAuthors, await this.policyTrailer()), (raw) => this.signRaw(raw));
     await this.spaces.refresh(branch);
     this.refsChanged();
     if (commit) this.log(`committed ${commit.slice(0, 7)} ${message} (in a space)`);
@@ -2746,6 +2747,68 @@ export class Host {
     return true;
   }
 
+  /**
+   * The document a path belongs to, if it does: a feature's companion (0082,
+   * `p01.md.annotations/@…`) or one of the document's own files (0107,
+   * `p01.md.files/…`). Such files are shown, counted and compiled as part of
+   * their document, not on their own.
+   */
+  belongsTo(path: string): string | null {
+    return this.features.documentOf(path) ?? documentOfFiles(path);
+  }
+
+  /** A document's own files (0107): those in its `.files` folder this device holds. */
+  async filesOfDocument(doc: string): Promise<string[]> {
+    const folder = `${filesFolderOf(doc)}/`;
+    return (await this.listFiles()).filter((p) => p.startsWith(folder) && present(this.resolvePath(p, { link: 'self' })));
+  }
+
+  /**
+   * References written again after files moved (0107): in each document that
+   * names a file or folder that moved (`moves`, as moved already), and in each
+   * document that moved itself, whose relative references are written from its
+   * new place. A document open in a room takes the change there too (everyone
+   * sees it at once); a document this person may not change (`mayChange`, asked of
+   * where it was) is left as it is. Not committed here: the caller commits the documents
+   * changed with the move. Call inside serial().
+   */
+  async rewriteReferences(moves: readonly (readonly [string, string])[], mayChange: (path: string) => Promise<boolean> = async () => true): Promise<{ changed: string[]; left: string[] }> {
+    const moved = movedBy(moves);
+    // Where a document was before the move, if it moved itself.
+    const before = (path: string) => movedBy(moves.map(([from, to]) => [to, from] as const))(path) ?? path;
+    const names = moves.map(([from]) => from.slice(from.lastIndexOf('/') + 1));
+    const branch = await this.git.branch();
+    const changed: string[] = [];
+    const left: string[] = [];
+    for (const path of await this.listFiles()) {
+      const type = this.typeFor(path);
+      if (!type?.references || this.belongsTo(path)) continue;
+      const abs = this.resolvePath(path, { link: 'self' });
+      if (!present(abs) || lstatSync(abs).isSymbolicLink()) continue;
+      const was = before(path);
+      const rec = this.records.get(`${branch}:${path}`);
+      let text: string;
+      try {
+        if (rec) await this.flushNow(rec);
+        text = await this.readText(abs, path);
+      } catch {
+        continue;
+      }
+      // Only documents that moved, or whose text names something that did, are read through.
+      if (was === path && !names.some((n) => text.includes(n) || text.includes(encodeURI(n)))) continue;
+      const next = rewriteReferences(text, type.references(text), was, path, moved);
+      if (next === null) continue;
+      if (!(await mayChange(was))) {
+        left.push(path);
+        continue;
+      }
+      await this.writeAtomic(abs, next);
+      if (rec) await this.applyOutside(rec, next, true);
+      changed.push(path);
+    }
+    return { changed, left };
+  }
+
   async setTitle(path: string, title: string): Promise<void> {
     const type = this.typeFor(path);
     if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
@@ -2811,7 +2874,7 @@ export class Host {
    * committed yet, credited to whoever typed it.
    */
   async wordsByDay(since: string): Promise<DayWords[]> {
-    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.features.documentOf(p) !== null });
+    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.belongsTo(p) !== null });
     const branch = await this.git.branch();
     const uncommitted: Uncommitted[] = [];
     for (const rec of this.records.values()) {
@@ -2848,7 +2911,7 @@ export class Host {
    */
   async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number; words?: number }[]> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
     const out = [];
     for (const i of bookItems(folder, entries, await readOrders(this, paths), [])) {
@@ -2867,7 +2930,7 @@ export class Host {
    */
   async compileFolder(folder: string, o: { exclude: string[]; noHeading: string[]; title: string }): Promise<{ text: string; resources: string[] } | string> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
     const orders = await readOrders(this, paths);
     const items = bookItems(folder, entries, orders, o.exclude, o.noHeading);
     const docs = items.flatMap((i) => (i.kind === 'document' ? [i.path] : []));
@@ -2904,7 +2967,8 @@ export class Host {
     for (const p of changed) {
       if (this.features.documentOf(p) || existsSync(this.resolvePath(p, { link: 'self' }))) continue;
       // Everyone's files go: moved, unchanged, which anyone may (the gate takes a move of someone's own file).
-      const left = await this.features.filesOf(p);
+      // And the document's own files (0107) added meanwhile at its old name, which its references then follow.
+      const left = [...(await this.features.filesOf(p)), ...(await this.filesOfDocument(p))];
       if (!left.length) continue;
       const to = await this.takenByCommit(p);
       if (!to) continue;
@@ -2919,7 +2983,10 @@ export class Host {
       await renameOver(this.resolvePath(from), this.resolvePath(to));
       await this.carrySpaces(from, to, false);
     }
-    await this.commitPaths(moves.flat(), moves.length === 1 ? `Move ${moves[0]![0]} with its document` : `Move ${moves.length} files with their documents`);
+    // The folders they left, where now empty (git keeps no folders: nothing to commit).
+    for (const dir of new Set(moves.map(([from]) => dirname(this.resolvePath(from))))) await rmdir(dir).catch(() => undefined);
+    const { changed: rewritten } = await this.rewriteReferences(moves);
+    await this.commitPaths([...moves.flat(), ...rewritten], moves.length === 1 ? `Move ${moves[0]![0]} with its document` : `Move ${moves.length} files with their documents`);
   }
 
   /** Whether an edit from another device (`via>origin`, or the device itself) was made on one of this host's person's devices. */
@@ -3069,4 +3136,14 @@ function caseRename(paths: string[]): boolean {
     seen.add(p.toLowerCase());
   }
   return false;
+}
+
+/** Whether something is at a path, not following a link there (a link to nothing is something). */
+function present(abs: string): boolean {
+  try {
+    lstatSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
 }

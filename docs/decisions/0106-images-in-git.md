@@ -1,5 +1,9 @@
 # 0106 · Images and other binary files: in git, cleaned on the way in, shown before they are kept
 
+*Since [0107](0107-a-documents-own-files.md): images are kept in the document's own folder,
+`report.md.files/`, not `images/`; in its space, by whoever may change it; and renames and moves write
+references to them again.*
+
 **Status: built** (cleaning, the dialog, the history's size). **Partial clones: not built**; what is
 built leaves room for them (below). Adds to [0040](0040-writing-in-the-editor.md) (images pasted or
 dropped into a document).

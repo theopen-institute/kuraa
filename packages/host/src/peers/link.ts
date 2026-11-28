@@ -36,9 +36,11 @@ const CONTROL = 'kuraa/control/1';
  * 9: 0099 (servers: a join with role `server`, by a key no one's, which every
  * operation after it names, so an older device would wait for them for ever);
  * 10: 0099 (a server taken out by a revoke, to be invited back: an older device
- * would not count it, and keep the server in).
+ * would not count it, and keep the server in);
+ * 11: 0107 (a document's own files, `report.md.files/…`, are changed by whoever
+ * may change the document: an older device would judge them by their folder).
  */
-export const PROTOCOL = 10;
+export const PROTOCOL = 11;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

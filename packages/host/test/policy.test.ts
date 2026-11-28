@@ -1,7 +1,7 @@
 // A workspace's policy: groups of admins and members, the same on every device (policy.ts, decision 0066).
 import { describe, expect, it } from 'vitest';
 import crypto from 'hypercore-crypto';
-import { evaluate, grantMessage, hashedPath, makeOp, pathsAbove, readOp, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
+import { evaluate, grantMessage, hashedPath, makeOp, pathsAbove, permissionPaths, readOp, type PolicyEntry, type PolicyOp, type Role } from '../src/peers/policy.js';
 
 const WS = 'ab'.repeat(16);
 type Key = ReturnType<typeof crypto.keyPair>;
@@ -433,3 +433,32 @@ describe('a workspace’s policy', () => {
   });
 
   });
+
+describe('a document’s own files (0107)', () => {
+  it('count their document between their folder and the folder the two are in', () => {
+    expect(permissionPaths('ch/report.md.files/bay.jpg')).toEqual(['ch/report.md.files/bay.jpg', 'ch/report.md.files/', 'ch/report.md', 'ch/', '']);
+    expect(permissionPaths('report.md.files/raw/a.csv')).toEqual(['report.md.files/raw/a.csv', 'report.md.files/raw/', 'report.md.files/', 'report.md', '']);
+    expect(permissionPaths('ch/notes.md')).toEqual(pathsAbove('ch/notes.md'));
+  });
+
+  it('are changed by whoever may change their document, its own permission theirs, in the clear or private', () => {
+    const h = history();
+    h.add({ t: 'genesis', admins: [ada.id], legacy: false }, ada);
+    h.add(grant(bo, 'member'), ada);
+    h.add(grant(cy, 'member'), ada);
+    h.add({ t: 'perm', path: 'ch/', write: [cy.id] }, ada);
+    h.add({ t: 'perm', path: 'ch/report.md', write: [bo.id] }, ada);
+    h.add({ t: 'perm', path: hashedPath(WS, 'ch/party.md'), write: [ada.id] }, ada);
+    const p = h.now();
+    expect(p.ruleFor('ch/report.md.files/bay.jpg')).toMatchObject({ path: 'ch/report.md', by: [bo.id] });
+    expect(p.mayWrite(bo.id, 'ch/report.md.files/bay.jpg')).toBe(true);
+    expect(p.mayWrite(cy.id, 'ch/report.md.files/bay.jpg')).toBe(false);
+    expect(p.mayWrite(ada.id, 'ch/party.md.files/cake.png')).toBe(true);
+    expect(p.mayWrite(bo.id, 'ch/party.md.files/cake.png')).toBe(false);
+    // A document with no permission of its own: its folder's, as before.
+    expect(p.mayWrite(cy.id, 'ch/notes.md.files/a.png')).toBe(true);
+    expect(p.mayWrite(bo.id, 'ch/notes.md.files/a.png')).toBe(false);
+    // Reading is its space's, not a permission's: a file's permission says nothing of it.
+    expect(p.readFor('ch/report.md.files/bay.jpg')).toBeNull();
+  });
+});

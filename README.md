@@ -121,9 +121,10 @@ so on) and it is formatted as you type; Backspace straight afterwards undoes the
 full list is in [decision 0008](docs/decisions/0008-markdown-cues.md). Citations are typed as
 Pandoc writes them (`[@smith2020, p. 3]`, `@smith2020`); typing `@` offers the keys of the
 bibliography the header names, and citations show as "Smith 2020", a key the bibliography lacks
-marked. Paste or drop an image to keep it in `images/` beside the document: a dialog shows how large
-it is, lets you make it smaller, and says what it removes from the file, such as where a photo was taken
-([decision 0106](docs/decisions/0106-images-in-git.md)); `| a | b |` then Enter
+marked. Paste or drop an image to keep it with the document, in its own folder (`report.md.files/`,
+not shown in the file list, renamed, moved and deleted with it, references following): a dialog shows
+how large it is, lets you make it smaller, and says what it removes from the file, such as where a photo
+was taken ([decisions 0106](docs/decisions/0106-images-in-git.md), [0107](docs/decisions/0107-a-documents-own-files.md)); `| a | b |` then Enter
 makes a table (Tab between cells, right-click for rows and columns; **Insert table** in the menu);
 `$$` then Enter starts display math. ⌘F finds and replaces, ⌥⌘O shows the outline, and ⌥⌘N goes to
 the next conflict; clicking a file's conflict count opens it at the first

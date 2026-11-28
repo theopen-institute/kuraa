@@ -374,6 +374,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button.danger { color: var(--warn); }
 .menu-actions button.danger { color: var(--warn); }
 .context-menu .context-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+/* An item's button spans the menu's width, so the whole row takes the pointer, not only its words. */
+.context-menu .context-item { display: grid; }
 /* An item with icons at the right of its row (the open workspace's sync and ⚙). */
 .context-menu .context-row { display: flex; align-items: center; gap: 2px; }
 .context-menu .context-row > button:first-child { flex: 1; }

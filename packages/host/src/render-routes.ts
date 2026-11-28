@@ -5,7 +5,8 @@ import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
 import { personOf, readBody, send } from './http.js';
 import { HttpError } from './errors.js';
-import { bookName, MIME, RENDER_FORMATS, type CompileOptions, type RenderFormat } from './renders.js';
+import { bookName, MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
+import type { Json } from '@kuraa/feature-kit';
 
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
 
@@ -19,26 +20,11 @@ const pathOf = (c: Context, v: unknown) => {
   return `${folder}/`;
 };
 
-/** What a folder's compile leaves out (workspace paths) and its title, as asked (0093); the rest of the book as it says (0106). */
-const compileOf = (c: Context, path: string, body: Record<string, unknown>): CompileOptions | undefined => {
+/** How a folder is compiled, as asked (0093, 0106): the body's `compile`, passed as it is to the feature that compiles folders (0122). */
+const compileOf = (path: string, body: Record<string, unknown>): Json | undefined => {
   if (!path.endsWith('/')) return undefined;
-  const paths = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : []);
-  const text = (v: unknown, most = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, most) : null);
-  const file = (v: unknown) => (typeof v === 'string' && v.trim() ? c.host.relPath(v.trim()) : null);
-  return {
-    exclude: paths(body.exclude),
-    noHeading: paths(body.noHeading),
-    // The top level ('') is a folder too: its documents may have no titles.
-    noTitles: Array.isArray(body.noTitles) ? body.noTitles.filter((x): x is string => typeof x === 'string').map((x) => (x.replace(/^\/+|\/+$/g, '') ? c.host.relPath(x.replace(/\/+$/, '')) : '')) : [],
-    title: text(body.title) ?? bookName(path),
-    subtitle: text(body.subtitle),
-    author: text(body.author),
-    toc: body.toc === true,
-    numbering: body.numbering === 'chapters' || body.numbering === 'sections' ? body.numbering : null,
-    separator: text(body.separator, 100),
-    referenceDoc: file(body.referenceDoc),
-    cover: file(body.cover),
-  };
+  const c = body.compile;
+  return c && typeof c === 'object' && !Array.isArray(c) ? (c as Json) : {};
 };
 
 const formatOf = (v: unknown): RenderFormat => {
@@ -53,17 +39,10 @@ const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsaf
 export const renderRoutes: Route[] = [
   route('GET', '/api/renders', async (c) => send(c.res, 200, await c.host.renders.info(pathOf(c, c.q.get('path'))))),
 
-  // What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth.
-  route('GET', '/api/renders/contents', async (c) => {
-    const path = pathOf(c, c.q.get('path'));
-    if (!path.endsWith('/')) throw new HttpError(400, 'A folder: its path ending in /');
-    send(c.res, 200, { items: await c.host.bookContents(path === '/' ? '' : path.slice(0, -1)) });
-  }),
-
   route('POST', '/api/renders', async (c) => {
     const body = await readBody(c.req);
     const path = pathOf(c, body.path);
-    const { state } = await c.host.renders.render(path, formatOf(body.format), personOf(body.by), compileOf(c, path, body));
+    const { state } = await c.host.renders.render(path, formatOf(body.format), personOf(body.by), compileOf(path, body));
     send(c.res, state.state === 'failed' ? 422 : 202, state);
   }),
 

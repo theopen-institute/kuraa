@@ -95,6 +95,34 @@ export interface FeatureStatus {
   me: string | null;
 }
 
+/**
+ * The order of a folder's files and folders, as people arrange them (0093): a
+ * plain file in the folder, one name per line, read by anyone and by any tool.
+ * What it does not name comes after what it does; a name of nothing there is
+ * passed over. The core writes it; components read it (0122).
+ */
+export const ORDER_FILE = '.kuraa-order';
+
+/** The folder ('' for the top) an order file orders, or null if the path is not one. */
+export function orderedFolder(path: string): string | null {
+  if (path === ORDER_FILE) return '';
+  return path.endsWith(`/${ORDER_FILE}`) ? path.slice(0, -ORDER_FILE.length - 1) : null;
+}
+
+/** The order file of a folder ('' for the top). */
+export const orderFileOf = (folder: string): string => (folder ? `${folder}/${ORDER_FILE}` : ORDER_FILE);
+
+/** The names an order file lists, in order: blank lines and `#` comments passed over, each name once. */
+export function parseOrder(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const name = raw.trim();
+    if (!name || name.startsWith('#') || name.includes('/') || out.includes(name)) continue;
+    out.push(name);
+  }
+  return out;
+}
+
 /** The folder of a document's companions by a suffix: `p01.md.annotations`. */
 export function companionFolder(doc: string, suffix: string): string {
   return `${doc}${suffix}`;

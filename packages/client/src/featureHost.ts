@@ -114,7 +114,6 @@ export function useFeatureHost(o: FeatureHostOptions) {
       render: (p, format, compile) => api.value.render(p, format, o.person(), compile),
       output: (p, format) => api.value.renderOutput(p, format),
       madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
-      bookContents: (folder) => api.value.bookContents(folder),
     },
     documents: {
       setHeader: async (p, fields) => {

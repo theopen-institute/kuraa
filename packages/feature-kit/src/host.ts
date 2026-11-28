@@ -343,9 +343,29 @@ export interface FeatureRoute {
   handle(req: FeatureRequest): FeatureResponse | Promise<FeatureResponse>;
 }
 
+/**
+ * A folder compiled into one document to render (FeatureSession.compileFolder,
+ * 0122): its text, pandoc's Markdown; the workspace's folders where what it
+ * refers to is found (its documents' images, say); and workspace files to put
+ * beside it by a name its text gives them (a Word template, a cover: 0106).
+ */
+export interface CompiledFolder {
+  text: string;
+  folders: string[];
+  files: { name: string; path: string }[];
+}
+
 /** A feature opened for one workspace. */
 export interface FeatureSession {
   routes?: FeatureRoute[];
+  /**
+   * A folder ('' the top level) joined into one document, to render it in a
+   * format (`html`, `docx`, `pdf`, `epub`), as `request` asks (what that holds
+   * is the feature's to say: 0122). The core renders a folder (a path ending
+   * in `/`) by asking the first feature on that has this, and keeps its
+   * outputs as for a document. A string says why there is nothing to render.
+   */
+  compileFolder?(folder: string, request: Json, format: string): Promise<CompiledFolder | string>;
   close?(): void | Promise<void>;
 }
 

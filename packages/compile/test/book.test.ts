@@ -2,7 +2,7 @@
 // those left out skipped, how deep each is its heading's level; joined under
 // the book's title.
 import { describe, expect, it } from 'vitest';
-import { bookItems, chapters, documentsInOrder, headingsDown, joinBook, separatorBlock, withoutHeader, type BookPart } from '../src/compile.js';
+import { bookItems, chapters, documentsInOrder, headingsDown, joinBook, separatorBlock, withoutHeader, type BookPart } from '../src/book.js';
 
 describe('a folder’s book', () => {
   const entries = [

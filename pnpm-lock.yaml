@@ -420,12 +420,19 @@ importers:
       '@kuraa/feature-kit':
         specifier: workspace:*
         version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       vue:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+    devDependencies:
+      '@kuraa/format-pandoc':
+        specifier: workspace:*
+        version: link:../format-pandoc
 
   packages/corkboard:
     dependencies:

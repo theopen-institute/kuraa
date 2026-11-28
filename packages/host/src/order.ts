@@ -9,31 +9,13 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { ORDER_FILE, orderedFolder, orderFileOf, parseOrder } from '@kuraa/feature-kit';
 import { NotAllowed } from './errors.js';
 
-export const ORDER_FILE = '.kuraa-order';
+// The file's name and how it is read are the contract's (0122), for components to read it as the core does.
+export { ORDER_FILE, orderedFolder, orderFileOf, parseOrder };
 
 const HEADER = '# The order of this folder in Kuraa: one file or folder name per line; others follow, by name.\n';
-
-/** The folder ('' for the top) an order file orders, or null if the path is not one. */
-export function orderedFolder(path: string): string | null {
-  if (path === ORDER_FILE) return '';
-  return path.endsWith(`/${ORDER_FILE}`) ? path.slice(0, -ORDER_FILE.length - 1) : null;
-}
-
-/** The order file of a folder ('' for the top). */
-export const orderFileOf = (folder: string): string => (folder ? `${folder}/${ORDER_FILE}` : ORDER_FILE);
-
-/** The names an order file lists, in order: blank lines and `#` comments passed over, each name once. */
-export function parseOrder(text: string): string[] {
-  const out: string[] = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const name = raw.trim();
-    if (!name || name.startsWith('#') || name.includes('/') || out.includes(name)) continue;
-    out.push(name);
-  }
-  return out;
-}
 
 /** An order file's text: null (no file) for no names. */
 export function formatOrder(names: readonly string[]): string | null {

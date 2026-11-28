@@ -5,10 +5,10 @@ import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, r
 import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat, writeFile as writeFileAsync } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { cleanImage, documentOfFiles, filesFolderOf, movedBy, proseWords, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { cleanImage, documentOfFiles, filesFolderOf, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
-import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type EditedDocument, type HostFeature } from '@kuraa/feature-kit/host';
+import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type EditedDocument, type HostFeature, type Json } from '@kuraa/feature-kit/host';
 import { HostFeatures } from './features.js';
 import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
@@ -17,7 +17,7 @@ import { commitSigned, signCommitObject } from './signing.js';
 import { serialQueue } from './serial.js';
 import { NAME_FILE, cleanName, initWorkspace, readWorkspaceName, writeWorkspaceName } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { readOutput, Renders, type CompiledBook, type CompileOptions, type RenderFormat } from './renders.js';
+import { readOutput, Renders, type CompiledBook, type RenderFormat } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
 import { gateFor, upgradeAllowed, type RequestGate } from './origins.js';
@@ -27,8 +27,6 @@ import type { Peers, PeerOptions } from './peers/peers.js';
 import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './peers/gate.js';
 import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
-import { bookItems, joinBook, type BookPart, type CompileEntry } from './compile.js';
-import { readOrders } from './order.js';
 import { gitHistory } from './history.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
@@ -429,7 +427,7 @@ export class Host {
       runner: this.runner,
       flush: (path) => this.writeForRender(path),
       madeFrom: (path) => this.madeFrom(path),
-      compile: (folder, o, format) => this.compileFolder(folder, o, format),
+      compile: (folder, request, format) => this.compileForRender(folder, request, format),
       read: (path, file) => this.readForRender(path, file),
       log: (m) => this.log(m),
     });
@@ -2930,71 +2928,34 @@ export class Host {
   }
 
   /**
-   * What a folder's book could have (0093: '' the top level): its folders and
-   * the documents a book is made of, all of them (nothing left out), in the
-   * file tree's order, each at how deep it is (1: in the folder itself), with
-   * its title or name, for Compile's outline.
+   * A folder compiled (0093: '' the top level), to render: joined by the
+   * feature on that compiles folders (0122: @kuraa/compile), its folders and
+   * files resolved here, inside the workspace and never through a link. A
+   * string says why there is nothing.
    */
-  async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number; words?: number }[]> {
-    const paths = await this.listFiles();
-    const entries = await this.bookEntries(paths);
-    const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
-    const out = [];
-    for (const i of bookItems(folder, entries, await readOrders(this, paths), [])) {
-      // A document's words (0094), as its file has them.
-      const words = i.kind === 'document' ? proseWords(this.typeFor(i.path), await readFile(this.resolvePath(i.path), 'utf8').catch(() => '')) ?? undefined : undefined;
-      out.push({ kind: i.kind, path: i.path, title: i.kind === 'folder' ? i.name : titles.get(i.path) || basename(i.path), depth: i.level, ...(words !== undefined ? { words } : {}) });
-    }
-    return out;
-  }
-
-  /** The workspace's files as a book sees them: not those kept beside documents; each saying whether it is a document a book is made of (its type's text is Markdown, 0119). */
-  private async bookEntries(paths: string[]): Promise<CompileEntry[]> {
-    return (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path)).map((e) => ({ ...e, book: !!this.typeFor(e.path)?.markdown }));
-  }
-
-  /**
-   * A folder compiled (0093: '' the top level): its documents in the file
-   * tree's order, but those left out, each as it is now (its open room written
-   * first), joined into one Markdown document; with the folders they are in,
-   * where what they refer to is found. A string says why there is nothing.
-   */
-  async compileFolder(folder: string, o: CompileOptions, format: RenderFormat = 'html'): Promise<CompiledBook | string> {
-    const paths = await this.listFiles();
-    const entries = await this.bookEntries(paths);
-    const orders = await readOrders(this, paths);
-    const items = bookItems(folder, entries, orders, o.exclude, o.noHeading);
-    const docs = items.flatMap((i) => (i.kind === 'document' ? [i.path] : []));
-    if (!docs.length) return `${folder ? `${folder}/` : 'The workspace'} has no documents to compile${o.exclude.length ? ' that are not left out' : ''}.`;
-    const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
-    // A Word template for a Word book, a cover for an EPUB (0106): files in the workspace, put beside the book.
+  private async compileForRender(folder: string, request: Json, format: RenderFormat): Promise<CompiledBook | string> {
+    const book = await this.features.compileFolder(folder, request, format);
+    if (typeof book === 'string') return book;
     const files: { name: string; from: string }[] = [];
-    const beside = async (path: string | null | undefined, kinds: RegExp, what: string, name: (ext: string) => string): Promise<string | null> => {
-      if (!path) return null;
-      const ext = kinds.exec(path)?.[1]?.toLowerCase();
-      const from = ext ? this.resolvePath(path) : null;
-      if (!ext || !from || !(await stat(from).then((s) => s.isFile(), () => false))) return `${what} ${path} is not there${ext ? '' : ', or is not one'}.`;
-      files.push({ name: name(ext), from });
-      return null;
-    };
-    const missing = (format === 'docx' ? await beside(o.referenceDoc, /\.(docx)$/i, 'The Word template', () => 'reference.docx') : null)
-      ?? (format === 'epub' ? await beside(o.cover, /\.(png|jpe?g|gif|svg|webp)$/i, 'The cover image', (ext) => `cover.${ext}`) : null);
-    if (missing) return missing;
-    const noTitles = new Set(o.noTitles ?? []);
-    const parts: BookPart[] = [];
-    for (const i of items) {
-      if (i.kind === 'folder') {
-        parts.push(i);
-        continue;
+    for (const f of book.files) {
+      let from: string;
+      try {
+        from = this.resolvePath(f.path);
+      } catch {
+        return `${f.path} is not there.`;
       }
-      await this.writeForRender(i.path);
-      const untitled = noTitles.has(i.path.includes('/') ? i.path.slice(0, i.path.lastIndexOf('/')) : '');
-      parts.push({ kind: 'document', level: i.level, title: untitled ? null : titles.get(i.path) ?? null, text: await readFile(this.resolvePath(i.path), 'utf8') });
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$/.test(f.name) || !(await stat(from).then((st) => st.isFile(), () => false))) return `${f.path} is not there.`;
+      files.push({ name: f.name, from });
     }
-    const resources = [...new Set(docs.map((p) => resolve(this.dir, p, '..')))];
-    const named = (n: string) => files.find((f) => f.name.startsWith(n))?.name ?? null;
-    const text = joinBook({ title: o.title, subtitle: o.subtitle, author: o.author, toc: o.toc, numbering: o.numbering, separator: o.separator, referenceDoc: named('reference.'), cover: named('cover.') }, parts);
-    return { text, resources, files };
+    const resources: string[] = [];
+    for (const d of book.folders) {
+      try {
+        resources.push(d ? this.resolvePath(d) : this.dir);
+      } catch {
+        // A folder that is a link, or outside: nothing there is found.
+      }
+    }
+    return { text: book.text, resources: [...new Set(resources)], files };
   }
 
   /** The workspace's files this device holds: git's, untracked ones as .gitignore leaves them, and those of the spaces it holds. */

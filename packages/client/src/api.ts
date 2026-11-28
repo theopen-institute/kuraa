@@ -2,7 +2,6 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
-import type { BookContent, CompileRequest } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -360,9 +359,9 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: CompileRequest): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: Json): Promise<RenderState> {
     try {
-      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
+      return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...(compile !== undefined ? { compile } : {}) }) });
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) return { path, format, state: 'failed', message: e.message, progress: null, log: '', by: by.name, startedAt: '', finishedAt: null, output: null };
       throw e;
@@ -371,10 +370,6 @@ export class HostApi {
   /** A document's latest output in a format. */
   async renderOutput(path: string, format: RenderFormat): Promise<Blob> {
     return (await this.req(`/api/renders/file?path=${encodeURIComponent(path)}&format=${format}`)).blob();
-  }
-  /** What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth. */
-  async bookContents(folder: string): Promise<BookContent[]> {
-    return (await this.json<{ items: BookContent[] }>(`/api/renders/contents?path=${encodeURIComponent(folder)}`)).items;
   }
   /** The files a document's latest output in a format was made from, as they were, in a zip (0081). */
   async renderMadeFrom(path: string, format: RenderFormat): Promise<Blob> {

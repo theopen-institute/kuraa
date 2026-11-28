@@ -321,41 +321,6 @@ export interface FolderViewContext extends NavigationContext {
   viewKey(): string;
 }
 
-/** A folder or document a folder's book could have (0093). */
-export interface BookContent {
-  kind: 'folder' | 'document';
-  path: string;
-  /** A document's title (its filename, without one), a folder's name. */
-  title: string;
-  /** How deep it is in the folder compiled: 1 in the folder itself. */
-  depth: number;
-  /** A document's words, as its file has them (0094). */
-  words?: number;
-}
-
-/** How a folder is compiled (0093, 0106), as asked of the host's render. */
-export interface CompileRequest {
-  /** What is left out (workspace paths; a folder's, all in it). */
-  exclude?: string[];
-  /** Folders (paths) whose names are no heading, nor a level. */
-  noHeading?: string[];
-  /** Folders (paths) whose documents' titles are no headings: what is in them runs on, a separator between (0106). */
-  noTitles?: string[];
-  title?: string;
-  subtitle?: string;
-  author?: string;
-  /** A table of contents. */
-  toc?: boolean;
-  /** Its top-level headings as chapters (Chapter 1: …), or every heading numbered (1, 1.1, …). */
-  numbering?: 'chapters' | 'sections';
-  /** Between two documents with no heading between them: a rule (`* * *`, `---`), or this text, centred. */
-  separator?: string;
-  /** A Word document in the workspace whose styles a Word book takes (path). */
-  referenceDoc?: string;
-  /** An image in the workspace on an EPUB's cover (path). */
-  cover?: string;
-}
-
 /** A match to open a file at (0089). */
 export interface MatchTarget {
   /** 1-based line of the file (or of the open document's text) the match was on. */
@@ -439,23 +404,15 @@ export interface RenderService {
   /**
    * Render a document (as you, for the record); a render that cannot start says
    * why, as a failed one. A folder (its path ending in `/`, the top level `/`)
-   * is compiled (0093): its folders and documents in the file tree's order,
-   * but those `exclude` names (paths; a folder's, all in it), joined under
-   * `title`, how deep each is its heading's level; the folders `noHeading`
-   * names (paths) with no heading, nor a level, of their own; and the book as
-   * the rest of `compile` says (0106).
+   * is joined into one document by the feature that compiles folders (0093,
+   * 0122: its FeatureSession.compileFolder), as `compile` asks: what that holds
+   * is that feature's to say.
    */
-  render(path: string, format: RenderFormat, compile?: CompileRequest): Promise<RenderState>;
+  render(path: string, format: RenderFormat, compile?: Json): Promise<RenderState>;
   /** A document's latest output in a format. */
   output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */
   madeFrom(path: string, format: RenderFormat): Promise<Blob>;
-  /**
-   * What a folder's book could have (its path ending in `/`, the top level
-   * `/`: 0093): its folders and documents, nothing left out, in the file
-   * tree's order, each at how deep it is (1: in the folder itself).
-   */
-  bookContents(folder: string): Promise<BookContent[]>;
 }
 
 /**

@@ -23,7 +23,7 @@ import { documentOfFiles, HookBus, sourceMapOf, type DocumentType, type HookEven
 import {
   COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, STORE_NAME, companionFolder, documentOf, ownFile, ownerOf,
   type FeatureContext, type FeatureEvent, type FeatureEvents, type FeatureRequest, type FeatureResponse, type FeatureSession,
-  type ConvertedFile, type EditedDocument, type FeatureHistory, type FeatureSettings, type FeatureStatus, type FeatureStore, type HostFeature, type Json, type NewFile, type Person,
+  type CompiledFolder, type ConvertedFile, type EditedDocument, type FeatureHistory, type FeatureSettings, type FeatureStatus, type FeatureStore, type HostFeature, type Json, type NewFile, type Person,
 } from '@kuraa/feature-kit/host';
 import type { FeatureSeed, FeatureView } from '@kuraa/session/server';
 import type { Node } from 'prosemirror-model';
@@ -201,6 +201,18 @@ export class HostFeatures {
   }
 
   /** On for the workspace, here: the host has it on, and the workspace too. */
+  /**
+   * A folder joined into one document to render (0122), by the first feature
+   * on that compiles folders; a string says why not.
+   */
+  async compileFolder(folder: string, request: Json, format: string): Promise<CompiledFolder | string> {
+    for (const [id, { session }] of this.open) {
+      if (!session.compileFolder || !this.isOn(id)) continue;
+      return session.compileFolder(folder, request, format);
+    }
+    return 'Nothing here compiles folders: Compile is off for this workspace.';
+  }
+
   isOn(id: string): boolean {
     return this.onForHost(id) && this.onForWorkspace(id);
   }

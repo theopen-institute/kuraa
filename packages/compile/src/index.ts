@@ -3,15 +3,19 @@
 // the host's render; any document or folder left out. Its host half keeps what
 // Compile knows of each folder (a `.kuraa-compile.yml` in it: the book's title,
 // format and settings, and what in it is left out), and follows renames and
-// deletions. The compiling is the core's (a folder rendered: renders.ts); the
-// panel that asks for it is the client half's.
+// deletions. It joins a folder's documents into one (./compiling.ts, 0122),
+// which the core renders as it renders a document (a folder's path ending in
+// `/`: renders.ts), keeping its outputs; the panel that asks for it is the
+// client half's.
 //
-//   its routes   GET folders, files; POST include, settings, heading, titles, target
+//   its routes   GET folders, files, contents; POST include, settings, heading, titles, target
 //   it writes    files named .kuraa-compile.yml (`names`), in their folders
 import { defineFeature, type FeatureContext, type FeatureRequest, type FeatureResponse, type FeatureRoute, type Json, type Person } from '@kuraa/feature-kit/host';
+import { bookContents, compileFolder as compileFolderBook } from './compiling.js';
 import { afterDelete, afterRename, COMPILE_FILE, compileFileOf, compileFolder, emptyCompile as empty, FORMATS, isBookDocument, isCoverImage, isTemplate, NUMBERINGS, readCompile, withIncluded, writeCompile, type CompileFormat, type FolderCompile, type Numbering } from './settings.js';
 
 export { COMPILE_FILE, emptyCompile, readCompile, writeCompile, type FolderCompile } from './settings.js';
+export type { BookContent, CompileRequest } from './compiling.js';
 
 /** What Compile knows of each folder that says anything, by folder. */
 async function folders(ctx: FeatureContext): Promise<Map<string, FolderCompile>> {
@@ -135,6 +139,17 @@ export const compileFeature = defineFeature({
         })),
       },
       {
+        // What a folder's book could have (0093): its folders and documents in the file tree's order, each at its depth, with its words.
+        method: 'GET',
+        path: 'contents',
+        handle: (req: FeatureRequest) => answer(async () => {
+          const folder = (req.query.get('folder') ?? '').replace(/^\/+|\/+$/g, '');
+          if (folder.split('/').some((s) => s === '..')) throw new Refused(400, 'folder: a folder of the workspace');
+          if (folder && !(await ctx.list()).some((p) => p.startsWith(`${folder}/`))) throw new Refused(404, `No folder ${folder}`);
+          return { items: (await bookContents(ctx, folder)) as unknown as Json };
+        }),
+      },
+      {
         // What a book may take as its Word template or its cover (0106): the workspace's Word documents and images.
         method: 'GET',
         path: 'files',
@@ -209,6 +224,11 @@ export const compileFeature = defineFeature({
         if (paths.some((p) => compileFolder(p) !== null)) ctx.tell({ changed: '' });
       }),
     ];
-    return { routes, close: () => stops.forEach((s) => s()) };
+    return {
+      routes,
+      // A folder's documents joined, for the core to render (0122).
+      compileFolder: (folder: string, request: Json, format: string) => compileFolderBook(ctx, folder, request, format),
+      close: () => stops.forEach((s) => s()),
+    };
   },
 });

@@ -2,9 +2,9 @@
 // Settings › Workspace (decision 0064): the open workspace's own settings, kept
 // in the workspace, for everyone in it: its people and servers, and inviting
 // people (DevicesSection), each opening a view of their own in this one's place
-// (MemberView, 0107: their role, their computers, removing them, a computer lost
+// (MemberView, 0111: their role, their computers, removing them, a computer lost
 // or stolen); its groups and permissions (RulesSection); and, at the end, the
-// two ways out (0107): Leave this workspace (you are taken out, as an admin takes
+// two ways out (0111): Leave this workspace (you are taken out, as an admin takes
 // someone out, and everyone is told; not the owner, who hands the role on first),
 // and, where the host allows it, Remove this device from this workspace (local:
 // this computer stops syncing it and takes it off its list; its folder stays, and
@@ -31,10 +31,10 @@ const props = defineProps<{
   canRemove: boolean;
 }>();
 const emit = defineEmits<{ remove: []; invite: []; permissions: [path: string] }>();
-/** A person's or server's own view, open in the section's place (0107); the rest stays, hidden. */
+/** A person's or server's own view, open in the section's place (0111); the rest stays, hidden. */
 const member = ref<Who | null>(null);
 
-/** Who you are here, for Leave this workspace (0107): read when the section opens, and again after leaving. */
+/** Who you are here, for Leave this workspace (0111): read when the section opens, and again after leaving. */
 const peers = shallowRef<PeersInfo | null>(null);
 const leaveError = shallowRef<unknown>(null);
 const leaving = ref(false);

@@ -125,7 +125,7 @@ test('a folder’s permissions, from its right-click menu: only she reads it, an
     await expect.poll(async () => (await a.host.peers!.people()).people.length, { timeout: 20_000 }).toBe(2);
 
     // Ada: plans/ is for the admins (she alone is one) to read, from its right-click menu. No one reads
-    // something alone (0106): the owner reads everything, as the dialog says.
+    // something alone (0110): the owner reads everything, as the dialog says.
     await ada.getByTestId('folder:plans').click({ button: 'right' });
     await ada.getByTestId('context:folder-permissions').click();
     const dialog = ada.getByTestId('permissions-dialog');

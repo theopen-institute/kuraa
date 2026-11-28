@@ -32,7 +32,7 @@ import type { KeyPair } from '../keys.js';
 
 /** How soon this device tells the others its outputs changed, in ms: sooner than branches, which come in bursts. */
 const OUTPUTS_ANNOUNCE_MS = 20;
-/** Why someone may not change who reads a space (0106). */
+/** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
 export interface PeerOptions {
@@ -153,7 +153,7 @@ export function audienceWords(audience: string[], me: string | null, names: Map<
 }
 
 /**
- * Who reads a space in words (0106): its audience, and the owner, who reads
+ * Who reads a space in words (0110): its audience, and the owner, who reads
  * every space: "You, Bo and the owner". The workspace's servers read every
  * space too, but work for the owner: not named.
  */
@@ -204,7 +204,7 @@ export interface PermissionsInfo {
   admin: boolean;
   /** Whether this person may change it (a file: says who reads it). */
   canWrite: boolean;
-  /** Its readers are a space's that someone else chose, which only they or the owner change (0106). */
+  /** Its readers are a space's that someone else chose, which only they or the owner change (0110). */
   readersLocked?: boolean;
 }
 
@@ -1029,7 +1029,7 @@ export class Peers {
     return { files, folders: marked };
   }
 
-  /** Who reads each space, in words ("You, Bo and the owner", "editors and the owner"), for the file list (0066, 0106). */
+  /** Who reads each space, in words ("You, Bo and the owner", "editors and the owner"), for the file list (0066, 0110). */
   async readersInWords(): Promise<Map<string, string>> {
     const { policy, me } = await this.node.policy();
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
@@ -1069,7 +1069,7 @@ export class Peers {
   }
 
   /**
-   * No one makes something read by themselves alone (0106): the owner and the
+   * No one makes something read by themselves alone (0110): the owner and the
    * workspace's servers read everything, so it would not be; what is to be
    * one's own alone is kept in a workspace one owns.
    */
@@ -1158,7 +1158,7 @@ export class Peers {
     };
   }
 
-  /** Whether who reads a path is a space someone else chose, not this person's to change (0106): a file's own, or a folder's. */
+  /** Whether who reads a path is a space someone else chose, not this person's to change (0110): a file's own, or a folder's. */
   private readersLocked(policy: Policy, me: string | null, path: string, folder: boolean, folderSpace: string | undefined): boolean {
     if (!policy.founded) return false;
     const space = folder ? folderSpace : this.host.spaceOf(path);
@@ -1188,7 +1188,7 @@ export class Peers {
     if (write !== undefined || (folder && read !== undefined)) {
       if (!policy.isAdmin(me)) throw new NotAllowed('Only an admin of this workspace says who can change what, and who reads a folder');
       const own = policy.permAt(path);
-      // A folder's readers changed where it has a space: that space's, whoever made it or the owner says (0106).
+      // A folder's readers changed where it has a space: that space's, whoever made it or the owner says (0110).
       const ownSpace = folder && own?.perm.space && policy.spaces.has(own.perm.space) ? own.perm.space : undefined;
       if (folder && read && ownSpace && read.join() !== (policy.spaces.get(ownSpace)?.audience ?? []).join() && !policy.mayChangeSpace(me, ownSpace)) throw new NotAllowed(SPACE_CHANGERS);
       const nextWrite = write === undefined ? own?.perm.write : write ?? undefined;

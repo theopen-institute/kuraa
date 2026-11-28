@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Settings › Workspace's People (decisions 0064, 0068, 0107): everyone in the
+// Settings › Workspace's People (decisions 0064, 0068, 0111): everyone in the
 // workspace, by kind (the owner, admins, members, then servers), each on a line
 // with whether they are online (from their computers). A line opens their own
 // view (MemberView: their role, their computers, removing them, a computer lost
@@ -97,7 +97,7 @@ const noContact = (i: Info) =>
     <p v-else-if="noContact(info)" class="menu-facts warn" data-testid="no-contact">{{ noContact(info) }}</p>
     <p v-if="!info.removed && info.network && S.devices.network[info.network.kind]" class="menu-facts warn" data-testid="this-network">{{ S.devices.network[info.network.kind] }}</p>
 
-    <!-- Everyone (0107): by kind; a line opens their own view, where anything is changed. -->
+    <!-- Everyone (0111): by kind; a line opens their own view, where anything is changed. -->
     <ul v-if="info.people?.founded" class="member-list" data-testid="people">
       <li v-for="m in members(info)" :key="`${m.kind}:${m.id}`">
         <button type="button" class="member-row" :data-testid="testid(m)" @click="emit('open', { kind: m.kind, id: m.id })">

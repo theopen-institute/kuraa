@@ -1,5 +1,5 @@
 // A server in a workspace, on a local DHT (decision 0099): it joins by the owner's invite link for a
-// server, as no person; holds the members' work, every space too (0106), and passes it on while they
+// server, as no person; holds the members' work, every space too (0110), and passes it on while they
 // are never online at once;
 // changes nothing (what it signs is kept out everywhere); and is taken out by the owner.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -159,7 +159,7 @@ describe('a server in a workspace (0099)', () => {
     expect(read(dirA, 'from-bo.md')).toBeNull();
   });
 
-  it('holds every space, as the owner does, and passes one on while its readers are never online at once (0106)', async () => {
+  it('holds every space, as the owner does, and passes one on while its readers are never online at once (0110)', async () => {
     const { a, dirA, dirS } = await withServer();
     const bo = await person('Bo');
     const boKey = crypto.keyPair();

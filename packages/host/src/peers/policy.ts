@@ -35,7 +35,7 @@
 // - space: who may read a set of files (0066, step 5): a space's ID and its
 //   audience (people, `group:<name>`, `admins`), like a rule's. Anyone in the
 //   workspace may make one they are in themselves; its audience may be changed
-//   by whoever made it, or by the owner (0106). The owner, and the workspace's
+//   by whoever made it, or by the owner (0110). The owner, and the workspace's
 //   servers, read every space besides its audience. Files not in a space are
 //   the workspace's: everyone in it reads them.
 //
@@ -63,7 +63,7 @@
 //   by its own `join` with an owner's invite link for a server (role `server`,
 //   for one). Of a key that is no one's, only that counts, and a server's
 //   `admit` (it lets people in by their links). A
-//   server reads everything in the workspace, every space too (0106), changes
+//   server reads everything in the workspace, every space too (0110), changes
 //   nothing, and is in no group. The owner takes it out as a person
 //   is taken out (`revoke`, of the workspace): it may be invited back, by a new
 //   link. A `drop` of its key (lost or stolen) is for good, as a computer's.
@@ -486,7 +486,7 @@ export class Policy {
    */
   mayRead(id: string | null, space: string | null): boolean {
     if (!this.founded) return space === null;
-    // The owner, and the workspace's servers, read every space (0106): the owner is in control of the workspace, and
+    // The owner, and the workspace's servers, read every space (0110): the owner is in control of the workspace, and
     // its servers are the owner's computers that are always on.
     if (this.isServer(id)) return space === null || this.spaces.has(space);
     if (!id || !this.role(id)) return false;
@@ -495,7 +495,7 @@ export class Policy {
     return !!s && (this.isOwner(id) || s.audience.some((e) => this.holds(e, id)));
   }
 
-  /** Whether a person may change who reads a space (0106): whoever made it, or the owner. */
+  /** Whether a person may change who reads a space (0110): whoever made it, or the owner. */
   mayChangeSpace(id: string | null, space: string): boolean {
     const s = this.spaces.get(space);
     return !!s && !!id && !!this.role(id) && (s.by === id || this.isOwner(id));
@@ -849,7 +849,7 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'perm':
       return now.isAdmin(by);
     case 'space': {
-      // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or the owner (0106: before,
+      // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or the owner (0110: before,
       // or any admin, who could so read any space by adding themselves).
       const had = s.spaces.get(op.id);
       if (!now.role(by)) return false;

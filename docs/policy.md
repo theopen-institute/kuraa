@@ -24,7 +24,7 @@ signed by the server's own key, which no person vouched for.
 | `unlink` | an invite link lets no one into its group any more | an admin of the group |
 | `owner` | someone in the workspace is the owner now | the owner |
 | `rule`, `perm` | who may change a path; who reads what is made in a folder | the workspace's admins |
-| `space` | a space's audience | anyone in the workspace who is in that audience (to make it); whoever made it, or the owner (to change it; [0106](decisions/0106-the-owner-reads-everything.md)) |
+| `space` | a space's audience | anyone in the workspace who is in that audience (to make it); whoever made it, or the owner (to change it; [0110](decisions/0110-the-owner-reads-everything.md)) |
 | `drop` | a signing key (one computer, or a server) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer; for a server's key, the owner alone). For good |
 
 Made before [0078](decisions/0078-restrictive-wins.md) and read only so a history that has them stays
@@ -107,7 +107,7 @@ holds, and on all of them together:
 - **The same everywhere.** The same operations, in any order, any repeated, make the same policy,
   clashes and all.
 - **One owner, an admin.** The workspace has exactly one owner, an admin; so always an admin. The
-  owner reads every space ([0106](decisions/0106-the-owner-reads-everything.md)).
+  owner reads every space ([0110](decisions/0110-the-owner-reads-everything.md)).
 - **Groups inside the workspace.** No one outside the workspace is in any group; no one never let in
   is in any.
 - **Only people's word.** No operation by a key that is no one's counts, but a server's own join and
@@ -116,7 +116,7 @@ holds, and on all of them together:
   by a person's key.
 - **Servers.** Each server has a join of its own counting, by a link for one server, for the
   workspace, with someone in letting it in first. A server is in no group, its key is no person's
-  and not dropped; it may change no file, and reads every space (0106). One
+  and not dropped; it may change no file, and reads every space (0110). One
   taken out is a server again only by a join of its own after the taking out; out, its cutoff is on
   record.
 - **Nothing after one is out.** Of someone out of the workspace, nothing counts that is not in the
@@ -137,7 +137,7 @@ holds, and on all of them together:
 
 A server ([0099](decisions/0099-servers.md)) is a key no person vouched for, in the workspace as
 itself by its own `join` (role `server`). It reads everything in the workspace, every space too
-([0106](decisions/0106-the-owner-reads-everything.md): before, only a space whose audience named its
+([0110](decisions/0110-the-owner-reads-everything.md): before, only a space whose audience named its
 key); it may change nothing, whatever the rules say
 or where they say nothing, not even a file named for it; it is in no group (a grant naming it counts
 for nothing, and its join takes it out of any a grant made at the same time put it in). Nothing else

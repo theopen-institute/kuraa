@@ -1,4 +1,4 @@
-# 0107 · People, each with a view of their own
+# 0111 · People, each with a view of their own
 
 **Status: built.** Changes Workspace settings' **People and computers**
 ([0068](0068-people-and-their-computers.md)) and where a server is removed and blocked

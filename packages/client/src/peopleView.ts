@@ -1,4 +1,4 @@
-// What Workspace settings' People and a person's or server's own view (0107)
+// What Workspace settings' People and a person's or server's own view (0111)
 // say of who is in the workspace: whose each computer is, whether someone is
 // online (from their computers), how a computer is connected, and who may do
 // what (change a role, remove someone, say a computer is lost or stolen). The
@@ -27,7 +27,7 @@ export const serverDevices = (i: Info, s: Server) => i.devices.filter((d) => s.d
 /** Computers no person here is known to be, nor a server (all of them, where there is no policy). */
 export const others = (i: Info) => i.devices.filter((d) => !d.server && !(i.people?.founded && i.people.people.some((p) => p.devices.includes(d.key))));
 
-/** The order of People (0107): the owner, the admins, the members, then the servers; by name within each. */
+/** The order of People (0111): the owner, the admins, the members, then the servers; by name within each. */
 const RANK = { owner: 0, admin: 1, member: 2 } as const;
 export function members(i: Info): Member[] {
   const people = [...(i.people?.people ?? [])].sort((a, b) => RANK[a.role] - RANK[b.role] || nameOf(a).localeCompare(nameOf(b)));

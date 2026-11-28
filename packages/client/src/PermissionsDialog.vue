@@ -7,9 +7,9 @@
 // - Who can read: a file's is who it is sent to (its space): everyone, or
 //   people and groups, always with you and never you alone; whoever may change
 //   it says, and once it has readers of its own, whoever chose them or the owner
-//   (0106). A folder's is who reads what is made in it, and its files that
+//   (0110). A folder's is who reads what is made in it, and its files that
 //   followed it; the workspace's admins say. The owner reads everything
-//   (0106), and the dialog says so; the workspace's servers, which work for
+//   (0110), and the dialog says so; the workspace's servers, which work for
 //   the owner, too, unnamed. A group's readers are its admins' to say.
 // - Who can change: its own (only you, or people, groups, admins), or as its
 //   folder says; the workspace's admins say. Anyone else sees who can, and why.
@@ -42,7 +42,7 @@ let readWas = '';
 let writeWas = '';
 const key = (x: { mode: Mode; chosen: string[] }) => `${x.mode}:${[...x.chosen].sort().join(',')}`;
 const modeOf = (list: string[] | null) => (!list ? { mode: 'all' as Mode, chosen: [] } : list.length === 1 && list[0] === me.value ? { mode: 'me' as Mode, chosen: [] } : { mode: 'chosen' as Mode, chosen: list });
-/** Who reads it: everyone (as above), or those chosen; never you alone (0106), so one from before shows as chosen. */
+/** Who reads it: everyone (as above), or those chosen; never you alone (0110), so one from before shows as chosen. */
 const readModeOf = (list: string[] | null) => (!list ? { mode: 'all' as Mode, chosen: [] } : { mode: 'chosen' as Mode, chosen: list });
 
 onMounted(async () => {
@@ -83,7 +83,7 @@ const choices = computed(() => [
 const writeFromAbove = computed(() => (info.value?.fromAbove.write ? S.permissions.fromRule(info.value.fromAbove.write.path, info.value.fromAbove.write.by.map(nameOf)) : S.permissions.anyone));
 const readFromAbove = computed(() => (info.value?.fromAbove.read ? S.permissions.readFromRule(info.value.fromAbove.read.path, info.value.fromAbove.read.audience.map(nameOf)) : S.readers.everyone.toLowerCase()));
 const canRead = computed(() => (folder.value ? !!info.value?.admin : !!info.value?.canWrite) && !everything.value && !info.value?.readersLocked);
-/** Who reads everything besides (0106): the owner (and the workspace's servers, which work for the owner: not named). */
+/** Who reads everything besides (0110): the owner (and the workspace's servers, which work for the owner: not named). */
 const readsEverything = computed(() => S.readers.readsEverything(!!people.value?.owner && people.value.owner === me.value));
 const canRule = computed(() => !!info.value?.admin);
 /** Who can change it now, for someone who may not say. */

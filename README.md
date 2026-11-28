@@ -315,7 +315,7 @@ host`), a server does not update itself: `git pull`, `pnpm install` and `pnpm we
 A server is in a workspace as itself, not as anyone's computer
 ([decision 0099](docs/decisions/0099-servers.md)): always on, it keeps everyone's work and passes it
 on while people are apart; it reads everything in the workspace, as its owner does, files only some
-people read too ([decision 0106](docs/decisions/0106-the-owner-reads-everything.md)), and changes
+people read too ([decision 0110](docs/decisions/0110-the-owner-reads-everything.md)), and changes
 nothing. Only the workspace's owner adds one: **People › Add a server…**
 makes an invite link for one server.
 
@@ -447,7 +447,7 @@ nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
 
 In the app, Workspace settings' **People** lists everyone, by kind (owner, admins, members, servers),
 online or not ([0068](docs/decisions/0068-people-and-their-computers.md),
-[0107](docs/decisions/0107-people-first.md)); nothing on the list changes anything. Each opens a view of
+[0111](docs/decisions/0111-people-first.md)); nothing on the list changes anything. Each opens a view of
 their own: their role (a menu, for whoever may change it), their computers, each with how it is
 connected and **Lost or stolen…** (blocking its key, for good: your own, whether or not you are an
 admin, its key revoked too where your identity is on this computer; anyone's, for admins), and

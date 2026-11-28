@@ -30,7 +30,7 @@ commits theirs. Now it can be in as itself.
 | Its key | the computer's signing key (`~/.kuraa/signing.json`), one for all its workspaces | the same: the server's signing key, one for all its workspaces |
 | Why it counts | the person's identity vouches for the key, and the policy has the person in | the policy names the key itself, as a server |
 | Comes in by | an invite link (an admin's), its person's `join` | an invite link for a server (the owner's), its own `join` |
-| Reads | what its person reads | the workspace's own files, and each space whose audience names it (since [0106](0106-the-owner-reads-everything.md): everything, every space too) |
+| Reads | what its person reads | the workspace's own files, and each space whose audience names it (since [0110](0110-the-owner-reads-everything.md): everything, every space too) |
 | Writes | what its person may change | nothing |
 | Acts in the policy | as its person may | never, but its own join |
 | Taken out by | its person taken out (a `revoke`), or one computer dropped (a `drop` of its key, for good) | the owner: taken out (a `revoke`, to be invited back), or its key dropped (lost or stolen, for good) |
@@ -66,7 +66,7 @@ nothing, and a server that later gets an identity stops being one.
 - **Not a person in any group.** A grant naming a server's key counts for nothing. Audiences may name
   it, by its key: that is how it reads a space.
 - **`mayRead`**: a server reads the workspace's own files, and a space whose audience names it.
-  (Changed by [0106](0106-the-owner-reads-everything.md): a server reads every space.)
+  (Changed by [0110](0110-the-owner-reads-everything.md): a server reads every space.)
   Not by `admins` or a group.
 - **`mayWrite`**: never. Not by a rule naming it, not where there is no rule, not its own files.
 
@@ -164,7 +164,7 @@ both on this computer only).
 
 ## In the app
 
-*(Since [0107](0107-people-first.md): servers are listed with the people; a server's own view has
+*(Since [0111](0111-people-first.md): servers are listed with the people; a server's own view has
 **Remove from workspace…**, and **Block this server's access…**, for a key someone else may have.)*
 Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
 devices' name (one online first, of several), how it is connected, and, for the owner, **Remove…**

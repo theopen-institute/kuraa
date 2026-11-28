@@ -511,14 +511,14 @@ differ by person, and how usable plain git is with only the public layer.
   tips of the spaces its person may read, so a change in one is fetched.
 - **The policy** has `space` operations: an ID and an audience (people, `group:<name>`, `admins`).
   Anyone in the workspace may make one they are in themselves; whoever made it, or an admin,
-  changes it (since [0106](0106-the-owner-reads-everything.md): whoever made it, or the owner; and
+  changes it (since [0110](0110-the-owner-reads-everything.md): whoever made it, or the owner; and
   the owner and the workspace's servers read every space). Space IDs and audiences are in the policy every member holds (not encrypted to the
   audience, as *Each space is a whole workspace* hoped): members learn that an audience exists,
   never a file of it, its name or its history. Spaces have no names; files are named by their paths
   and badged with who reads them.
 - **Who can read…** (a file's right-click menu, the document's ⋯ menu; `POST /api/audience`,
   only by someone who may change the file) chooses everyone in the workspace, only you, or people
-  and groups (always with you; since 0106, no *only you*). Files with the same audience share a space; one is made for an
+  and groups (always with you; since 0110, no *only you*). Files with the same audience share a space; one is made for an
   audience no space has. The file moves as it is now: taken out of where it was (its history stays
   there, with those who read it then) and put into the other. Widening never shares the old history.
 - **On a device**, the files of the spaces it holds lie in the working folder at their paths and

@@ -432,7 +432,7 @@ export const S = {
     renameShort: 'Rename…',
   },
 
-  // A computer or server lost or stolen (0107): its key blocked, from the person's or server's own view.
+  // A computer or server lost or stolen (0111): its key blocked, from the person's or server's own view.
   keys: {
     lost: 'Lost or stolen…',
     lostTitle: 'Only if someone else may have it: its key is blocked here for good',
@@ -506,9 +506,9 @@ export const S = {
     about: 'Only the people chosen, and the workspace’s owner, get this file on their devices; no one else’s device is sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
     everyone: 'Everyone in the workspace',
     onlyMe: 'Only you',
-    /** Who reads everything in the workspace besides each file's readers (0106). */
+    /** Who reads everything in the workspace besides each file's readers (0110). */
     readsEverything: (youOwn: boolean) => (youOwn ? 'As the workspace’s owner, you read everything in it.' : 'The workspace’s owner reads everything in it.'),
-    /** Where groups are among those who may be chosen (0106): a group's readers are its admins' to say. */
+    /** Where groups are among those who may be chosen (0110): a group's readers are its admins' to say. */
     groupsAbout: 'A group’s readers are whoever its admins put in it.',
     notYouAlone: 'Choose who reads it besides you. What is only yours belongs in a workspace of your own: the owner reads everything in this one.',
     locked: 'Who reads it is for whoever chose that, or the workspace’s owner, to change.',

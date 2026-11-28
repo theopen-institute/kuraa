@@ -69,7 +69,7 @@ test('people on two devices edit one document; a member made owner renames their
     await expect.poll(() => readFileSync(join(dirA, 'notes.md'), 'utf8'), { timeout: 20_000 }).toContain('Ada was here. So was Bo.');
     await expect.poll(() => git(dirA, 'rev-parse', 'HEAD') === git(dirB, 'rev-parse', 'HEAD') && git(dirB, 'status', '--porcelain') === '', { timeout: 20_000 }).toBe(true);
 
-    // Workspace settings list the people (0107), by kind, each online or not, in plain words: no keys or branches;
+    // Workspace settings list the people (0111), by kind, each online or not, in plain words: no keys or branches;
     // nothing on the list changes anything.
     await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
@@ -164,7 +164,7 @@ test('people on two devices edit one document; a member made owner renames their
   }
 });
 
-test('a member leaves the workspace from its settings: taken out, everyone told; the owner hands the role on first (0107)', async ({ browser }) => {
+test('a member leaves the workspace from its settings: taken out, everyone told; the owner hands the role on first (0111)', async ({ browser }) => {
   test.setTimeout(120_000);
   const testnet = await createTestnet(3);
   const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-leave-a-'));

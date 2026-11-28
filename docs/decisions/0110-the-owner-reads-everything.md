@@ -1,4 +1,4 @@
-# 0106 · The owner, and the workspace's servers, read everything
+# 0110 · The owner, and the workspace's servers, read everything
 
 **Status: built.** Changes who reads a space ([0066](0066-permissions-without-a-centre.md),
 [0072](0072-ranks-devices-and-changes-not-kept.md)), who changes a space's readers, and what a server
@@ -74,7 +74,7 @@ the owner. Where it is someone else (a friend's machine, a hosting company), the
 everything in the workspace. Servers that hold without reading are 0073's, for later.
 
 **Tightening admins** follows from owner = control: admins manage people and permissions, and with
-0106 the owner sees everything anyway; an admin quietly adding themselves to someone's space is power
+0110 the owner sees everything anyway; an admin quietly adding themselves to someone's space is power
 the model does not give them.
 
 ## How
@@ -86,7 +86,7 @@ the model does not give them.
 - `allowed` for `space`: changing a space's audience is its maker's or the owner's (`isOwner`), not any
   admin's. `Policy.mayChangeSpace` says the same for the host. Like every rule of the policy, this
   applies to the whole history as each device evaluates it: an admin's change of someone else's space
-  made before 0106 no longer counts.
+  made before 0110 no longer counts.
 - `Peers.setAudience`, `setPermissions`: an audience of the sender alone refused; changing a space's
   readers that are not this person's to change, refused (`NotAllowed`); `PermissionsInfo.readersLocked`.
 - `readersWords` (host): an audience in words, with the owner where it does not hold them (servers

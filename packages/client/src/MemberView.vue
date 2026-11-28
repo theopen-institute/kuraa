@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// A person's or a server's own view (decision 0107), opened from Workspace
+// A person's or a server's own view (decision 0111), opened from Workspace
 // settings' People in its place, with a way back: their role (a menu for whoever
 // may change it), whether they are online, and each of their computers (a
 // server: its device here), how each is connected; this computer renamed here.

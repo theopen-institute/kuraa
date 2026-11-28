@@ -199,7 +199,7 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     expect(late.status).toBe(400);
 
     // Workspace settings now show the device that joined: the same person's (both hubs are theirs here), so another of
-    // their computers, in their own view (0107).
+    // their computers, in their own view (0111).
     await openSettings(page);
     await page.getByTestId('settings-tab-workspace').click();
     await page.getByTestId('devices').locator('[data-testid^="person:"]').first().click();

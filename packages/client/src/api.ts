@@ -113,7 +113,7 @@ export interface PermissionsInfo {
   readers: string[] | null;
   admin: boolean;
   canWrite: boolean;
-  /** Its readers are a space's that someone else chose, which only they or the owner change (0106). */
+  /** Its readers are a space's that someone else chose, which only they or the owner change (0110). */
   readersLocked?: boolean;
 }
 

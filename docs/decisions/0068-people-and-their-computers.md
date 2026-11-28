@@ -17,7 +17,7 @@ section listed devices as if they were who is in, only admins could remove one (
 lost a laptop had to find an admin), and cutting a lost laptop off took two acts in two places:
 removing the device (it stops syncing) and revoking its key (what it signs stops counting).
 
-- *(Since [0107](0107-people-first.md): **People**, one line each, by kind; each opens a view of their own, with their computers, **Lost or stolen…** beside each, and **Remove from workspace…**.)*
+- *(Since [0111](0111-people-first.md): **People**, one line each, by kind; each opens a view of their own, with their computers, **Lost or stolen…** beside each, and **Remove from workspace…**.)*
 - **One list: People and computers.** Each person, with their role and actions (admins: Make
   admin/member, Take out…, which takes their computers out too), and under them their computers:
   this one as *this computer*, the others with how they are connected. Computers no identity here

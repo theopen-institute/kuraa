@@ -1,5 +1,5 @@
 // Servers in a workspace's policy (decision 0099): a key no person vouched for, in by its own join with
-// the owner's invite link for a server; reading everything in the workspace, every space too (0106),
+// the owner's invite link for a server; reading everything in the workspace, every space too (0110),
 // changing nothing, acting in nothing, taken out by the owner's drop of its key.
 import { describe, expect, it } from 'vitest';
 import crypto from 'hypercore-crypto';
@@ -122,7 +122,7 @@ describe('servers in the policy (0099)', () => {
     expect(p.groups.get('editors')?.has(s.id) ?? false).toBe(false);
   });
 
-  it('lets a server read everything, every space too (0106), and change nothing', () => {
+  it('lets a server read everything, every space too (0110), and change nothing', () => {
     const h = history();
     h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'member' }, ada);
     const s = server();
@@ -284,7 +284,7 @@ describe('servers in the policy (0099)', () => {
   });
 });
 
-describe('the owner, in control of the workspace (0106)', () => {
+describe('the owner, in control of the workspace (0110)', () => {
   it('reads every space, and stops when no longer the owner', () => {
     const h = history();
     h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);

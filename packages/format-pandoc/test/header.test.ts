@@ -1,7 +1,7 @@
 // A document's header changed by its fields (0096): only those named, the rest
 // of the header and the document as they were.
 import { describe, expect, it } from 'vitest';
-import { withHeaderFields } from '../src/header.js';
+import { pandocHeader, withHeaderFields } from '../src/header.js';
 
 describe('header fields set in a document’s text', () => {
   it('sets and takes away fields, keeping the rest of the header, its comments, and the text', () => {
@@ -19,5 +19,14 @@ describe('header fields set in a document’s text', () => {
   it('keeps Windows line ends, and refuses a header that does not parse', () => {
     expect(withHeaderFields('---\r\ntitle: A\r\n---\r\nText\r\n', { status: 'Done' })).toBe('---\r\ntitle: A\r\nstatus: Done\r\n---\r\nText\r\n');
     expect(() => withHeaderFields('---\ntitle: [unclosed\n---\nText\n', { status: 'x' })).toThrow(/not valid YAML/);
+  });
+
+  it('reads the fields by name: none where there is no header, null where it cannot be read as fields (0123)', () => {
+    expect(pandocHeader.read('---\ntitle: The harbour\ntarget-words: 1200\nkeywords: [a, b]\n---\n\nText.\n')).toEqual({ title: 'The harbour', 'target-words': 1200, keywords: ['a', 'b'] });
+    expect(pandocHeader.read('No header.\n')).toEqual({});
+    expect(pandocHeader.read('---\n---\nText\n')).toEqual({});
+    expect(pandocHeader.read('---\ntitle: [unclosed\n---\n')).toBeNull();
+    expect(pandocHeader.read('---\n- a list\n---\n')).toBeNull();
+    expect(pandocHeader.write).toBe(withHeaderFields);
   });
 });

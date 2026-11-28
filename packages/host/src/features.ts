@@ -16,14 +16,14 @@
 // - tells features what happened, after it happened (they cannot refuse it);
 // - routes /api/features/<id>/… to them, and lets them write only their own files.
 import { constants } from 'node:fs';
-import { open, readdir, rm, rmdir } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { isUtf8 } from 'node:buffer';
-import { dirname } from 'node:path';
-import { HookBus, sourceMapOf, type DocumentType, type HookEvent, type ParsedDocument } from '@kuraa/kernel';
+import { dirname, join } from 'node:path';
+import { documentOfFiles, HookBus, sourceMapOf, type DocumentType, type HookEvent, type ParsedDocument } from '@kuraa/kernel';
 import {
-  COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, companionFolder, documentOf, ownFile, ownerOf,
+  COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, STORE_NAME, companionFolder, documentOf, ownFile, ownerOf,
   type FeatureContext, type FeatureEvent, type FeatureEvents, type FeatureRequest, type FeatureResponse, type FeatureSession,
-  type ConvertedFile, type FeatureSettings, type FeatureStatus, type HostFeature, type Json, type NewFile, type Person,
+  type CompiledFolder, type ConvertedFile, type EditedDocument, type FeatureHistory, type FeatureSettings, type FeatureStatus, type FeatureStore, type HostFeature, type Json, type NewFile, type Person,
 } from '@kuraa/feature-kit/host';
 import type { FeatureSeed, FeatureView } from '@kuraa/session/server';
 import type { Node } from 'prosemirror-model';
@@ -43,6 +43,16 @@ export interface FeaturePort {
   canWrite(path: string): Promise<boolean>;
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
+  /** A file's type, as this host opens it. */
+  typeFor(path: string): DocumentType | undefined;
+  /** A document's text as its open room has it now (on the branch checked out), if it has one here (0124). */
+  liveText(path: string): Promise<string | undefined>;
+  /** The workspace's history, read only (0125). */
+  history: FeatureHistory;
+  /** Documents changed in their rooms here since their last commit, and by whom (0125). */
+  edited(): Promise<EditedDocument[]>;
+  /** The repository's own folder (.git), where what features keep on this device is kept (0125). */
+  gitDir(): Promise<string>;
   /** Tell the clients of rooms: those of `path`, or every one. */
   tell(feature: string, message: Json, path: string | null): void;
   /** Whether a document's room is open here (its companions are then the room's to write). */
@@ -113,7 +123,7 @@ function stable(v: unknown): string {
 }
 
 /** A file's text, if it is a plain file (never through a link) holding UTF-8; else null. */
-async function readPlain(abs: string): Promise<string | null> {
+async function readPlain(abs: string, maxBytes = Infinity): Promise<string | null> {
   let fh;
   try {
     fh = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -121,12 +131,40 @@ async function readPlain(abs: string): Promise<string | null> {
     return null;
   }
   try {
-    if (!(await fh.stat()).isFile()) return null;
+    const st = await fh.stat();
+    if (!st.isFile() || st.size > maxBytes) return null;
     const bytes = await fh.readFile();
     return isUtf8(bytes) ? bytes.toString('utf8') : null;
   } finally {
     await fh.close();
   }
+}
+
+/** What a feature keeps on this device (0125): JSON files in .git/kuraa/features/<id>/, never synced or committed. */
+export function featureStore(id: string, gitDir: () => Promise<string>): FeatureStore {
+  const fileOf = async (name: string) => {
+    if (!STORE_NAME.test(name)) throw new Error(`${name} is not a name to keep something under (${STORE_NAME})`);
+    return join(await gitDir(), 'kuraa', 'features', id, `${name}.json`);
+  };
+  return {
+    async get(name) {
+      const text = await readFile(await fileOf(name), 'utf8').catch(() => null);
+      if (text === null) return null;
+      try {
+        return JSON.parse(text) as Json;
+      } catch {
+        return null;
+      }
+    },
+    async set(name, value) {
+      const file = await fileOf(name);
+      if (value === null) return void (await rm(file, { force: true }));
+      await mkdir(dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(tmp, JSON.stringify(value));
+      await rename(tmp, file);
+    },
+  };
 }
 
 export class HostFeatures {
@@ -163,6 +201,18 @@ export class HostFeatures {
   }
 
   /** On for the workspace, here: the host has it on, and the workspace too. */
+  /**
+   * A folder joined into one document to render (0126), by the first feature
+   * on that compiles folders; a string says why not.
+   */
+  async compileFolder(folder: string, request: Json, format: string): Promise<CompiledFolder | string> {
+    for (const [id, { session }] of this.open) {
+      if (!session.compileFolder || !this.isOn(id)) continue;
+      return session.compileFolder(folder, request, format);
+    }
+    return 'Nothing here compiles folders: Compile is off for this workspace.';
+  }
+
   isOn(id: string): boolean {
     return this.onForHost(id) && this.onForWorkspace(id);
   }
@@ -522,7 +572,15 @@ export class HostFeatures {
     return {
       id: f.id,
       settings: () => this.settings(f.id),
-      read: (path) => readPlain(this.port.resolvePath(path)).catch(() => null),
+      // Null for whatever is not a file of text here: a link (resolvePath refuses it), a folder, bytes not in UTF-8.
+      read: async (path, o) => {
+        try {
+          return await readPlain(this.port.resolvePath(path), o?.maxBytes);
+        } catch {
+          return null;
+        }
+      },
+      live: async (path) => (await this.port.liveText(path)) ?? null,
       write: async (path, text, o) => {
         const mine = own(path);
         if (!mine) throw new HttpError(403, `${f.label} writes only your own files and those it keeps, not ${path}`);
@@ -562,6 +620,11 @@ export class HostFeatures {
         });
       },
       list: () => this.port.list(),
+      typeOf: (path) => this.port.typeFor(path),
+      belongsTo: (path) => this.documentOf(path) ?? documentOfFiles(path),
+      history: this.port.history,
+      edited: () => this.port.edited(),
+      store: featureStore(f.id, () => this.port.gitDir()),
       convert: (name, bytes) => this.port.convert(name, bytes),
       // New files only, never one it would overwrite; checked, cleaned and committed by the host (0116).
       create: (files, o) => this.port.create(files, { message: o.message, by: o.by ?? null }),

@@ -6,11 +6,15 @@ import { createSerializer, type SerializeHooks } from './serialize.js';
 import { pandocTitle } from './title.js';
 import { countConflicts, createMerge } from './merge.js';
 import { pandocReferences } from './references.js';
+import { pandocHeader } from './header.js';
+import { markdownProse } from './prose.js';
 
 export { pandocMarks, pandocNodes, safeUrl } from './schema.js';
 export { parseFragment, type MdNode, type ParseContext, type ParseHooks } from './parse.js';
 export { pandocTitle } from './title.js';
 export { pandocReferences } from './references.js';
+export { pandocHeader, withHeaderFields } from './header.js';
+export { markdownProse, markdownWords } from './prose.js';
 export { conflictBlock, countConflicts, createMerge, isConflictAttrs, isVersionAttrs } from './merge.js';
 export { CITATION_KEY, citeKey, readCitation, type Citation, type CitationItem } from './citations.js';
 export { authorsShort, bibliographyPaths, entryLabel, headerReferences, readBibliography, readBibtex, readCslJson, readCslYaml, type BibEntry } from './bibliography.js';
@@ -82,6 +86,9 @@ export function createPandocType(ext?: PandocExtension): DocumentType {
     parse,
     serialize,
     title: pandocTitle,
+    prose: markdownProse,
+    header: pandocHeader,
+    markdown: true,
     merge: createMerge(parse),
     conflicts: countConflicts,
     references: pandocReferences,

@@ -2,21 +2,21 @@
 // those left out skipped, how deep each is its heading's level; joined under
 // the book's title.
 import { describe, expect, it } from 'vitest';
-import { bookItems, chapters, documentsInOrder, headingsDown, joinBook, separatorBlock, withoutHeader, type BookPart } from '../src/compile.js';
+import { bookItems, chapters, documentsInOrder, headingsDown, joinBook, separatorBlock, withoutHeader, type BookPart } from '../src/book.js';
 
 describe('a folder’s book', () => {
   const entries = [
-    { path: 'novel/b.md', title: 'Boats' },
-    { path: 'novel/a.md', title: 'Arrival' },
-    { path: 'novel/notes.md', title: null },
+    { path: 'novel/b.md', title: 'Boats', book: true },
+    { path: 'novel/a.md', title: 'Arrival', book: true },
+    { path: 'novel/notes.md', title: null, book: true },
     { path: 'novel/map.png' },
     { path: 'novel/.kuraa-order' },
     { path: 'novel/.kuraa-compile.yml' },
-    { path: 'novel/coast/cliffs.md', title: 'Cliffs' },
-    { path: 'novel/coast/beach.Rmd', title: 'Beach' },
-    { path: 'novel/research/sources.md', title: 'Sources' },
+    { path: 'novel/coast/cliffs.md', title: 'Cliffs', book: true },
+    { path: 'novel/coast/beach.Rmd', title: 'Beach', book: true },
+    { path: 'novel/research/sources.md', title: 'Sources', book: true },
     { path: 'novel/pictures/map.png' },
-    { path: 'elsewhere.md', title: 'Elsewhere' },
+    { path: 'elsewhere.md', title: 'Elsewhere', book: true },
   ];
 
   it('is in the tree’s order: by name (folders first, then titles), or as arranged', () => {

@@ -7,6 +7,7 @@
 // menus and settings from what the features contribute.
 import { FEATURE_API_VERSION, type ClientFeature, type CoreHost, type CoreService, type FeatureClientContext, type FeatureStatus, type Json, type MatchTarget, type Person } from '@kuraa/feature-kit/client';
 import type { EditorUi } from '@kuraa/editor-kit';
+import type { DocumentType } from '@kuraa/kernel';
 import type { HostApi } from './api.js';
 
 const HIDDEN_KEY = 'kuraa:features-hidden';
@@ -49,6 +50,8 @@ export interface FeatureApp {
   marksChanged(): void;
   /** A feature's settings or choice changed: ask the host how features stand again. */
   changed(): void;
+  /** A workspace file's type, as the client opens it (0123). */
+  typeOf(path: string): DocumentType | undefined;
 }
 
 /** What hosts tell features' client halves, passed on to whoever listens (Editor.vue hears it from rooms). */
@@ -149,6 +152,7 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     keyLabel: (keys) => app.keyLabel(keys),
     moveFile: (from, to) => app.moveFile(from, to),
     marksChanged: () => app.marksChanged(),
+    typeOf: (path) => app.typeOf(path),
   };
 }
 

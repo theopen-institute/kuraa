@@ -13,8 +13,9 @@ import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, featureUpdate, type HeadlessClient } from '@kuraa/session/testing';
 import { defineFeature, type FeatureEvents, type HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
+import { searchFeature } from '@kuraa/search';
 import { startHost, type RunningHost } from '../src/index.js';
-import { checkFeatures } from '../src/features.js';
+import { checkFeatures, featureStore } from '../src/features.js';
 import { createPerson } from '../src/peers/person.js';
 
 const NOTES = `---
@@ -129,7 +130,7 @@ describe('features', () => {
   };
   const file = (name: string) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : null);
   const start = async (o: { featuresOn?: string[] } = {}) => {
-    running = await startHost({ dir, timings: FAST, features: [marksFeature, spyFeature(seen)], ...o });
+    running = await startHost({ dir, timings: FAST, features: [marksFeature, spyFeature(seen), searchFeature], ...o });
   };
   /** Mark a phrase in an open document, as a client's editor would. */
   const mark = (c: HeadlessClient, id: string, phrase: string, by = ALICE) => {
@@ -347,10 +348,10 @@ describe('features', () => {
     expect((await clear()).status).toBe(200);
     expect(file(COMPANION)).toBeNull();
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('1 mark removed');
-    // Search leaves companions out.
+    // Search (a feature of its own, 0124) leaves another feature's companions out.
     mkdirSync(join(dir, 'other.md.marks'), { recursive: true });
     writeFileSync(join(dir, `other.md.marks/@${ME}.json`), '{"marks": []} tide');
-    const found = (await json('/api/search?q=tide')).body as { files: { path: string }[] };
+    const found = (await json('/api/features/search/search?q=tide')).body as { files: { path: string }[] };
     expect(found.files.map((f) => f.path)).toEqual(['notes.md']);
   });
 
@@ -427,5 +428,25 @@ describe('features', () => {
     expect(ws.types.map((t) => t.id)).toContain('marks');
     const host = running as unknown as { host: { mergeSignature: string } };
     expect(host.host?.mergeSignature ?? '').toContain('marks@1');
+  });
+});
+
+describe('what a feature keeps on this device (0125)', () => {
+  it('keeps JSON by name, its own apart from others’, forgets on null, and refuses a name that is not one', async () => {
+    const git = mkdtempSync(join(tmpdir(), 'kuraa-store-'));
+    try {
+      const mine = featureStore('words', async () => git);
+      const theirs = featureStore('other', async () => git);
+      expect(await mine.get('commits')).toBeNull();
+      await mine.set('commits', { version: 1, n: [1, 2] });
+      expect(await mine.get('commits')).toEqual({ version: 1, n: [1, 2] });
+      expect(await theirs.get('commits')).toBeNull();
+      expect(existsSync(join(git, 'kuraa/features/words/commits.json'))).toBe(true);
+      await mine.set('commits', null);
+      expect(await mine.get('commits')).toBeNull();
+      for (const bad of ['../x', 'A', '', 'a/b', '.hidden']) await expect(mine.set(bad, 1)).rejects.toThrow(/not a name/);
+    } finally {
+      rmSync(git, { recursive: true, force: true });
+    }
   });
 });

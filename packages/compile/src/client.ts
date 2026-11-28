@@ -49,10 +49,10 @@ export const compileClient = defineClientFeature({
       },
     }];
   },
-  marks(path): FileMark | null {
+  marks(path, ctx): FileMark | null {
     const bare = path.replace(/\/+$/, '');
     const isFolder = path.endsWith('/');
-    if ((isFolder || isBookDocument(path)) && excludedBy(known.value, bare)) return { label: S.leftOut, muted: true, testid: `mark:left-out:${bare}` };
+    if ((isFolder || isBookDocument(ctx.typeOf(path))) && excludedBy(known.value, bare)) return { label: S.leftOut, muted: true, testid: `mark:left-out:${bare}` };
     const s = isFolder ? settingsOf(bare) : undefined;
     if (s && (s.title || s.format)) return { label: S.compiledAs(s.title || bare.split('/').pop()!), icon: BOOK, testid: `mark:compiled:${bare}` };
     if (s && !s.heading) return { label: S.noHeadingMark, icon: NO_HEADING, testid: `mark:no-heading:${bare}` };

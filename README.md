@@ -300,10 +300,11 @@ a joined workspace is copied into is `shared-workspace` (or `-2`, …): only its
 
 ## A server that updates itself
 
-For a computer that serves kuraa all the time (to browsers, or as an always-on device of shared
-workspaces), each release has the server on its own: `kuraa-server-<version>.tar.gz`, the server
-and the web client in one folder, needing only Node 24 and git (and Podman to run R). Installed,
-it updates itself ([decision 0052](docs/decisions/0052-the-server-updates-itself.md)):
+For a computer that runs kuraa all the time, each release has it on its own:
+`kuraa-server-<version>.tar.gz`, one program in two roles, needing only Node 24 and git (and Podman
+to run R): a **host** serving the app to browsers (this section), or a **server**, a headless,
+always-on device of shared workspaces (the next section). Installed, it updates itself
+([decision 0052](docs/decisions/0052-the-server-updates-itself.md)):
 
 ```sh
 v=$(curl -sLo /dev/null -w '%{url_effective}' https://github.com/<owner>/<repo>/releases/latest); v=${v##*/v}
@@ -322,7 +323,11 @@ own number, as a server's below; a service cannot listen on one below 1024, such
 Members learn them from it, and invite links made from then on carry them. With
 `--auto-update`, it looks for a newer release every six hours, takes it only if it is signed with
 the release key, puts it beside the one running, and restarts to use it at night (between 3 and 5),
-or at once when a device of a workspace runs a newer kuraa (the two do not sync until then). Its
+or at once when a device of a workspace runs a newer kuraa (the two do not sync until then). A
+release that changes how devices sync (its protocol) is held until a device of its workspaces runs
+it, so it does not leave every member behind overnight; `--auto-update-all` takes it at once
+([decision 0112](docs/decisions/0112-server-hardening.md)). `install --service --no-auto-update`
+makes a service that does not update itself: whoever runs it updates it, as below. Its
 service starts it again; the version before is kept. `~/.kuraa/server/kuraa-host update` takes the
 latest by hand, for the next start; `--version` says which runs. Run from the repository (`pnpm
 host`), a server does not update itself: `git pull`, `pnpm install` and `pnpm web:build`.
@@ -347,21 +352,29 @@ systemctl --user daemon-reload && systemctl --user enable --now kuraa   # as it 
 loginctl enable-linger "$USER"                                         # to run while no one is logged in
 ~/.kuraa/server/kuraa-host server join 'kuraa-invite:…'                # the owner's link for a server
 ~/.kuraa/server/kuraa-host server list                                 # what it holds, and whether each took it in
+~/.kuraa/server/kuraa-host server status                               # how it stands: release, updates, members, latest work
 ~/.kuraa/server/kuraa-host server remove <id>                          # let a workspace go (its copy here taken away)
 ```
+
+Before running one for others, read [Running a server](docs/running-a-server.md): what it holds
+(everything, every space too), who can read it, what to back up, and what to do when its key or its
+disk is lost.
 
 From the repository, `pnpm server` is the same (`pnpm server join …`, `pnpm server list`,
 `pnpm server key`), not updating itself. Its folder is `~/.kuraa/server-data` (`--data`): its key
 (one for all its workspaces; no identity), its workspaces, and `server.json` (where its API is, and
 its access code). It makes no workspaces and runs no code. It is headless: it serves no page, and
 its port (`--port 4322`, on this computer only unless `--host` says otherwise) answers, with its
-access code, only `join` and `list`. Members reach it on **5872**, TCP for their connections and UDP
+access code, only what its commands ask: `join` (and how a join is going), `list`, `status`,
+`remove` and `new-key`. Members reach it on **5872**, TCP for their connections and UDP
 for its DHT node (`--peer-port`, `--dht-port` say otherwise; 0, any free port). `--public-address`
 tells them where, so devices on networks that block UDP reach it too; without it, it is reached as
 any device is. `server join` says how it goes, the copy included, however long it takes. The owner
 takes it out from its view under **People** (**Remove from workspace…**), and may invite it back with a
 new link; **Block this server's access…**, there too, shuts its key out for good (a server with a new
-key may join again). One
+key may join again). Either way, the server deletes its copy as soon as it hears. A server blocks
+its own key in every workspace it holds with `server new-key`, run while it runs; run again once it
+is stopped, it puts the old key aside and starts afresh. One
 service per computer: installing one as a server replaces a host's.
 
 ## On several devices

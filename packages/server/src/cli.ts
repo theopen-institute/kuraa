@@ -75,7 +75,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     if (command === 'join') {
       // `-`: the link from standard input, so it is not on the command line, where others on this computer see it.
       const link = rest[0] === '-' ? (await readStdin()).trim() : rest[0];
-      if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (People and computers › Add a server…)`, 2);
+      if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (Workspace settings › People › Add a server…)`, 2);
       say('joining…');
       // How it is going, as it changes: each step; while copying, each tenth of each of git's stages.
       let last = '';
@@ -107,7 +107,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
       const id = rest[0];
       if (!id) fail(`${name} remove <id>: the workspace's id, as ${name} list says it`, 2);
       await removeFromServer(id, data);
-      say(`let go of ${id}: its copy here is gone. The server is still in the workspace until its owner takes it out (People and computers › Servers › Remove…).`);
+      say(`let go of ${id}: its copy here is gone. The server is still in the workspace until its owner takes it out (Workspace settings › People › the server › Remove from workspace…).`);
       process.exit(0);
     }
     if (command === 'key') {

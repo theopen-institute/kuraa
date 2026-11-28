@@ -559,7 +559,7 @@ export class Hub {
           throw new HttpError(400, (e as Error).message);
         }
         // A server joins by a link for a server, as no person (0099).
-        if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
+        if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Workspace settings › People › Add a server…)');
         const workspace = link.workspace.id;
         if (this.joiningWorkspaces.has(workspace)) throw new HttpError(409, 'This workspace is being joined already: wait for that join to finish');
         // A server holding the workspace already (0099): in it, that one; taken out since, the old copy let go of, and

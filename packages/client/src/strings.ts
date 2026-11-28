@@ -433,7 +433,6 @@ export const S = {
   },
 
   devices: {
-    title: 'People and computers',
     alone: 'This workspace is on this computer only. Invite people to work on it with you, from their own computers.',
     invite: 'Invite people…',
     youAreOn: (name: string) => `You are on ${name}.`,

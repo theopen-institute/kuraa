@@ -2,7 +2,7 @@
 import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { markdownWords, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
@@ -17,7 +17,7 @@ import { commitSigned, signCommitObject } from './signing.js';
 import { serialQueue } from './serial.js';
 import { NAME_FILE, cleanName, initWorkspace, readWorkspaceName, writeWorkspaceName } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { Renders } from './renders.js';
+import { Renders, type CompiledBook, type CompileOptions, type RenderFormat } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
 import { gateFor, upgradeAllowed, type RequestGate } from './origins.js';
@@ -307,7 +307,7 @@ export class Host {
   private readonly opening = new Map<string, Promise<RoomRecord>>();
   private relay!: Relay;
   runner!: Runner;
-  /** Documents rendered to HTML, Word and PDF (renders.ts). */
+  /** Documents rendered to HTML, Word, PDF and EPUB (renders.ts). */
   renders!: Renders;
   /** Words written by day and person, from the history (wordlog.ts, 0094). */
   private wordLog: WordLog | null = null;
@@ -432,7 +432,7 @@ export class Host {
       runner: this.runner,
       flush: (path) => this.writeForRender(path),
       madeFrom: (path) => this.madeFrom(path),
-      compile: (folder, o) => this.compileFolder(folder, o),
+      compile: (folder, o, format) => this.compileFolder(folder, o, format),
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) {
@@ -2865,7 +2865,7 @@ export class Host {
    * first), joined into one Markdown document; with the folders they are in,
    * where what they refer to is found. A string says why there is nothing.
    */
-  async compileFolder(folder: string, o: { exclude: string[]; noHeading: string[]; title: string }): Promise<{ text: string; resources: string[] } | string> {
+  async compileFolder(folder: string, o: CompileOptions, format: RenderFormat = 'html'): Promise<CompiledBook | string> {
     const paths = await this.listFiles();
     const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
     const orders = await readOrders(this, paths);
@@ -2873,6 +2873,20 @@ export class Host {
     const docs = items.flatMap((i) => (i.kind === 'document' ? [i.path] : []));
     if (!docs.length) return `${folder ? `${folder}/` : 'The workspace'} has no documents to compile${o.exclude.length ? ' that are not left out' : ''}.`;
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
+    // A Word template for a Word book, a cover for an EPUB (0106): files in the workspace, put beside the book.
+    const files: { name: string; from: string }[] = [];
+    const beside = async (path: string | null | undefined, kinds: RegExp, what: string, name: (ext: string) => string): Promise<string | null> => {
+      if (!path) return null;
+      const ext = kinds.exec(path)?.[1]?.toLowerCase();
+      const from = ext ? this.resolvePath(path) : null;
+      if (!ext || !from || !(await stat(from).then((s) => s.isFile(), () => false))) return `${what} ${path} is not there${ext ? '' : ', or is not one'}.`;
+      files.push({ name: name(ext), from });
+      return null;
+    };
+    const missing = (format === 'docx' ? await beside(o.referenceDoc, /\.(docx)$/i, 'The Word template', () => 'reference.docx') : null)
+      ?? (format === 'epub' ? await beside(o.cover, /\.(png|jpe?g|gif|svg|webp)$/i, 'The cover image', (ext) => `cover.${ext}`) : null);
+    if (missing) return missing;
+    const noTitles = new Set(o.noTitles ?? []);
     const parts: BookPart[] = [];
     for (const i of items) {
       if (i.kind === 'folder') {
@@ -2880,10 +2894,13 @@ export class Host {
         continue;
       }
       await this.writeForRender(i.path);
-      parts.push({ kind: 'document', level: i.level, title: titles.get(i.path) ?? null, text: await readFile(this.resolvePath(i.path), 'utf8') });
+      const untitled = noTitles.has(i.path.includes('/') ? i.path.slice(0, i.path.lastIndexOf('/')) : '');
+      parts.push({ kind: 'document', level: i.level, title: untitled ? null : titles.get(i.path) ?? null, text: await readFile(this.resolvePath(i.path), 'utf8') });
     }
     const resources = [...new Set(docs.map((p) => resolve(this.dir, p, '..')))];
-    return { text: joinBook(o.title, parts), resources };
+    const named = (n: string) => files.find((f) => f.name.startsWith(n))?.name ?? null;
+    const text = joinBook({ title: o.title, subtitle: o.subtitle, author: o.author, toc: o.toc, numbering: o.numbering, separator: o.separator, referenceDoc: named('reference.'), cover: named('cover.') }, parts);
+    return { text, resources, files };
   }
 
   /** The workspace's files this device holds: git's, untracked ones as .gitignore leaves them, and those of the spaces it holds. */

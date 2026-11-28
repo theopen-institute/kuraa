@@ -5,7 +5,7 @@ import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
 import { personOf, readBody, send } from './http.js';
 import { HttpError } from './errors.js';
-import { bookName, MIME, RENDER_FORMATS, type RenderFormat } from './renders.js';
+import { bookName, MIME, RENDER_FORMATS, type CompileOptions, type RenderFormat } from './renders.js';
 import { searchWorkspace } from './search.js';
 
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
@@ -20,23 +20,37 @@ const pathOf = (c: Context, v: unknown) => {
   return `${folder}/`;
 };
 
-/** What a folder's compile leaves out (workspace paths) and its title, as asked (0093). */
-const compileOf = (c: Context, path: string, body: Record<string, unknown>) => {
+/** What a folder's compile leaves out (workspace paths) and its title, as asked (0093); the rest of the book as it says (0106). */
+const compileOf = (c: Context, path: string, body: Record<string, unknown>): CompileOptions | undefined => {
   if (!path.endsWith('/')) return undefined;
   const paths = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x).map((x) => c.host.relPath(x.replace(/\/+$/, ''))) : []);
-  const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : bookName(path);
-  return { exclude: paths(body.exclude), noHeading: paths(body.noHeading), title };
+  const text = (v: unknown, most = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, most) : null);
+  const file = (v: unknown) => (typeof v === 'string' && v.trim() ? c.host.relPath(v.trim()) : null);
+  return {
+    exclude: paths(body.exclude),
+    noHeading: paths(body.noHeading),
+    // The top level ('') is a folder too: its documents may have no titles.
+    noTitles: Array.isArray(body.noTitles) ? body.noTitles.filter((x): x is string => typeof x === 'string').map((x) => (x.replace(/^\/+|\/+$/g, '') ? c.host.relPath(x.replace(/\/+$/, '')) : '')) : [],
+    title: text(body.title) ?? bookName(path),
+    subtitle: text(body.subtitle),
+    author: text(body.author),
+    toc: body.toc === true,
+    numbering: body.numbering === 'chapters' || body.numbering === 'sections' ? body.numbering : null,
+    separator: text(body.separator, 100),
+    referenceDoc: file(body.referenceDoc),
+    cover: file(body.cover),
+  };
 };
 
 const formatOf = (v: unknown): RenderFormat => {
-  if (!RENDER_FORMATS.includes(v as RenderFormat)) throw new HttpError(400, 'Not a format: html, docx or pdf');
+  if (!RENDER_FORMATS.includes(v as RenderFormat)) throw new HttpError(400, 'Not a format: html, docx, pdf or epub');
   return v as RenderFormat;
 };
 
 /** What a rendered page may do if opened on its own: show itself, nothing more (no scripts, no requests). */
 const RENDER_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; font-src data:; media-src data:";
 
-// Rendering documents to HTML, Word and PDF, where code runs; outputs are kept in .git/kuraa/renders.
+// Rendering documents to HTML, Word, PDF and EPUB, where code runs; outputs are kept in .git/kuraa/renders.
 export const renderRoutes: Route[] = [
   route('GET', '/api/renders', async (c) => send(c.res, 200, await c.host.renders.info(pathOf(c, c.q.get('path'))))),
 

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileFeature } from '@kuraa/compile';
+import { compileFeature, emptyCompile } from '@kuraa/compile';
 import { startHost, type RunningHost } from '../src/index.js';
 
 const ANA = { name: 'Ana Lima', email: 'ana@example.org', color: '#d33' };
@@ -69,7 +69,7 @@ describe('Compile', () => {
     expect((await post('include', { path: 'novel/gone.md', include: false })).status).toBe(404);
 
     expect((await post('settings', { folder: 'novel', title: 'The Coast', format: 'pdf' })).status).toBe(200);
-    expect(await folders()).toEqual([{ folder: 'novel', title: 'The Coast', format: 'pdf', heading: true, target: null, exclude: ['notes.md', 'research'] }]);
+    expect(await folders()).toEqual([{ ...emptyCompile('novel'), title: 'The Coast', format: 'pdf', exclude: ['notes.md', 'research'] }]);
 
     // The book's target in words (0094), and none again.
     expect((await post('target', { folder: 'novel', target: 80000 })).status).toBe(200);
@@ -107,6 +107,39 @@ describe('Compile', () => {
     expect((await api(`/api/files?path=${encodeURIComponent('novel/research')}`, { method: 'DELETE' })).status).toBe(200);
     await until(async () => !(await folders()).some((f) => f.folder === 'novel'), 10_000, 'the deletion to be followed');
     await until(() => git(dir, 'status', '--porcelain') === '', 10_000, 'everything committed');
+  });
+
+  it('keeps a book’s own settings as each changes, even several at once; a folder’s documents without titles; templates and covers to choose (0106)', async () => {
+    writeFileSync(join(dir, 'house.docx'), 'a Word document');
+    writeFileSync(join(dir, 'novel/cover.jpg'), 'a picture');
+    const files = (await (await api('/api/features/compile/files')).json()) as { templates: string[]; images: string[] };
+    expect(files).toEqual({ templates: ['house.docx'], images: ['novel/cover.jpg', 'novel/map.png'] });
+    // Changed at once, as the panel may: each kept.
+    const answers = await Promise.all([
+      post('settings', { folder: 'novel', subtitle: 'A novel' }),
+      post('settings', { folder: 'novel', author: 'Ada Byron' }),
+      post('settings', { folder: 'novel', toc: true }),
+      post('settings', { folder: 'novel', numbering: 'chapters' }),
+      post('settings', { folder: 'novel', separator: '#' }),
+      post('settings', { folder: 'novel', referenceDoc: 'house.docx' }),
+      post('settings', { folder: 'novel', cover: 'novel/cover.jpg' }),
+      post('titles', { folder: 'novel', titles: false }),
+    ]);
+    expect(answers.map((a) => a.status)).toEqual([200, 200, 200, 200, 200, 200, 200, 200]);
+    expect(await folders()).toEqual([{
+      ...emptyCompile('novel'), subtitle: 'A novel', author: 'Ada Byron', toc: true, numbering: 'chapters', separator: '#',
+      referenceDoc: 'house.docx', cover: 'novel/cover.jpg', titles: false,
+    }]);
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('No titles for the documents in novel/ in Compile');
+    // Not a Word document, or not there: refused.
+    expect((await post('settings', { folder: 'novel', referenceDoc: 'novel/notes.md' })).status).toBe(400);
+    expect((await post('settings', { folder: 'novel', cover: 'gone.png' })).status).toBe(400);
+    // Only what is named changes; null takes it away.
+    expect((await post('settings', { folder: 'novel', cover: null })).status).toBe(200);
+    expect((await folders())[0]).toMatchObject({ cover: null, referenceDoc: 'house.docx', author: 'Ada Byron' });
+    // The template renamed: followed.
+    expect((await api('/api/files', { method: 'PATCH', body: JSON.stringify({ from: 'house.docx', to: 'styles.docx' }) })).status).toBe(200);
+    await until(async () => (await folders())[0]?.referenceDoc === 'styles.docx', 10_000, 'the template’s rename to be followed');
   });
 
   it('asks the host to render a folder, which says why it cannot here', async () => {

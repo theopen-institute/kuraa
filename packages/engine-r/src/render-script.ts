@@ -1,7 +1,7 @@
 // The R side of rendering a document (render.ts). Started with Rscript in the
 // environment, once per render:
 //
-//   Rscript render.R <document> <html|docx|pdf> <scratch> [<folders>]
+//   Rscript render.R <document> <html|docx|pdf|epub> <scratch> [<folders>]
 //
 // <folders>: where what the document refers to is found besides its own folder,
 // separated by colons (a compiled folder's documents', 0093).
@@ -14,7 +14,9 @@
 //
 // What the header asks for is followed where it can be: R Markdown's `output:`
 // (html_document, word_document, pdf_document and others, with their options)
-// and the `format:` of Quarto-style headers (toc, number-sections, pdf-engine).
+// and the `format:` of Quarto-style headers (toc, number-sections, pdf-engine),
+// those also at the header's top level as Quarto has them for every format
+// (toc, number-sections, reference-doc, and cover-image for EPUB: 0106).
 // HTML is always self-contained (images and styles inside), with math as MathML
 // unless the header chooses, so it shows without scripts or the network. PDF is
 // made with Typst unless the header asks for a LaTeX engine the environment has
@@ -38,7 +40,7 @@ local({
   tmp_dir <- file.path(scratch, "tmp")
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
   dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
-  ext <- c(html = "html", docx = "docx", pdf = "pdf")[[format]]
+  ext <- c(html = "html", docx = "docx", pdf = "pdf", epub = "epub")[[format]]
   out_name <- paste0("document.", ext)
   out_file <- file.path(out_dir, out_name)
   notes <- character()
@@ -99,11 +101,13 @@ local({
       f <- header[["format"]]
       if (is.list(f) && is.list(f[[key]])) f[[key]] else list()
     }
-    chosen <- switch(format, html = pick("html"), docx = pick("word|docx"), pdf = pick("pdf"))
+    chosen <- switch(format, html = pick("html"), docx = pick("word|docx"), pdf = pick("pdf"), epub = pick("epub"))
     opts <- options_of(chosen)
-    q <- quarto(switch(format, html = "html", docx = "docx", pdf = "pdf"))
-    toc <- isTRUE(or(opts$toc, q$toc))
-    numbered <- isTRUE(or(opts$number_sections, q[["number-sections"]]))
+    q <- quarto(format)
+    # Quarto-style options at the header's top level, for every format.
+    top <- function(key) or(q[[key]], header[[key]])
+    toc <- isTRUE(or(opts$toc, top("toc")))
+    numbered <- isTRUE(or(opts$number_sections, top("number-sections")))
 
     # PDF: Typst, unless the header asks for a LaTeX engine the environment has.
     pdf_engine <- NULL
@@ -126,7 +130,7 @@ local({
     }
 
     if (grepl("\\.rmd$", input, ignore.case = TRUE)) render_rmd(chosen, opts, toc, numbered, pdf_engine)
-    else render_md(header, opts, toc, numbered, pdf_engine)
+    else render_md(header, opts, toc, numbered, pdf_engine, top)
     if (!file.exists(out_file)) stop("The render finished but made no file.")
   }
 
@@ -145,6 +149,12 @@ local({
       if ("math_method" %in% takes && is.null(opts$math_method) && is.null(opts$mathjax)) output_options$math_method <- "mathml"
     } else if (format == "docx") {
       output_format <- or(chosen, "word_document")
+    } else if (format == "epub") {
+      # An output format the header names (bookdown::epub_book), else pandoc's EPUB 3.
+      output_format <- if (!is.null(chosen)) chosen else rmarkdown::output_format(
+        knitr = rmarkdown::knitr_options(opts_chunk = list(dev = "png", dpi = 192)),
+        pandoc = rmarkdown::pandoc_options(to = "epub3", ext = ".epub", args = c("--mathml", if (toc) "--toc", if (numbered) "--number-sections")),
+        keep_md = FALSE, clean_supporting = TRUE)
     } else if (pdf_engine != "typst") {
       output_format <- or(chosen, "pdf_document")
       output_options$latex_engine <- pdf_engine
@@ -171,19 +181,31 @@ local({
   # sandbox where the document needs no files of the workspace besides its
   # bibliography (it then reads nothing else); the container keeps it to the
   # workspace, read-only, either way.
-  render_md <- function(header, opts, toc, numbered, pdf_engine) {
+  render_md <- function(header, opts, toc, numbered, pdf_engine, top) {
     dir <- dirname(input)
     body <- paste(readLines(input, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
     reads_files <- grepl("!\\[|<img|<embed|<object|<video|<audio|<source|<link|src\\s*=", body, ignore.case = TRUE) ||
-      any(names(header) %in% c("csl", "include-in-header", "include-before-body", "include-after-body", "css", "reference-doc", "template", "logo", "header-includes"))
+      any(names(header) %in% c("csl", "include-in-header", "include-before-body", "include-after-body", "css", "reference-doc", "template", "logo", "header-includes", "cover-image"))
     args <- c(input, "--standalone", "--citeproc", paste0("--resource-path=", paste(c(dir, resources), collapse = ":")), "-o", out_file)
     if (format == "html") {
       args <- c(args, "--embed-resources", "--mathml")
       if (is.null(header[["title"]]) && is.null(header[["pagetitle"]])) args <- c(args, "--metadata", paste0("pagetitle=", sub("\\.[^.]*$", "", basename(input))))
     }
-    if (format == "docx" && is.character(opts$reference_docx)) {
-      args <- c(args, paste0("--reference-doc=", file.path(dir, opts$reference_docx)))
+    # A Word template: R Markdown's reference_docx, or reference-doc; beside the document.
+    reference <- or(opts$reference_docx, top("reference-doc"))
+    if (format == "docx" && is.character(reference)) {
+      args <- c(args, paste0("--reference-doc=", file.path(dir, reference)))
       reads_files <- TRUE
+    }
+    if (format == "epub") {
+      args <- c(args, "--mathml")
+      if (is.null(header[["title"]]) && is.null(header[["pagetitle"]])) args <- c(args, "--metadata", paste0("title=", sub("\\.[^.]*$", "", basename(input))))
+      # A cover beside the document (pandoc would look for it where it runs, in scratch).
+      cover <- top("cover-image")
+      if (is.character(cover)) {
+        args <- c(args, paste0("--epub-cover-image=", file.path(dir, cover)))
+        reads_files <- TRUE
+      }
     }
     if (format == "pdf") args <- c(args, if (pdf_engine == "typst") c("-t", "typst"), paste0("--pdf-engine=", pdf_engine))
     if (toc) args <- c(args, "--toc")

@@ -276,7 +276,7 @@ export interface Engine {
 // Like a run, a render's processes start through the environment, with the
 // workspace read-only and no network, whatever the workspace asks for.
 
-export type RenderFormat = 'html' | 'docx' | 'pdf';
+export type RenderFormat = 'html' | 'docx' | 'pdf' | 'epub';
 
 export interface RenderContext extends ComponentContext {
   /**

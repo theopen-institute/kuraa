@@ -333,6 +333,29 @@ export interface BookContent {
   words?: number;
 }
 
+/** How a folder is compiled (0093, 0106), as asked of the host's render. */
+export interface CompileRequest {
+  /** What is left out (workspace paths; a folder's, all in it). */
+  exclude?: string[];
+  /** Folders (paths) whose names are no heading, nor a level. */
+  noHeading?: string[];
+  /** Folders (paths) whose documents' titles are no headings: what is in them runs on, a separator between (0106). */
+  noTitles?: string[];
+  title?: string;
+  subtitle?: string;
+  author?: string;
+  /** A table of contents. */
+  toc?: boolean;
+  /** Its top-level headings as chapters (Chapter 1: …), or every heading numbered (1, 1.1, …). */
+  numbering?: 'chapters' | 'sections';
+  /** Between two documents with no heading between them: a rule (`* * *`, `---`), or this text, centred. */
+  separator?: string;
+  /** A Word document in the workspace whose styles a Word book takes (path). */
+  referenceDoc?: string;
+  /** An image in the workspace on an EPUB's cover (path). */
+  cover?: string;
+}
+
 /** A match to open a file at (0089). */
 export interface MatchTarget {
   /** 1-based line of the file (or of the open document's text) the match was on. */
@@ -344,7 +367,7 @@ export interface MatchTarget {
 }
 
 /** A format a document renders to (the host's renders, 0041). */
-export type RenderFormat = 'html' | 'docx' | 'pdf';
+export type RenderFormat = 'html' | 'docx' | 'pdf' | 'epub';
 
 /** A document's latest render in one format. */
 export interface RenderState {
@@ -441,9 +464,10 @@ export interface RenderService {
    * is compiled (0093): its folders and documents in the file tree's order,
    * but those `exclude` names (paths; a folder's, all in it), joined under
    * `title`, how deep each is its heading's level; the folders `noHeading`
-   * names (paths) with no heading, nor a level, of their own.
+   * names (paths) with no heading, nor a level, of their own; and the book as
+   * the rest of `compile` says (0106).
    */
-  render(path: string, format: RenderFormat, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState>;
+  render(path: string, format: RenderFormat, compile?: CompileRequest): Promise<RenderState>;
   /** A document's latest output in a format. */
   output(path: string, format: RenderFormat): Promise<Blob>;
   /** The files a document's latest output was made from, as they were, in a zip (0081). */

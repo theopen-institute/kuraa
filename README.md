@@ -144,10 +144,10 @@ Any folder can be **arranged by hand**: drag a file or folder between two rows o
 shows where it lands), or move it with **Alt+↑** and **Alt+↓**. The order is kept in a plain
 `.kuraa-order` file in the folder (one name per line), which moves with it; whatever it does not name
 follows by name, and **Sort by name** on the folder's menu forgets it. **Compile…** on any folder's
-menu makes one book of its folders and documents, in that order (Word, PDF or HTML, rendered as documents are,
+menu makes one book of its folders and documents, in that order (Word, PDF, HTML or EPUB, rendered as documents are,
 where code runs): folders' names and documents' titles become headings, one level deeper for each folder
-down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. These choices and the book's title are kept in
-a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md)).
+down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. Untick a folder's **Titles** for scenes that run on under its heading, with what you put **Between documents without titles** (`#`, or `* * *` for a line) between them. The book has a subtitle and author for its title page, a table of contents, **Numbering** (*Chapter 1: …*, or every heading 1, 1.1, …), a Word template for a Word book and a cover for an EPUB (files in the workspace). These choices and the book's title are kept in
+a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md), [0106](docs/decisions/0106-a-books-own-settings-and-epub.md)).
 
 The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as
@@ -222,12 +222,13 @@ document now (**Compare with now**: changed paragraphs, the words in them marked
 (**Restore this version…**: an edit like any other, which everyone sees and ⌘Z undoes;
 [0043](docs/decisions/0043-past-versions.md)).
 
-## Rendering: HTML, Word and PDF
+## Rendering: HTML, Word, PDF and EPUB
 
 **Preview** in the menu, or ⇧⌘R, renders the document as it is now (R Markdown knitted by
 rmarkdown, Markdown by pandoc) and shows the page beside it, in a frame where nothing in the document
-runs; **Update when saved** renders it again each time it is saved. **Save as** HTML, Word or PDF
-renders that format and saves the file. The header's `output:` (or `format:`) settings apply. PDFs are
+runs; **Update when saved** renders it again each time it is saved. **Export as** PDF, Word, HTML or EPUB
+renders that format and saves the file. The header's `output:` (or `format:`) settings apply, as do
+`toc`, `number-sections`, `reference-doc` and `cover-image` at its top level. PDFs are
 made with Typst, which the environment has, so no TeX is needed. A header asking for a LaTeX engine
 (`latex_engine: xelatex`, `pdf-engine:`) gets TeX as a **tool**: where installs are allowed, the
 panel offers **Download PDF with LaTeX** (TinyTeX, about 54 MB, kept once on this computer) and

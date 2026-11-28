@@ -1,4 +1,4 @@
-// Rendering documents to HTML, Word and PDF, through run components.
+// Rendering documents to HTML, Word, PDF and EPUB (0106), through run components.
 //
 // The host knows neither R nor pandoc: an engine that is on renders the file
 // types it says it does (run-kit's DocumentRenderer), in the environment code
@@ -18,7 +18,7 @@
 // it loads). One that needs a tool this computer does not have says so, with
 // what to offer people (`needs`).
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, posix, resolve } from 'node:path';
 import type { RenderFormat, RenderResult } from '@kuraa/run-kit';
@@ -28,7 +28,7 @@ import { renameOver } from './files.js';
 import { checkMadeFrom } from './madefrom.js';
 
 export type { RenderFormat };
-export const RENDER_FORMATS: RenderFormat[] = ['html', 'docx', 'pdf'];
+export const RENDER_FORMATS: RenderFormat[] = ['html', 'docx', 'pdf', 'epub'];
 /** The most times a render runs again after adding parts its tools lacked. */
 const MAX_REPAIRS = 4;
 /** The largest output kept. */
@@ -71,13 +71,34 @@ export const MIME: Record<RenderFormat, string> = {
   html: 'text/html; charset=utf-8',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pdf: 'application/pdf',
+  epub: 'application/epub+zip',
 };
 
-/** A folder's compile, as asked (0093): what to leave out and which folders have no heading (workspace paths), and the book's title. */
+/**
+ * A folder's compile, as asked (0093): what to leave out and which folders have
+ * no heading (workspace paths), and the book's title; and (0106) the folders
+ * whose documents' titles are no headings, its title page, a table of
+ * contents, numbering, a separator, a Word template and a cover (workspace paths).
+ */
 export interface CompileOptions {
   exclude: string[];
   noHeading: string[];
   title: string;
+  noTitles?: string[];
+  subtitle?: string | null;
+  author?: string | null;
+  toc?: boolean;
+  numbering?: 'chapters' | 'sections' | null;
+  separator?: string | null;
+  referenceDoc?: string | null;
+  cover?: string | null;
+}
+
+/** A folder's documents joined, to render: the folders where what they refer to is found, and files to put beside it (a Word template, a cover: 0106). */
+export interface CompiledBook {
+  text: string;
+  resources: string[];
+  files?: { name: string; from: string }[];
 }
 
 /** What renders a path: a folder (ending in `/`: 0093) is compiled to Markdown, and rendered as that. */
@@ -100,8 +121,8 @@ export class Renders {
     flush(path: string): Promise<void>;
     /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
     madeFrom(path: string): Promise<MadeFrom>;
-    /** A folder's documents joined, to compile it (0093: '' the top level); a string says why not. */
-    compile(folder: string, o: CompileOptions): Promise<{ text: string; resources: string[] } | string>;
+    /** A folder's documents joined, to compile it (0093: '' the top level) to a format; a string says why not. */
+    compile(folder: string, o: CompileOptions, format: RenderFormat): Promise<CompiledBook | string>;
     log(m: string): void;
   }) {}
 
@@ -209,10 +230,10 @@ export class Renders {
     state.message = 'Rendering…';
     // A folder (0093): its documents joined, each as it is now, into one in scratch.
     const compile = this.compiling.get(`${path}\0${format}`);
-    let joined: { text: string; resources: string[] } | null = null;
+    let joined: CompiledBook | null = null;
     if (compile) {
       state.message = 'Putting the documents together…';
-      const r = await this.o.compile(path === '/' ? '' : path.slice(0, -1), compile);
+      const r = await this.o.compile(path === '/' ? '' : path.slice(0, -1), compile, format);
       if (typeof r === 'string') {
         Object.assign(state, { state: 'failed', message: r, finishedAt: new Date().toISOString(), progress: null });
         return;
@@ -243,6 +264,8 @@ export class Renders {
           input = join(scratch, 'in', `${bookName(path)}.md`);
           await mkdir(dirname(input), { recursive: true });
           await writeFile(input, joined.text);
+          // Beside it, by the names its header gives them: a Word template, a cover (0106).
+          for (const f of joined.files ?? []) await copyFile(f.from, join(scratch, 'in', f.name));
         }
         result = await found.renderer.render(ctx, { input, format, ...(joined ? { resources: joined.resources } : {}) });
         if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;

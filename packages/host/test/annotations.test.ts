@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Node as PMNode } from 'prosemirror-model';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
-import { annotationsFeature, aboutOf, codeOf, readCodebook, readPage, textOf, writeCodebook, type Item } from '@kuraa/annotations';
+import { INLINE_CLASS, annotationsFeature, aboutOf, codeOf, isInline, readCodebook, readPage, textOf, writeCodebook, type Item } from '@kuraa/annotations';
 import { startHost, type RunningHost } from '../src/index.js';
 import { createPerson } from '../src/peers/person.js';
 
@@ -120,6 +120,21 @@ describe('comments', () => {
     expect(about.start).toBe([...NOTES.slice(0, NOTES.indexOf('I never trusted'))].length);
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('Field notes: 1 comment added (Alice Ng)');
     // The document itself never changes.
+    expect(file('notes.md')).toBe(NOTES);
+  });
+
+  it('keeps an inline comment inline (0129): its target’s styleClass written with the passage, the passage named anew', async () => {
+    const a = await connect();
+    const f = a.feature('annotations', ME);
+    const at = where(a.read(), 'I never trusted');
+    const item = comment('commenting', 'urn:uuid:i1', 'Which council?', { source: '../notes.md', styleClass: INLINE_CLASS, selector: [{ type: 'TextQuoteSelector', exact: 'I never trusted the council' }] });
+    f.update({ set: { 'urn:uuid:i1': { item, from: f.anchorAt(at, 1), to: f.anchorAt(at + 'I never trusted the council'.length, -1) } } });
+    await until(() => readPage(file(OWN)).length === 1 && git(dir, 'status', '--porcelain') === '', 10_000, 'the inline comment committed');
+    const [c] = readPage(file(OWN));
+    expect(isInline(c!)).toBe(true);
+    expect(c!.target).toMatchObject({ source: '../notes.md', styleClass: INLINE_CLASS });
+    expect((aboutOf(c!) as { exact: string; start: number }).start).toBe([...NOTES.slice(0, NOTES.indexOf('I never trusted'))].length);
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Field notes: 1 comment added (Alice Ng)');
     expect(file('notes.md')).toBe(NOTES);
   });
 

@@ -123,7 +123,9 @@ export const annotationsFeature = defineFeature({
             // A point: one place in the text, after what is before it.
             const start = sourceMap.toText(from, to === from ? -1 : 1);
             const end = to === from ? start : sourceMap.toText(to, -1);
-            item = { ...item, target: { source: sourceOf(path), selector: selectorsFor(text, start, end) } };
+            // What else its target says (an inline comment's styleClass, say) kept: only where it is, renamed.
+            const was = item.target && typeof item.target === 'object' && !Array.isArray(item.target) ? item.target : {};
+            item = { ...item, target: { ...was, source: sourceOf(path), selector: selectorsFor(text, start, end) } };
           }
           // Its text gone: kept as it was named last, to be found again or placed anew.
         }

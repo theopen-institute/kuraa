@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aboutOf, describePages, findPassage, fromCodePoints, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
+import { INLINE_CLASS, aboutOf, describePages, findPassage, fromCodePoints, isInline, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
 
 const ME = 'a'.repeat(64);
 const comment = (id: string, value: string, modified = '2026-11-25T10:00:00Z', target: Item['target'] = '../p01.md'): Item => ({
@@ -100,5 +100,23 @@ describe('what a change did', () => {
     const after = writePage([comment('urn:uuid:a', 'one, edited', 'later'), comment('urn:uuid:b', 'two'), { ...comment('urn:uuid:c', 'reply'), motivation: 'replying' }], ME);
     expect(describePages(before, after)).toBe('1 comment added, 1 comment changed, 1 reply added');
     expect(describePages(after, null)).toBe('2 comments removed, 1 reply removed');
+  });
+});
+
+describe('an inline comment (0129)', () => {
+  const passage = (extra: { [k: string]: unknown } = {}) => ({ source: '../p01.md', ...extra, selector: [{ type: 'TextQuoteSelector', exact: 'the council' }] }) as Item['target'];
+  it('is a comment whose target says it is shown inline, by the W3C model’s styleClass', () => {
+    expect(isInline(comment('urn:uuid:a', 'x', undefined, passage({ styleClass: INLINE_CLASS })))).toBe(true);
+    expect(isInline(comment('urn:uuid:a', 'x', undefined, passage({ styleClass: ['other', INLINE_CLASS] })))).toBe(true);
+    expect(isInline(comment('urn:uuid:a', 'x', undefined, passage()))).toBe(false);
+    expect(isInline(comment('urn:uuid:a', 'x'))).toBe(false);
+    // Only a comment: a reply or a coding with the class is not one.
+    expect(isInline({ ...comment('urn:uuid:a', 'x', undefined, passage({ styleClass: INLINE_CLASS })), motivation: 'replying' })).toBe(false);
+  });
+  it('is still a comment on its passage, to any tool, and written back as it was', () => {
+    const c = comment('urn:uuid:a', 'x', undefined, passage({ styleClass: INLINE_CLASS }));
+    expect(aboutOf(c)).toMatchObject({ kind: 'passage', exact: 'the council' });
+    expect(readPage(writePage([c], ME))).toEqual([c]);
+    expect(describePages(null, writePage([c], ME))).toBe('1 comment added');
   });
 });

@@ -158,14 +158,14 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   const menu = page.getByTestId('context-menu');
   await plus.click({ button: 'right' });
   // With what features add for the top level (0114): Compile… of the whole workspace, Import….
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…', 'Compile…', 'Import…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file…', 'New folder…', 'Compile…', 'Import…']);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   // The space below the files has the same menu, by right-click.
   const space = page.getByTestId('tree-space');
   await space.scrollIntoViewIfNeeded();
   await space.click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…', 'Compile…', 'Import…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file…', 'New folder…', 'Compile…', 'Import…']);
   await page.keyboard.press('Escape');
   await plus.click({ button: 'right' });
   await page.getByTestId('context:new-folder').click();
@@ -190,6 +190,36 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await expect(page.getByTestId('settings-window')).toHaveCount(0);
 });
 
+
+test('New file… from ＋’s menu asks its kind: a document by its title, a text file by its name; made at once', async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
+  const plus = page.getByRole('button', { name: 'New document', exact: true });
+  await plus.click({ button: 'right' });
+  await page.getByTestId('context:new-file').click();
+  const dialog = page.getByTestId('new-file');
+  await expect(dialog.locator('select[name="type"]')).toHaveValue('pandoc-markdown');
+  // A document: its title, its filename made from it, shown as it is typed.
+  await dialog.locator('input[name="title"]').fill(`Harbour notes ${stamp}`);
+  await expect(page.getByTestId('new-file-path')).toContainText(`harbour-notes-${stamp}.md`);
+  await dialog.getByRole('button', { name: 'Create' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[role="treeitem"][aria-current="page"]')).toHaveAttribute('data-path', `harbour-notes-${stamp}.md`);
+  await expect.poll(() => readFileSync(join(E2E.dir, `harbour-notes-${stamp}.md`), 'utf8')).toContain(`title: Harbour notes ${stamp}`);
+  // A text file: its name, the extension following the kind.
+  await plus.click({ button: 'right' });
+  await page.getByTestId('context:new-file').click();
+  await dialog.locator('select[name="type"]').selectOption({ label: 'Text file (.txt)' });
+  await dialog.locator('input[name="path"]').fill(`list-${stamp}.txt`);
+  await dialog.getByRole('button', { name: 'Create' }).click();
+  await expect(page.locator(`[role="treeitem"][data-path="list-${stamp}.txt"]`)).toBeVisible();
+  expect(existsSync(join(E2E.dir, `list-${stamp}.txt`))).toBe(true);
+  // Cancelled: nothing made.
+  await plus.click({ button: 'right' });
+  await page.getByTestId('context:new-file').click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
 
 test('dragging moves files into folders, and folders to the top level', async ({ page }) => {
   const stamp = Date.now().toString(36);

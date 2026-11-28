@@ -290,7 +290,7 @@ export const S = {
     newFileIn: (name: string) => `New file in ${name}`,
     referencesLeft: (paths: string[]) => `Moved. ${listOf(paths)} ${paths.length === 1 ? 'still points' : 'still point'} to the old place: ${paths.length === 1 ? 'it is' : 'they are'} not yours to change.`,
     newFolderIn: (name: string) => `New folder in ${name}`,
-    newFileMenu: (where: string) => `New file${where}`,
+    newFileMenu: (where: string) => `New file${where}…`,
     /** The space below the files, with none yet: its menu has a new file or folder. */
     space: 'New file or folder…',
     newFolderMenu: (where: string) => `New folder${where}…`,
@@ -312,6 +312,18 @@ export const S = {
     untitled: (path: string) => `${path}: no title yet (Rename… or Document settings… gives it one)`,
   },
 
+
+  newFile: {
+    title: 'New file',
+    type: 'File type',
+    titleLabel: 'Title',
+    titlePlaceholder: 'Field notes from the harbour',
+    savedAs: 'Saved as',
+    name: 'Name',
+    needsTitle: 'A document needs a title.',
+    needsName: 'A file needs a name.',
+    exists: (p: string) => `${p} already exists.`,
+  },
 
   rename: {
     title: 'Rename',

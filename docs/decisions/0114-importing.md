@@ -94,6 +94,15 @@ folder `/`. That brings **Import…**, and **Compile…** of the whole workspace
 did. **A file opened that the list does not have yet** (one just imported) makes the page ask for
 the list again first.
 
+**New file… from a menu asks its kind** (revising [0097](0097-starting-to-write.md)). The owner, of
+＋'s menu (right-clicked): "When clicking "New file" this way, bring up the dialog for file type (and
+change it to "New file…")". In every menu that has it (＋'s, a folder's, the space below the
+files), **New file…** opens the dialog 0097 took away: the kind (Markdown, R Markdown, a text or
+source file), then a document's title (its filename made from it, shown as it is typed) or a file's
+name (the extension and the kind following each other). The file is made at once: it has something
+in it, a title or a name. ＋ itself, and a folder's own ＋ on its row, still make an untitled
+document at once, written when something is written in it (0097).
+
 ### Not yet
 
 - Scrivener's comments as Kuraa's (annotations, 0082), and its project notes (`Files/ProjectNotes`).

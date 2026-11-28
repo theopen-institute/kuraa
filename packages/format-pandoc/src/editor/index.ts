@@ -26,7 +26,7 @@ export { arrangeNotes } from './notes.js';
 export { pandocHeaderFields } from './header.js';
 export { conflictPositions, nextConflict, versionDateLabel, versionLabel } from './conflicts.js';
 export { Bibliography, citationLabel, describeEntry } from './citations.js';
-export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable, wordAt } from './tables.js';
+export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteTable, goToCell, headerCells, insertTable, spanAt, wordAt } from './tables.js';
 export { workspacePath } from './paths.js';
 export { joinAfterList, liftAtItemStart, listRules, switchList } from './lists.js';
 export { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
@@ -306,7 +306,7 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: EDITING, does: 'Line break', keys: ['Shift-Enter'], note: 'in a note, a new paragraph; in a table, a new line in the cell' },
   { group: EDITING, does: 'Leave a code block or table', keys: ['Mod-Enter'] },
   { group: EDITING, does: 'Next cell, previous cell', keys: ['Tab', 'Shift-Tab'], note: 'in a table' },
-  { group: EDITING, does: 'Rows and columns', keys: ['Shift-F10'], note: 'in a table; or right-click' },
+  { group: EDITING, does: 'Rows and columns', keys: ['Shift-F10'], note: 'in a table; or right-click; select across rows to delete them together' },
   { group: EDITING, does: 'Next conflict', keys: ['Mod-Alt-n'] },
 ];
 

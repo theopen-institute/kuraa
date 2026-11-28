@@ -264,6 +264,12 @@ export function creatorOf(item: Item): string {
   return isObject(c) && typeof c.name === 'string' ? c.name : '';
 }
 
+/** Its maker's colour as it was when they made it (their cursor's, 0129), as #rrggbb; null where none was kept. */
+export function creatorColourOf(item: Item): string | null {
+  const c = item.creator;
+  return isObject(c) && typeof c.color === 'string' && /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : null;
+}
+
 /** What one change to a person's file did, in a few words: "2 comments added, 1 reply removed". */
 export function describePages(before: string | null, after: string | null): string | null {
   const was = new Map(readPage(before).map((i) => [String(i.id), i]));

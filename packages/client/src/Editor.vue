@@ -769,7 +769,7 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
         v-for="m in margin"
         :key="m.key"
         type="button"
-        :class="['feature-mark', { 'feature-tag': m.kind === 'tag', active: m.active }]"
+        :class="['feature-mark', { 'feature-tag': m.kind === 'tag', 'feature-icon': m.kind !== 'tag' && m.icon, active: m.active }]"
         :style="m.kind === 'tag' ? { top: `${m.at}px`, left: `${m.left}px`, maxWidth: `${m.room}px`, '--mark-color': m.color ?? 'var(--muted)' } : { top: `${m.at}px`, left: `${m.left}px`, color: m.color }"
         :title="m.title"
         :aria-label="m.title ?? m.label"
@@ -778,7 +778,7 @@ watch([() => props.showSource, view], ([showSource, v], _prev, onCleanup) => {
         @mouseenter="m.hover?.(true)"
         @mouseleave="m.hover?.(false)"
         @click="runMark(m, $event)"
-      >{{ m.label }}</button>
+      ><svg v-if="m.kind !== 'tag' && m.icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path v-for="(d, i) in m.icon.paths" :key="i" :d="d" /></svg><template v-else>{{ m.label }}</template></button>
       <div v-if="selectionBar" class="selection-actions" role="toolbar" :aria-label="S.features.selection" :style="{ top: `${selectionBar.top}px`, left: `${selectionBar.left}px` }" data-testid="selection-actions" @mousedown.stop.prevent>
         <button v-for="a in selectionBar.items" :key="a.label" type="button" :data-testid="a.testid" @click="a.run()">{{ a.label }}</button>
       </div>

@@ -23,6 +23,7 @@ export const KEYS = {
   lineStart: MAC ? 'Meta+ArrowLeft' : 'Home',
   lineEnd: MAC ? 'Meta+ArrowRight' : 'End',
   docStart: MAC ? 'Meta+ArrowUp' : 'Control+Home',
+  paragraphUp: MAC ? 'Alt+ArrowUp' : 'Control+ArrowUp',
 };
 
 export const NOTES = `---

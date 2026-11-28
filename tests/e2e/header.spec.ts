@@ -51,7 +51,7 @@ test('the header is edited in Document settings; the page shows only its title',
 
     // Typing at the very start of the text goes into the text, not the header.
     await editor.getByText('Introduction').click();
-    await page.keyboard.press('ControlOrMeta+ArrowUp');
+    await page.keyboard.press(KEYS.docStart);
     await page.keyboard.press(KEYS.lineStart);
     await page.keyboard.type('An ');
     await expect.poll(onDisk(dir, 'paper.md')).toContain('# An Introduction');
@@ -157,7 +157,7 @@ test('the title is typed in the page: only the header’s title changes', async 
 
     // ↑ at the start of the text goes up into the title; what is typed there is the header's title.
     await editor.getByText('Introduction').click();
-    await page.keyboard.press('ControlOrMeta+ArrowUp');
+    await page.keyboard.press(KEYS.docStart);
     await page.keyboard.press('ArrowUp');
     await expect(title).toBeFocused();
     await page.keyboard.type(': revised');
@@ -167,6 +167,15 @@ test('the title is typed in the page: only the header’s title changes', async 
     await page.keyboard.press('Enter');
     await page.keyboard.type('Now ');
     await expect.poll(onDisk(dir, 'paper.md')).toContain('# Now Introduction');
+    // A paragraph up (Ctrl+↑, ⌥↑ on the Mac) from the first block: to the start of the text; again, into the title.
+    await page.keyboard.press(KEYS.paragraphUp);
+    await page.keyboard.type('So ');
+    await expect.poll(onDisk(dir, 'paper.md')).toContain('# So Now Introduction');
+    await page.keyboard.press(KEYS.paragraphUp);
+    await page.keyboard.press(KEYS.paragraphUp);
+    await expect(title).toBeFocused();
+    await page.keyboard.type('!');
+    await expect.poll(onDisk(dir, 'paper.md')).toContain('title: "Old title: revised!"');
 
     // A document with no header: an empty title to type in, which makes the header.
     await page.getByTestId('file:plain.md').click();

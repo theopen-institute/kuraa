@@ -128,8 +128,12 @@ const update = (patch: Partial<EditorStatus>) => {
 /** What the file is called, in messages: its name. */
 const name = computed(() => props.path.slice(props.path.lastIndexOf('/') + 1));
 const user = computed(() => ({ name: props.settings.name, email: props.settings.email, color: props.settings.color }));
-// Reconnect only when what the host runs changes, not on every workspace refresh.
+// What the host runs, told to the open document's runner when it changes, not on every workspace refresh.
 const runKey = computed(() => (props.run?.enabled ? JSON.stringify(props.run) : ''));
+const NO_RUN: RunInfo = { enabled: false, engines: [], allowInstalls: false, environment: null };
+const runInfo = (): RunInfo => (runKey.value ? (JSON.parse(runKey.value) as RunInfo) : NO_RUN);
+/** The open document's runner, told what the host runs now. */
+let runInfoChanged: ((info: RunInfo) => void) | null = null;
 
 /**
  * Where a point in the editor's empty space (the padding below or above the
@@ -275,12 +279,34 @@ function open(carried: Carried | null = null): () => void {
 
   const hints = type.editor?.nodeViews ?? {};
   const runnable = Object.values(hints).some((h) => h.kind === 'code' && h.run);
-  const runner = runKey.value && runnable ? markRaw(new ChunkRunner(api, path, JSON.parse(runKey.value) as RunInfo, () => user.value)) : null;
+  // A runner whenever the document may have code to run, though what the host runs is not known yet (the
+  // workspace's answer can come after the document opens) or runs nothing: told when that changes, it shows
+  // its chunks as they then stand. Opening the document again for it would lose what is being typed (0134).
+  const runner = runnable ? markRaw(new ChunkRunner(api, path, runInfo(), () => user.value)) : null;
+  let runnerShown = false;
+  let runnerLoaded = false;
   let chunkTimer: ReturnType<typeof setTimeout> | undefined;
   // News from a connection already closed (its last status, as it goes) is not this one's.
   const report = (patch: Partial<EditorStatus>) => {
     if (!cancelled) update(patch);
   };
+  /** Code runs here: the session in the document's menu, and the outputs kept with the document shown. Else neither. */
+  const showRunner = () => {
+    if (!runner || !runnerShown || cancelled) return;
+    const on = runner.info.enabled;
+    update({ runner: on ? runner : null });
+    if (on && !runnerLoaded) {
+      runnerLoaded = true;
+      runner.load().catch(() => report({ notice: { kind: 'warn', text: S.editor.outputsFailed } }));
+    }
+  };
+  const toldRunInfo = runner
+    ? (info: RunInfo) => {
+        runner.setInfo(info);
+        showRunner();
+      }
+    : null;
+  runInfoChanged = toldRunInfo;
 
   (async () => {
     const room = await api.room(path, props.draft);
@@ -476,8 +502,8 @@ function open(carried: Carried | null = null): () => void {
     });
     if (runner) {
       runner.setChunks(collectChunks(pmView.state.doc, hints));
-      update({ runner });
-      runner.load().catch(() => report({ notice: { kind: 'warn', text: S.editor.outputsFailed } }));
+      runnerShown = true;
+      showRunner();
     }
     // The live editor is shown (in place of the preview) before anything is told it is ready:
     // what follows (go to a conflict, a search match, the title) scrolls and focuses it.
@@ -508,6 +534,7 @@ function open(carried: Carried | null = null): () => void {
     margin.value = [];
     selectionBar.value = null;
     cancelled = true;
+    if (runInfoChanged === toldRunInfo) runInfoChanged = null;
     clearTimeout(slowTimer);
     clearTimeout(chunkTimer);
     clearTimeout(conflictTimer);
@@ -527,10 +554,11 @@ onMounted(() => {
 });
 // The features on, by id: a feature turned on or off opens the document again, with it or without it.
 const featureKey = computed(() => (props.features ?? []).map((f) => f.feature.id).join(' '));
-watch([() => props.api, () => props.path, () => props.type, () => props.settings.token, runKey, () => props.formatEditor, featureKey], () => {
+watch([() => props.api, () => props.path, () => props.type, () => props.settings.token, () => props.formatEditor, featureKey], () => {
   close?.();
   close = open();
 });
+watch(runKey, () => runInfoChanged?.(runInfo()));
 onBeforeUnmount(() => {
   close?.();
   close = null;

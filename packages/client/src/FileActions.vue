@@ -50,14 +50,21 @@ const emit = defineEmits<{
   reveal: [path: string, from?: string];
 }>();
 
+/**
+ * Refresh, opening `select` (if given) only while what was open when the action
+ * began (`was`) still is: something opened meanwhile is not taken away.
+ */
+const changed = (was: string | null, select?: string | null) => emit('changed', props.selected === was ? select : undefined);
+
 /** Do something to files, then refresh (opening `select`, if given); whether it was done. */
 async function act(fn: () => Promise<unknown>, select?: string | null): Promise<boolean> {
+  const was = props.selected;
   try {
     const result = await fn();
     // A move whose references in others' documents were not this person's to write again (0109).
     const left = (result as { left?: unknown } | undefined)?.left;
     if (Array.isArray(left) && left.length) emit('notice', S.tree.referencesLeft(left as string[]));
-    emit('changed', select);
+    changed(was, select);
     return true;
   } catch (e) {
     emit('error', e);
@@ -190,7 +197,7 @@ async function renameFolder(from: string) {
   try {
     await props.api.renameFile(from, to);
     emit('reveal', `${to}/`, `${from}/`);
-    emit('changed', follow);
+    changed(selected, follow);
   } catch (e) {
     emit('error', e);
   }
@@ -238,10 +245,10 @@ async function place(from: string, folder: string, names: string[]): Promise<boo
       moved = true;
     }
     await props.api.setOrder(folder, names);
-    emit('changed', follow);
+    changed(selected, follow);
     return true;
   } catch (e) {
-    if (moved) emit('changed', follow);
+    if (moved) changed(selected, follow);
     emit('error', e);
     return false;
   }

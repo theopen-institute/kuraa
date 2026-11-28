@@ -816,6 +816,7 @@ let treeAsked = 0;
 let treeShown = 0;
 async function refreshTree(selectPath?: string | null) {
   const asked = api.value;
+  const from = path.value;
   const n = ++treeAsked;
   try {
     const [ws, tree] = await Promise.all([asked.workspace(), asked.tree()]);
@@ -830,7 +831,8 @@ async function refreshTree(selectPath?: string | null) {
       // Which features are on may have come with the files (a merge): asked again.
       void fh.load();
     }
-    if (selectPath !== undefined) select(selectPath);
+    // Only if nothing else was opened meanwhile: a late answer does not take the person back to what they left (0134).
+    if (selectPath !== undefined && path.value === from) select(selectPath);
   } catch (e) {
     if (asked === api.value) fail(e);
   }

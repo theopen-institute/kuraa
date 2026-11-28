@@ -1,4 +1,5 @@
 import type { MarkSpec, NodeSpec } from 'prosemirror-model';
+import { attrValue, cssLength } from './attributes.js';
 
 // Schema fragments for Pandoc markdown. Exported as plain objects so that other
 // document types (R Markdown) can compose them through createPandocType.
@@ -162,7 +163,10 @@ export const pandocNodes: Record<string, NodeSpec> = {
     }],
     toDOM: (node) => {
       const src = safeUrl(node.attrs.src, 'image');
-      return ['img', { ...(src ? { src } : {}), alt: node.attrs.alt, title: node.attrs.title }];
+      // Its width and height as Pandoc writes them in HTML (0130).
+      const raw = String(node.attrs.attrs ?? '');
+      const size = [['width', cssLength(attrValue(raw, 'width'))], ['height', cssLength(attrValue(raw, 'height'))]].filter(([, v]) => v).map(([k, v]) => `${k}:${v}`).join(';');
+      return ['img', { ...(src ? { src } : {}), alt: node.attrs.alt, title: node.attrs.title, ...(size ? { style: size } : {}) }];
     },
   },
 

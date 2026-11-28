@@ -123,7 +123,7 @@ describe('comments', () => {
     expect(file('notes.md')).toBe(NOTES);
   });
 
-  it('keeps an inline comment inline (0129): its target’s styleClass written with the passage, the passage named anew', async () => {
+  it('keeps an inline comment inline (0133): its target’s styleClass written with the passage, the passage named anew', async () => {
     const a = await connect();
     const f = a.feature('annotations', ME);
     const at = where(a.read(), 'I never trusted');

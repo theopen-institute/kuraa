@@ -107,6 +107,48 @@ describe.skipIf(!pandocWasm())('Markdown rendered without Podman (0107)', () => 
     expect(readFileSync(pdf.file!).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  // 0130: images placed (fig-align) and columns, in each format.
+  const LAID_OUT = '![Right](art/pixel.png){width=40% fig-align=right}\n\n![](art/pixel.png){width=20%}\n\n'
+    + ':::: columns\n::: {.column width=30%}\nLeft words.\n:::\n\n::: {.column width=70%}\nRight words.\n:::\n::::\n';
+
+  it('places images and puts columns side by side in HTML and EPUB', async () => {
+    const input = doc(LAID_OUT);
+    const page = readFileSync((await render(input, 'html')).file!, 'utf8');
+    expect(page).toMatch(/<figure style="text-align:right;margin-left:0;margin-right:0">/);
+    expect(page).toMatch(/style="width:40.0%"/);
+    // An image without a caption, alone on its line: centred, as in the editor.
+    expect(page).toMatch(/<div style="text-align:center">\s*<p><img [^>]*style="width:20.0%"/);
+    expect(page).toMatch(/<div class="columns" style="display:flex;gap:1.5em;align-items:flex-start">\s*<div class="column" style="flex:30 1 0;min-width:0">\s*<p>Left words.<\/p>/);
+    const epub = await render(input, 'epub');
+    expect(epub.ok).toBe(true);
+    const chapter = entries(epub.file!).find((e) => /^EPUB\/text\/ch\d+\.xhtml$/.test(e))!;
+    expect(unzip(epub.file!, chapter)).toContain('style="flex:70 1 0;min-width:0"');
+  });
+
+  it('places images and puts columns side by side in Word: placement styles aligned, columns a table without borders', async () => {
+    const word = await render(doc(LAID_OUT), 'docx');
+    expect(word.ok).toBe(true);
+    const body = unzip(word.file!, 'word/document.xml');
+    expect(body).toContain('<w:pStyle w:val="ImageRight" />');
+    expect(body).toContain('<w:pStyle w:val="ImageCaptionRight" />');
+    expect(body).toContain('<w:pStyle w:val="ImageCentre" />');
+    expect(body).toMatch(/<w:tbl>[\s\S]*Left words[\s\S]*Right words[\s\S]*<\/w:tbl>/);
+    expect(body).toContain('<w:tblLook w:firstRow="0"');
+    const styles = unzip(word.file!, 'word/styles.xml');
+    expect(styles).toMatch(/w:styleId="ImageRight">[\s\S]*?<w:jc w:val="right" \/>/);
+    expect(styles).toMatch(/w:styleId="ImageCaptionRight">[\s\S]*?<w:basedOn w:val="ImageCaption" \/>[\s\S]*?<w:jc w:val="right" \/>/);
+    expect(styles).toMatch(/w:styleId="ImageCentre">[\s\S]*?<w:jc w:val="center" \/>/);
+  });
+
+  it.skipIf(!typstParts())('places images and puts columns side by side in a PDF: Typst’s figure placement and grid', async () => {
+    const pdf = await render(doc(LAID_OUT), 'pdf');
+    expect(pdf).toMatchObject({ ok: true, message: 'Rendered to PDF.' });
+    const typ = readFileSync(join(scratch, 'out', 'document.typ'), 'utf8');
+    expect(typ).toMatch(/#\[#show figure: set align\(right\)\s*#figure\(image\("[^"]*pixel\.png", width: 40\.0%/);
+    expect(typ).toMatch(/#align\(center\)\[\s*#box\(image\("[^"]*pixel\.png", width: 20\.0%/);
+    expect(typ).toMatch(/#grid\(columns: \(30fr, 70fr\), column-gutter: 1\.5em,\s*\[\s*Left words\.\s*\],\s*\[\s*Right words\.\s*\],\s*\)/);
+  });
+
   it('copies in only what the host gives: nothing outside the workspace, nothing of .git; what cannot be had, its description', async () => {
     const input = doc(`Words.\n\n![Outside](../../outside.png)\n\n![Hosts](/etc/hosts)\n\n![Git](../.git/config)\n\n![Web](https://example.org/x.png)\n\n<img src="../.git/config">\n`);
     const r = await render(input, 'html');

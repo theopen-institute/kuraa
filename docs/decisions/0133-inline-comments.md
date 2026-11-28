@@ -1,4 +1,4 @@
-# 0129 · Inline comments: a discussion in the text, after its block
+# 0133 · Inline comments: a discussion in the text, after its block
 
 The owner asked for a new kind of annotation, **inline comments**: a threaded conversation shown
 after the block it is about, so that a discussion between several people can be read in the body of
@@ -48,9 +48,11 @@ replies written there join the same thread.
   cell): a ProseMirror widget, not part of the document, so it is never in the file, never copied
   with the text, and the text around it is typed in as before. Several in one block follow each
   other in the order of their passages.
-- **A conversation**: each message with who wrote it, a round mark with their initial and a colour
-  of their own (from their identity, so mostly the same for them everywhere; no two alike in one
-  thread), when, and whether it was edited; your own to edit or delete (beside who and when, as the
+- **A conversation**: each message with who wrote it, a round mark with their initial in their
+  colour, the one their comments' bubbles in the margin have
+  ([0129](0129-a-comment-is-a-bubble-in-its-makers-colour.md)): yours as it is now, others' as
+  their annotation kept it; for one that kept none (made before colours were kept), a hue from
+  their identity, no two alike in one thread; when, and whether it was edited; your own to edit or delete (beside who and when, as the
   message is pointed at); a box at its foot to reply in, Enter sending. Its head says how many
   messages and whose, and **Fold** puts it away to that one line (**Show** brings it back): a
   convenience of the reader's, kept in this browser. The passage is quoted at its top where it is not

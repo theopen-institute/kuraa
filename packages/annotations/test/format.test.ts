@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INLINE_CLASS, aboutOf, describePages, findPassage, fromCodePoints, isInline, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
+import { INLINE_CLASS, aboutOf, creatorColourOf, describePages, findPassage, fromCodePoints, isInline, isPoint, mergePages, readPage, selectorsFor, toCodePoints, writePage, type Item } from '../src/format.js';
 
 const ME = 'a'.repeat(64);
 const comment = (id: string, value: string, modified = '2026-11-25T10:00:00Z', target: Item['target'] = '../p01.md'): Item => ({
@@ -22,6 +22,15 @@ describe('an annotation page', () => {
     // None: no file.
     expect(writePage([], ME)).toBeNull();
     expect(readPage('not json')).toEqual([]);
+  });
+
+  it("keeps its maker's colour, as #rrggbb, and reads none where there is none or it is not one", () => {
+    const a = comment('urn:uuid:a', 'coloured');
+    expect(creatorColourOf(a)).toBeNull();
+    a.creator = { ...(a.creator as object), color: '#1a7f5A' };
+    expect(creatorColourOf(readPage(writePage([a], ME))[0]!)).toBe('#1a7f5A');
+    a.creator = { ...(a.creator as object), color: 'red; background: url(x)' };
+    expect(creatorColourOf(a)).toBeNull();
   });
 
   it('keeps annotations of kinds it does not know, and whatever else they hold', () => {
@@ -103,7 +112,7 @@ describe('what a change did', () => {
   });
 });
 
-describe('an inline comment (0129)', () => {
+describe('an inline comment (0133)', () => {
   const passage = (extra: { [k: string]: unknown } = {}) => ({ source: '../p01.md', ...extra, selector: [{ type: 'TextQuoteSelector', exact: 'the council' }] }) as Item['target'];
   it('is a comment whose target says it is shown inline, by the W3C model’s styleClass', () => {
     expect(isInline(comment('urn:uuid:a', 'x', undefined, passage({ styleClass: INLINE_CLASS })))).toBe(true);

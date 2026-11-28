@@ -1,4 +1,4 @@
-// Inline comments (docs/decisions/0129-inline-comments.md): a comment's thread
+// Inline comments (docs/decisions/0133-inline-comments.md): a comment's thread
 // shown in the text itself, after its passage's block, as a conversation
 // everyone reading the document sees there: each message with who wrote it (a
 // colour of their own, the same wherever they write), when, and a box to reply
@@ -14,6 +14,8 @@ import { composer } from './commentbox.js';
 export interface Message {
   id: string;
   person: string;
+  /** Their colour (their cursor's, 0129), as #rrggbb: yours as it is now, others' as their annotation kept it; null where none was kept. */
+  color: string | null;
   /** Their name ('You' for yours). */
   who: string;
   mine: boolean;
@@ -84,8 +86,9 @@ const slotOf = (person: string) => {
 };
 
 /**
- * People's colours in a thread (their hues), in the order they first wrote: each their own, from their identity, so
- * mostly the same for them in every thread; where two would share one, the later takes the next one free.
+ * Hues for people whose annotations kept no colour of theirs (made before they were kept), in the order they first
+ * wrote: each their own, from their identity, so mostly the same for them in every thread; where two would share one,
+ * the later takes the next one free.
  */
 export function huesFor(people: string[]): Map<string, number> {
   const out = new Map<string, number>();
@@ -98,6 +101,16 @@ export function huesFor(people: string[]): Map<string, number> {
     out.set(p, 12 + slot * (360 / HUES));
   }
   return out;
+}
+
+/** What reads on a colour: dark on a light one (#rrggbb), else white. */
+function inkOn(hex: string | undefined): string {
+  if (!hex) return '#fff';
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 0.33 ? '#1d1c1a' : '#fff';
 }
 
 const initial = (name: string) => [...(name.trim() || '?')][0]!.toUpperCase();
@@ -159,7 +172,15 @@ export function threadView(o: ThreadOptions): ThreadView {
     if (!t) return;
     const folded = o.id !== 'new' && loadFolded().has(o.id);
     const people = [...new Map(t.messages.map((m) => [m.person, m])).values()];
-    const hues = huesFor(t.messages.map((m) => m.person));
+    // Each person's colour: their own (the first of their messages that kept one), else a hue from their identity.
+    const own = new Map<string, string>();
+    for (const m of t.messages) if (m.color && !own.has(m.person)) own.set(m.person, m.color);
+    const hues = huesFor(t.messages.map((m) => m.person).filter((p) => !own.has(p)));
+    const colour = (person: string) => own.get(person) ?? `hsl(${hues.get(person) ?? 160} 45% 42%)`;
+    const paint = (e: HTMLElement, person: string) => {
+      e.style.setProperty('--who-color', colour(person));
+      e.style.setProperty('--who-ink', inkOn(own.get(person)));
+    };
     root.classList.toggle('kuraa-inline-folded', folded);
     root.setAttribute('aria-label', o.id === 'new' ? 'A new inline comment' : `A discussion of ${t.messages.length} ${t.messages.length === 1 ? 'message' : 'messages'}`);
 
@@ -172,7 +193,7 @@ export function threadView(o: ThreadOptions): ThreadView {
       const faces = make('span', 'kuraa-inline-faces');
       for (const m of people.slice(0, 6)) {
         const f = make('span', 'kuraa-inline-face', initial(m.who));
-        f.style.setProperty('--who', String(hues.get(m.person)));
+        paint(f, m.person);
         f.title = m.who;
         faces.append(f);
       }
@@ -196,7 +217,7 @@ export function threadView(o: ThreadOptions): ThreadView {
     const list = make('ol', 'kuraa-inline-messages');
     for (const m of t.messages) {
       const row = make('li', 'kuraa-inline-message', undefined, m === t.messages[0] ? 'inline-comment' : 'inline-reply');
-      row.style.setProperty('--who', String(hues.get(m.person)));
+      paint(row, m.person);
       const face = make('span', 'kuraa-inline-face', initial(m.who));
       face.setAttribute('aria-hidden', 'true');
       const body = make('div', 'kuraa-inline-body');
@@ -297,14 +318,14 @@ export const INLINE_CSS = `
 .kuraa-inline-faces { display: inline-flex; }
 .kuraa-inline-faces .kuraa-inline-face { width: 18px; height: 18px; font-size: 10px; margin-left: -4px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--rail) 6%, var(--surface, #fff)); }
 .kuraa-inline-faces .kuraa-inline-face:first-child { margin-left: 0; }
-.kuraa-inline-face { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: hsl(var(--who, 160) 45% 42%); color: #fff; font: 600 11.5px/1 var(--font, system-ui); }
+.kuraa-inline-face { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--who-color, var(--accent, #2f6f5e)); color: var(--who-ink, #fff); font: 600 11.5px/1 var(--font, system-ui); }
 .kuraa-inline-quote { color: var(--muted, #666); font-size: 12.5px; font-style: italic; border-left: 2px solid color-mix(in srgb, var(--rail) 40%, transparent); padding-left: 8px; overflow-wrap: anywhere; }
 .kuraa-inline .kuraa-inline-messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .kuraa-inline .kuraa-inline-message { display: flex; gap: 9px; align-items: flex-start; margin: 0; padding: 0; }
 .kuraa-inline-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .kuraa-inline-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 4px; font-size: 12px; }
 .kuraa-inline-meta .kuraa-meta { white-space: pre; }
-.kuraa-inline-name { font-weight: 600; color: hsl(var(--who, 160) 45% 34%); }
+.kuraa-inline-name { font-weight: 600; color: color-mix(in srgb, var(--who-color, var(--accent, #2f6f5e)) 72%, var(--text, #000)); }
 .kuraa-inline-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .kuraa-inline-tools { display: inline-flex; gap: 10px; margin-left: auto; opacity: 0; transition: opacity 120ms; }
 .kuraa-inline-message:hover .kuraa-inline-tools, .kuraa-inline-message:focus-within .kuraa-inline-tools { opacity: 1; }
@@ -313,9 +334,5 @@ export const INLINE_CSS = `
 /* A reply box not in use: the box alone, its button once something is typed or it is written in. */
 .kuraa-inline .kuraa-card-composer:not(:focus-within):has(textarea:placeholder-shown) .kuraa-card-actions { display: none; }
 .kuraa-inline-passage { background: color-mix(in srgb, var(--accent, #2f6f5e) 16%, transparent); border-radius: 2px; }
-@media (prefers-color-scheme: dark) {
-  .kuraa-inline-name { color: hsl(var(--who, 160) 60% 72%); }
-  .kuraa-inline-face { background: hsl(var(--who, 160) 40% 40%); }
-}
 @media (prefers-reduced-motion: reduce) { .kuraa-inline-tools { transition: none; } }
 `;

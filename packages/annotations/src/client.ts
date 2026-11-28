@@ -4,10 +4,11 @@
 // - Comments (where the workspace comments: so unless turned off), written and
 //   read where the text is (./commentbox): Comment beside a selection (⌥⌘M)
 //   opens a box just below it to write in, Enter saves; commented passages are
-//   tinted, with a 💬 in the margin at each, which opens its thread in a card
+//   tinted, with a speech bubble in the margin at each (0129), in its maker's
+//   colour, which opens its thread in a card
 //   below the passage (reply, edit or delete your own). In any document you
 //   read, whether or not you may change it.
-// - Inline comments (./inline; docs/decisions/0129-inline-comments.md): a
+// - Inline comments (./inline; docs/decisions/0133-inline-comments.md): a
 //   comment whose thread is drawn in the text, after its passage's block, as a
 //   conversation (Inline comment, ⌥⇧⌘M, on a selection or the caret's block).
 // - The Comments panel (⌥⌘K): the document's threads in order, each comment
@@ -33,7 +34,7 @@ import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node, ResolvedPos } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
-import { INLINE_CLASS, SUFFIX, aboutOf, codeOf, creatorOf, findPassage, isInline, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import { INLINE_CLASS, SUFFIX, aboutOf, codeOf, creatorColourOf, creatorOf, findPassage, isInline, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
 import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
 import { openCodeBox, openMenu, type ScreenBox, type Suggestion } from './codebox.js';
 import { composer as cardComposer, openCard, type Card } from './commentbox.js';
@@ -447,7 +448,7 @@ function openThread(store: Store, view: EditorView, id: string, owner?: HTMLElem
 }
 
 // ---------------------------------------------------------------------------
-// Inline comments (docs/decisions/0129-inline-comments.md): a comment's thread in the text, after its passage's block.
+// Inline comments (docs/decisions/0133-inline-comments.md): a comment's thread in the text, after its passage's block.
 
 /**
  * Where a thread is drawn for a passage: just after the block its end is in (a paragraph, a heading, an item's
@@ -494,6 +495,8 @@ function inlineThread(store: Store, id: string): Thread | null {
       id: a.id,
       person: a.person,
       who: a.mine ? 'You' : creatorOf(a.item) || 'Someone',
+      // Yours in your colour as it is now; others' in the colour their annotation kept (0129).
+      color: (a.mine && /^#[0-9a-f]{6}$/i.test(store.ctx.person().color) ? store.ctx.person().color : null) || creatorColourOf(a.item),
       mine: a.mine,
       when: when(String(a.item.created ?? '')),
       edited: !!a.item.modified && a.item.modified !== a.item.created,
@@ -940,11 +943,14 @@ function editor(ctx: FeatureEditorContext) {
         });
       }
       const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
-      // A 💬 at each comment, opening its thread below its passage.
+      // A speech bubble at each comment, in its maker's colour (yours as it is now, for your own), opening its thread below its passage.
+      // Not an inline comment's: its thread is in the text (0133).
       const items: MarginItem[] = commenting(ctx) ? shown.filter((s) => s.kind === 'comment' && !isInline(s.item)).map((s) => ({
         key: s.id,
         pos: s.from!,
         label: '💬',
+        icon: BUBBLE,
+        color: (s.mine ? ctx.person().color : null) || creatorColourOf(s.item) || undefined,
         title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
         active: store.cardFor === s.id,
         run: (at: HTMLElement) => openThread(store, view, s.id, at),
@@ -994,6 +1000,15 @@ function pin(style: string) {
 // ---------------------------------------------------------------------------
 // The Comments panel
 
+/** This person, as their annotations name them: their identity, name and cursor colour (0129) as they are now. */
+function creator(ctx: FeatureClientContext, me: string): Json {
+  const { name, color } = ctx.person();
+  return { id: `urn:kuraa:person:${me}`, type: 'Person', name, ...(/^#[0-9a-f]{6}$/i.test(color) ? { color } : {}) };
+}
+
+/** A comment in the margin (0129): a speech bubble, as line art in a 16×16 box. */
+const BUBBLE = { paths: ['M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H7.5l-3.25 2.75v-2.75H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z'] };
+
 /** A new annotation of this person's. */
 function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting' | 'replying', value: string, target: Json): Item {
   const now = new Date().toISOString();
@@ -1003,7 +1018,7 @@ function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting'
     motivation,
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'TextualBody', value, format: 'text/markdown', purpose: motivation },
     target,
   };
@@ -1303,7 +1318,7 @@ function newCoding(ctx: FeatureClientContext, me: string, code: string, quote: s
     motivation: 'classifying',
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'SpecificResource', source: code, purpose: 'classifying' },
     target: { source, selector: [{ type: 'TextQuoteSelector', exact: quote }] },
   };

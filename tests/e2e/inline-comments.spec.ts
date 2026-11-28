@@ -1,4 +1,4 @@
-// Inline comments (docs/decisions/0129-inline-comments.md), in the app: begun on the paragraph the caret is in
+// Inline comments (docs/decisions/0133-inline-comments.md), in the app: begun on the paragraph the caret is in
 // (⌥⇧⌘M) or on a selection (Inline, beside it), each a thread drawn in the text after its block, set apart from
 // it; replied to there; someone else's reply shown in it, by their name; folded and shown again; listed in the
 // Comments panel; kept in the commenter's own file as a W3C comment whose target's styleClass says it is
@@ -133,7 +133,7 @@ test('inline comments: a discussion in the text, after its block, kept beside th
   await expect(first.getByTestId('inline-reply')).toHaveCount(2);
   await expect(first.getByTestId('inline-reply').nth(1)).toContainText('Ben');
   await expect(first.getByTestId('inline-reply').nth(1)).toContainText('No: the old one.');
-  const hues = await first.locator('.kuraa-inline-message').evaluateAll((rows) => rows.map((r) => (r as HTMLElement).style.getPropertyValue('--who')));
+  const hues = await first.locator('.kuraa-inline-message').evaluateAll((rows) => rows.map((r) => (r as HTMLElement).style.getPropertyValue('--who-color')));
   expect(hues[0]).toBe(hues[1]);
   expect(hues[2]).not.toBe(hues[0]);
   await expect(first.locator('.kuraa-inline-title')).toHaveText('3 messages');

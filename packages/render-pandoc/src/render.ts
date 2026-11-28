@@ -19,6 +19,8 @@ import { appendFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import type { RenderFormat, RenderRequest, RenderResult, RendererContext } from '@kuraa/run-kit';
 import { headerOf, headerOptions } from './header.js';
+import { alignWordStyles, layOut } from './layout.js';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { runTypst } from './typst.js';
 import { runPandoc } from './wasi.js';
 
@@ -155,6 +157,8 @@ export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, p
   // Files the header names are given as flags, pointing at the copies: pandoc is not to look for them itself.
   const meta = (tree as { meta?: Record<string, unknown> }).meta;
   if (meta) for (const k of ['bibliography', 'csl', 'css', 'reference-doc', 'cover-image']) delete meta[k];
+  // Images placed and columns side by side, as the format can have them (0130).
+  layOut(tree as { blocks?: [] }, ext);
   if (missing.size) notes.push(`${missing.size === 1 ? 'An image' : `${missing.size} images`} could not be found in the workspace, and ${missing.size === 1 ? 'its description is' : 'their descriptions are'} shown instead: ${[...missing].slice(0, 5).join(', ')}${missing.size > 5 ? ', …' : ''}.`);
   await writeFile(join(out, 'tree.json'), JSON.stringify(tree));
 
@@ -192,6 +196,9 @@ export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, p
   const wrote = await pandoc(args);
   if (wrote) return { ok: false, message: `The document could not be rendered: ${wrote}`, log: await log() };
 
+  // Word: the placement styles pandoc made, aligned.
+  if (ext === 'docx') await alignWordFile(join(out, 'document.docx'));
+
   // 4. A PDF: Typst, on what pandoc wrote.
   if (ext === 'pdf') {
     if (!programs.typst) return { ok: false, message: 'Making a PDF needs Typst, which is not on this computer. Render to HTML, Word or EPUB instead.', log: await log() };
@@ -202,6 +209,18 @@ export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, p
     if (!typst.ok) return { ok: false, message: `The document could not be rendered: ${typst.message}`, log: await log() };
   }
   return { ok: true, output: `out/document.${ext}`, message: [`Rendered to ${NAMES[ext]}.`, ...notes].join(' '), log: await log() };
+}
+
+/** A Word file with its placement styles aligned (layout.ts), if pandoc made any. */
+async function alignWordFile(file: string): Promise<void> {
+  const files = unzipSync(new Uint8Array(await readFile(file)));
+  const styles = files['word/styles.xml'];
+  if (!styles) return;
+  const before = strFromU8(styles);
+  const after = alignWordStyles(before);
+  if (after === before) return;
+  files['word/styles.xml'] = strToU8(after);
+  await writeFile(file, zipSync(files, { level: 6 }));
 }
 
 /** The LaTeX engine a document's header asks for, if any, for a PDF. */

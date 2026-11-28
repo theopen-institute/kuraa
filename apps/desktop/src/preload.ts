@@ -37,6 +37,15 @@ const bridge: ShellBridge = {
 };
 contextBridge.exposeInMainWorld('kuraa', bridge);
 
+// The closing page's (static/closing.html, 0131): told once every workspace is saved, and Quit Now.
+contextBridge.exposeInMainWorld('kuraaClosing', {
+  onSaved: (show: () => void) => {
+    ipcRenderer.on('kuraa:closing-saved', () => show());
+    ipcRenderer.send('kuraa:closing-saved?');
+  },
+  quitNow: () => ipcRenderer.send('kuraa:quit-now'),
+});
+
 // A right-click the page answered with a menu of its own (a table's, the file list's) gets no
 // native one: the main process is told, once the page's handlers have run, whether it was.
 window.addEventListener('contextmenu', (e) => ipcRenderer.send('kuraa:context-menu', e.defaultPrevented));

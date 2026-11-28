@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The document's ⋯ menu (decision 0065), from the top-right corner of the open
 // document: what to do with it, as a menu like any other (0072). Its views
-// (Source, History, Preview), writing in it (Find and replace, Outline, Insert
+// (Source, History, Export…), writing in it (Find and replace, Outline, Insert
 // table, Next conflict), Save version, what features add (each in a group of its
 // own: Preview's, the comments', the code session's: 0082, 0092), and the way to
 // its permissions, its settings (Settings › Document) and the Markdown

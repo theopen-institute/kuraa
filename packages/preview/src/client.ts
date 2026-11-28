@@ -1,8 +1,8 @@
-// Preview's client half (0089): a document's panel, opened by its keys (⇧⌘R)
-// or the document's ⋯ menu, each of which renders the document again while it
-// is open; and Export… on that menu, which opens it at its formats to export as
-// (PDF, Word, HTML, EPUB) rather than rendering for the page (0100). Offered for
-// documents laid out as text (not line-by-line source files).
+// Preview's client half (0089): a document's panel, Export, opened by its keys
+// (⇧⌘R), which render the document again while it is open; and by Export… on
+// the document's ⋯ menu, its one item there, which renders it too and puts the
+// focus on its formats to export as (PDF, Word, HTML, EPUB) (0100, 0114).
+// Offered for documents laid out as text (not line-by-line source files).
 import { createApp } from 'vue';
 import { defineClientFeature } from '@kuraa/feature-kit/client';
 import PreviewPanel from './PreviewPanel.vue';
@@ -35,5 +35,5 @@ export const previewClient = defineClientFeature({
       return () => app.unmount();
     },
   }],
-  documentMenu: (ctx) => (ctx.type.editor?.layout ? [] : [{ command: 'panel:preview', testid: 'menu-preview' }, { command: 'export', testid: 'menu-export' }]),
+  documentMenu: (ctx) => (ctx.type.editor?.layout ? [] : [{ command: 'export', testid: 'menu-export' }]),
 });

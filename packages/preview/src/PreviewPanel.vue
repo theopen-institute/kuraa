@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// The Preview panel: the open document rendered to HTML by the host (where code
-// runs), shown in a frame that runs nothing; and Word, PDF and HTML files to
-// save. It renders when asked (Render, ⇧⌘R, the ⋯ menu), and, if chosen, each
+// The Export panel (Preview's): the open document rendered to HTML by the host
+// (where code runs), shown in a frame that runs nothing; and Word, PDF and HTML
+// files to save. It renders when asked (Render, ⇧⌘R, Export… on the ⋯ menu, 0114), and, if chosen, each
 // time the document is written to its file. A render that needs a tool this
 // computer lacks (LaTeX, for a PDF) offers to download it, and renders again
 // once it is there (decision 0045). A component (0089): the rendering is the
@@ -160,12 +160,22 @@ async function render(format: RenderFormat, thenSave = false) {
   try {
     await synced();
     const state = await ctx.host.renders.render(path.value, format);
-    shown.value = state;
+    if (!exportShown(format)) shown.value = state;
     if (state.state === 'failed') toSave.delete(format);
     await refresh();
   } catch (e) {
     error.value = e;
   }
+}
+
+/**
+ * Whether a render for the page (HTML) is to leave the status to a format being exported: Export…
+ * renders the page as it opens, and a PDF chosen a moment later, its progress and an offer of LaTeX,
+ * is what was asked for (0114).
+ */
+function exportShown(format: RenderFormat): boolean {
+  const s = shown.value;
+  return format === 'html' && !!s && s.format !== 'html' && (toSave.size > 0 || s.state === 'rendering');
 }
 
 async function save(format: RenderFormat) {
@@ -200,13 +210,15 @@ watch(path, () => {
   toSave.clear();
   known = refresh(true);
 }, { immediate: true });
-// Asked for (opened by ⇧⌘R or the menu, or asked again while open): render now, once what is there is known.
-// Asked by Export… (0100): the formats to export as, shown and the first focused, nothing rendered for the page.
+// Asked for (opened by ⇧⌘R or Export…, or asked again while open): render now, once what is there is known.
+// Asked by Export… (0100, 0114): the formats to export as, marked and the first focused, as well.
 const actions = useTemplateRef<HTMLElement>('actions');
 const exporting = ref(false);
 let exportTimer: ReturnType<typeof setTimeout> | undefined;
 const stopAsk = ctx.onAsk(() => {
-  if (!exportAsked()) return void known.then(() => render('html'));
+  const toExport = exportAsked();
+  void known.then(() => render('html'));
+  if (!toExport) return;
   void known.then(async () => {
     exporting.value = true;
     await nextTick();

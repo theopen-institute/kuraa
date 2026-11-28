@@ -4,7 +4,8 @@
 // - Comments (where the workspace comments: so unless turned off), written and
 //   read where the text is (./commentbox): Comment beside a selection (⌥⌘M)
 //   opens a box just below it to write in, Enter saves; commented passages are
-//   tinted, with a 💬 in the margin at each, which opens its thread in a card
+//   tinted, with a speech bubble in the margin at each (0129), in its maker's
+//   colour, which opens its thread in a card
 //   below the passage (reply, edit or delete your own). In any document you
 //   read, whether or not you may change it.
 // - The Comments panel (⌥⌘K): the document's threads in order, each comment
@@ -30,7 +31,7 @@ import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node, ResolvedPos } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
-import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import { SUFFIX, aboutOf, codeOf, creatorColourOf, creatorOf, findPassage, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
 import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
 import { openCodeBox, openMenu, type ScreenBox, type Suggestion } from './codebox.js';
 import { composer as cardComposer, openCard, type Card } from './commentbox.js';
@@ -722,11 +723,13 @@ function editor(ctx: FeatureEditorContext) {
         });
       }
       const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
-      // A 💬 at each comment, opening its thread below its passage.
+      // A speech bubble at each comment, in its maker's colour (yours as it is now, for your own), opening its thread below its passage.
       const items: MarginItem[] = commenting(ctx) ? shown.filter((s) => s.kind === 'comment').map((s) => ({
         key: s.id,
         pos: s.from!,
         label: '💬',
+        icon: BUBBLE,
+        color: (s.mine ? ctx.person().color : null) || creatorColourOf(s.item) || undefined,
         title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
         active: store.cardFor === s.id,
         run: (at: HTMLElement) => openThread(store, view, s.id, at),
@@ -775,6 +778,15 @@ function pin(style: string) {
 // ---------------------------------------------------------------------------
 // The Comments panel
 
+/** This person, as their annotations name them: their identity, name and cursor colour (0129) as they are now. */
+function creator(ctx: FeatureClientContext, me: string): Json {
+  const { name, color } = ctx.person();
+  return { id: `urn:kuraa:person:${me}`, type: 'Person', name, ...(/^#[0-9a-f]{6}$/i.test(color) ? { color } : {}) };
+}
+
+/** A comment in the margin (0129): a speech bubble, as line art in a 16×16 box. */
+const BUBBLE = { paths: ['M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H7.5l-3.25 2.75v-2.75H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z'] };
+
 /** A new annotation of this person's. */
 function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting' | 'replying', value: string, target: Json): Item {
   const now = new Date().toISOString();
@@ -784,7 +796,7 @@ function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting'
     motivation,
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'TextualBody', value, format: 'text/markdown', purpose: motivation },
     target,
   };
@@ -1083,7 +1095,7 @@ function newCoding(ctx: FeatureClientContext, me: string, code: string, quote: s
     motivation: 'classifying',
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'SpecificResource', source: code, purpose: 'classifying' },
     target: { source, selector: [{ type: 'TextQuoteSelector', exact: quote }] },
   };

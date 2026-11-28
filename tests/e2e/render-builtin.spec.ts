@@ -18,11 +18,14 @@ test('the Preview panel renders Markdown with the built-in pandoc, and saves Wor
   const folder = `builtin-${Date.now().toString(36)}`;
   mkdirSync(join(E2E.dir, folder, 'art'), { recursive: true });
   writeFileSync(join(E2E.dir, folder, 'art', 'pixel.png'), PIXEL);
+  // And one of the document's own files (0109), beside it in tide.md.files/.
+  mkdirSync(join(E2E.dir, folder, 'tide.md.files'), { recursive: true });
+  writeFileSync(join(E2E.dir, folder, 'tide.md.files', 'own.png'), PIXEL);
   const path = `${folder}/tide.md`;
   const res = await fetch(`${E2E.url}/api/files`, {
     method: 'POST',
     headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ path, content: '---\ntitle: "Tide tables"\n---\n\nThe tide was out.\n\n![A pixel](art/pixel.png)\n\n<script>document.body.append("SCRIPT RAN")</script>\n' }),
+    body: JSON.stringify({ path, content: '---\ntitle: "Tide tables"\n---\n\nThe tide was out.\n\n![A pixel](art/pixel.png)\n\n![Its own pixel](tide.md.files/own.png)\n\n<script>document.body.append("SCRIPT RAN")</script>\n' }),
   });
   expect(res.status).toBe(201);
   await page.goto(`/?token=${E2E.token}&name=Renderer&email=r%40example.org`);
@@ -35,7 +38,7 @@ test('the Preview panel renders Markdown with the built-in pandoc, and saves Wor
   await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 60_000 });
   const body = page.frameLocator('[data-testid="render-frame"]').locator('body');
   await expect(body).toContainText('The tide was out.');
-  await expect(body.locator('img[src^="data:image/png"]')).toHaveCount(1);
+  await expect(body.locator('img[src^="data:image/png"]')).toHaveCount(2);
   await expect(body).not.toContainText('SCRIPT RAN');
 
   // Typed a moment ago, rendered with ⇧⌘R.

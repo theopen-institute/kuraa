@@ -170,11 +170,11 @@ describe('a server in a workspace (0099)', () => {
     const b = await start(dirB, bo, boKey);
     const c = await start(dirC, cy, cyKey);
     await until(async () => (await b.host.peers!.people()).people.length === 3, 20_000, 'all three in, on Bo’s device');
-    // Bo writes a plan, for himself and Cy: the owner and the server read it too, and Bo is told so.
+    // Bo writes a plan, for himself and Cy: the owner reads it too, and Bo is told so; the server, working for the owner, is not named.
     expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n\nOn Friday.\n' }) })).status).toBe(201);
     const res = await api(b, '/api/audience', { method: 'POST', body: JSON.stringify({ path: 'plan.md', audience: [bo.id, cy.id] }) });
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { readers: { words: string } }).readers.words).toBe('You, Cy, the owner and the server');
+    expect(((await res.json()) as { readers: { words: string } }).readers.words).toBe('You, Cy and the owner');
     await until(() => !!read(dirC, 'plan.md')?.includes('Friday'), 20_000, 'the plan on Cy’s device');
     await until(() => !!read(dirS, 'plan.md')?.includes('Friday') && spacesIn(dirS) !== '', 20_000, 'the plan, in its space, on the server');
     await until(() => !!read(dirA, 'plan.md')?.includes('Friday') && spacesIn(dirA) !== '', 20_000, 'the plan, in its space, on the owner’s device');

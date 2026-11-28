@@ -133,6 +133,7 @@ test('a folder’s permissions, from its right-click menu: only she reads it, an
     await expect(dialog.getByTestId('read-me')).toHaveCount(0);
     await expect(dialog.getByTestId('reads-everything')).toContainText('As the workspace’s owner, you read everything in it.');
     await dialog.getByTestId('read-chosen').check();
+    await expect(dialog.getByTestId('groups-about')).toContainText('whoever its admins put in it');
     await dialog.getByTestId('read-person:Ada').check();
     await dialog.getByTestId('permissions-save').click();
     await expect(dialog).toContainText('Choose who reads it besides you');

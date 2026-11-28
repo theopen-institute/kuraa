@@ -153,15 +153,14 @@ export function audienceWords(audience: string[], me: string | null, names: Map<
 }
 
 /**
- * Who reads a space in words (0106): its audience, and the owner and the
- * workspace's servers, who read every space: "You, Bo and the owner", "Ada and
- * the server".
+ * Who reads a space in words (0106): its audience, and the owner, who reads
+ * every space: "You, Bo and the owner". The workspace's servers read every
+ * space too, but work for the owner: not named.
  */
 export function readersWords(audience: string[], me: string | null, names: Map<string, string>, policy: Policy): string {
   const words = audienceList(audience, me, names);
   const owner = policy.owner;
   if (owner && !policy.audienceHolds(audience, owner)) words.push(owner === me ? (words.length ? 'you' : 'You') : 'the owner');
-  if (policy.servers.size) words.push(policy.servers.size === 1 ? 'the server' : 'the servers');
   return words.length === 1 && words[0] === 'You' ? 'Only you' : listWords(words);
 }
 
@@ -1030,7 +1029,7 @@ export class Peers {
     return { files, folders: marked };
   }
 
-  /** Who reads each space, in words ("You, Bo and the owner", "editors and the server"), for the file list (0066, 0106). */
+  /** Who reads each space, in words ("You, Bo and the owner", "editors and the owner"), for the file list (0066, 0106). */
   async readersInWords(): Promise<Map<string, string>> {
     const { policy, me } = await this.node.policy();
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
@@ -1075,7 +1074,7 @@ export class Peers {
    * one's own alone is kept in a workspace one owns.
    */
   private notYouAlone(audience: string[], me: string): void {
-    if (audience.length === 1 && audience[0] === me) throw new NotAllowed('Choose who besides you reads it: what is only yours belongs in a workspace of your own (the owner, and the workspace’s servers, read everything in this one)');
+    if (audience.length === 1 && audience[0] === me) throw new NotAllowed('Choose who besides you reads it: what is only yours belongs in a workspace of your own (the owner reads everything in this one)');
   }
 
   /** An audience as the policy names one: sorted, each entry someone it can name. */

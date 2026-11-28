@@ -432,7 +432,7 @@ export const S = {
   // Servers (0099): always-on computers in the workspace as themselves, with no person.
   servers: {
     title: 'Servers',
-    about: 'A server is a computer that is always on: it keeps everyone’s work and passes it on while you are apart. It reads what this workspace’s people all read, and folders that name it; it changes nothing.',
+    about: 'A server is a computer that is always on, working for the workspace’s owner: it keeps everyone’s work and passes it on while you are apart. Like the owner, it reads everything in the workspace; it changes nothing.',
     add: 'Add a server…',
     linkFor: 'An invite link for one server, for a week:',
     howToUse: 'On the server, run kuraa-host server join with this link (from the repository: pnpm server join). It joins as a server, not as anyone.',
@@ -474,7 +474,7 @@ export const S = {
     writersTitle: (words: string) => `Who can change it: ${words}`,
     titleFolder: (name: string) => `Permissions for the folder ${name}`,
     titleEverything: 'Permissions for everything in the workspace',
-    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them on their devices, with the owner and the workspace’s servers. Changing who reads it later moves nothing: whoever is added gets its files and their history; whoever is taken out keeps what they had, and gets nothing new.',
+    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them on their devices, and the workspace’s owner. Changing who reads it later moves nothing: whoever is added gets its files and their history; whoever is taken out keeps what they had, and gets nothing new.',
     asAbove: 'As the folder above says',
     readFromRule: (path: string, who: string[]) => `${list(who)}, as ${path} says`,
     anyoneChoice: 'Anyone in the workspace',
@@ -486,15 +486,13 @@ export const S = {
   readers: {
     title: (words: string) => `Who can read it: ${words}`,
     line: (words: string) => (words === 'Only you' ? 'Only you can read this document.' : `Only ${words.replace(/^You/, 'you')} can read this document.`),
-    about: 'Only the people chosen get this file on their devices, with the owner and the workspace’s servers; no one else’s device is sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
+    about: 'Only the people chosen, and the workspace’s owner, get this file on their devices; no one else’s device is sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
     everyone: 'Everyone in the workspace',
     onlyMe: 'Only you',
     /** Who reads everything in the workspace besides each file's readers (0106). */
-    readsEverything: (youOwn: boolean, servers: number) => {
-      const server = servers === 1 ? 'its server' : servers > 1 ? 'its servers' : '';
-      if (youOwn) return server ? `As the workspace’s owner, you read everything in it, as ${server} ${servers === 1 ? 'does' : 'do'}.` : 'As the workspace’s owner, you read everything in it.';
-      return server ? `The workspace’s owner, and ${server}, read everything in it.` : 'The workspace’s owner reads everything in it.';
-    },
+    readsEverything: (youOwn: boolean) => (youOwn ? 'As the workspace’s owner, you read everything in it.' : 'The workspace’s owner reads everything in it.'),
+    /** Where groups are among those who may be chosen (0106): a group's readers are its admins' to say. */
+    groupsAbout: 'A group’s readers are whoever its admins put in it.',
     notYouAlone: 'Choose who reads it besides you. What is only yours belongs in a workspace of your own: the owner reads everything in this one.',
     locked: 'Who reads it is for whoever chose that, or the workspace’s owner, to change.',
     chosen: 'These people and groups:',

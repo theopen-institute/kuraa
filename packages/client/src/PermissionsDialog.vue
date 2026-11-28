@@ -8,8 +8,9 @@
 //   people and groups, always with you and never you alone; whoever may change
 //   it says, and once it has readers of its own, whoever chose them or the owner
 //   (0106). A folder's is who reads what is made in it, and its files that
-//   followed it; the workspace's admins say. The owner and the workspace's
-//   servers read everything (0106): the dialog says so.
+//   followed it; the workspace's admins say. The owner reads everything
+//   (0106), and the dialog says so; the workspace's servers, which work for
+//   the owner, too, unnamed. A group's readers are its admins' to say.
 // - Who can change: its own (only you, or people, groups, admins), or as its
 //   folder says; the workspace's admins say. Anyone else sees who can, and why.
 import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
@@ -82,8 +83,8 @@ const choices = computed(() => [
 const writeFromAbove = computed(() => (info.value?.fromAbove.write ? S.permissions.fromRule(info.value.fromAbove.write.path, info.value.fromAbove.write.by.map(nameOf)) : S.permissions.anyone));
 const readFromAbove = computed(() => (info.value?.fromAbove.read ? S.permissions.readFromRule(info.value.fromAbove.read.path, info.value.fromAbove.read.audience.map(nameOf)) : S.readers.everyone.toLowerCase()));
 const canRead = computed(() => (folder.value ? !!info.value?.admin : !!info.value?.canWrite) && !everything.value && !info.value?.readersLocked);
-/** Who reads everything besides (0106): the owner, and the workspace's servers. */
-const readsEverything = computed(() => S.readers.readsEverything(!!people.value?.owner && people.value.owner === me.value, people.value?.servers?.length ?? 0));
+/** Who reads everything besides (0106): the owner (and the workspace's servers, which work for the owner: not named). */
+const readsEverything = computed(() => S.readers.readsEverything(!!people.value?.owner && people.value.owner === me.value));
 const canRule = computed(() => !!info.value?.admin);
 /** Who can change it now, for someone who may not say. */
 const writersNow = computed(() => {
@@ -151,6 +152,7 @@ async function save() {
             <label v-for="c in choices" :key="c.value" class="check">
               <input v-model="read.chosen" type="checkbox" :value="c.value" :disabled="!folder && c.value === me" :data-testid="`read-${c.group ? 'group' : 'person'}:${c.label.replace(S.permissions.you, '')}`"> {{ c.label }}
             </label>
+            <p class="naming-hint" data-testid="groups-about">{{ S.readers.groupsAbout }}</p>
           </div>
           <p v-if="info.readersLocked" class="naming-hint" data-testid="readers-locked">{{ S.readers.locked }}</p>
           <p v-else-if="!folder && !canRead" class="naming-hint">{{ S.permissions.readOnlyRead }}</p>

@@ -43,10 +43,19 @@ read everything, no *Only you*, and only a space's maker or the owner changes it
   from before is shown as theirs and the owner's. *Only you* stays for who may *change* something:
   that hides nothing.
 - **Said where readers are said.** Who reads a file, in the file list, its readers line and the
-  dialog, names the owner and the servers where its audience does not hold them (*You, Cy, the owner
-  and the server*); the dialog says who reads everything (*The workspace's owner, and its server, read
-  everything in it*; to the owner, *As the workspace's owner, you read everything in it*). The texts
-  that said no one else's device is sent a file now name the owner and the servers.
+  dialog, names the owner where its audience does not hold them (*You, Cy and the owner*); the dialog
+  says who reads everything (*The workspace's owner reads everything in it*; to the owner, *As the
+  workspace's owner, you read everything in it*). The texts that said no one else's device is sent a
+  file now name the owner. **Servers are not named there:** a server works for the owner, who is in
+  control, so who reads a file is said as the owner's; what a server reads is said where servers are
+  (People and computers › Servers: *Like the owner, it reads everything in the workspace*), as the
+  owner asked: "I don't think it's necessary to foreground the server so much […] since the server
+  really "works for" the owner, who has full control."
+- **A group's readers are its admins' to say.** A workspace's admins, and a group's own, put people in
+  a group, themselves too; so choosing a group to read something is trusting whoever manages it. That
+  is said where groups are offered (*A group's readers are whoever its admins put in it*), rather than
+  ruled out: only the owner adding people to a group that reads a space would make groups depend on
+  spaces, and harder to explain.
 
 ## Why
 
@@ -80,8 +89,8 @@ the model does not give them.
   made before 0106 no longer counts.
 - `Peers.setAudience`, `setPermissions`: an audience of the sender alone refused; changing a space's
   readers that are not this person's to change, refused (`NotAllowed`); `PermissionsInfo.readersLocked`.
-- `readersWords` (host): an audience in words, with the owner and the servers where it does not hold
-  them; `Policy.audienceHolds`.
+- `readersWords` (host): an audience in words, with the owner where it does not hold them (servers
+  not named); `Policy.audienceHolds`.
 - Every device must evaluate the policy alike, so this is a compatibility break: `PROTOCOL` 11 (a device
   still on 0.11 would count an admin's change of someone else's space, send them the space, and send
   neither the owner nor a server the spaces they now read), and the next release is 0.12.0.

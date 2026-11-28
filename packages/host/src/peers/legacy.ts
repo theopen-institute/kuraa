@@ -279,6 +279,8 @@ function allowed(e: PolicyEntry, by: string, s: State, ctx: LegacyContext): bool
       const holdsMaker = op.audience.some((w) => w === by || (w === 'admins' && now.isAdmin(by)) || (w.startsWith('group:') && now.role(by, w.slice(6)) !== null));
       return had ? had.by === by || now.isAdmin(by) : holdsMaker;
     }
+    // Said since 0115, of a workspace founded since: a workspace from before judges by its legacy policy alone.
+    case 'rules':
     case 'genesis':
       return false;
   }
@@ -358,6 +360,7 @@ function effect(e: PolicyEntry, by: string, s: State, at: number): boolean {
       return true;
     case 'witness':
     case 'verifier':
+    case 'rules':
     case 'genesis':
       return false;
   }

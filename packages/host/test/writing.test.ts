@@ -75,7 +75,7 @@ describe('writing: images and files', () => {
     expect(await res.text()).not.toContain('secret"');
   });
 
-  it('keeps an image in the document’s own files (0107), with a safe name, committed', async () => {
+  it('keeps an image in the document’s own files (0109), with a safe name, committed', async () => {
     const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}&by=Ada&email=ada@example.org`, { method: 'POST', body: new Uint8Array(body) });
     const first = await add('My Plot (final).PNG', PNG);
     expect(first.status).toBe(201);
@@ -91,7 +91,7 @@ describe('writing: images and files', () => {
     expect(await (await add('my plot final.png', png2)).json()).toMatchObject({ src: 'one.md.files/my-plot-final-2.png' });
   });
 
-  it('keeps an image without its details (0106): the same picture with them is the same file', async () => {
+  it('keeps an image without its details (0108): the same picture with them is the same file', async () => {
     const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}`, { method: 'POST', body: new Uint8Array(body) });
     const signed = withChunk('tEXt', 'Author\0Ada Lovelace');
     const res = await add('portrait.png', Buffer.concat([signed, Buffer.from('appended')]));

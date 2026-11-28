@@ -1,4 +1,4 @@
-// What a document refers to (0107): the workspace files its images, links and
+// What a document refers to (0109): the workspace files its images, links and
 // definitions name, as paths relative to the document; and those paths written
 // again when files move, so a rename or move breaks no reference.
 //
@@ -16,7 +16,7 @@ export interface Reference {
   target: string;
 }
 
-/** The folder of a document's own files (0107): `report.md` → `report.md.files`, beside it. */
+/** The folder of a document's own files (0109): `report.md` → `report.md.files`, beside it. */
 export const FILES_SUFFIX = '.files';
 
 export function filesFolderOf(doc: string): string {

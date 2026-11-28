@@ -2512,7 +2512,7 @@ export class Host {
     if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
     // What is kept beside a document goes where it goes (0082).
     // Only this person's own: others' are theirs to move (0082), and stay where those who read the document could read them.
-    // Its own files (0107: `report.md.files/`) all go: they are the document's, read by whoever reads it.
+    // Its own files (0109: `report.md.files/`) all go: they are the document's, read by whoever reads it.
     for (const p of [path, ...(await this.features.ownFilesOf(path)), ...(await this.filesOfDocument(path))]) await this.moveOneToSpace(p, target);
   }
 
@@ -2749,7 +2749,7 @@ export class Host {
 
   /**
    * The document a path belongs to, if it does: a feature's companion (0082,
-   * `p01.md.annotations/@…`) or one of the document's own files (0107,
+   * `p01.md.annotations/@…`) or one of the document's own files (0109,
    * `p01.md.files/…`). Such files are shown, counted and compiled as part of
    * their document, not on their own.
    */
@@ -2757,14 +2757,14 @@ export class Host {
     return this.features.documentOf(path) ?? documentOfFiles(path);
   }
 
-  /** A document's own files (0107): those in its `.files` folder this device holds. */
+  /** A document's own files (0109): those in its `.files` folder this device holds. */
   async filesOfDocument(doc: string): Promise<string[]> {
     const folder = `${filesFolderOf(doc)}/`;
     return (await this.listFiles()).filter((p) => p.startsWith(folder) && present(this.resolvePath(p, { link: 'self' })));
   }
 
   /**
-   * References written again after files moved (0107): in each document that
+   * References written again after files moved (0109): in each document that
    * names a file or folder that moved (`moves`, as moved already), and in each
    * document that moved itself, whose relative references are written from its
    * new place. A document open in a room takes the change there too (everyone
@@ -2967,7 +2967,7 @@ export class Host {
     for (const p of changed) {
       if (this.features.documentOf(p) || existsSync(this.resolvePath(p, { link: 'self' }))) continue;
       // Everyone's files go: moved, unchanged, which anyone may (the gate takes a move of someone's own file).
-      // And the document's own files (0107) added meanwhile at its old name, which its references then follow.
+      // And the document's own files (0109) added meanwhile at its old name, which its references then follow.
       const left = [...(await this.features.filesOf(p)), ...(await this.filesOfDocument(p))];
       if (!left.length) continue;
       const to = await this.takenByCommit(p);

@@ -22,7 +22,7 @@ export interface EditorUi {
   /** Say something in passing (an image that could not be added), as the client shows its notices. */
   notify?(text: string, kind?: 'info' | 'warn'): void;
   /**
-   * Ask how to add images pasted or dropped into a document (0106): each shown
+   * Ask how to add images pasted or dropped into a document (0108): each shown
    * with how large it is as kept, the details it carries that are removed, a
    * smaller size to choose, and its description. Resolves to the images to add
    * as chosen (perhaps fewer, perhaps made smaller), or null if cancelled.

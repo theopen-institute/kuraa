@@ -267,7 +267,7 @@ export function pathsAbove(path: string): string[] {
 }
 
 /**
- * The paths whose permissions count for a path, nearest first (0107): those
+ * The paths whose permissions count for a path, nearest first (0109): those
  * above it (pathsAbove), with a document's own files (`report.md.files/…`)
  * under their document: after their folder, before the folder the two are in.
  * So whoever may change a document may change its files, and a document's own

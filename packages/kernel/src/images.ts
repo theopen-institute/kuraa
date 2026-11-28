@@ -1,4 +1,4 @@
-// Image files' bytes (decision 0106): what kind of image a file is, known by its
+// Image files' bytes (decision 0108): what kind of image a file is, known by its
 // bytes, and the details it carries beyond its picture (where a photo was taken,
 // the camera and its serial number, when, who, the software, a thumbnail of the
 // uncropped original, images or video appended after it), found and removed.
@@ -24,7 +24,7 @@ export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
  * A file this size or larger is a large one: the dialog that adds images says
  * so, and suggests a smaller size. It is also the size above which devices may
  * one day fetch a file only when it is needed, rather than with its history
- * (0106: partial clones, not built).
+ * (0108: partial clones, not built).
  */
 export const LARGE_FILE_BYTES = 1024 * 1024;
 

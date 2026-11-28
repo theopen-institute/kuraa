@@ -1,4 +1,4 @@
-// A Pandoc document's references (0107): images, links and definitions, with
+// A Pandoc document's references (0109): images, links and definitions, with
 // where each target is written; nothing in code; and written again when files move.
 import { describe, expect, it } from 'vitest';
 import { movedBy, rewriteReferences } from '@kuraa/kernel';

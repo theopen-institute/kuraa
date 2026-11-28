@@ -1,5 +1,5 @@
 // Images in the editor. `![alt](src)` typed becomes an image. Image files
-// pasted or dropped are shown in the client's dialog first (0106: how large
+// pasted or dropped are shown in the client's dialog first (0108: how large
 // each is as kept, the details removed from it, a smaller size, its
 // description), then kept in the workspace (in `images/` next to the document,
 // under a safe name not yet taken), and images pointing at them go where they

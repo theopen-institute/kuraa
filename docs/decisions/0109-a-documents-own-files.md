@@ -1,7 +1,7 @@
-# 0107 · A document's own files: `report.md.files/`, kept, moved and read with it; references that follow
+# 0109 · A document's own files: `report.md.files/`, kept, moved and read with it; references that follow
 
 **Status: built** (the folder, its permissions and spaces, references written again on a rename or
-move). **`PROTOCOL` 11.** Changes [0106](0106-images-in-git.md)'s `images/` beside a document; adds to
+move). **`PROTOCOL` 11.** Changes [0108](0108-images-in-git.md)'s `images/` beside a document; adds to
 [0069](0069-permissions-on-files-and-folders.md) (permissions) and [0082](0082-annotations.md) (what is
 kept beside a document).
 
@@ -33,7 +33,7 @@ A document's own files are in a folder beside it named after its whole filename 
   as companions are), so the file list and Open (quick open) leave them out; search does not find in
   them; word counts and compiling a folder leave them out. A folder whose document is gone shows on
   its own, as a companion does.
-- **Everything the dialog adds** goes there (0106): images now; any embedded file later.
+- **Everything the dialog adds** goes there (0108): images now; any embedded file later.
 - **Copies are free.** The same picture in two documents is two files in their folders, and one blob
   in git: the history does not grow. A file several documents use on purpose (a logo, a bibliography)
   is kept in an ordinary folder and named from there.

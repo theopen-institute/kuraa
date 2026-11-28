@@ -1,4 +1,4 @@
-// The dialog that adds images (ImagesDialog.vue, 0106), asked for by a format's
+// The dialog that adds images (ImagesDialog.vue, 0108), asked for by a format's
 // editor module (EditorUi.chooseImages) as ask.ts's questions are: mounted on
 // its own over the page, resolving to the images to add as chosen, or null.
 import { createApp } from 'vue';

@@ -1,4 +1,4 @@
-// What a Pandoc document refers to (0107): its images, links and link
+// What a Pandoc document refers to (0109): its images, links and link
 // definitions, each with where its target is written in the text, for the host
 // to write again when files move. Read from the same Markdown tree the parser
 // starts from, so nothing in code (a fenced block, `inline code`) counts.

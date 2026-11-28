@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Adding images pasted or dropped into a document (0106): each shown with how
+// Adding images pasted or dropped into a document (0108): each shown with how
 // large it is as kept, what was in its file besides the picture (and is
 // removed), smaller sizes to choose from with how large each would be, and its
 // description; then, for them all, what they add to the workspace beside how

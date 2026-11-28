@@ -1,6 +1,6 @@
-// Images: one pasted is shown in a dialog (0106: its size as kept, what was in
+// Images: one pasted is shown in a dialog (0108: its size as kept, what was in
 // its file and is removed, smaller sizes), then kept as one of the document's
-// own files (0107: `report.md.files/`, not shown in the file list) and shown
+// own files (0109: `report.md.files/`, not shown in the file list) and shown
 // from the workspace; `![alt](src)` typed becomes an image too; renaming the
 // document takes its files and their references with it.
 import { expect, test } from '@playwright/test';

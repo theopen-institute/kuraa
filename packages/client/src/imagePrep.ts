@@ -1,4 +1,4 @@
-// Getting images ready to add (0106), for the dialog that adds them
+// Getting images ready to add (0108), for the dialog that adds them
 // (ImagesDialog.vue): what each is, how large it is, the details it carries,
 // and smaller sizes to choose from, each with how large it would be as kept.
 //

@@ -1,6 +1,6 @@
-# 0106 · Images and other binary files: in git, cleaned on the way in, shown before they are kept
+# 0108 · Images and other binary files: in git, cleaned on the way in, shown before they are kept
 
-*Since [0107](0107-a-documents-own-files.md): images are kept in the document's own folder,
+*Since [0109](0109-a-documents-own-files.md): images are kept in the document's own folder,
 `report.md.files/`, not `images/`; in its space, by whoever may change it; and renames and moves write
 references to them again.*
 

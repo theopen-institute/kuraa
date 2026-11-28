@@ -434,7 +434,7 @@ describe('a workspace’s policy', () => {
 
   });
 
-describe('a document’s own files (0107)', () => {
+describe('a document’s own files (0109)', () => {
   it('count their document between their folder and the folder the two are in', () => {
     expect(permissionPaths('ch/report.md.files/bay.jpg')).toEqual(['ch/report.md.files/bay.jpg', 'ch/report.md.files/', 'ch/report.md', 'ch/', '']);
     expect(permissionPaths('report.md.files/raw/a.csv')).toEqual(['report.md.files/raw/a.csv', 'report.md.files/raw/', 'report.md.files/', 'report.md', '']);

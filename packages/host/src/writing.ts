@@ -1,10 +1,10 @@
 // What the editor needs while people write (decision 0040): a workspace file as
 // it is, to show an image the document points at; images pasted or dropped into
-// a document, kept as its own files (0107) with their details removed (0106);
+// a document, kept as its own files (0109) with their details removed (0108);
 // how much the workspace's history takes; and who made a commit and when, for
 // the labels on a conflict's versions.
 //
-// Every binary file the page shows is read through /api/raw (0106): the one
+// Every binary file the page shows is read through /api/raw (0108): the one
 // place a file not yet fetched would be fetched, were devices one day to fetch
 // large files only when needed.
 //
@@ -94,9 +94,9 @@ export interface AddedImage {
 }
 
 /**
- * Keep an image as one of a document's own files (0107): in `report.md.files/`
+ * Keep an image as one of a document's own files (0109): in `report.md.files/`
  * beside it, under a name not yet taken (or the same image's), with its details
- * removed (0106). Whatever the page did already, the host cleans it: what it
+ * removed (0108). Whatever the page did already, the host cleans it: what it
  * keeps is clean. Only someone who may change the document adds to its files,
  * and they are read by whoever reads it: in its space, where it is in one.
  */

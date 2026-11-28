@@ -266,7 +266,7 @@ const fileRoutes: Route[] = [
     const paths = await host.listFiles();
     // Documents are shown by their title: null if one has none, absent for files that are not documents.
     const files = await host.treeEntries(paths, branch);
-    // Companions (0082) and a document's own files (0107) say which document they are kept beside, when it is there:
+    // Companions (0082) and a document's own files (0109) say which document they are kept beside, when it is there:
     // the list shows them with it, not on their own.
     const listed = new Set(paths);
     for (const f of files) {
@@ -413,9 +413,9 @@ const fileRoutes: Route[] = [
     const why = host.peers ? await host.peers.whyNotMove(from, isFolder) : null;
     if (why) throw new HttpError(403, why);
     // What is kept beside a file goes with it (0082): its companion folders, everyone's files in them, unchanged; a folder's go with it anyway.
-    // And its own files (0107: `report.md.files/`), all of them.
+    // And its own files (0109: `report.md.files/`), all of them.
     const companions = isFolder ? [] : [...host.features.foldersOf(from), filesFolderOf(from)].filter((c) => lexists(host.resolvePath(c, { link: 'self' }))).map((c) => [c, `${to}${c.slice(from.length)}`] as const);
-    // Documents whose references to what moved are not this person's to write again (0107): left as they are, and said.
+    // Documents whose references to what moved are not this person's to write again (0109): left as they are, and said.
     let left: string[] = [];
     for (const [, c] of companions) if (lexists(host.resolvePath(c, { link: 'self' })) && !caseOnly) throw new HttpError(409, `${c} already exists`);
     const commit = await host.serial(async () => {
@@ -442,7 +442,7 @@ const fileRoutes: Route[] = [
       // Files of spaces stay in their spaces, at their new paths (0069).
       await host.carrySpaces(from, to, isFolder);
       for (const [c, next] of companions) await host.carrySpaces(c, next, true);
-      // References follow (0107): to what moved, in every document that names it, and from the document that moved.
+      // References follow (0109): to what moved, in every document that names it, and from the document that moved.
       const mayChange = async (p: string) => !host.peers || (await host.peers.access(p)).canWrite;
       const refs = await host.rewriteReferences([[from, to], ...companions], mayChange);
       left = refs.left;
@@ -463,7 +463,7 @@ const fileRoutes: Route[] = [
     const isFolder = lstatSync(abs).isDirectory();
     // What is kept beside a file: only the deleter's own goes with it; others' stay, theirs (0082).
     const companions = isFolder ? [] : await host.features.ownFilesOf(path);
-    // Its own files (0107: `report.md.files/`) are the document's: they go with it, all of them.
+    // Its own files (0109: `report.md.files/`) are the document's: they go with it, all of them.
     const own = isFolder ? null : filesFolderOf(path);
     const ownFiles = own && lexists(host.resolvePath(own, { link: 'self' })) ? own : null;
     // A folder: everything in it but others' own files, which stay where they are, theirs.

@@ -1,4 +1,4 @@
-// References (0107): a document's own files' folder, paths resolved from a
+// References (0109): a document's own files' folder, paths resolved from a
 // document and written from one, and references written again when files move.
 import { describe, expect, it } from 'vitest';
 import { documentOfFiles, filesFolderOf, movedBy, relativeTarget, rewriteReferences, workspacePath, type Reference } from '../src/references.js';

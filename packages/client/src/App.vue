@@ -122,7 +122,7 @@ const inviting = shallowRef<{ syncing: boolean } | null>(null);
 const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
 /** The open document's conflicts as it is being edited, likewise. */
 const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
-/** The files, with the open document's live title and conflicts; what features keep beside a document (0082), and its own files (0107), are shown with it, not apart. */
+/** The files, with the open document's live title and conflicts; what features keep beside a document (0082), and its own files (0109), are shown with it, not apart. */
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;

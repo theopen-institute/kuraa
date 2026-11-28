@@ -288,7 +288,7 @@ export class HostApi {
     const q = new URLSearchParams({ doc, name, by: by.name, email: by.email });
     return this.json<{ path: string; src: string; size: number; removed: string[] }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
   }
-  /** How much the workspace's history takes on the host's computer, in bytes (0106). */
+  /** How much the workspace's history takes on the host's computer, in bytes (0108). */
   storage() { return this.json<{ history: number }>('/api/storage'); }
   /** Who made a commit, and when (ISO). */
   commitInfo(hash: string) { return this.json<{ author: string; date: string }>(`/api/commits/${encodeURIComponent(hash)}`); }

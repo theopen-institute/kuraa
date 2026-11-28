@@ -122,7 +122,7 @@ export interface DocumentType {
    */
   sourceMap?(doc: Node, parsed: ParsedDocument): SourceMap;
   /**
-   * The workspace files a document's text names (0107): its images, links and
+   * The workspace files a document's text names (0109): its images, links and
    * link definitions, each with where its target is written, so the host can
    * write them again when files move. Must not throw. Without it, a file of
    * this type names nothing, and nothing in it is rewritten.

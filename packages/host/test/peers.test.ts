@@ -31,7 +31,7 @@ import type { JoinProgress } from '../src/peers/join.js';
 import type { HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
 
-/** A 1×1 PNG: an image to add (0107). */
+/** A 1×1 PNG: an image to add (0109). */
 const PIXEL = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082', 'hex');
 const NOTES = '---\ntitle: Field notes\n---\n\n# Day one\n\nThe tide was out.\n\nWe counted crabs.\n\n# Day two\n\nIt rained.\n';
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
@@ -679,7 +679,7 @@ describe('equal members, and forks', () => {
 
     // Ada writes a plan, and gives it to herself and Bo alone.
     expect((await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n\nThe surprise party is on Friday.\n' }) })).status).toBe(201);
-    // With an image of its own (0107), everyone's while the plan is.
+    // With an image of its own (0109), everyone's while the plan is.
     const addImage = (name: string) => api(a, `/api/images?doc=plan.md&name=${name}`, { method: 'POST', body: new Uint8Array(PIXEL) });
     expect(await (await addImage('venue.png')).json()).toMatchObject({ path: 'plan.md.files/venue.png' });
     await until(() => existsSync(join(dirC, 'plan.md')), 20_000, 'the plan, first everyone’s, on Cy’s device');
@@ -690,7 +690,7 @@ describe('equal members, and forks', () => {
     expect(git(dirA, 'ls-tree', '--name-only', 'HEAD')).not.toContain('plan.md');
     expect(git(dirA, 'status', '--porcelain')).toBe('');
     expect(git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/')).toMatch(/^refs\/spaces\/[0-9a-f]{32}\/heads\/main$/);
-    // Its own files went with it (0107); one added now goes straight there, never on the workspace's own branch.
+    // Its own files went with it (0109); one added now goes straight there, never on the workspace's own branch.
     expect(await (await addImage('cake.png')).json()).toMatchObject({ path: 'plan.md.files/cake.png' });
     const space = git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/');
     expect(git(dirA, 'ls-tree', '-r', '--name-only', 'HEAD')).not.toContain('plan.md.files');

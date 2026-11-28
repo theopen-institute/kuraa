@@ -364,7 +364,7 @@ function open(carried: Carried | null = null): () => void {
     const files = workspaceFiles(api, path, () => user.value);
     disposeFiles = () => files.dispose();
     const notify = (text: string, kind: 'info' | 'warn' = 'info') => report({ notice: { kind, text } });
-    // Images pasted or dropped are added through the dialog (0106), told how large the workspace's history is.
+    // Images pasted or dropped are added through the dialog (0108), told how large the workspace's history is.
     const storage = () => api.storage().then((r) => r.history, () => null);
     const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify, spelling: props.spelling, chooseImages: (images) => chooseImages(images, storage) });
     commands = formatEditor?.commands?.(ctx) ?? {};

@@ -1,4 +1,4 @@
-// Images' details (0106): where a photo was taken, the camera, when, who, a
+// Images' details (0108): where a photo was taken, the camera, when, who, a
 // thumbnail, what is appended after the picture; found and removed in each kind
 // of image, the picture and what it needs to look the same (its colour profile,
 // its orientation, its looping) kept, and the same file again once clean.

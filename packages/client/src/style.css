@@ -699,7 +699,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .settings-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 /* One line between parts: a part's first group draws none of its own, nor does the first part (the heading's line is above it). */
 .settings-content .settings-part > .pref-group:first-child, .settings-content .settings-part > form > .pref-group:first-child { border-top: 0; padding-top: 0; }
-.settings-content > div > .settings-part:first-child, .settings-content > div > .menu-section:first-child { border-top: 0; padding-top: 4px; }
+.settings-content > div > .settings-part:first-child, .settings-content > div > .menu-section:first-child, .settings-content .workspace-main > .menu-section:first-child { border-top: 0; padding-top: 4px; }
 /* In a subpanel, its head draws the line under it. */
 .settings-content .subpanel-head { border-bottom: 1px solid var(--border); }
 .settings-content .subpanel-head + .settings-part, .settings-content .subpanel-head + section { border-top: 0; }
@@ -829,7 +829,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .component-state { flex: none; min-width: 28px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
 .component-state.on { color: #30a46c; }
 /* A person's role, as a menu for whoever may change it (DevicesSection): the size of the tag it replaces, not a form's field. */
-.preferences .person-line .role-menu, .preferences .people-list .role-menu, .role-menu {
+.preferences .person-line .role-menu, .preferences .member-facts .role-menu, .role-menu {
   width: auto; flex: none; box-sizing: border-box; font: 12px var(--font); color: var(--text);
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1px 4px; cursor: pointer;
 }

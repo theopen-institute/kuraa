@@ -198,10 +198,12 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     const late = await hubCall(theirs, '/hub/api/workspaces', { kind: 'join', invitation: code, name: 'Too late' });
     expect(late.status).toBe(400);
 
-    // Workspace settings now show the device that joined.
+    // Workspace settings now show the device that joined: the same person's (both hubs are theirs here), so another of
+    // their computers, in their own view (0107).
     await openSettings(page);
     await page.getByTestId('settings-tab-workspace').click();
-    await expect(page.getByTestId('devices')).toContainText('1 of 1 other device online');
+    await page.getByTestId('devices').locator('[data-testid^="person:"]').first().click();
+    await expect(page.getByTestId('member-devices').locator('[data-testid^="state:"]')).toHaveText([/online/], { timeout: 15_000 });
   } finally {
     await theirs.close();
     await mine.close();

@@ -520,7 +520,7 @@ async function workspaceAdded(w: HubWorkspace) {
 
 async function removeWorkspace(id: string) {
   const w = hub.value?.find((x) => x.id === id);
-  if (!w || !(await askConfirm(S.app.removeWorkspace(w.name, w.path), S.common.remove, true))) return;
+  if (!w || !(await askConfirm(S.app.removeWorkspace(w.name, w.path), S.app.stopUsing, true))) return;
   try {
     await hubApi.value.remove(id);
     if (chosen.value === id) {

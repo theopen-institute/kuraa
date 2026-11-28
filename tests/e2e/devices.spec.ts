@@ -69,16 +69,14 @@ test('people on two devices edit one document; a member made owner renames their
     await expect.poll(() => readFileSync(join(dirA, 'notes.md'), 'utf8'), { timeout: 20_000 }).toContain('Ada was here. So was Bo.');
     await expect.poll(() => git(dirA, 'rev-parse', 'HEAD') === git(dirB, 'rev-parse', 'HEAD') && git(dirB, 'status', '--porcelain') === '', { timeout: 20_000 }).toBe(true);
 
-    // Workspace settings list the people, each online or not; their computers beneath, closed (0107), in plain
-    // words: online or offline, no keys or branches.
+    // Workspace settings list the people (0107), by kind, each online or not, in plain words: no keys or branches;
+    // nothing on the list changes anything.
     await openSettings(ada);
     await ada.getByTestId('settings-tab-workspace').click();
-    await expect(ada.getByTestId('person-state:Bo')).toHaveText('online', { timeout: 15_000 });
-    await expect(ada.getByTestId('device:laptop')).toBeHidden();
-    await ada.getByTestId('computers-summary').click();
-    await expect(ada.getByTestId('devices')).toContainText('1 of 1 other device online');
-    await expect(ada.getByTestId('device:laptop')).toContainText('online');
+    await expect(ada.getByTestId('state-of:Bo')).toHaveText('online', { timeout: 15_000 });
     await expect(ada.getByTestId('devices')).not.toContainText(/[0-9a-f]{8}/);
+    await expect(ada.getByTestId('devices').locator('[data-testid^="person:"]')).toHaveText([/^Ada \(you\)owner/, /^Bomember/]);
+    await expect(ada.getByTestId('devices').getByRole('button', { name: /Remove|Lost/ })).toHaveCount(0);
     // A device Ada's cannot reach, which the laptop says it is connected to: online, through the laptop.
     // Bo's phone (0072: a device is in as its person is): its own key, which Bo's identity vouches for.
     const phoneDevice = await keptKey(join(keys, 'phone', 'device.json'));
@@ -91,58 +89,63 @@ test('people on two devices edit one document; a member made owner renames their
       signRecord({ kind: 'vouch', workspace: git(dirA, 'config', 'kuraa.workspace'), subject: hexOf(phoneKey), person: boPerson.id, personKey: hexOf(boPerson), name: 'Bo', proof: sign(vouch, boPerson), keyProof: sign(vouch, phoneKey) }, phoneDevice),
     ]);
     b.host.peers!.node.links.get(a.host.peers!.node.myKey)!.send({ type: 'present', keys: [phone] });
-    await expect(ada.getByTestId('through:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
-    await expect(ada.getByTestId('devices')).toContainText('2 of 2 other devices online');
-    // The people, with their roles: Ada, who made the workspace, its owner; Bo, invited, a member.
-    await expect(ada.getByTestId('role:Ada')).toHaveText('owner');
+    // Bo's own view: his computers, each with how it is connected.
+    await ada.getByTestId('person:Bo').click();
+    await expect(ada.getByTestId('member-title')).toHaveText('Bo');
+    await expect(ada.getByTestId('device:laptop')).toContainText('online');
+    await expect(ada.getByTestId('state:phone')).toHaveText(/^online, through .*laptop$/, { timeout: 10_000 });
     // Ada, the owner, may change Bo's role: a menu, at his role now.
-    await expect(ada.getByTestId('role:Bo')).toHaveValue('member', { timeout: 15_000 });
+    await expect(ada.getByTestId('member-role')).toHaveValue('member', { timeout: 15_000 });
 
-    // On Bo's device: a member, he may rename his device, but not invite or remove anyone.
+    // On Bo's device: a member, he may not invite or remove anyone, nor say Ada's computers are lost.
     await openSettings(bo);
     await bo.getByTestId('settings-tab-workspace').click();
     await expect(bo.getByTestId('not-admin')).toContainText('Only the workspace’s admins');
     await expect(bo.getByTestId('invite-button')).toHaveCount(0);
-    await expect(bo.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
+    await bo.getByTestId('person:Ada').click();
+    await expect(bo.getByTestId('member-remove')).toHaveCount(0);
+    await expect(bo.getByTestId('member-devices').getByRole('button')).toHaveCount(0);
+    await bo.getByTestId('member-back').click();
 
     // Ada makes him an admin, then the owner, giving up the role (she stays an admin: 0070), from his role's menu.
-    await ada.getByTestId('role:Bo').selectOption('admin');
-    await expect(ada.getByTestId('role:Bo')).toHaveValue('admin');
+    await ada.getByTestId('member-role').selectOption('admin');
+    await expect(ada.getByTestId('member-role')).toHaveValue('admin');
     // Handing over the role asks first; said no to, nothing changes.
-    await ada.getByTestId('role:Bo').selectOption('owner');
+    await ada.getByTestId('member-role').selectOption('owner');
     await expect(ada.getByTestId('ask')).toContainText('You give up the role');
     await ada.getByTestId('ask').getByRole('button', { name: 'Cancel' }).click();
-    await expect(ada.getByTestId('role:Bo')).toHaveValue('admin');
-    await ada.getByTestId('role:Bo').selectOption('owner');
+    await expect(ada.getByTestId('member-role')).toHaveValue('admin');
+    await ada.getByTestId('member-role').selectOption('owner');
     await ada.getByTestId('ask').getByRole('button', { name: 'Transfer ownership' }).click();
     // Bo's role is no one's to change now but his: said, not offered; and no one removes the owner.
-    await expect(ada.getByTestId('role:Bo')).toHaveText('owner');
+    await expect(ada.getByTestId('member-role')).toHaveText('owner');
+    await expect(ada.getByTestId('member-remove')).toHaveCount(0);
+    await ada.getByTestId('member-back').click();
     await expect(ada.getByTestId('role:Ada')).toHaveText('admin');
-    await expect(ada.getByTestId('remove-person:Bo')).toHaveCount(0);
     await ada.keyboard.press('Escape');
 
-    // Bo, the owner now: rename his device, then remove Ada's (an admin's: the owner's to remove). It is permanent, and she keeps her copy.
+    // Bo, the owner now: renames this computer, from his own view.
     await expect(bo.getByTestId('role:Bo')).toHaveText('owner', { timeout: 15_000 });
     await expect(bo.getByTestId('invite-button')).toBeVisible();
-    await bo.getByTestId('computers-summary').click();
+    await bo.getByTestId('person:Bo').click();
     await bo.getByTestId('rename-device').click();
     await bo.getByTestId('ask').locator('input').fill('Bo’s laptop');
     await bo.getByTestId('ask').getByRole('button', { name: 'Rename' }).click();
-    await expect(bo.getByTestId('this-device')).toContainText('You are on bo-s-laptop');
-    // Blocking a computer is set apart, closed, at the end of Workspace settings (0107): no button for it among the people.
-    const adas = bo.getByTestId('computers-of:Ada').locator('li[data-testid^="device:"]');
+    await expect(bo.getByTestId('device-self')).toContainText('bo-s-laptop');
+    await bo.getByTestId('member-back').click();
+    // Then says Ada's computer is lost or stolen (an admin's: the owner's to say), from her view: its key blocked,
+    // for good; she keeps her copy, and stays in the workspace.
+    await bo.getByTestId('person:Ada').click();
+    const adas = bo.getByTestId('member-devices').locator('li[data-testid^="device:"]');
     await expect(adas).toHaveCount(1);
-    await expect(bo.getByTestId('devices').getByRole('button', { name: /Block|Lost/ })).toHaveCount(0);
-    await bo.getByTestId('keys-summary').click();
-    const adaKey = bo.getByTestId('keys-list').locator('li', { hasText: 'Ada on' });
-    await expect(adaKey).toHaveCount(1);
-    await adaKey.getByRole('button', { name: 'Block…' }).click();
+    await adas.getByRole('button', { name: 'Lost or stolen…' }).click();
     await expect(bo.getByTestId('ask')).toContainText('lost or stolen');
     await expect(bo.getByTestId('ask')).toContainText('keeps their copy');
-    await bo.getByTestId('ask').getByRole('button', { name: 'Block' }).click();
-    // Her computer is out (0072: its key dropped); she is still in the workspace, and the removal is listed.
+    await bo.getByTestId('ask').getByRole('button', { name: 'Block it' }).click();
     await expect(adas).toHaveCount(0, { timeout: 20_000 });
-    await expect(bo.getByTestId('person:Ada')).toBeVisible();
+    await expect(bo.getByTestId('member-title')).toHaveText('Ada');
+    await expect(bo.getByTestId('member-remove')).toBeVisible();
+    await bo.getByTestId('member-back').click();
     await bo.getByTestId('removals-details').locator('summary').click();
     await expect(bo.getByTestId('removals')).toContainText('A computer of Ada’s blocked by Bo');
     // Ada's device learns it, and stops syncing; her files stay as they were.
@@ -152,8 +155,6 @@ test('people on two devices edit one document; a member made owner renames their
     await ada.getByTestId('settings-tab-workspace').click();
     await expect(ada.getByTestId('device-removed')).toContainText('removed from the workspace', { timeout: 10_000 });
     await expect(ada.getByTestId('invite-button')).toHaveCount(0);
-    await expect(ada.getByTestId('devices').getByRole('button', { name: 'Remove…' })).toHaveCount(0);
-    await expect(ada.getByTestId('keys')).toHaveCount(0);
     await ada.keyboard.press('Escape');
     expect(readFileSync(join(dirA, 'notes.md'), 'utf8')).toContain('Ada was here. So was Bo.');
   } finally {

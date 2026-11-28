@@ -342,9 +342,9 @@ access code, only `join` and `list`. Members reach it on **5872**, TCP for their
 for its DHT node (`--peer-port`, `--dht-port` say otherwise; 0, any free port). `--public-address`
 tells them where, so devices on networks that block UDP reach it too; without it, it is reached as
 any device is. `server join` says how it goes, the copy included, however long it takes. The owner
-takes it out from **People** (**Remove…**), and may invite it back with a new link; **Block…**, under
-**Lost or stolen computers and servers** at the end of Workspace settings, shuts its key out for good
-(a server with a new key may join again). One
+takes it out from its view under **People** (**Remove from workspace…**), and may invite it back with a
+new link; **Lost or stolen…**, beside its device there, shuts its key out for good (a server with a new
+key may join again). One
 service per computer: installing one as a server replaces a host's.
 
 ## On several devices
@@ -375,7 +375,7 @@ pnpm host --dir ~/notes --static apps/web/dist
 who makes and unmakes admins; they hand the role to someone else with **Make owner…**, staying an
 admin.
 everyone reads everything; only admins invite people, remove devices, make others admins or
-members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, below its **Workspace groups**; a
+members or take them out, and say who may change a file or folder (Workspace settings' **Permissions**, below its **Groups**; a
 file's or folder's **Permissions…**, or `pnpm host rule chapters/ Ada group:editors`; `rules` lists
 them, `group` manages groups). Where nothing is said, anyone may change it. A document you may not
 change opens read only, saying who may. A change by anyone else (made outside the app) is kept out
@@ -392,7 +392,7 @@ change past the rules. How every device works the policy out is in [docs/policy.
 
 **Devices are in as their people are** (0072): a computer is in the workspace where its key is
 vouched for by someone the workspace has in it; taking someone out takes their computers out, and
-**Block…**, under **Lost or stolen computers and servers**, drops one computer's key (its own person,
+**Lost or stolen…**, beside a computer in its person's view, drops that computer's key (its own person,
 or an admin). Workspace settings list recent removals and who has confirmed each so far.
 
 **Permissions** are on files and folders ([0069](docs/decisions/0069-permissions-on-files-and-folders.md)):
@@ -445,15 +445,14 @@ runs one and prints its key, to name in Settings (Other computers › Advanced) 
 internet. All the workspaces on a computer share one connection to the DHT, which remembers the
 nodes it knew for next time ([0050](docs/decisions/0050-networking-review.md)).
 
-In the app, Workspace settings' **People** lists each person, owner, admin or member, on one line,
-online or not; their computers are beneath, in **Computers**, closed
-([0068](docs/decisions/0068-people-and-their-computers.md),
-[0107](docs/decisions/0107-people-first.md)). Admins change roles from each person's menu, have
-**Remove…** (a person and their computers; they can be invited back) and **Invite people…**, which
-makes and lists invite links, to revoke; anyone has **Rename this computer…** (in Computers). A lost
-or stolen computer is blocked, for good (it keeps its copy), under **Lost or stolen computers and
-servers**, at the end: your own, whether or not you are an admin (its key revoked too, where your
-identity is on this computer), or anyone's, for admins. From the command line, `pnpm host
+In the app, Workspace settings' **People** lists everyone, by kind (owner, admins, members, servers),
+online or not ([0068](docs/decisions/0068-people-and-their-computers.md),
+[0107](docs/decisions/0107-people-first.md)); nothing on the list changes anything. Each opens a view of
+their own: their role (a menu, for whoever may change it), their computers, each with how it is
+connected and **Lost or stolen…** (blocking its key, for good: your own, whether or not you are an
+admin, its key revoked too where your identity is on this computer; anyone's, for admins), and
+**Remove from workspace…** (they can be invited back). Admins have **Invite people…**, which makes and
+lists invite links, to revoke; you rename this computer from your own view. From the command line, `pnpm host
 devices` and `people` list them; `remove-device`, `role <person> admin|member`, `remove-person`,
 `name` and `fork` manage them. Paired devices
 are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.

@@ -1,75 +1,88 @@
-# 0107 · People first; blocking a key set apart
+# 0107 · People, each with a view of their own
 
 **Status: built.** Changes Workspace settings' **People and computers**
-([0068](0068-people-and-their-computers.md)) and how a server is blocked there
+([0068](0068-people-and-their-computers.md)) and where a server is removed and blocked
 ([0099](0099-servers.md)). What removing and blocking do is unchanged; where they are, and what
 they are called, is not.
 
-The owner's direction:
+The owner's direction, first:
 
 > "Please clean up the workspaces setting pane. it's really messy. For most situations the important
-> thing is the users, not the specific devices. Isn't that true? Perhaps devices should be hidden in a
-> sub-menu or a disclosure triangle? Also, don't show the "key lost or stolen" button by default for
-> servers. Instead, just show remove. The "permanently block" option should be hidden deeper somehow.
-> […] In either case, the full "block" functionality should be set off to a different location in
-> the settings."
+> thing is the users, not the specific devices. […] The "permanently block" option should be hidden
+> deeper somehow."
+
+and then, of a first pass (people on one line each, computers in a disclosure, blocking in a section of
+its own):
+
+> "This still seems overly complicated, and that's reflected in the settings panel. In the Workspace
+> People section, list every user (sorted by user type). Clicking on the user should give a new view
+> showing details, including all of their devices. There should also be a button for removing the user.
+> Don't have a button for removing the user from the main workspace settings pane. That will be
+> misclicked. Each device should also have a button to indiciate that it is lost or stolen. This blocks
+> that signing key. Remove the "Computers: x of X devices online" disclosure. That's redundant. Also
+> remove the lost or stolen computers and servers section. That inside the specific user/server
+> references. Change the name of "Workspace groups" to just "Groups"."
 
 ## What it is
 
-- **People**, one line each: their name, their role (a menu for whoever may change it, as before),
-  whether they are online (any of their computers online, or reached through another; else when one
-  was last seen), a tag where a computer of theirs runs a Kuraa that does not sync with this one, and
-  **Remove…** for whoever may take them out. **Remove…** is no longer red: the question it asks is.
-- **Servers** beneath, each with **Remove…** alone (taken out; invited back with **Add a server…**).
-  **Invite people…** and **Add a server…** side by side beneath them.
-- **Computers**, a disclosure beneath, closed: *Computers · 2 of 4 other devices online*. In it, *You
-  are on …*, each person's computers with how each is connected, computers known to be no one's, and
-  **Rename this computer…**. Where the workspace has no policy yet, there are no people to list, and
-  it is open.
-- **Recent removals**, a disclosure beneath, closed, where there are any.
-- **Lost or stolen computers and servers**, a section of its own near the end of Workspace settings
-  (after Permissions, before Details), closed, shown only to someone who may block something: the
-  computers they may block (their own; anyone's, for an admin; an admin's, for the owner) and, for the
-  owner, the servers, each with **Block…**. What blocking does is said above them, and in each
-  question, with *Use this only if it is lost or stolen*.
-- Removing a person said as it is: *Their computers stop syncing with everyone here; they keep their
-  copy of everything up to now. You can invite them back later.* It said their devices were removed
-  for good; they are not (a person taken out is a `revoke`, and a new link lets them in again, their
-  cutoff no longer counting).
-- Smaller: Permissions' *Everything* and *No file or folder has permissions of its own* no longer
-  say the same sentence twice; a new group's first-admin menu says what it is for until one is
-  chosen.
+- **People**: everyone in the workspace, by kind (the owner, admins, members, then servers; by name
+  within each), one line each: their name, their kind, a tag where a computer of theirs runs a Kuraa
+  that does not sync with this one, whether they are online (any of their computers online, or reached
+  through another; else when one was last seen), and ›. Nothing on the list changes anything. Beneath
+  it, **Invite people…** (admins) and **Add a server…** (the owner); recent removals, closed; and,
+  rarely, computers known to be no one's.
+- **A person's view**, opened by their line, in the section's place, with *‹ Workspace* back: their
+  role (a menu for whoever may change it, the owner's role handed over from it, asking first), whether
+  they are online, what their role means, and their **Computers**, each with how it is connected and
+  **Lost or stolen…** for whoever may say so (the computer's own person; an admin; the owner, for an
+  admin's). This computer is there too, with **Rename…**. Beneath, set apart by a line, **Remove from
+  workspace…** for whoever may remove them, with what it does: their computers stop syncing here; they
+  can be invited back; a lost or stolen computer is said so beside it instead, and they stay in.
+- **A server's view**, the same: what a server is, its device here with **Lost or stolen…**, and
+  **Remove from workspace…** (it can be invited back), the owner's.
+- **Lost or stolen…** blocks that computer's signing key, or the server's key, here, for good (a
+  `drop`, 0072): the question says to use it only if it is lost or stolen, and what follows.
+- With no policy yet, there are no people to list: the computers are, with **Rename this computer…**.
+- **Groups**, no longer *Workspace groups*.
+- **Stop using on this computer…**, no longer *Remove from this list…*: what it does, which is local
+  (the workspace closes and comes off this computer's workspaces; its folder stays; no one else is
+  told, and whoever uses it stays in the workspace), said in its name and its question.
+- Removing a person said as it is: they can be invited back (a person taken out is a `revoke`, and a
+  new link lets them in again, their cutoff no longer counting). It said their devices were removed for
+  good.
 
-## Why: removing and blocking are different things
+## What can be removed, and what blocked
 
-Asked whether blocking a key belongs with removing a person, since people get a new key each time
-they join while a server keeps one key for all its workspaces:
+Each person has an identity, a signing key on each computer, and a device key for each copy of a
+workspace; a server has a signing key, which is the server, and a device key for each workspace
+(0035, 0099; servers get no identity for now: a server is one machine, and an identity kept on it
+would be taken with it).
 
-- **A person is removed by their identity, not a key.** Removing someone is a `revoke` of the person;
-  no key is blocked, and they can be invited back, from the same computers.
-- **Each computer has one signing key for all its workspaces, as each server does** (0035, 0099). What
-  is new at each join is the workspace's device key, which the computer's key signs for. A thief with
-  the computer has its signing key, and could make new device keys with it, so a lost computer is
-  shut out by its signing key.
-- **Blocking (a `drop`) is for this workspace only**: the computer or server goes on syncing with its
-  other workspaces. But it can never sync with this one again with that key, and since the key is
-  the same for all its workspaces, coming back here takes a new key, which for a server means joining
-  each of its workspaces again with it.
+| | Remove | Lost or stolen (block) |
+| --- | --- | --- |
+| A person (their identity) | yes: out, with their computers; invited back by a new link | no: an identity stolen is recovered by its person (its recovery key) |
+| A person's computer (its signing key) | no: a computer is in as its person is | yes: its key blocked here; the person stays in |
+| A server (its key) | yes: out; invited back by a new link | yes: its key blocked here; a new key is a new server, added again |
+| A copy of a workspace (its device key) | no: deleted where it is, if no longer wanted | no: a computer holds one copy of a workspace, so blocking the computer here is blocking it |
 
-So blocking is for a key someone else may have, not for taking someone out: it is set apart, and
-**Remove…**, which can be undone, is the one action beside each person and server. A computer no
-longer used need not be blocked: it is offline, in Computers.
+Remove answers *who belongs*, and can be undone; blocking answers *is this key still in the right
+hands*, and cannot. A computer no longer used, wiped, need not be blocked: it stays offline in its
+person's view.
 
 ## How
 
-- `DevicesSection.vue`: the people's lines (`stateOf`: online, through, last seen, from their
-  computers; `kuraaOf`), servers with **Remove…** only, the Computers and Recent removals disclosures.
-- `KeysSection.vue`: the blocking section, closed (`removeDevice`, `removeServer(key, true)`), read
-  again every few seconds, as People is, since who may block what changes with roles.
-- Strings: `S.keys`; `S.devices.computers`, `computersSummary`; `S.people.removeAsk`, `removal`
-  (*removed*, *blocked*); `S.rules.anyone`. Gone: *Lost or no longer used…*, *Key lost or stolen…*.
+- `peopleView.ts`: the list's and the views' rules (the order, whether someone is online, how a
+  computer is connected, who may change a role, remove, or say a computer is lost or stolen).
+- `DevicesSection.vue`: the list. `MemberView.vue`: a person's or server's view (`removePerson`,
+  `removeServer(key)`, `removeDevice`, `removeServer(key, true)`, `setRole`, `makeOwner`,
+  `renameDevice`). `SettingsWorkspace.vue` shows a view in the section's place, the rest kept, hidden.
+- Strings: `S.keys` (*Lost or stolen…*, its questions); `S.people.removeFromWorkspace`, `removeAbout`,
+  `removeAsk`, `removal` (*removed*, *blocked*); `S.servers.removeFromWorkspace`; `S.rules.groups`;
+  `S.menu.removeWorkspace`, `S.app.removeWorkspace`. Gone: *Key lost or stolen…*, *Lost or no longer
+  used…*, the Computers disclosure and its count.
 
 ## Not yet
 
-- Removing a computer no longer used, from Computers, without blocking its key (there is no
-  operation for that yet: a computer is in as its person is, 0072).
+- **Leave this workspace…** in your own view (a person removing themselves, which the policy allows:
+  it tells everyone, unlike Stop using on this computer).
+- Folding away computers not seen for months, in a person's view.

@@ -157,14 +157,15 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   const plus = page.getByRole('button', { name: 'New document', exact: true });
   const menu = page.getByTestId('context-menu');
   await plus.click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
+  // With what features add for the top level (0114): Compile… of the whole workspace, Import….
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…', 'Compile…', 'Import…']);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   // The space below the files has the same menu, by right-click.
   const space = page.getByTestId('tree-space');
   await space.scrollIntoViewIfNeeded();
   await space.click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['New file', 'New folder…', 'Compile…', 'Import…']);
   await page.keyboard.press('Escape');
   await plus.click({ button: 'right' });
   await page.getByTestId('context:new-folder').click();

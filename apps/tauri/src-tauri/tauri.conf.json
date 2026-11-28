@@ -1,10 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kuraa Tauri",
-  "version": "0.12.0",
-  "identifier": "org.kuraa.tauri-prototype",
+  "productName": "Kuraa",
+  "mainBinaryName": "Kuraa",
+  "version": "../../desktop/package.json",
+  "identifier": "org.kuraa.desktop",
   "build": {
-    "frontendDist": "../loading"
+    "frontendDist": "../build/pages"
   },
   "app": {
     "windows": [],
@@ -14,7 +15,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "category": "Productivity",
+    "copyright": "Kuraa",
+    "shortDescription": "Edit folders of Pandoc markdown and R Markdown files, alone or live with others.",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "externalBin": ["binaries/node"],
     "resources": {
@@ -22,7 +26,16 @@
       "staged/git/": "git/"
     },
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.mac.plist",
+      "hardenedRuntime": true
+    },
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    },
+    "linux": {
+      "deb": { "depends": [] },
+      "rpm": { "depends": [] }
     }
   }
 }

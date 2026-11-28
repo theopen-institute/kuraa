@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "joined",
+  "description": "A shared host's own pages, which the window shows once joined: not this app's code, so it may only go back to the app (leave, home) and ask the spell checker (bridge.rs checks it is the host joined).",
+  "windows": ["main"],
+  "remote": { "urls": ["http://*", "https://*", "http://*:*", "https://*:*"] },
+  "permissions": [
+    "allow-leave",
+    "allow-home",
+    "allow-spelling",
+    "allow-learn-word",
+    "allow-test-result"
+  ]
+}

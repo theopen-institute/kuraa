@@ -274,6 +274,18 @@ importers:
 
   apps/tauri:
     devDependencies:
+      '@kuraa/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@kuraa/features':
+        specifier: workspace:*
+        version: link:../../packages/features
+      '@kuraa/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@kuraa/run-components':
+        specifier: workspace:*
+        version: link:../../packages/run-components
       '@tauri-apps/cli':
         specifier: 2.12.4
         version: 2.12.4

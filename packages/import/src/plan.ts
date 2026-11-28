@@ -3,11 +3,14 @@
 // other files (a research PDF). Then the new files that make it: each folder's
 // documents named from their titles as the app names them, their images in
 // their own files folder (0109), each folder's order (.kuraa-order) and, where
-// it says something, what Compile keeps for it (.kuraa-compile.yml: 0093, 0106).
+// it says something, what Compile keeps for it (.kuraa-compile.yml: 0093, 0106);
+// and a document's comments (Scrivener's), as the importing person's comments
+// on it (0082: their own file of annotations beside it).
 import { stringify } from 'yaml';
 import { filesFolderOf, folderName, pathForTitle, slugify } from '@kuraa/kernel';
 import { emptyCompile, writeCompile, type FolderCompile } from '@kuraa/compile';
 import type { NewFile } from '@kuraa/feature-kit/host';
+import { EXTENSION, SUFFIX, writePage, type Item } from '@kuraa/annotations/format';
 
 /** A document's details (0094), as its header keeps them. */
 export interface Details {
@@ -27,8 +30,52 @@ export interface PlannedDocument {
   /** Its text (pandoc's Markdown), naming its images by the names in `media`. */
   body: string;
   media: { name: string; bytes: Uint8Array }[];
+  /** Comments on it (Scrivener's, imported). */
+  comments?: ImportedComment[];
   /** Left out of Compile. */
   leftOut?: boolean;
+}
+
+/** A comment to make on a document: on a passage (the words it quotes, and a little of what is around them), or on the whole document. */
+export interface ImportedComment {
+  /** Its text (Markdown). */
+  body: string;
+  /** Who wrote it, and when, as the project says (Scrivener 3 keeps them). */
+  author: string | null;
+  date: string | null;
+  quote: { exact: string; prefix: string; suffix: string } | null;
+}
+
+/** Who imports: whose comments the imported ones are (their identity, their name); null where there is no one yet. */
+export interface Importer {
+  id: string;
+  name: string;
+}
+
+/** Scrivener's dates (2026-06-15 09:14:00 +0000) as ISO ones; null if it is not one. */
+export function isoDate(s: string | null): string | null {
+  const m = s ? /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*(Z|[+-]\d{2}:?\d{2})?$/.exec(s.trim()) : null;
+  if (!m) return null;
+  const zone = !m[3] || m[3] === 'Z' ? 'Z' : `${m[3].slice(0, 3)}:${m[3].slice(-2)}`;
+  const t = Date.parse(`${m[1]}T${m[2]}${zone}`);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
+/** A comment as an annotation of the importer's (0082), saying it came from Scrivener. */
+function commentItem(c: ImportedComment, docName: string, by: Importer, now: string): Item {
+  const when = isoDate(c.date) ?? now;
+  const value = c.author && c.author !== by.name ? `${c.body}\n\n— ${c.author}, in Scrivener` : c.body;
+  return {
+    id: `urn:uuid:${globalThis.crypto.randomUUID()}`,
+    type: 'Annotation',
+    motivation: 'commenting',
+    created: when,
+    modified: when,
+    creator: { id: `urn:kuraa:person:${by.id}`, type: 'Person', name: by.name },
+    body: { type: 'TextualBody', value, format: 'text/markdown', purpose: 'commenting' },
+    target: c.quote ? { source: `../${docName}`, selector: [{ type: 'TextQuoteSelector', exact: c.quote.exact, prefix: c.quote.prefix, suffix: c.quote.suffix }] } : `../${docName}`,
+    generator: { type: 'Software', name: 'Scrivener' },
+  };
 }
 
 export interface PlannedFile {
@@ -86,6 +133,9 @@ export interface Written {
   folders: number;
   images: number;
   others: number;
+  /** Comments made, and those that could not be (no one to make them as yet). */
+  comments: number;
+  commentsLeft: number;
 }
 
 /**
@@ -93,8 +143,9 @@ export interface Written {
  * folder named from its title (made unique among `taken`, the names already in
  * `into`), and everything in it.
  */
-export function writePlan(root: PlannedFolder, into: string, taken: string[]): Written {
-  const out: Written = { files: [], root: '', first: null, documents: 0, folders: 0, images: 0, others: 0 };
+export function writePlan(root: PlannedFolder, into: string, taken: string[], by: Importer | null = null): Written {
+  const out: Written = { files: [], root: '', first: null, documents: 0, folders: 0, images: 0, others: 0, comments: 0, commentsLeft: 0 };
+  const now = new Date().toISOString();
   const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
   const folder = (f: PlannedFolder, parent: string, names: string[]): string => {
     const path = join(parent, folderName(f.title, names));
@@ -125,6 +176,14 @@ export function writePlan(root: PlannedFolder, into: string, taken: string[]): W
         }
         out.files.push({ path: file, text: documentText(item.title, item.details, body) });
         out.documents++;
+        // Its comments: the importer's own file of annotations beside it.
+        if (item.comments?.length) {
+          if (by) {
+            const page = writePage(item.comments.map((c) => commentItem(c, name, by, now)), by.id);
+            if (page) out.files.push({ path: `${file}${SUFFIX}/@${by.id}${EXTENSION}`, text: page });
+            out.comments += item.comments.length;
+          } else out.commentsLeft += item.comments.length;
+        }
         out.first ??= file;
       } else {
         const file = pathForTitle(item.title, item.extension, `${path}/`, paths);

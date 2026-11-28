@@ -3,7 +3,7 @@ export const S = {
   label: 'Import',
   menu: 'Import…',
   heading: (into: string | null) => (into ? `Import into “${into}”` : 'Import'),
-  intro: 'A Word document becomes a folder of documents, one for each chapter. A Scrivener project becomes a folder as its binder is, with each document’s synopsis, label, status and keywords, and what goes in its book.',
+  intro: 'A Word document becomes a folder of documents, one for each chapter. A Scrivener project becomes a folder as its binder is, with each document’s synopsis, label, status, keywords and comments, and what goes in its book.',
   drop: 'Drop a Word document or a Scrivener project here',
   or: 'or',
   chooseFile: 'Choose a file…',
@@ -22,12 +22,14 @@ export const S = {
   sending: (done: number, total: number) => `Sending… ${done.toLocaleString()} of ${total.toLocaleString()}`,
   importing: 'Making the folder… (each text converted; a long project takes a minute)',
   made: (folder: string) => `Made “${folder}”`,
-  counts: (r: { documents: number; folders: number; images: number; others: number }) => [
+  counts: (r: { documents: number; folders: number; images: number; others: number; comments?: number }) => [
     `${r.documents.toLocaleString()} ${r.documents === 1 ? 'document' : 'documents'}`,
     r.folders > 1 ? `${(r.folders - 1).toLocaleString()} ${r.folders === 2 ? 'folder' : 'folders'} in it` : null,
     r.images ? `${r.images.toLocaleString()} ${r.images === 1 ? 'image' : 'images'}` : null,
     r.others ? `${r.others.toLocaleString()} other ${r.others === 1 ? 'file' : 'files'}` : null,
+    r.comments ? `${r.comments.toLocaleString()} ${r.comments === 1 ? 'comment' : 'comments'}` : null,
   ].filter(Boolean).join(', ') + '.',
+  commentsShown: 'Its comments show where Annotations is on (Settings › Components).',
   left: 'Not brought:',
   big: 'This is larger than 1 GB, the most one import may send.',
 };

@@ -2,14 +2,16 @@
 // pandoc) and a Scrivener 3 project with real RTF, sent to Import's routes and
 // made into folders of the workspace in one commit each, converted by the
 // host's convert (pandoc.wasm), added by its create (new files only).
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { importFeature } from '@kuraa/import';
+import { annotationsFeature } from '@kuraa/annotations';
 import pandocComponent, { pandocRenderer, pandocWasm } from '@kuraa/render-pandoc';
 import { startHost, type RunningHost } from '../src/index.js';
+import { createPerson } from '../src/peers/person.js';
 
 const ADA = { name: 'Ada Lima', email: 'ada@example.org', color: '#d33' };
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -26,6 +28,12 @@ describe.skipIf(!pandocWasm())('Import', () => {
     for (const [path, bytes] of Object.entries(files)) expect((await post('upload', { session, path, data: Buffer.from(bytes).toString('base64'), start: 0 })).status).toBe(200);
   };
   const read = (p: string) => readFileSync(join(dir, p), 'utf8');
+  /** This host's person (whose an import's comments are): a key of its own, never that of whoever runs the tests. */
+  let me = '';
+  beforeAll(async () => {
+    process.env.KURAA_PERSON = join(mkdtempSync(join(tmpdir(), 'kuraa-import-person-')), 'person.json');
+    me = (await createPerson('Ada Lima')).id;
+  });
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'kuraa-import-'));
@@ -36,7 +44,7 @@ describe.skipIf(!pandocWasm())('Import', () => {
     writeFileSync(join(dir, 'books', 'keep.md'), '# Keep\n');
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'Initial');
-    running = await startHost({ dir, features: [importFeature], run: { engines: [], components: [pandocComponent] } });
+    running = await startHost({ dir, features: [importFeature, annotationsFeature], run: { engines: [], components: [pandocComponent] } });
   });
   afterEach(async () => {
     await running.close().catch(() => undefined);
@@ -96,7 +104,9 @@ describe.skipIf(!pandocWasm())('Import', () => {
 </ScrivenerProject>`;
     await send('session-scriv-1', {
       'Coast.scrivx': new TextEncoder().encode(scrivx),
-      'Files/Data/B/content.rtf': rtf('We came by \\b sea\\b0 .'),
+      // A comment on "the harbour" and a linked footnote on "dawn", as Scrivener anchors them: links to scrivcmt://<ID>.
+      'Files/Data/B/content.rtf': rtf('We came by \\b sea\\b0  into {\\field{\\*\\fldinst{HYPERLINK "scrivcmt://C-1"}}{\\fldrslt the harbour}} at {\\field{\\*\\fldinst{HYPERLINK "scrivcmt://F-1"}}{\\fldrslt dawn}}.'),
+      'Files/Data/B/content.comments': new TextEncoder().encode('<?xml version="1.0" encoding="UTF-8"?><Comments><Comment ID="C-1" Footnote="No" Author="Ada Byron" Date="2026-06-15 09:14:00 +0000"><![CDATA[' + new TextDecoder().decode(rtf('Which \\i harbour\\i0 ?')) + ']]></Comment><Comment ID="F-1" Footnote="Yes"><![CDATA[' + new TextDecoder().decode(rtf('The log, 1902.')) + ']]></Comment></Comments>'),
       'Files/Data/B/synopsis.txt': new TextEncoder().encode('They arrive.'),
       'Files/Data/C/content.rtf': rtf('Not in the book.'),
       'Files/Data/E/content.png': PIXEL,
@@ -104,7 +114,17 @@ describe.skipIf(!pandocWasm())('Import', () => {
     const r = await post('run', { session: 'session-scriv-1', kind: 'scrivener', into: '', name: 'Coast', snapshots: false });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ folder: 'Coast Novel', documents: 2, others: 1 });
-    expect(read('Coast Novel/Draft/arrival.md')).toBe('---\ntitle: Arrival\nsynopsis: They arrive.\nlabel: Scene\n---\n\nWe came by **sea**.\n');
+    expect(read('Coast Novel/Draft/arrival.md')).toBe('---\ntitle: Arrival\nsynopsis: They arrive.\nlabel: Scene\n---\n\nWe came by **sea** into the harbour at dawn[^s1].\n\n[^s1]: The log, 1902.\n');
+    expect(r.body).toMatchObject({ comments: 1 });
+    // Added in the import's one commit.
+    expect(git(dir, 'show', '--name-only', '--format=', 'HEAD')).toContain(`Coast Novel/Draft/arrival.md.annotations/@${me}.jsonld`);
+    // The comment, as the app's comments have it (Annotations on): the importing person's, on the words it was on, found there.
+    expect((await fetch(`${running.url}/api/features/annotations`, { method: 'PATCH', headers: { authorization: `Bearer ${running.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ on: true, by: ADA }) })).status).toBe(200);
+    const recent = (await (await fetch(`${running.url}/api/features/annotations/recent`, { headers: { authorization: `Bearer ${running.token}` } })).json()) as { path: string; text: string; quote: string | null; at: { from: number; to: number } | null; created: string }[];
+    expect(recent).toHaveLength(1);
+    expect(recent[0]).toMatchObject({ path: 'Coast Novel/Draft/arrival.md', text: 'Which *harbour*?\n\n— Ada Byron, in Scrivener', quote: 'the harbour', created: '2026-06-15T09:14:00.000Z' });
+    const doc = read('Coast Novel/Draft/arrival.md');
+    expect(doc.slice(recent[0]!.at!.from, recent[0]!.at!.to)).toBe('the harbour');
     expect(read('Coast Novel/Draft/.kuraa-compile.yml')).toMatch(/title: Coast Novel\nauthor: Ada Byron[\s\S]*exclude:\n {2}- outtake\.md/);
     expect(existsSync(join(dir, 'Coast Novel/Research/the-pixel.png'))).toBe(true);
     expect(read('Coast Novel/.kuraa-order')).toMatch(/\nDraft\nResearch\n$/);

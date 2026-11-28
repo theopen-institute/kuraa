@@ -1,7 +1,7 @@
 // What was chosen to import (0116), made into files with their places: a Word
 // file, as it is; a Scrivener project (a folder, dropped or picked, or a .zip
 // of one) as only what the import reads of it: its project file, its texts,
-// synopses, notes and research files. Not its snapshots, search indexes,
+// synopses, notes, comments, project notes and research files. Not its snapshots, search indexes,
 // backups, settings or Dropbox's conflicted copies.
 import { unzipSync } from 'fflate';
 
@@ -22,8 +22,12 @@ export const WORD = /\.(docx|odt|rtf|epub|html?)$/i;
 export function scrivenerWants(path: string): boolean {
   if (/conflicted copy/i.test(path)) return false;
   if (!path.includes('/')) return /\.scrivx$/i.test(path);
-  if (/^Files\/Docs\/[^/]+$/.test(path)) return !/\.(links|checksum|styles)$/i.test(path);
-  return /^Files\/Data\/[^/]+\/(content\.(?!styles$|comments$)[^/]+|synopsis\.txt|notes\.rtf)$/i.test(path);
+  // Scrivener 2: texts, synopses, notes, research, and comments (.links).
+  if (/^Files\/Docs\/[^/]+$/.test(path)) return !/\.(checksum|styles)$/i.test(path);
+  // Scrivener 2's project notes.
+  if (/^Files\/ProjectNotes\/[^/]+\.(xml|rtf)$/i.test(path)) return true;
+  // Scrivener 3: texts, research, comments (content.comments), synopses, notes.
+  return /^Files\/Data\/[^/]+\/(content\.(?!styles$)[^/]+|synopsis\.txt|notes\.rtf)$/i.test(path);
 }
 
 const stem = (name: string) => name.replace(/\.[^.]*$/, '');

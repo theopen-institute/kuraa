@@ -15,7 +15,7 @@ const ctx = props.ctx;
 const MAX = 1024 * 1024 * 1024;
 const PART = 8 * 1024 * 1024;
 
-type Result = { folder: string; first: string | null; documents: number; folders: number; images: number; others: number; left: string[] };
+type Result = { folder: string; first: string | null; documents: number; folders: number; images: number; others: number; comments?: number; left: string[] };
 const chosen = shallowRef<Chosen | null>(null);
 const split = ref<'chapters' | 'sections' | 'none'>('chapters');
 const stage = ref<'choose' | 'sending' | 'importing' | 'done'>('choose');
@@ -116,6 +116,7 @@ onBeforeUnmount(() => {
     <h3 class="import-heading">{{ S.heading(where) }}</h3>
     <template v-if="stage === 'done' && result">
       <p class="import-made" data-testid="import-made"><strong>{{ S.made(result.folder.split('/').pop()!) }}</strong>: {{ S.counts(result) }}</p>
+      <p v-if="result.comments" class="import-note">{{ S.commentsShown }}</p>
       <template v-if="result.left.length">
         <p class="import-note">{{ S.left }}</p>
         <ul class="import-left" data-testid="import-left"><li v-for="l in result.left" :key="l">{{ l }}</li></ul>

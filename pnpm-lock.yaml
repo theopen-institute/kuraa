@@ -840,6 +840,9 @@ importers:
 
   packages/import:
     dependencies:
+      '@kuraa/annotations':
+        specifier: workspace:*
+        version: link:../annotations
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile

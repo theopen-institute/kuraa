@@ -163,7 +163,8 @@ OpenDocument, RTF, EPUB, HTML) or a Scrivener project (2 or 3, its folder or a .
 of documents, converted by the built-in pandoc. A Word document gets a document for each chapter (or
 section); a Scrivener project its binder's folders and documents in order, with each one's synopsis,
 label, status and keywords, what goes in its book and its title, author and target for Compile, its
-research files, and its notes in a Notes folder ([0116](docs/decisions/0116-importing.md)).
+research files, its notes and project notes in a Notes folder, its comments as comments (on the
+words they were on) and its linked footnotes as footnotes ([0116](docs/decisions/0116-importing.md)).
 
 **Composition mode** (⌥⌘P, or the document's ⋯ menu) shows the page alone, full screen, until Escape:
 with typewriter scrolling, the document's words and target at the foot of the page, and the other

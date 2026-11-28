@@ -1,10 +1,21 @@
 // The Source view is editable: edits there reach the live document, character by
 // character, and edits made elsewhere (another person, in the rich view) appear
 // in it as they happen.
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 async function create(content: string): Promise<string> {
   const path = `runs/source-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.md`;
@@ -18,7 +29,7 @@ async function create(content: string): Promise<string> {
 }
 
 async function open(browser: Browser, name: string, path: string): Promise<Page> {
-  const page = await (await browser.newContext()).newPage();
+  const page = await (await ownContext(browser)).newPage();
   page.on('pageerror', (e) => console.error(`[${name}] page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${name}&email=${name.toLowerCase()}%40example.org`);
   await page.getByTestId(`file:${path}`).click();

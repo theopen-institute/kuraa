@@ -92,7 +92,8 @@ test('Running code: the session in the document’s menu, and Packages over Sett
   await openComponents(page);
   await page.getByTestId('settings-packages').click();
   const dialog = page.getByTestId('packages');
-  await expect(dialog.getByRole('heading')).toHaveText('R packages');
+  // Its title (a section below it is headed too once the workspace has packages).
+  await expect(dialog.getByRole('heading', { level: 2 })).toHaveText('R packages');
   await expect(page.getByTestId('settings-window')).toBeVisible();
   // Escape closes the dialog, not the window beneath it.
   await page.keyboard.press('Escape');

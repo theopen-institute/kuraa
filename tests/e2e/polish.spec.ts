@@ -5,7 +5,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
 
 const MAC = process.platform === 'darwin';
 const MOD = MAC ? 'Meta' : 'Control';
@@ -35,7 +35,7 @@ async function openFile(page: Page, path: string): Promise<void> {
 /** Where focus is: the path of the tree row that has it, or a test id near it. */
 const focusedPath = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.path ?? null);
 
-test('an empty document says how to start; ⌘/ lists the cues and keys, from the menu too', async ({ page }) => {
+test('an empty document says how to start; ⌘/ lists the cues and keys, from the menu too', async ({ page, browserName }) => {
   const path = `runs/empty-${Date.now().toString(36)}.md`;
   await create(path, '');
   await openApp(page);
@@ -50,14 +50,17 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   const editor = page.getByTestId('editor');
   await expect(editor).toHaveAttribute('aria-placeholder', 'Start writing…');
   expect(await placeholder.evaluate((el) => getComputedStyle(el, '::before').content)).toContain('Start writing…');
-  const axText = async () => {
-    const cdp = await page.context().newCDPSession(page);
-    const { nodes } = await cdp.send('Accessibility.getFullAXTree');
-    await cdp.detach();
-    return nodes.filter((n) => n.role?.value === 'StaticText').map((n) => String(n.name?.value ?? '')).join('\n');
-  };
-  expect(await axText()).not.toContain('Start writing');
-  expect(await axText()).not.toMatch(/^Title$/m);
+  // The accessibility tree is read through Chromium's own protocol: WebKit's and Firefox's are not open to the tests.
+  if (browserName === 'chromium') {
+    const axText = async () => {
+      const cdp = await page.context().newCDPSession(page);
+      const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+      await cdp.detach();
+      return nodes.filter((n) => n.role?.value === 'StaticText').map((n) => String(n.name?.value ?? '')).join('\n');
+    };
+    expect(await axText()).not.toContain('Start writing');
+    expect(await axText()).not.toMatch(/^Title$/m);
+  }
   await placeholder.click();
   await page.keyboard.type('Now there is text.');
   await expect(placeholder).toHaveCount(0);
@@ -120,7 +123,7 @@ test('a file shows at once from disk while its room connects; then it can be typ
   await expect(page.getByTestId('editor')).toBeVisible();
   await expect(previewed).toHaveCount(0);
   await page.getByTestId('editor').getByText('Read before').click();
-  await page.keyboard.press('End');
+  await page.keyboard.press(KEYS.lineEnd);
   await page.keyboard.type(' Typed.');
   await expect.poll(() => readFileSync(join(E2E.dir, path), 'utf8'), { timeout: 10_000 }).toContain('Read before the room is ready. Typed.');
 });
@@ -165,7 +168,8 @@ test('tasks: a box to tick by a click, "- [ ] " and "[x] " typed, a new one afte
     const data = new DataTransfer();
     data.setData('text/html', '<ul><li class="task-list-item"><input type="checkbox" checked disabled> Dust</li><li class="task-list-item"><input type="checkbox" disabled> Mop</li></ul>');
     data.setData('text/plain', '- [x] Dust\n- [ ] Mop');
-    document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    // The data set on the event, not given to it: Firefox empties what a page gives a ClipboardEvent it makes.
+    document.activeElement!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { bubbles: true, cancelable: true }), 'clipboardData', { value: data }));
   });
   await expect.poll(saved, { timeout: 10_000 }).toMatch(/- \[x\] Dust\n- \[ \] Mop\n/);
 });
@@ -218,7 +222,7 @@ test('offline: a banner says what is kept and not yet sent, and Try again reconn
 
   // What is typed meanwhile is counted as not yet sent.
   await page.getByTestId('editor').locator('p', { hasText: 'Before the outage.' }).click();
-  await page.keyboard.press('End');
+  await page.keyboard.press(KEYS.lineEnd);
   await page.keyboard.type(' Typed while offline.');
   await expect(page.getByTestId('offline-unsent')).toContainText(/not yet sent/);
 
@@ -319,6 +323,8 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
   const editor = page.getByTestId('editor');
   await editor.locator('p', { hasText: 'The text behind.' }).click();
   await expect(editor).toBeFocused();
+  await page.keyboard.press(KEYS.lineEnd);
+  await page.waitForTimeout(100);
 
   // ⌘, opens Settings with focus inside it: typing does not reach the document behind.
   await page.keyboard.press(`${MOD}+Comma`);
@@ -333,10 +339,12 @@ test('dialogs keep focus while open, close on Escape, and give focus back; the m
   expect(await menu.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+Tab');
   expect(await menu.evaluate((el) => el.contains(document.activeElement))).toBe(true);
-  // Escape closes it, and the document has focus again.
+  // Escape closes it, and the document has focus again, with the caret where it was (Firefox put it at the top).
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   await expect(editor).toBeFocused();
+  await page.keyboard.type('!');
+  await expect(editor.locator('p')).toHaveText('The text behind.!');
 
   // A dialog from the sidebar gives focus back to what opened it.
   const row = page.locator(`[role="treeitem"][data-path="${path}"]`);

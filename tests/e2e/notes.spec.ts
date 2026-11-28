@@ -2,10 +2,21 @@
 // will see, with the note on hover; notes stay together at the end in that
 // order, each showing its number, which leads back to the reference. Typing
 // [^label] or ^[text], or ⌥⌘F, makes notes. Labels in the file never change.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Browser, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const MAC = process.platform === 'darwin';
 const START = 'Cores were taken at low tide.[^cores] A second visit is planned.^[Weather permitting.]\n\nMore text.\n\n[^cores]: Cores were 25 cm deep.\n';
@@ -78,7 +89,7 @@ test('footnotes display, link both ways, and can be made by typing', async ({ pa
 
   // A footnote inserted before the others takes its place in the notes, in order.
   await endOf(page, 'Cores were taken at low tide.');
-  await page.keyboard.press('Home');
+  await page.keyboard.press(KEYS.lineStart);
   await page.keyboard.type('Early[^early]', { delay: 10 });
   await page.keyboard.type('An early note.');
   await expect(editor.locator('aside.note .note-label')).toHaveText(['1', '2', '4', '6']);
@@ -96,7 +107,7 @@ test('with two people, notes stay in order and are never duplicated', async ({ b
   });
   expect(res.status).toBe(201);
   const open = async (name: string) => {
-    const page = await (await browser.newContext()).newPage();
+    const page = await (await ownContext(browser)).newPage();
     await page.goto(`/?token=${E2E.token}&name=${name}&email=${name.toLowerCase()}%40example.org`);
     await page.getByTestId(`file:${path}`).click();
     await expect(page.getByTestId('peers')).toContainText(name);

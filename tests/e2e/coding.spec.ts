@@ -6,7 +6,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
 import { openComponents } from './settings.js';
 
 const api = (path: string, init: RequestInit = {}) =>
@@ -78,7 +78,7 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
 
   // # at the caret: the code there is suggested; Tab completes its name, Enter applies it to that point.
   await editor.locator('p', { hasText: 'Nobody' }).click({ position: { x: 4, y: 8 } });
-  await page.keyboard.press('End');
+  await page.keyboard.press(KEYS.lineEnd);
   await page.keyboard.type('#');
   await expect(box).toBeVisible();
   await page.keyboard.type('distr');
@@ -116,7 +116,7 @@ test('coding by #: a passage and a point, tags in the margin, highlighted when p
 
   // # meant as text: Esc types it, with what followed; at a new line's start, # and a space make a heading.
   await editor.locator('p', { hasText: 'Nobody' }).click({ position: { x: 4, y: 8 } });
-  await page.keyboard.press('End');
+  await page.keyboard.press(KEYS.lineEnd);
   await page.keyboard.type('#');
   await page.keyboard.type('1');
   await page.keyboard.press('Escape');

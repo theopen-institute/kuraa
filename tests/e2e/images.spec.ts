@@ -7,7 +7,7 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
 
 const MAC = process.platform === 'darwin';
 const PNG = '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082';
@@ -36,7 +36,8 @@ test('a pasted image is kept with the document and shown; a typed one too; both 
     const bytes = new Uint8Array(hex.match(/../g)!.map((h) => parseInt(h, 16)));
     const data = new DataTransfer();
     data.items.add(new File([bytes], 'Growth Curve.png', { type: 'image/png' }));
-    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    // The data set on the event, not given to it: Firefox empties what a page gives a ClipboardEvent it makes.
+    el.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { bubbles: true, cancelable: true }), 'clipboardData', { value: data }));
   }, PNG);
   // The dialog: nothing hidden in this one; its description from its name; Enter adds it.
   const dialog = page.getByTestId('add-images');
@@ -56,7 +57,7 @@ test('a pasted image is kept with the document and shown; a typed one too; both 
   await expect(page.getByTestId(`file:${dir}/report.md.files/growth-curve.png`)).toHaveCount(0);
 
   // A typed image, pointing at it.
-  await page.keyboard.press('End');
+  await page.keyboard.press(KEYS.lineEnd);
   await page.keyboard.press('Enter');
   await page.keyboard.type('Again: ![the curve](report.md.files/growth-curve.png) and a missing ![x](images/none.png)', { delay: 10 });
   await expect(editor.getByTestId('image')).toHaveCount(3);
@@ -149,7 +150,8 @@ test('a photo is kept without where it was taken, at a smaller size if chosen; c
     const photo = new Uint8Array([...jpeg.subarray(0, 2), ...app1, ...jpeg.subarray(2)]);
     const data = new DataTransfer();
     data.items.add(new File([photo], 'IMG_0042.jpg', { type: 'image/jpeg' }));
-    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    // Set on the event, as above (Firefox).
+    el.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { bubbles: true, cancelable: true }), 'clipboardData', { value: data }));
   });
 
   // Cancelled: nothing added.

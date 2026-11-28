@@ -9,7 +9,7 @@
 // file afterwards are never seen (Node 24). So on Linux each folder is watched
 // instead, which tells of any change to a name in it, whichever file it is now;
 // folders made later are watched as they appear, and those removed let go.
-import { readdirSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { readdirSync, realpathSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 export interface TreeWatcher {
@@ -28,8 +28,11 @@ export interface WatchTreeOptions {
  * forward slashes) that changed; `failed`, that watching had to stop (watches run
  * out on Linux, in a large folder).
  */
-export function watchTree(dir: string, changed: (rel: string) => void, failed: (err: Error) => void, o: WatchTreeOptions = {}): TreeWatcher {
+export function watchTree(given: string, changed: (rel: string) => void, failed: (err: Error) => void, o: WatchTreeOptions = {}): TreeWatcher {
   const slashed = (p: string) => p.split(sep).join('/');
+  // On Windows, by its full name: a folder named in the old short form (C:\Users\RUNNER~1\…) is watched, but its
+  // changes come under the long name, and libuv then stops the whole process (an assertion in fs-event.c).
+  const dir = process.platform === 'win32' ? fullName(given) : given;
   if (process.platform !== 'linux' && !o.folders) {
     const w = watch(dir, { recursive: true }, (_event, filename) => {
       if (filename) changed(slashed(String(filename)));
@@ -113,4 +116,13 @@ export function watchTree(dir: string, changed: (rel: string) => void, failed: (
   add(dir);
   scan(dir);
   return { close };
+}
+
+/** A folder's full name, as the system has it (on Windows, long names for short ones); the name given if it cannot be had. */
+function fullName(dir: string): string {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
 }

@@ -109,7 +109,6 @@ export function useFeatureHost(o: FeatureHostOptions) {
   const codeChanged = () => tell(codeListeners, 'the code session changing');
   /** The host's own services, offered to components (0089, 0091): always the open workspace's. */
   const coreHost: CoreHost = {
-    search: { run: (q, caseSensitive) => api.value.search(q, caseSensitive) },
     renders: {
       info: (p) => api.value.renders(p),
       render: (p, format, compile) => api.value.render(p, format, o.person(), compile),

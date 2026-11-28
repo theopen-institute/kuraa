@@ -14,6 +14,7 @@ import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { standardTypes } from '@kuraa/formats';
 import { mergeLines, type DocumentType } from '@kuraa/kernel';
+import { searchFeature } from '@kuraa/search';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { commitSigner } from '../src/signing.js';
 import { sign, signRecord, signsMessage, vouchMessage } from '../src/peers/records.js';
@@ -141,7 +142,7 @@ type Net = Pick<PeerOptions, 'direct' | 'computer' | 'tunnelAfterMs' | 'lan' | '
 
 async function start(dir: string, extra: { types?: DocumentType[]; person?: Person; invites?: object; run?: RunOptions; node?: PeerNode; dialMs?: number; lookupsMs?: number[]; bootstrap?: unknown[]; net?: Net; timings?: Partial<HostTimings>; features?: HostFeature[] } = {}): Promise<RunningHost> {
   const { person, node, dialMs, lookupsMs, bootstrap, net, timings, ...rest } = extra;
-  const h = await startHost({ ...rest, dir, timings: { ...FAST, ...timings }, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
+  const h = await startHost({ features: [searchFeature], ...rest, dir, timings: { ...FAST, ...timings }, peers: { bootstrap: (bootstrap ?? testnet.bootstrap) as never, signing: signingKeyFor(dir), person: person ?? (await personFor(dir)), node, dialMs, lookupsMs, ...net }, log: process.env.PEER_LOG ? (m) => console.log(`[${dir.slice(-6)}] ${m}`) : undefined });
   hosts.push(h);
   return h;
 }
@@ -744,7 +745,7 @@ describe('equal members, and forks', () => {
     await until(() => existsSync(join(dirB, 'plan.md.files/cake.png')), 20_000, 'the plan’s image on Bo’s device');
     const treeB = { files: await treeOf(b) };
     expect(treeB.files.find((f) => f.path === 'plan.md')?.readers).toBe('You and Ada');
-    expect(((await (await api(b, '/api/search?q=surprise')).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('plan.md');
+    expect(((await (await api(b, '/api/features/search/search?q=surprise')).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('plan.md');
     // Bo changes it: it comes back to Ada, in the space.
     writeFileSync(join(dirB, 'plan.md'), '# Plan\n\nThe surprise party is on Friday. Bo brings cake.\n');
     await b.host.serial(() => b.host.commitPaths(['plan.md'], 'Cake'));
@@ -765,7 +766,7 @@ describe('equal members, and forks', () => {
     expect(() => git(dirC, 'cat-file', '-e', cakeBlob)).toThrow();
     const treeC = (await (await api(c, '/api/tree')).json()) as { files: { path: string }[] };
     expect(treeC.files.map((f) => f.path)).not.toContain('plan.md');
-    expect(((await (await api(c, '/api/search?q=cake')).json()) as { files: { path: string }[] }).files).toEqual([]);
+    expect(((await (await api(c, '/api/features/search/search?q=cake')).json()) as { files: { path: string }[] }).files).toEqual([]);
     // Its file went from Cy's working tree with the workspace's branch, and its own files with it; the later image never came.
     await until(() => !existsSync(join(dirC, 'plan.md')), 20_000, 'the plan gone from Cy’s copy');
     await until(() => !existsSync(join(dirC, 'plan.md.files/venue.png')), 20_000, 'the plan’s first image gone from Cy’s copy');

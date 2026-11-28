@@ -401,10 +401,6 @@ export interface RenderInfo {
   renders: RenderState[];
 }
 
-/** Where a phrase was found (the host's search, 0042). */
-export interface SearchMatch { line: number; column: number; text: string; at: number }
-export interface SearchFile { path: string; type: string | null; title?: string | null; live: boolean; matches: SearchMatch[] }
-export interface SearchResult { files: SearchFile[]; truncated: boolean }
 
 /** A tool (TeX, say) as far as a component follows it (0045). */
 export interface ToolState {
@@ -423,7 +419,6 @@ export interface ToolState {
  * as the client's own calls do.
  */
 export interface CoreHost {
-  search: SearchService;
   renders: RenderService;
   tools: ToolService;
   code: CodeService;
@@ -455,11 +450,6 @@ export interface HistoryService {
   wordsByDay(since: string): Promise<WordsDay[]>;
 }
 
-/** Searching the workspace (0042). */
-export interface SearchService {
-  /** Search the workspace's text files, and open documents as they are now. */
-  run(query: string, caseSensitive: boolean): Promise<SearchResult>;
-}
 
 /** Rendering documents (0041), and what their outputs were made from (0081). */
 export interface RenderService {

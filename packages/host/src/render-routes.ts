@@ -1,12 +1,11 @@
-// The HTTP routes for rendering documents (renders.ts) and searching the
-// workspace (search.ts), added to http.ts's table.
+// The HTTP routes for rendering documents (renders.ts), added to http.ts's
+// table. Searching is @kuraa/search's (0120), on its own routes.
 import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
 import { personOf, readBody, send } from './http.js';
 import { HttpError } from './errors.js';
 import { bookName, MIME, RENDER_FORMATS, type CompileOptions, type RenderFormat } from './renders.js';
-import { searchWorkspace } from './search.js';
 
 const route = (method: Route['method'], path: string, handle: (c: Context) => Promise<void>): Route => ({ method, path, handle });
 
@@ -95,14 +94,5 @@ export const renderRoutes: Route[] = [
       'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${name}.zip`)}`,
     });
     c.res.end(bytes);
-  }),
-];
-
-// Searching the workspace's text files, and open documents as they are being edited.
-export const searchRoutes: Route[] = [
-  route('GET', '/api/search', async (c) => {
-    const query = c.q.get('q') ?? '';
-    if (!query.trim() || query.length > 500 || query.includes('\n')) throw new HttpError(400, 'Search for a phrase of up to 500 characters, on one line');
-    send(c.res, 200, await searchWorkspace(c.host, query, c.q.get('case') === '1'));
   }),
 ];

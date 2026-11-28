@@ -28,19 +28,20 @@
   },
   "devDependencies": {
     "@kuraa/annotations": "workspace:*",
+    "@kuraa/compile": "workspace:*",
+    "@kuraa/corkboard": "workspace:*",
+    "@kuraa/details": "workspace:*",
     "@kuraa/env-podman": "workspace:*",
     "@kuraa/feature-example": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",
-    "@kuraa/render-pandoc": "workspace:*",
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",
-    "@kuraa/compile": "workspace:*",
     "@kuraa/import": "workspace:*",
-    "@kuraa/details": "workspace:*",
-    "@kuraa/corkboard": "workspace:*",
-    "yaml": "^2.9.1",
+    "@kuraa/render-pandoc": "workspace:*",
+    "@kuraa/search": "workspace:*",
     "@kuraa/sync-git": "workspace:*",
     "@types/ws": "^8.18.2",
-    "prosemirror-transform": "^1.12.5"
+    "prosemirror-transform": "^1.12.5",
+    "yaml": "^2.9.1"
   }
 }

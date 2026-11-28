@@ -13,6 +13,7 @@ import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, featureUpdate, type HeadlessClient } from '@kuraa/session/testing';
 import { defineFeature, type FeatureEvents, type HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
+import { searchFeature } from '@kuraa/search';
 import { startHost, type RunningHost } from '../src/index.js';
 import { checkFeatures } from '../src/features.js';
 import { createPerson } from '../src/peers/person.js';
@@ -129,7 +130,7 @@ describe('features', () => {
   };
   const file = (name: string) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8') : null);
   const start = async (o: { featuresOn?: string[] } = {}) => {
-    running = await startHost({ dir, timings: FAST, features: [marksFeature, spyFeature(seen)], ...o });
+    running = await startHost({ dir, timings: FAST, features: [marksFeature, spyFeature(seen), searchFeature], ...o });
   };
   /** Mark a phrase in an open document, as a client's editor would. */
   const mark = (c: HeadlessClient, id: string, phrase: string, by = ALICE) => {
@@ -347,10 +348,10 @@ describe('features', () => {
     expect((await clear()).status).toBe(200);
     expect(file(COMPANION)).toBeNull();
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('1 mark removed');
-    // Search leaves companions out.
+    // Search (a feature of its own, 0120) leaves another feature's companions out.
     mkdirSync(join(dir, 'other.md.marks'), { recursive: true });
     writeFileSync(join(dir, `other.md.marks/@${ME}.json`), '{"marks": []} tide');
-    const found = (await json('/api/search?q=tide')).body as { files: { path: string }[] };
+    const found = (await json('/api/features/search/search?q=tide')).body as { files: { path: string }[] };
     expect(found.files.map((f) => f.path)).toEqual(['notes.md']);
   });
 

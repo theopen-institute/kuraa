@@ -1,6 +1,6 @@
-// Searching the workspace: tracked and untracked text files as .gitignore leaves
-// them, never through links, not binary or large files; open documents as they
-// are being edited.
+// Searching the workspace (@kuraa/search's host half, 0120): tracked and
+// untracked text files as .gitignore leaves them, never through links, not
+// binary or large files; open documents as they are being edited.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ import { Transform } from 'prosemirror-transform';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { startHost, type RunningHost } from '../src/index.js';
-import type { SearchResult } from '../src/search.js';
+import { searchFeature, type SearchResult } from '@kuraa/search';
 
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 const ADA = { name: 'Ada', email: 'ada@example.org', color: '#123456' };
@@ -22,7 +22,7 @@ describe('search', () => {
   const clients: HeadlessClient[] = [];
 
   const api = (path: string) => fetch(running.url + path, { headers: { authorization: `Bearer ${running.token}` } });
-  const search = async (q: string, caseSensitive = false) => (await (await api(`/api/search?q=${encodeURIComponent(q)}${caseSensitive ? '&case=1' : ''}`)).json()) as SearchResult;
+  const search = async (q: string, caseSensitive = false) => (await (await api(`/api/features/search/search?q=${encodeURIComponent(q)}${caseSensitive ? '&case=1' : ''}`)).json()) as SearchResult;
   const paths = (r: SearchResult) => r.files.map((f) => f.path);
 
   beforeEach(async () => {
@@ -47,7 +47,7 @@ describe('search', () => {
     writeFileSync(join(outside, 'secret.txt'), 'tide secret\n');
     symlinkSync(outside, join(dir, 'elsewhere'));
     symlinkSync(join(outside, 'secret.txt'), join(dir, 'secret.txt'));
-    running = await startHost({ dir, port: 0, timings: { flushMs: 60_000, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 } });
+    running = await startHost({ dir, port: 0, timings: { flushMs: 60_000, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 }, features: [searchFeature] });
   });
 
   afterEach(async () => {
@@ -76,7 +76,7 @@ describe('search', () => {
     expect((await search('--help')).files).toEqual([]);
     expect((await search('x <- 1')).files.map((f) => f.path)).toEqual(['code.R']);
     expect((await search('.*')).files).toEqual([]);
-    expect((await api('/api/search?q=')).status).toBe(400);
+    expect((await api('/api/features/search/search?q=')).status).toBe(400);
   });
 
   it('finds what is being typed in an open document before it reaches the file', async () => {

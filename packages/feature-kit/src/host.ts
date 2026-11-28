@@ -142,6 +142,12 @@ export interface FeatureEvents {
 
 export type FeatureEvent = keyof FeatureEvents;
 
+/** How FeatureContext.read reads a file. */
+export interface ReadOptions {
+  /** Not read where larger than this many bytes (null is returned). */
+  maxBytes?: number;
+}
+
 /** A file converted into Markdown (FeatureContext.convert), or why not. */
 export type ConvertedFile =
   | { ok: true; markdown: string; media: { name: string; bytes: Uint8Array }[] }
@@ -159,8 +165,18 @@ export interface FeatureContext {
   readonly id: string;
   /** Its settings for the workspace, as they are now. */
   settings(): FeatureSettings;
-  /** A workspace file's text, if this device holds it and it is text; null otherwise. */
-  read(path: string): Promise<string | null>;
+  /**
+   * A workspace file's text, if this device holds it and it is text (UTF-8,
+   * not through a link); null otherwise. `maxBytes`: null for a file larger
+   * than this, which is then not read.
+   */
+  read(path: string, o?: ReadOptions): Promise<string | null>;
+  /**
+   * A document's text as its room here has it now (0120), what was typed a
+   * moment ago, before it is written to its file; null where it has no room
+   * here (read its file).
+   */
+  live(path: string): Promise<string | null>;
   /**
    * Write one of its own files (this host's person's own file beside a
    * document that exists, or one it declared), whole, or remove it (null):
@@ -209,6 +225,12 @@ export interface FeatureContext {
   companions(doc: string, suffix?: string): Promise<{ person: string; path: string; text: string }[]>;
   /** The document a companion file of this feature belongs to, or null. */
   documentOf(path: string): string | null;
+  /**
+   * The document any file is kept beside (0120), or null: any feature's
+   * companion (0082) or a document's own files (0109). Such files are shown,
+   * counted and searched with their document, not on their own.
+   */
+  belongsTo(path: string): string | null;
   /** Be told after something happens. Returns how to stop. */
   on<E extends FeatureEvent>(event: E, fn: (payload: FeatureEvents[E]) => void | Promise<void>): () => void;
   /** Tell its client halves: those with `path` open, or every one with any document open. */

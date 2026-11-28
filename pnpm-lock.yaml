@@ -804,6 +804,9 @@ importers:
       '@kuraa/render-pandoc':
         specifier: workspace:*
         version: link:../render-pandoc
+      '@kuraa/search':
+        specifier: workspace:*
+        version: link:../search
       '@kuraa/sync-git':
         specifier: workspace:*
         version: link:../sync-git

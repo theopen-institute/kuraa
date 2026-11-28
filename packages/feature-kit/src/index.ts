@@ -28,7 +28,7 @@
 // any file named `@<identity ID>`, knowing no feature.
 
 /** Bumped whenever this contract changes incompatibly. The host refuses a feature written for another. */
-export const FEATURE_API_VERSION = 1;
+export const FEATURE_API_VERSION = 2;
 
 /** What a feature keeps and sends: JSON. */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };

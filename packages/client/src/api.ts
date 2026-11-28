@@ -222,10 +222,6 @@ export interface RenderInfo {
   unavailable: string | null;
   renders: RenderState[];
 }
-/** Where a phrase was found (the host's search.ts). */
-export interface SearchMatch { line: number; column: number; text: string; at: number }
-export interface SearchFile { path: string; type: string | null; title?: string | null; live: boolean; matches: SearchMatch[] }
-export interface SearchResult { files: SearchFile[]; truncated: boolean }
 
 export class ApiError extends Error {
   /** `body`: the whole answer, where it says more than its message. */
@@ -389,7 +385,6 @@ export class HostApi {
     return (await this.req(`/api/renders/made-from?path=${encodeURIComponent(path)}&format=${format}`)).blob();
   }
   /** Search the workspace's text files, and open documents as they are now. */
-  search(query: string, caseSensitive: boolean) { return this.json<SearchResult>(`/api/search?q=${encodeURIComponent(query)}${caseSensitive ? '&case=1' : ''}`); }
   /** Features (0082): how each the host has stands for this workspace. */
   features() { return this.json<{ features: FeatureStatus[] }>('/api/features').then((r) => r.features); }
   /** Turn a feature on or off for this workspace, or change its settings there: committed, for everyone in it. */

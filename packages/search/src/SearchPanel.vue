@@ -2,9 +2,10 @@
 // Search across the workspace (⇧⌘F): every text file, and open documents as
 // they are being edited. Results are grouped by file, documents by their title;
 // choosing one opens the file at the match (the core's openMatch). Asked for
-// again while open, the field takes focus (0089).
+// again while open, the field takes focus (0089). Its host half searches (0120).
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import type { FeaturePanelContext, SearchMatch, SearchResult } from '@kuraa/feature-kit/client';
+import type { FeaturePanelContext } from '@kuraa/feature-kit/client';
+import type { SearchMatch, SearchResult } from './search.js';
 import { S } from './strings.js';
 
 const props = defineProps<{ ctx: FeaturePanelContext }>();
@@ -30,7 +31,7 @@ async function search() {
   }
   searching.value = true;
   try {
-    const r = await props.ctx.host.search.run(q, caseSensitive.value);
+    const r = (await props.ctx.request('GET', `search?q=${encodeURIComponent(q)}${caseSensitive.value ? '&case=1' : ''}`)) as unknown as SearchResult;
     if (n !== asked) return;
     result.value = r;
     searched.value = q;

@@ -15,7 +15,7 @@ import type { Host } from './host.js';
 import { MERGE_AUTHOR } from './merging.js';
 import { HttpError, NotAllowed } from './errors.js';
 import { renameOver, unportablePath } from './files.js';
-import { renderRoutes, searchRoutes } from './render-routes.js';
+import { renderRoutes } from './render-routes.js';
 import { toolRoutes } from './tool-routes.js';
 import { writingRoutes } from './writing.js';
 import { corsHeaders, hostAllowed, refuseHost } from './origins.js';
@@ -917,7 +917,7 @@ const featureRoutes: Route[] = [
   })),
 ];
 
-const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...searchRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes, ...featureRoutes];
+const ROUTES: Route[] = [...workspaceRoutes, ...runRoutes, ...renderRoutes, ...toolRoutes, ...fileRoutes, ...historyRoutes, ...peerRoutes, ...personRoutes, ...syncRoutes, ...writingRoutes, ...featureRoutes];
 
 /** The route for a request, and the groups of its path. */
 function findRoute(method: string, path: string): { route: Route; params: string[] } | null {

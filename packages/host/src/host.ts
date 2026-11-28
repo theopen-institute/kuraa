@@ -3166,6 +3166,12 @@ export class Host {
       canWrite: async (p) => (this.peers ? (await this.peers.access(p)).canWrite : true),
       list: () => this.listFiles(),
       typeFor: (p) => this.typeFor(p),
+      liveText: async (p) => {
+        // Most files have no room: answered without asking git which branch is checked out.
+        if (![...this.records.values()].some((r) => r.path === p)) return undefined;
+        const rec = this.records.get(`${await this.git.branch()}:${p}`);
+        return rec ? this.roomText(rec.room) : undefined;
+      },
       tell: (feature, message, path) => {
         const m: RoomMessage = { type: 'feature', feature, message, path };
         if (path) this.broadcastPath(path, m);

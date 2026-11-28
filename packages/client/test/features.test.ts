@@ -38,9 +38,9 @@ describe('features in the client', () => {
   });
 
   it('are given only the host services they say they use (0091)', async () => {
-    const host = { search: { run: async () => ({ files: [], truncated: false }) }, renders: {}, tools: {} } as unknown as CoreHost;
-    const given = servicesFor(defineClientFeature({ id: 'finder', uses: ['search'] }), host);
-    expect(await given.search.run('x', false)).toEqual({ files: [], truncated: false });
+    const host = { tools: { list: async () => ({ tools: [] }) }, renders: {} } as unknown as CoreHost;
+    const given = servicesFor(defineClientFeature({ id: 'finder', uses: ['tools'] }), host);
+    expect(await given.tools.list()).toEqual({ tools: [] });
     expect(() => given.renders).toThrow(/finder uses the host's renders without saying so/);
   });
 

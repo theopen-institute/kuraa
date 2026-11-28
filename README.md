@@ -343,7 +343,7 @@ for its DHT node (`--peer-port`, `--dht-port` say otherwise; 0, any free port). 
 tells them where, so devices on networks that block UDP reach it too; without it, it is reached as
 any device is. `server join` says how it goes, the copy included, however long it takes. The owner
 takes it out from its view under **People** (**Remove from workspace…**), and may invite it back with a
-new link; **Lost or stolen…**, beside its device there, shuts its key out for good (a server with a new
+new link; **Block this server's access…**, there too, shuts its key out for good (a server with a new
 key may join again). One
 service per computer: installing one as a server replaces a host's.
 
@@ -452,7 +452,10 @@ their own: their role (a menu, for whoever may change it), their computers, each
 connected and **Lost or stolen…** (blocking its key, for good: your own, whether or not you are an
 admin, its key revoked too where your identity is on this computer; anyone's, for admins), and
 **Remove from workspace…** (they can be invited back). Admins have **Invite people…**, which makes and
-lists invite links, to revoke; you rename this computer from your own view. From the command line, `pnpm host
+lists invite links, to revoke; you rename this computer from your own view. At the end of Workspace
+settings, **Leave this workspace…** takes you out (everyone is told; the owner hands the role on first),
+and **Remove this device from this workspace…** stops this computer syncing it (its folder stays, and no
+one is told). From the command line, `pnpm host
 devices` and `people` list them; `remove-device`, `role <person> admin|member`, `remove-person`,
 `name` and `fork` manage them. Paired devices
 are git remotes (`kuraa://<device key>`): `git log laptop/main` shows what a device has.

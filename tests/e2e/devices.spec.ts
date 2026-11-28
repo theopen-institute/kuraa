@@ -163,3 +163,54 @@ test('people on two devices edit one document; a member made owner renames their
     await testnet.destroy();
   }
 });
+
+test('a member leaves the workspace from its settings: taken out, everyone told; the owner hands the role on first (0107)', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const testnet = await createTestnet(3);
+  const dirA = mkdtempSync(join(tmpdir(), 'kuraa-e2e-leave-a-'));
+  const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  git(dirA, 'init', '-q', '-b', 'main');
+  git(dirA, 'config', 'user.name', 'Ada');
+  git(dirA, 'config', 'user.email', 'ada@example.org');
+  writeFileSync(join(dirA, 'notes.md'), '---\ntitle: Field notes\n---\n\nThe tide was out.\n');
+  git(dirA, 'add', '-A');
+  git(dirA, 'commit', '-q', '-m', 'Initial');
+  const peers = { bootstrap: testnet.bootstrap as never };
+  const keys = mkdtempSync(join(tmpdir(), 'kuraa-e2e-leave-keys-'));
+  const adaPerson = await createPerson('Ada', join(keys, 'ada', 'person.json'));
+  const boPerson = await createPerson('Bo', join(keys, 'bo', 'person.json'));
+  const asAda = { ...peers, person: adaPerson, signing: await keptKey(join(keys, 'ada', 'signing.json')) };
+  const asBo = { ...peers, person: boPerson, signing: await keptKey(join(keys, 'bo', 'signing.json')) };
+  const a = await startHost({ features: standardFeatures, dir: dirA, staticDir: STATIC, timings: TIMINGS, peers: asAda, invites: { peers: asAda } });
+  const dirB = join(mkdtempSync(join(tmpdir(), 'kuraa-e2e-leave-b-')), 'notes');
+  await joinWorkspace({ dir: dirB, invitation: await a.host.peers!.inviteLink({ hours: 24, once: true }), name: 'laptop', bootstrap: peers.bootstrap, timeoutMs: 20_000, person: boPerson, signing: asBo.signing });
+  const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
+  try {
+    const open = async (h: typeof a, name: string) => {
+      const page = await (await browser.newContext()).newPage();
+      await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
+      await openSettings(page);
+      await page.getByTestId('settings-tab-workspace').click();
+      return page;
+    };
+    const ada = await open(a, 'Ada');
+    const bo = await open(b, 'Bo');
+    await expect(ada.getByTestId('person:Bo')).toBeVisible({ timeout: 20_000 });
+    // The owner may not leave: she hands the role on first, as the button says.
+    await expect(ada.getByTestId('menu-leave-workspace')).toBeDisabled();
+    await expect(ada.getByTestId('settings-workspace')).toContainText('give the role to someone else first');
+    // Bo leaves: asked first, then taken out; his device says so, and Ada's list no longer has him.
+    await bo.getByTestId('menu-leave-workspace').click();
+    await expect(bo.getByTestId('ask')).toContainText('everyone is told');
+    await bo.getByTestId('ask').getByRole('button', { name: 'Leave' }).click();
+    await expect(bo.getByTestId('device-removed')).toBeVisible({ timeout: 20_000 });
+    await expect(bo.getByTestId('menu-leave-workspace')).toHaveCount(0);
+    await expect(ada.getByTestId('person:Bo')).toHaveCount(0, { timeout: 20_000 });
+    await ada.getByTestId('removals-details').locator('summary').click();
+    await expect(ada.getByTestId('removals')).toContainText('Bo removed by Bo');
+  } finally {
+    await b.close();
+    await a.close();
+    await testnet.destroy();
+  }
+});

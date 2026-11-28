@@ -5,7 +5,8 @@
 // server: its device here), how each is connected; this computer renamed here.
 // Each computer may be said to be lost or stolen, which blocks its key (0072),
 // for good; and the person, or the server, removed from the workspace, which
-// can be undone by inviting them again. Neither is offered in the list, where a
+// can be undone by inviting them again. A server is not lost or stolen, its key
+// goes astray: its access is blocked, beside removing it. Neither is offered in the list, where a
 // click is easily made.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
@@ -76,15 +77,17 @@ async function chooseRole(e: Event) {
 /** Whether this computer (or server's device) may be said to be lost or stolen here. */
 const mayBlockDevice = (d: Device) => {
   if (!i.value || !m.value) return false;
-  return m.value.kind === 'person' ? mayBlock(i.value, m.value.p, d) : managesServers(i.value) && !m.value.s.you;
+  return m.value.kind === 'person' && mayBlock(i.value, m.value.p, d);
 };
+/** Whether you may block this server's access (its key): the owner's (0099). */
+const mayBlockServer = computed(() => !!i.value && m.value?.kind === 'server' && managesServers(i.value) && !m.value.s.you);
+async function blockServer() {
+  if (m.value?.kind !== 'server') return;
+  const s = m.value.s;
+  if (await askConfirm(S.keys.blockServerAsk(s.name), S.servers.blockButton, true)) await act(() => props.api.removeServer(s.key, true));
+}
 async function lostOrStolen(d: Device) {
-  if (!m.value) return;
-  if (m.value.kind === 'server') {
-    const s = m.value.s;
-    if (await askConfirm(S.keys.blockServerAsk(s.name), S.keys.blockButton, true)) await act(() => props.api.removeServer(s.key, true));
-    return;
-  }
+  if (m.value?.kind !== 'person') return;
   const own = m.value.p.you;
   const ok = await askConfirm(own ? S.keys.blockOwnAsk(d.name) : S.keys.blockAsk(S.devices.on(nameOf(m.value.p), d.name)), S.keys.blockButton, true);
   if (!ok) return;
@@ -164,9 +167,15 @@ async function rename(current: string) {
       </ul>
       <p v-if="note" class="menu-facts" role="status" data-testid="device-note">{{ note }}</p>
 
-      <div v-if="mayRemove" class="member-remove">
-        <button type="button" class="danger" :disabled="busy" data-testid="member-remove" @click="remove">{{ m.kind === 'server' ? S.servers.removeFromWorkspace : S.people.removeFromWorkspace }}</button>
-        <span class="menu-facts">{{ m.kind === 'server' ? S.servers.removeAbout : S.people.removeAbout }}</span>
+      <div v-if="mayRemove || mayBlockServer" class="member-remove">
+        <template v-if="mayRemove">
+          <button type="button" class="danger" :disabled="busy" data-testid="member-remove" @click="remove">{{ m.kind === 'server' ? S.servers.removeFromWorkspace : S.people.removeFromWorkspace }}</button>
+          <span class="menu-facts">{{ m.kind === 'server' ? S.servers.removeAbout : S.people.removeAbout }}</span>
+        </template>
+        <template v-if="mayBlockServer">
+          <button type="button" class="danger member-block" :disabled="busy" data-testid="server-block" @click="blockServer">{{ S.servers.block }}</button>
+          <span class="menu-facts">{{ S.servers.blockAbout }}</span>
+        </template>
       </div>
       <ErrorBanner v-if="error" :error="error" inline />
     </section>
@@ -184,4 +193,5 @@ async function rename(current: string) {
 .member-view .menu-devices button.lost { color: var(--warn); }
 .member-remove { display: grid; gap: 4px; justify-items: start; padding-top: 10px; border-top: 1px solid var(--border); }
 .member-remove button.danger { color: var(--warn); }
+.member-remove .member-block { margin-top: 8px; }
 </style>

@@ -38,15 +38,26 @@ its own):
   admin's). This computer is there too, with **Rename…**. Beneath, set apart by a line, **Remove from
   workspace…** for whoever may remove them, with what it does: their computers stop syncing here; they
   can be invited back; a lost or stolen computer is said so beside it instead, and they stay in.
-- **A server's view**, the same: what a server is, its device here with **Lost or stolen…**, and
-  **Remove from workspace…** (it can be invited back), the owner's.
-- **Lost or stolen…** blocks that computer's signing key, or the server's key, here, for good (a
-  `drop`, 0072): the question says to use it only if it is lost or stolen, and what follows.
+- **A server's view**, the same: what a server is, its device here, **Remove from workspace…** (it can
+  be invited back), and beneath it **Block this server's access…**, both the owner's. A server is not
+  lost or stolen; its key goes astray ("A server isn't normally "stolen", its key just goes rogue", as
+  the owner put it), so its blocking is named for what it does, and set beside removing it.
+- **Lost or stolen…** blocks that computer's signing key here, for good (a `drop`, 0072), as **Block
+  this server's access…** does the server's key: each question says to use it only if someone else may
+  have the key, and what follows.
 - With no policy yet, there are no people to list: the computers are, with **Rename this computer…**.
 - **Groups**, no longer *Workspace groups*.
-- **Stop using on this computer…**, no longer *Remove from this list…*: what it does, which is local
-  (the workspace closes and comes off this computer's workspaces; its folder stays; no one else is
-  told, and whoever uses it stays in the workspace), said in its name and its question.
+- **The two ways out**, at the end of Workspace settings, each with what it does beneath it:
+  - **Leave this workspace…**: you are taken out (a `revoke` of yourself, which the policy lets
+    anyone make), on all your computers, and everyone is told; you keep your copy, and someone can
+    invite you back. Not the owner, who gives the role to someone first: the button says so, and is
+    shut until then.
+  - **Remove this device from this workspace…**, no longer *Remove from this list…* (nor, briefly,
+    *Stop using on this computer…*): local, as before. This computer stops syncing the workspace and
+    takes it off its workspaces; the folder stays, and can be added again; no one else is told, and you
+    stay in the workspace, this computer shown to the others as offline. Where the host lets
+    workspaces be taken off its list (the app's own).
+  The owner asked for these two names, *Remove workspace* being wrong as the files stay.
 - Removing a person said as it is: they can be invited back (a person taken out is a `revoke`, and a
   new link lets them in again, their cutoff no longer counting). It said their devices were removed for
   good.
@@ -83,6 +94,4 @@ person's view.
 
 ## Not yet
 
-- **Leave this workspace…** in your own view (a person removing themselves, which the policy allows:
-  it tells everyone, unlike Stop using on this computer).
 - Folding away computers not seen for months, in a person's view.

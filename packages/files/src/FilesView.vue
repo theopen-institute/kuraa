@@ -192,7 +192,7 @@ function nudge(path: string, by: -1 | 1) {
   void ctx.place(path, folder, names).then(() => focusRow(path));
 }
 
-// Motion (0115): when you move a row (a drop, or Alt+↑/↓), the rows whose
+// Motion (0116): when you move a row (a drop, or Alt+↑/↓), the rows whose
 // place changed glide there from where they were, the moved one too, across
 // folders as well. Nothing moves otherwise, nor where motion is reduced. Only
 // rows in sight are animated, and the tree is measured once before and once

@@ -1,4 +1,4 @@
-# 0115 · Motion, where you caused a change
+# 0116 · Motion, where you caused a change
 
 **Status: built.** The design is meant to be clean and clear, with as little on screen as possible.
 The owner asked whether a few subtle animations would help you see what changed: rows moving when a

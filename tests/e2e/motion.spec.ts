@@ -1,4 +1,4 @@
-// Motion (docs/decisions/0115-motion.md): rows moved in the file tree glide to
+// Motion (docs/decisions/0116-motion.md): rows moved in the file tree glide to
 // their places, only those whose place changed; a pane beside the document comes
 // in from the right. Neither where motion is reduced (the other tests' setting).
 import { expect, test, type Page } from '@playwright/test';

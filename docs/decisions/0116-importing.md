@@ -74,15 +74,35 @@ the project's title. The format was learned from a real Scrivener 2.4 project, i
 - **What isn't in the compile** (*Include in compile* off) is left out of Compile (0093).
 - **The Draft** gets the project's title, author and word target for Compile (0106).
 - **Research's PDFs, images and the like** come as files.
-- **Notes** become documents in a **Notes** folder, titled as their documents.
-- **Said and left:**
-  - the Trash;
-  - snapshots;
-  - web pages kept in the project;
-  - comments (the words they were on are kept: their links are taken away).
+- **Notes** become documents in a **Notes** folder, titled as their documents. So do **the
+  project's notes** (Scrivener 2's: `Files/ProjectNotes/index.xml`, which names them, and
+  `<ID>.rtf`; Scrivener 3 has none, as it made them binder documents), first, by their titles.
+- **Comments** become Kuraa's (0082). They are anchored in the text as links to
+  `scrivcmt://<ID>` on the words they are about. Their own text is RTF in the document's comments
+  file, Scrivener 2's `<ID>.links` (`Links/CommentsAndFootnotes/Comment` with `ID`, `IsFootnote`
+  and its `RTF`) or Scrivener 3's `content.comments` (`Comments/Comment` with `ID`, `Footnote`,
+  `Author`, `Date`, its RTF its text). Scrivener 3's was learned from a public description, which
+  calls its shape approximate, so both are read leniently: either attribute name, the RTF in a child
+  or as the element's own text.
+  - The link is taken away and its words kept. The comment is an annotation of the importing
+    person's, in their own file beside the document (`report.md.annotations/@<identity>.jsonld`),
+    added in the import's one commit and written as the Comments feature writes its own.
+  - It quotes the words, with a little of what is around them in their paragraph to say which,
+    where they are there twice. An anchor that pandoc gives in pieces (its words change formatting
+    within it) is one passage.
+  - Its text comes too, converted, with who wrote it when Scrivener 3 says, and when. It says it
+    came from Scrivener (`generator`).
+  - A comment whose anchor is not in the text is a comment on the whole document.
+  - Where this computer has no person yet to make them as, they are not made, and the result says
+    so. They show where the workspace has Annotations on, as the result says.
+- **Linked footnotes** (the same files, flagged as footnotes) become footnotes in the text: the
+  anchor's words, then `[^s1]`, defined at the document's end.
+- **Said and left:** the Trash, snapshots, and web pages kept in the project.
 
-A real Scrivener 2.4 project was planned through it, without its text being read: 101 documents, 13 folders, two images, one PDF and about 110,000 words, in 2.6 seconds. It reported the
-Trash's 80 items, 43 comments and the snapshots.
+A real Scrivener 2.4 project was planned through it, without its text being read: 101 documents, 13
+folders, two images, one PDF and about 110,000 words, in under 4 seconds. Its 31 linked footnotes
+became footnotes; its 29 comments were all on items in its Trash, so none were made. It reported the
+Trash's 80 items and the snapshots.
 
 **File names** are made as the app makes them: a document's from its title (`pathForTitle`,
 `slugify`), and a folder's as it reads (`folderName`), since a folder's name is its heading in a
@@ -105,7 +125,9 @@ document at once, written when something is written in it (0097).
 
 ### Not yet
 
-- Scrivener's comments as Kuraa's (annotations, 0082), and its project notes (`Files/ProjectNotes`).
+- Scrivener's inline annotations and inline footnotes (kept in the text itself, as coloured or marked
+  text), which come as their words.
+- Word's own comments.
 - Collections (saved searches and lists), custom metadata, and document targets.
 - Scrivener 1 projects (`.scriv` without a `.scrivx`), and Word's old `.doc` files (save as `.docx`).
 - Importing Markdown folders (Obsidian, Ulysses): files that are Markdown already can be copied in.

@@ -163,7 +163,8 @@ OpenDocument, RTF, EPUB, HTML) or a Scrivener project (2 or 3, its folder or a .
 of documents, converted by the built-in pandoc. A Word document gets a document for each chapter (or
 section); a Scrivener project its binder's folders and documents in order, with each one's synopsis,
 label, status and keywords, what goes in its book and its title, author and target for Compile, its
-research files, and its notes in a Notes folder ([0116](docs/decisions/0116-importing.md)).
+research files, its notes and project notes in a Notes folder, its comments as comments (on the
+words they were on) and its linked footnotes as footnotes ([0116](docs/decisions/0116-importing.md)).
 
 The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as

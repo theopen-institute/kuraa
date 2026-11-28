@@ -13,7 +13,7 @@ import { planScrivener, projectFile, readProject } from './scrivener.js';
 import { planWord, type Split } from './word.js';
 
 export { planWord, splitHeader, headingsUp, plainTitle } from './word.js';
-export { readProject, projectFile, itemFiles, planScrivener, withoutComments } from './scrivener.js';
+export { readProject, readNotes, readProjectNotes, anchorNotes, projectFile, itemFiles, planScrivener } from './scrivener.js';
 export { writePlan, documentText } from './plan.js';
 
 /** The most one import may send, and how long it is kept unused. */
@@ -145,10 +145,12 @@ export const importFeature = defineFeature({
             folder = plan.folder;
             left = plan.left;
           } else throw new Refused(400, 'kind: word or scrivener');
-          const written = writePlan(folder, into, namesIn(all, into));
+          const me = ctx.me();
+          const written = writePlan(folder, into, namesIn(all, into), me ? { id: me, name: req.person?.name || 'You' } : null);
           const { skipped } = await ctx.create(written.files, { message: `Import ${name} into ${into ? `${into}/` : 'the top level'}`, by: req.person });
           staged.delete(body.session as string);
           for (const k of skipped) left.push(`${k.path}: ${k.why}`);
+          if (written.commentsLeft) left.push(`${written.commentsLeft} ${written.commentsLeft === 1 ? 'comment' : 'comments'} (this computer has no one to make them as yet; the words they were on are kept)`);
           return {
             folder: written.root,
             first: written.first,
@@ -156,6 +158,7 @@ export const importFeature = defineFeature({
             folders: written.folders,
             images: written.images - skipped.length,
             others: written.others,
+            comments: written.comments,
             left,
           };
         }),

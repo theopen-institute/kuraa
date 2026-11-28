@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // A sync's settings, in its subpanel under Settings › Components (decisions 0059, 0064, 0084): places this workspace keeps a
 // copy on and syncs with, beyond its own devices, each from a component the host
-// loads. The online copy (@kuraa/sync-git) is the one that ships: a git server
-// (GitHub, GitLab, any) each save is pushed to, which every few minutes
-// brings in what others pushed there, so people whose computers cannot reach
-// each other directly still meet through it. Everyone sees them; adding and
+// loads. The personal backup (@kuraa/sync-git, 0115) is the one that ships: a git
+// server (GitHub, GitLab, any) each save is pushed to, which every few minutes
+// brings in what this person's other computers pushed there, so they meet
+// through it when they cannot reach each other directly. Everyone sees them; adding and
 // removing them is for whoever runs the host (the desktop app, pnpm dev), with
 // their own git credentials. Each leads with one target; any more added are
 // listed the same way. Its name and its words come from the component.

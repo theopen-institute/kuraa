@@ -2616,7 +2616,11 @@ export class Host {
     this.log(`committed ${commit.slice(0, 7)} ${message.split('\n')[0]}`);
   }
 
-  /** Bring an online copy's branches in, as fetched (SyncContext.bringIn): what the merge into the open branch kept, to say. */
+  /**
+   * Bring a personal backup's branches in, as fetched (SyncContext.bringIn): what
+   * the merge into the open branch kept, to say. A backup is its person's (0115):
+   * what it holds is judged as work from one of their devices, this one.
+   */
   async bringInFrom(name: string): Promise<string> {
     const prefix = `refs/remotes/${name}/`;
     const refs = (await this.git.out(['for-each-ref', '--format=%(refname)', prefix])).split('\n').filter((r) => r && r !== `${prefix}HEAD`);
@@ -2625,7 +2629,7 @@ export class Host {
       let said = '';
       for (const ref of refs) {
         const branch = ref.slice(prefix.length);
-        const outcome = await this.bringBranch(branch, ref);
+        const outcome = this.peers ? await this.peers.asOwnDevice(() => this.bringBranch(branch, ref)) : await this.bringBranch(branch, ref);
         if (branch === current) said = `/${branch}${describeOutcome(outcome)}`;
       }
       return said;

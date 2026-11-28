@@ -106,7 +106,8 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .panes.no-layout.history-open { grid-template-columns: 40px minmax(0, 1fr) 280px; }
 .panes.no-layout.side-open { grid-template-columns: 40px minmax(0, 1fr) minmax(320px, 38%); }
 .panes.no-layout.history-open.side-open { grid-template-columns: 40px minmax(0, 1fr) 280px minmax(320px, 34%); }
-.panes { position: relative; }
+/* Clipped at the sides (the window's), so a pane coming in from the right never widens the page. */
+.panes { position: relative; overflow-x: clip; }
 .fallback-nav { position: absolute; top: 6px; left: 4px; z-index: 5; }
 .fallback-button { display: grid; place-items: center; width: 32px; height: 30px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
 .fallback-button:hover { color: var(--text); background: var(--selected); }
@@ -123,6 +124,11 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 /* .pane-left is the sidebar's (@kuraa/sidebar), which styles the rest of it. */
 /* The space below the files: right-click for a new file or folder at the top level. */
 .pane-right { border-left: 1px solid var(--border); }
+/* Motion (0117): a pane beside the document comes in from the right as it opens (the document narrows at once,
+   its text wrapped again once); it closes at once. Only transform and opacity, so nothing is laid out again. */
+@keyframes pane-in { from { opacity: 0; transform: translateX(12px); } }
+.pane-right { animation: pane-in 160ms cubic-bezier(0.2, 0, 0, 1); }
+@media (prefers-reduced-motion: reduce) { .pane-right { animation: none; } }
 .pane-header {
   display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);

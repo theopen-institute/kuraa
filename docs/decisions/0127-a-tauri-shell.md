@@ -124,6 +124,11 @@ file afterwards were never seen. `packages/host/src/watch.ts` watches each folde
 (which tells of any change to a name in it), following folders as they come and go, and not looking
 into git's own folders inside `.git`; macOS and Windows keep the system's recursive watching.
 
+Windows found another, as old: a folder named in its short form (`C:\Users\RUNNER~1\…`, as a temporary
+folder is, opened as given) was watched, its changes came under the long name, and libuv stopped the
+whole hub (an assertion in `fs-event.c`). The watcher takes the folder's full name first. (WebView2 also
+says a page in a hidden window is visible, so the tests ask the shell whether its window is shown.)
+
 ## Not yet
 
 - **Handing installed copies over.** One last Electron release whose update is this app: its zip and
@@ -134,8 +139,8 @@ into git's own folders inside `.git`; macOS and Windows keep the system's recurs
   same name replaces the old. Untried until a signed release.
 - **The release workflow** (release.yml) still builds the Electron app; building, signing and
   publishing this one there (with `latest.json` merged from every platform) is the switch.
-- **Windows** is built and tested by CI only, never by hand. Windows signing is given to Tauri as a
-  command (`KURAA_WINDOWS_SIGN_COMMAND`).
+- **Windows** is built and tested by CI only (all the tests pass there, and its installer is made),
+  never yet run by a person. Windows signing is given to Tauri as a command (`KURAA_WINDOWS_SIGN_COMMAND`).
 - **Spell suggestions on Windows and Linux** in the editor's own menus (the system's spell checker
   there: ISpellChecker, Enchant).
 - **An icon** (as the Electron app, it has none of its own; the placeholders are the system's).

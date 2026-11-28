@@ -36,9 +36,11 @@ const CONTROL = 'kuraa/control/1';
  * 9: 0099 (servers: a join with role `server`, by a key no one's, which every
  * operation after it names, so an older device would wait for them for ever);
  * 10: 0099 (a server taken out by a revoke, to be invited back: an older device
- * would not count it, and keep the server in).
+ * would not count it, and keep the server in); 11: 0106 (the owner and servers
+ * read every space, and only a space's maker or the owner changes its readers:
+ * an older device would count an admin's change, and send it the space).
  */
-export const PROTOCOL = 10;
+export const PROTOCOL = 11;
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):

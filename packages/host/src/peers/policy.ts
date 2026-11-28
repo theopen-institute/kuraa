@@ -35,7 +35,8 @@
 // - space: who may read a set of files (0066, step 5): a space's ID and its
 //   audience (people, `group:<name>`, `admins`), like a rule's. Anyone in the
 //   workspace may make one they are in themselves; its audience may be changed
-//   by whoever made it, or by the workspace's admins. Files not in a space are
+//   by whoever made it, or by the owner (0106). The owner, and the workspace's
+//   servers, read every space besides its audience. Files not in a space are
 //   the workspace's: everyone in it reads them.
 //
 // - perm: a file's or folder's permission (0069): who may change it (`write`,
@@ -62,8 +63,8 @@
 //   by its own `join` with an owner's invite link for a server (role `server`,
 //   for one). Of a key that is no one's, only that counts, and a server's
 //   `admit` (it lets people in by their links). A
-//   server reads the workspace's own files and the spaces whose audiences name
-//   it, changes nothing, and is in no group. The owner takes it out as a person
+//   server reads everything in the workspace, every space too (0106), changes
+//   nothing, and is in no group. The owner takes it out as a person
 //   is taken out (`revoke`, of the workspace): it may be invited back, by a new
 //   link. A `drop` of its key (lost or stolen) is for good, as a computer's.
 //
@@ -468,6 +469,11 @@ export class Policy {
     return this.isOwner(id);
   }
 
+  /** Whether an audience (people, `group:<name>`, `admins`) holds a person. */
+  audienceHolds(audience: string[], id: string): boolean {
+    return audience.some((e) => this.holds(e, id));
+  }
+
   /** Whether an audience entry (a person, `group:<name>`, `admins`) holds a person. */
   private holds(entry: string, id: string): boolean {
     return entry === id || (entry === 'admins' && this.isAdmin(id)) || (entry.startsWith('group:') && this.role(id, entry.slice(6)) !== null);
@@ -480,12 +486,19 @@ export class Policy {
    */
   mayRead(id: string | null, space: string | null): boolean {
     if (!this.founded) return space === null;
-    // A server (0099): the workspace's own files, and a space whose audience names it.
-    if (this.isServer(id)) return space === null || !!this.spaces.get(space)?.audience.includes(id!);
+    // The owner, and the workspace's servers, read every space (0106): the owner is in control of the workspace, and
+    // its servers are the owner's computers that are always on.
+    if (this.isServer(id)) return space === null || this.spaces.has(space);
     if (!id || !this.role(id)) return false;
     if (space === null) return true;
     const s = this.spaces.get(space);
-    return !!s && s.audience.some((e) => this.holds(e, id));
+    return !!s && (this.isOwner(id) || s.audience.some((e) => this.holds(e, id)));
+  }
+
+  /** Whether a person may change who reads a space (0106): whoever made it, or the owner. */
+  mayChangeSpace(id: string | null, space: string): boolean {
+    const s = this.spaces.get(space);
+    return !!s && !!id && !!this.role(id) && (s.by === id || this.isOwner(id));
   }
 
   /** Everyone in the workspace who may read a space now: for whether one audience holds another (what code may read). */
@@ -836,11 +849,12 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
     case 'perm':
       return now.isAdmin(by);
     case 'space': {
-      // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or an admin.
+      // Made by anyone in the workspace who is in it themselves; changed by whoever made it, or the owner (0106: before,
+      // or any admin, who could so read any space by adding themselves).
       const had = s.spaces.get(op.id);
       if (!now.role(by)) return false;
       const holdsMaker = op.audience.some((w) => w === by || (w === 'admins' && now.isAdmin(by)) || (w.startsWith('group:') && now.role(by, w.slice(6)) !== null));
-      return had ? had.by === by || now.isAdmin(by) : holdsMaker;
+      return had ? had.by === by || now.isOwner(by) : holdsMaker;
     }
     case 'genesis':
     case 'seal':

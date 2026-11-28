@@ -1,6 +1,6 @@
 // Servers in a workspace's policy (decision 0099): a key no person vouched for, in by its own join with
-// the owner's invite link for a server; reading the workspace's files and spaces naming it, changing
-// nothing, acting in nothing, taken out by the owner's drop of its key.
+// the owner's invite link for a server; reading everything in the workspace, every space too (0106),
+// changing nothing, acting in nothing, taken out by the owner's drop of its key.
 import { describe, expect, it } from 'vitest';
 import crypto from 'hypercore-crypto';
 import { admittedGrantMessage, evaluate, makeOp, readOp, type JoinRole, type PolicyEntry, type PolicyOp } from '../src/peers/policy.js';
@@ -122,7 +122,7 @@ describe('servers in the policy (0099)', () => {
     expect(p.groups.get('editors')?.has(s.id) ?? false).toBe(false);
   });
 
-  it('lets a server read the workspace’s own files and spaces naming it, and change nothing', () => {
+  it('lets a server read everything, every space too (0106), and change nothing', () => {
     const h = history();
     h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'member' }, ada);
     const s = server();
@@ -130,14 +130,16 @@ describe('servers in the policy (0099)', () => {
     const named = 'a1'.repeat(16);
     const unnamed = 'b2'.repeat(16);
     const admins = 'c3'.repeat(16);
+    const bos = 'd4'.repeat(16);
     h.add({ t: 'space', id: named, audience: [ada.id, s.id].sort() }, ada);
     h.add({ t: 'space', id: unnamed, audience: [ada.id] }, ada);
     h.add({ t: 'space', id: admins, audience: ['admins'] }, ada);
+    h.add({ t: 'space', id: bos, audience: [bo.id] }, bo);
     let p = h.now();
     expect(p.mayRead(s.id, null)).toBe(true);
-    expect(p.mayRead(s.id, named)).toBe(true);
-    expect(p.mayRead(s.id, unnamed)).toBe(false);
-    expect(p.mayRead(s.id, admins)).toBe(false);
+    for (const sp of [named, unnamed, admins, bos]) expect(p.mayRead(s.id, sp)).toBe(true);
+    // A space not made (its operation not come): no one's, the server's neither.
+    expect(p.mayRead(s.id, 'e5'.repeat(16))).toBe(false);
     // Nothing written: where no rule says, where a rule names it, its "own" files.
     expect(p.mayWrite(s.id, 'a.md')).toBe(false);
     h.add({ t: 'rule', path: 'notes/', by: [s.id] }, ada);
@@ -146,6 +148,11 @@ describe('servers in the policy (0099)', () => {
     expect(p.mayWrite(s.id, `a.md.notes/@${s.id}.json`)).toBe(false);
     // Bo still writes where no rule says.
     expect(p.mayWrite(bo.id, 'a.md')).toBe(true);
+    // Taken out, it reads nothing.
+    h.add({ t: 'revoke', group: 'workspace', who: s.id }, ada);
+    p = h.now();
+    expect(p.mayRead(s.id, null)).toBe(false);
+    expect(p.mayRead(s.id, bos)).toBe(false);
   });
 
   it('takes a server out by the owner’s drop of its key, for good; an admin may not', () => {
@@ -274,5 +281,46 @@ describe('servers in the policy (0099)', () => {
     expect(h.now().isServer(s.id)).toBe(true);
     h.add({ t: 'drop', key: s.id }, bo);
     expect(h.now().isServer(s.id)).toBe(false);
+  });
+});
+
+describe('the owner, in control of the workspace (0106)', () => {
+  it('reads every space, and stops when no longer the owner', () => {
+    const h = history();
+    h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    h.add({ t: 'grant', group: 'workspace', who: cy.id, role: 'member' }, ada);
+    const cys = 'a1'.repeat(16);
+    h.add({ t: 'space', id: cys, audience: [cy.id] }, cy);
+    let p = h.now();
+    expect(p.mayRead(ada.id, cys)).toBe(true);
+    // An admin who is not the owner: only what names them.
+    expect(p.mayRead(bo.id, cys)).toBe(false);
+    // The owner's role handed to Bo: Bo reads it, Ada no longer.
+    h.add({ t: 'owner', who: bo.id }, ada);
+    p = h.now();
+    expect(p.mayRead(bo.id, cys)).toBe(true);
+    expect(p.mayRead(ada.id, cys)).toBe(false);
+  });
+
+  it('lets only whoever made a space, or the owner, change who reads it: not another admin', () => {
+    const h = history();
+    h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    h.add({ t: 'grant', group: 'workspace', who: cy.id, role: 'member' }, ada);
+    const cys = 'a1'.repeat(16);
+    h.add({ t: 'space', id: cys, audience: [cy.id] }, cy);
+    // Bo, an admin, adding himself: does not count.
+    h.add({ t: 'space', id: cys, audience: [bo.id, cy.id].sort() }, bo);
+    let p = h.now();
+    expect(p.spaces.get(cys)!.audience).toEqual([cy.id]);
+    expect(p.mayRead(bo.id, cys)).toBe(false);
+    expect(p.mayChangeSpace(bo.id, cys)).toBe(false);
+    expect(p.mayChangeSpace(cy.id, cys)).toBe(true);
+    expect(p.mayChangeSpace(ada.id, cys)).toBe(true);
+    // The owner may, and Cy may.
+    h.add({ t: 'space', id: cys, audience: [bo.id, cy.id].sort() }, ada);
+    p = h.now();
+    expect(p.spaces.get(cys)!.audience).toEqual([bo.id, cy.id].sort());
+    h.add({ t: 'space', id: cys, audience: [cy.id] }, cy);
+    expect(h.now().spaces.get(cys)!.audience).toEqual([cy.id]);
   });
 });

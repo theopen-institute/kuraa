@@ -398,7 +398,7 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
     if (!p.servers.has(who) && !p.cutoffs.has(who)) out.push('a server taken out with no cutoff on record');
   }
   // Servers (0099): each by a join of its own counting, by the owner's link for one, with someone in letting it in first;
-  // in no group, never dropped; reading only the workspace's files and spaces naming it; changing nothing.
+  // in no group, never dropped; reading everything, every space too (0106); changing nothing.
   for (const sv of p.servers) {
     for (const [g, members] of p.groups) if (members.has(sv)) out.push(`a server is in ${g}`);
     if (p.dropped.has(sv)) out.push('a dropped key is a server');
@@ -411,8 +411,10 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
       if (!applied.some((a) => a.op.t === 'admit' && a.op.link === op.link && a.op.key === sv && past.get(j.id)!.has(a.id))) out.push('a server in with no one letting it in');
     }
     for (const path of PATHS) if (p.mayWrite(sv, `${path}x.md`)) out.push('a server may change a file');
-    for (const sp of SPACES) if (p.mayRead(sv, sp) !== !!p.spaces.get(sp)?.audience.includes(sv)) out.push('a server reads a space not naming it, or not one naming it');
+    for (const sp of SPACES) if (p.mayRead(sv, sp) !== p.spaces.has(sp)) out.push('a server does not read a space, or reads one not made');
   }
+  // The owner reads every space (0106).
+  for (const sp of SPACES) if (p.spaces.has(sp) && !p.mayRead(p.owner, sp)) out.push('the owner does not read a space');
   // Clashes are on record: each allowed in its own past that did not count lost one; each that lost (but narrowed or once) did not count, to one that did.
   const lost = new Set(p.clashes.map((c) => c.lost));
   for (const id of p.judged) if (!p.counted.has(id) && !lost.has(id)) out.push(`${byId.get(id)!.op.t} did not count, with no clash on record`);

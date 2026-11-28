@@ -32,6 +32,8 @@ import type { KeyPair } from '../keys.js';
 
 /** How soon this device tells the others its outputs changed, in ms: sooner than branches, which come in bursts. */
 const OUTPUTS_ANNOUNCE_MS = 20;
+/** Why someone may not change who reads a space (0106). */
+const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
 export interface PeerOptions {
   /** DHT bootstrap nodes (`host:port`): a private network, or tests. Default: Hyperswarm's public ones. */
@@ -147,11 +149,29 @@ export interface FileAccess {
 /** An audience in words: "Only you", "Ada and Bo", "editors", "admins". */
 export function audienceWords(audience: string[], me: string | null, names: Map<string, string>): string {
   if (audience.length === 1 && audience[0] === me) return 'Only you';
-  // You first: "You and Bo".
-  const ordered = [...audience].sort((x, y) => Number(y === me) - Number(x === me));
-  const words = ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
-  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+  return listWords(audienceList(audience, me, names));
 }
+
+/**
+ * Who reads a space in words (0106): its audience, and the owner and the
+ * workspace's servers, who read every space: "You, Bo and the owner", "Ada and
+ * the server".
+ */
+export function readersWords(audience: string[], me: string | null, names: Map<string, string>, policy: Policy): string {
+  const words = audienceList(audience, me, names);
+  const owner = policy.owner;
+  if (owner && !policy.audienceHolds(audience, owner)) words.push(owner === me ? (words.length ? 'you' : 'You') : 'the owner');
+  if (policy.servers.size) words.push(policy.servers.size === 1 ? 'the server' : 'the servers');
+  return words.length === 1 && words[0] === 'You' ? 'Only you' : listWords(words);
+}
+
+/** An audience's entries in words, you first: "You", "Bo", "editors", "admins". */
+function audienceList(audience: string[], me: string | null, names: Map<string, string>): string[] {
+  const ordered = [...audience].sort((x, y) => Number(y === me) - Number(x === me));
+  return ordered.map((w, i) => (w === me ? (i === 0 ? 'You' : 'you') : w === 'admins' ? 'admins' : w.startsWith('group:') ? w.slice(6) : names.get(w) ?? `${w.slice(0, 8)}…`));
+}
+
+const listWords = (words: string[]) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`);
 
 /** The workspace's groups and write rules (0066). */
 export interface RulesInfo {
@@ -185,6 +205,8 @@ export interface PermissionsInfo {
   admin: boolean;
   /** Whether this person may change it (a file: says who reads it). */
   canWrite: boolean;
+  /** Its readers are a space's that someone else chose, which only they or the owner change (0106). */
+  readersLocked?: boolean;
 }
 
 /** The workspace's people, by its policy (0066). */
@@ -962,7 +984,7 @@ export class Peers {
       admin: policy.founded && policy.isAdmin(me),
       you: me,
       // Who reads it: everyone in the workspace (null), or a space's audience (0066).
-      readers: space ? { audience: policy.spaces.get(space)?.audience ?? [], words: audienceWords(policy.spaces.get(space)?.audience ?? [], me, names) } : null,
+      readers: space ? { audience: policy.spaces.get(space)?.audience ?? [], words: readersWords(policy.spaces.get(space)?.audience ?? [], me, names, policy) } : null,
       notKept: await this.notKeptOf(path, me),
     };
   }
@@ -1003,17 +1025,17 @@ export class Peers {
     const marked: { path: string; readers?: string; writers?: string }[] = [];
     for (const f of [...folders].sort()) {
       const own = policy.permAt(f)?.perm;
-      if (own) marked.push({ path: f, ...(own.read ? { readers: words(own.read) } : {}), ...(own.write ? { writers: words(own.write) } : {}) });
+      if (own) marked.push({ path: f, ...(own.read ? { readers: readersWords(own.read, me, names, policy) } : {}), ...(own.write ? { writers: words(own.write) } : {}) });
     }
     return { files, folders: marked };
   }
 
-  /** Who reads each space, in words ("Only you", "Ada and Bo", "editors"), for the file list (0066). */
+  /** Who reads each space, in words ("You, Bo and the owner", "editors and the server"), for the file list (0066, 0106). */
   async readersInWords(): Promise<Map<string, string>> {
     const { policy, me } = await this.node.policy();
     const names = new Map((await this.node.identity.people()).map((p) => [p.key, p.name]));
     const out = new Map<string, string>();
-    for (const [id, s] of policy.spaces) out.set(id, audienceWords(s.audience, me, names));
+    for (const [id, s] of policy.spaces) out.set(id, readersWords(s.audience, me, names, policy));
     return out;
   }
 
@@ -1031,18 +1053,29 @@ export class Peers {
     if (!policy.founded || !me) throw new NotAllowed('Who reads what is for a workspace shared with other people, once it has a policy');
     if (!(await this.access(path)).canWrite) throw new NotAllowed('Only someone who may change this file says who reads it');
     const wanted = audience && this.cleanAudience(audience);
+    if (wanted) this.notYouAlone(wanted, me);
     const current = this.host.spaceOf(path);
     const folder = policy.readFor(path);
     let target: string | null;
     if (!wanted) target = null;
     else if (folder && folder.audience.join() === wanted.join()) target = folder.space ?? (await this.spaceFor(wanted));
     else if (current && this.ownSpace(policy, current, path)) {
+      if (!policy.mayChangeSpace(me, current)) throw new NotAllowed(SPACE_CHANGERS);
       await this.changeSpace(current, wanted);
       if (!(await this.node.policy()).policy.mayRead(me, current)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
       return;
     } else target = await this.newSpace(wanted);
     if (target && !(await this.node.policy()).policy.mayRead(me, target)) throw new NotAllowed('You would not be able to read it yourself: include yourself');
     await this.host.moveToSpace(path, target);
+  }
+
+  /**
+   * No one makes something read by themselves alone (0106): the owner and the
+   * workspace's servers read everything, so it would not be; what is to be
+   * one's own alone is kept in a workspace one owns.
+   */
+  private notYouAlone(audience: string[], me: string): void {
+    if (audience.length === 1 && audience[0] === me) throw new NotAllowed('Choose who besides you reads it: what is only yours belongs in a workspace of your own (the owner, and the workspace’s servers, read everything in this one)');
   }
 
   /** An audience as the policy names one: sorted, each entry someone it can name. */
@@ -1122,7 +1155,17 @@ export class Peers {
       readers: folder ? null : this.audienceOf(policy, path),
       admin: policy.founded && policy.isAdmin(me),
       canWrite: access ? access.canWrite : policy.founded && policy.isAdmin(me),
+      readersLocked: this.readersLocked(policy, me, path, folder, own?.perm.space),
     };
+  }
+
+  /** Whether who reads a path is a space someone else chose, not this person's to change (0106): a file's own, or a folder's. */
+  private readersLocked(policy: Policy, me: string | null, path: string, folder: boolean, folderSpace: string | undefined): boolean {
+    if (!policy.founded) return false;
+    const space = folder ? folderSpace : this.host.spaceOf(path);
+    if (!space || !policy.spaces.has(space)) return false;
+    if (!folder && !this.ownSpace(policy, space, path)) return false;
+    return !policy.mayChangeSpace(me, space);
   }
 
   /**
@@ -1142,9 +1185,13 @@ export class Peers {
     const write = clean(change.write);
     const read = clean(change.read);
     for (const l of [write, read]) if (l && !l.every(isWriter)) throw new NotAllowed('Name people, groups or admins');
+    if (read) this.notYouAlone(read, me);
     if (write !== undefined || (folder && read !== undefined)) {
       if (!policy.isAdmin(me)) throw new NotAllowed('Only an admin of this workspace says who can change what, and who reads a folder');
       const own = policy.permAt(path);
+      // A folder's readers changed where it has a space: that space's, whoever made it or the owner says (0106).
+      const ownSpace = folder && own?.perm.space && policy.spaces.has(own.perm.space) ? own.perm.space : undefined;
+      if (folder && read && ownSpace && read.join() !== (policy.spaces.get(ownSpace)?.audience ?? []).join() && !policy.mayChangeSpace(me, ownSpace)) throw new NotAllowed(SPACE_CHANGERS);
       const nextWrite = write === undefined ? own?.perm.write : write ?? undefined;
       const nextRead = folder ? (read === undefined ? own?.perm.read : read ?? undefined) : undefined;
       const parent = path === '' ? null : pathsAbove(path)[1] ?? null;

@@ -314,8 +314,9 @@ host`), a server does not update itself: `git pull`, `pnpm install` and `pnpm we
 
 A server is in a workspace as itself, not as anyone's computer
 ([decision 0099](docs/decisions/0099-servers.md)): always on, it keeps everyone's work and passes it
-on while people are apart; it reads the workspace's own files and any folder whose readers name it,
-and changes nothing. Only the workspace's owner adds one: **People and computers › Add a server…**
+on while people are apart; it reads everything in the workspace, as its owner does, files only some
+people read too ([decision 0106](docs/decisions/0106-the-owner-reads-everything.md)), and changes
+nothing. Only the workspace's owner adds one: **People and computers › Add a server…**
 makes an invite link for one server.
 
 It is the same program as the host above, in its server role: `kuraa-host server`. For a computer

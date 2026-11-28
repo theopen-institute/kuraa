@@ -474,7 +474,7 @@ export const S = {
     writersTitle: (words: string) => `Who can change it: ${words}`,
     titleFolder: (name: string) => `Permissions for the folder ${name}`,
     titleEverything: 'Permissions for everything in the workspace',
-    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them, on their devices. Changing who reads it later moves nothing: whoever is added gets its files and their history; whoever is taken out keeps what they had, and gets nothing new.',
+    folderReadAbout: 'Who reads what is in this folder: new files made in it, and those in it that read as it says. Only those chosen get them on their devices, with the owner and the workspace’s servers. Changing who reads it later moves nothing: whoever is added gets its files and their history; whoever is taken out keeps what they had, and gets nothing new.',
     asAbove: 'As the folder above says',
     readFromRule: (path: string, who: string[]) => `${list(who)}, as ${path} says`,
     anyoneChoice: 'Anyone in the workspace',
@@ -486,9 +486,17 @@ export const S = {
   readers: {
     title: (words: string) => `Who can read it: ${words}`,
     line: (words: string) => (words === 'Only you' ? 'Only you can read this document.' : `Only ${words.replace(/^You/, 'you')} can read this document.`),
-    about: 'Only the people chosen get this file, on their devices; no one else’s device is ever sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
+    about: 'Only the people chosen get this file on their devices, with the owner and the workspace’s servers; no one else’s device is sent it. Once it has readers of its own, whoever is added later gets its history too; whoever is taken out keeps what they had.',
     everyone: 'Everyone in the workspace',
     onlyMe: 'Only you',
+    /** Who reads everything in the workspace besides each file's readers (0106). */
+    readsEverything: (youOwn: boolean, servers: number) => {
+      const server = servers === 1 ? 'its server' : servers > 1 ? 'its servers' : '';
+      if (youOwn) return server ? `As the workspace’s owner, you read everything in it, as ${server} ${servers === 1 ? 'does' : 'do'}.` : 'As the workspace’s owner, you read everything in it.';
+      return server ? `The workspace’s owner, and ${server}, read everything in it.` : 'The workspace’s owner reads everything in it.';
+    },
+    notYouAlone: 'Choose who reads it besides you. What is only yours belongs in a workspace of your own: the owner reads everything in this one.',
+    locked: 'Who reads it is for whoever chose that, or the workspace’s owner, to change.',
     chosen: 'These people and groups:',
     save: 'Save',
     notShared: 'Who reads what is for a workspace you share with other people: invite someone first.',

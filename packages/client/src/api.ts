@@ -113,6 +113,8 @@ export interface PermissionsInfo {
   readers: string[] | null;
   admin: boolean;
   canWrite: boolean;
+  /** Its readers are a space's that someone else chose, which only they or the owner change (0106). */
+  readersLocked?: boolean;
 }
 
 /** The workspace's write rules and groups (0066). */

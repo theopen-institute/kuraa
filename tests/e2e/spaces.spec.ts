@@ -124,12 +124,20 @@ test('a folder’s permissions, from its right-click menu: only she reads it, an
     await expect(bo.getByTestId('file:plans/party.md')).toBeVisible();
     await expect.poll(async () => (await a.host.peers!.people()).people.length, { timeout: 20_000 }).toBe(2);
 
-    // Ada: plans/ is hers alone to read, from its right-click menu.
+    // Ada: plans/ is for the admins (she alone is one) to read, from its right-click menu. No one reads
+    // something alone (0106): the owner reads everything, as the dialog says.
     await ada.getByTestId('folder:plans').click({ button: 'right' });
     await ada.getByTestId('context:folder-permissions').click();
     const dialog = ada.getByTestId('permissions-dialog');
     await expect(dialog).toContainText('Permissions for the folder plans');
-    await dialog.getByTestId('read-me').check();
+    await expect(dialog.getByTestId('read-me')).toHaveCount(0);
+    await expect(dialog.getByTestId('reads-everything')).toContainText('As the workspace’s owner, you read everything in it.');
+    await dialog.getByTestId('read-chosen').check();
+    await dialog.getByTestId('read-person:Ada').check();
+    await dialog.getByTestId('permissions-save').click();
+    await expect(dialog).toContainText('Choose who reads it besides you');
+    await dialog.getByTestId('read-person:Ada').uncheck();
+    await dialog.getByTestId('read-group:The workspace’s admins').check();
     await dialog.getByTestId('permissions-save').click();
     await expect(dialog).toBeHidden();
     // Marked in her file list, the folder and its file.

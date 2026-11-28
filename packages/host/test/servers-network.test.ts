@@ -1,5 +1,6 @@
 // A server in a workspace, on a local DHT (decision 0099): it joins by the owner's invite link for a
-// server, as no person; holds the members' work and passes it on while they are never online at once;
+// server, as no person; holds the members' work, every space too (0106), and passes it on while they
+// are never online at once;
 // changes nothing (what it signs is kept out everywhere); and is taken out by the owner.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -99,6 +100,9 @@ const read = (dir: string, path: string) => {
   }
 };
 
+/** The spaces a copy holds (refs/spaces/), one ref a line. */
+const spacesIn = (dir: string) => git(dir, 'for-each-ref', '--format=%(refname)', 'refs/spaces/');
+
 /** Ada's workspace, with a server in it (its host started), and the keys of each. */
 async function withServer() {
   const ada = await person('Ada');
@@ -153,6 +157,37 @@ describe('a server in a workspace (0099)', () => {
     await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-bo.md', content: '# From Bo\n' }) });
     await until(() => read(dirS, 'from-bo.md') === '# From Bo\n', 20_000, 'Bo’s file on the server');
     expect(read(dirA, 'from-bo.md')).toBeNull();
+  });
+
+  it('holds every space, as the owner does, and passes one on while its readers are never online at once (0106)', async () => {
+    const { a, dirA, dirS } = await withServer();
+    const bo = await person('Bo');
+    const boKey = crypto.keyPair();
+    const cy = await person('Cy');
+    const cyKey = crypto.keyPair();
+    const dirB = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), bo, boKey, 'bee');
+    const dirC = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), cy, cyKey, 'cee');
+    const b = await start(dirB, bo, boKey);
+    const c = await start(dirC, cy, cyKey);
+    await until(async () => (await b.host.peers!.people()).people.length === 3, 20_000, 'all three in, on Bo’s device');
+    // Bo writes a plan, for himself and Cy: the owner and the server read it too, and Bo is told so.
+    expect((await api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n\nOn Friday.\n' }) })).status).toBe(201);
+    const res = await api(b, '/api/audience', { method: 'POST', body: JSON.stringify({ path: 'plan.md', audience: [bo.id, cy.id] }) });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { readers: { words: string } }).readers.words).toBe('You, Cy, the owner and the server');
+    await until(() => !!read(dirC, 'plan.md')?.includes('Friday'), 20_000, 'the plan on Cy’s device');
+    await until(() => !!read(dirS, 'plan.md')?.includes('Friday') && spacesIn(dirS) !== '', 20_000, 'the plan, in its space, on the server');
+    await until(() => !!read(dirA, 'plan.md')?.includes('Friday') && spacesIn(dirA) !== '', 20_000, 'the plan, in its space, on the owner’s device');
+    // Cy and the owner go away; Bo changes it; it waits on the server.
+    await stop(c);
+    await stop(a);
+    writeFileSync(join(dirB, 'plan.md'), '# Plan\n\nOn Friday. Bo brings cake.\n');
+    await b.host.serial(() => b.host.commitPaths(['plan.md'], 'Cake'));
+    await until(() => !!read(dirS, 'plan.md')?.includes('cake'), 20_000, 'Bo’s change on the server');
+    // Bo goes away; Cy comes back, and has it from the server alone.
+    await stop(b);
+    await start(dirC, cy, cyKey);
+    await until(() => !!read(dirC, 'plan.md')?.includes('cake'), 30_000, 'Bo’s change on Cy’s device, from the server');
   });
 
   it('merges work done apart, so each member takes one history from it', async () => {

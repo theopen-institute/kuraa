@@ -56,7 +56,7 @@ leaves the token out, as its output is a log file.
 **Whoever has the access code of a host listening only on this computer is its owner**, as the
 person using the desktop app is ([decision 0047](docs/decisions/0047-browser-equals-desktop.md)):
 in a browser too they have **Settings…**, **Open a folder…** (any folder on the computer, chosen
-in the page), their identity and the online copy. That is the default (`--host 127.0.0.1`). With
+in the page), their identity and the personal backup. That is the default (`--host 127.0.0.1`). With
 `--host` naming a network address, those are off, and the app says why; invites and devices stay,
 for the workspace's admins ([0066](docs/decisions/0066-permissions-without-a-centre.md)). A server
 for many people will need a design of its own.
@@ -97,7 +97,7 @@ Settings says so. The last column says where. What stays on the command line, an
 | `--allow-unsandboxed` | off | Allow an environment that is not sandboxed (none ships) | Command line only: code run with your rights |
 
 `--allow-invites`, `--manage-online` and `--manage-person` are gone: invites are always on, and the
-online copy and your identity follow from where the host listens.
+personal backup and your identity follow from where the host listens.
 
 Everyone who has the URL and token can edit. The first time, the app welcomes each person and asks
 what to call them, with an email (for co-author credit) and a cursor colour; the menu's **You**
@@ -205,7 +205,7 @@ table**; **Save version…**; its code session (**Run all**, **Restart**, **Pack
 them, when it was last saved and kept in the history. **Search** (⇧⌘F: every text file, and open documents as they are being
 typed; a result opens the file at the match, [0042](docs/decisions/0042-search.md)) is beside **+**
 at the top of the sidebar ([decision 0065](docs/decisions/0065-no-menu.md)). There is no Sync button:
-devices sync as they connect and the online copy every few minutes
+devices sync as they connect and the personal backup every few minutes
 ([0076](docs/decisions/0076-a-quieter-sidebar.md)).
 
 Settings are in one window of four sections, each saying who it applies to and where it is kept
@@ -214,10 +214,10 @@ colour, your key, and how each kind of document is edited for you; in this brows
 (the open document's header; in its file), **Workspace** (its name, as its heading, with **Rename
 workspace…**; packages, people and computers, its groups and permissions, and removing it from the
 list; in the workspace) and **Host** (its settings, only its owner changes them; and every component
-it has, the online copy among them, with its settings for the open workspace). ⚙, at the
+it has, the personal backup among them, with its settings for the open workspace). ⚙, at the
 right of the open workspace's row in the menu of its name, opens it at the workspace (with none
 open, **Settings…** there, at You); beside it, where the workspace syncs, ⟳ syncs it now (with how
-many saves the online copy lacks); ⌘, (Ctrl+,) at the open document
+many saves your backup lacks); ⌘, (Ctrl+,) at the open document
 (else the workspace); **Document settings…** and right-clicking a file at the document; ⌥⌘, where you
 left it. Commit ids and branch names are behind **Details**. A light left of the workspace's name
 says whether you are connected (green), and its tooltip who else is here; while the connection is lost, a banner says so, with how many changes are waiting to be sent and
@@ -260,19 +260,31 @@ read-only and no network), so it needs `--engine r` and Podman, like running chu
 what is missing. A Markdown PDF whose header asks for LaTeX goes there too, where it can. Outputs are kept in `.git/kuraa/renders/`, never beside the document
 ([decision 0041](docs/decisions/0041-rendering.md)).
 
-## An online copy
+## A personal backup
 
-A workspace can keep a copy on a git server: GitHub, GitLab, any git host, or a folder. It is a
-component (`@kuraa/sync-git`, loaded with the others; [decision 0059](docs/decisions/0059-online-copy-is-a-component.md)).
-In **Settings › Components**, the online copy's **Settings…**, in its Workspace column (for the open workspace;
-wherever the host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an empty repository, such as
-`git@github.com:you/notes.git`; from the command line, `pnpm host online add <address> --dir
-<workspace>` (or the name of a remote already there, such as `origin`). Each save is pushed to it,
-with your own git credentials (an SSH key, or a credential helper for https). Every few minutes it is
-fetched from and its work merged in, as another device's would be, so
+You can keep your own copy of a workspace on a git server: GitHub, GitLab, any git host, or a
+folder. It is a component (`@kuraa/sync-git`, loaded with the others;
+[decision 0059](docs/decisions/0059-online-copy-is-a-component.md)). In **Settings › Components**,
+the personal backup's **Settings…**, in its Workspace column (for the open workspace; wherever the
+host listens only on this computer: the desktop app, `pnpm dev`, `pnpm host`), add the address of an
+empty repository, such as `git@github.com:you/notes-backup.git`; from the command line,
+`pnpm host backup add <address> --dir <workspace>` (or the name of a remote already there, such as
+`origin`). Each save is pushed to it, with your own git credentials (an SSH key, or a credential
+helper for https). Every few minutes it is fetched from and its work merged in, so your own
 computers that cannot reach each other directly still meet through it: add the same address on
-each. If someone else pushed first, this device fetches, merges and pushes again; it never
-force-pushes ([decision 0039](docs/decisions/0039-online-copy.md)).
+each. If one of them pushed first, this one fetches, merges and pushes again; it never force-pushes
+([decision 0039](docs/decisions/0039-online-copy.md)).
+
+**It is yours alone** ([decision 0115](docs/decisions/0115-a-personal-backup.md)). What comes in
+from it is taken as your work, as if from another of your computers: judged by what you may change,
+and by everyone else's devices the same way once it reaches them. It is not a way to work with other
+people: a backup two people share lets each act as the other. To meet people whose computers cannot
+reach yours, give the workspace a server ([Running a server](docs/running-a-server.md)).
+
+**Keep it private.** On GitHub or GitLab, make the repository private and add no collaborators.
+Whoever can read it reads every file in the workspace but those in spaces (which never go there),
+whatever the workspace lets them read; whoever can push to it can change whatever you may change,
+as you. A public repository publishes the workspace.
 
 ## Many workspaces: a hub
 
@@ -446,7 +458,7 @@ device its files lie in the folder with the rest, marked with a lock in the file
 out of plain git's way (`.git/info/exclude`). A folder read by fewer holds a space of its own:
 changing who reads it moves nothing, sends its history to whoever is added, and sends nothing new to
 whoever is taken out (0072). Code run for a document cannot see files fewer people read than the
-document, and nothing of a space goes to the online copy.
+document, and nothing of a space goes to a personal backup.
 
 **Who is in** is a signed policy every device holds alike, so no device takes
 a removal from someone who is not an admin. Whoever makes a workspace is its first admin, and its
@@ -530,7 +542,7 @@ runs; **Interrupt**, **Restart** and **Run all** are in the menu, which also say
 
 In a shared workspace, outputs reach the other devices too: each device publishes its latest
 outputs on a git ref of its own (`refs/kuraa/outputs/<device>`, not a branch, never merged, pushed
-to backups or to the online copy), and the others fetch it. Devices connected with the document
+to backups or to a personal backup), and the others fetch it. Devices connected with the document
 open are also sent each run as it happens, so it shows there within moments, and a run under way
 on another device shows where ("Running on ada-laptop… 3 s"). An output from
 another device says where it ran ("Ada · on ada-laptop · 14:02"); the newest output of a chunk is
@@ -829,11 +841,11 @@ The desktop tests run the app with its windows hidden, so they do not take over 
 | Package | Role |
 | --- | --- |
 | `packages/kernel` | Document type registry, hook bus and merging (lines, words, blocks). No DOM, no Node, no formats |
-| `packages/run-kit` | The contract between run components: engines (languages), environments (where processes run), tools (toolchains downloaded on request) and syncs (the online copy), the policy |
+| `packages/run-kit` | The contract between run components: engines (languages), environments (where processes run), tools (toolchains downloaded on request) and syncs (the personal backup), the policy |
 | `packages/engine-r` | Engine component: R, running `r` chunks through `evaluate`, and rendering R Markdown and Markdown (rmarkdown, pandoc, Typst) |
 | `packages/env-podman` | Environment component: a locked-down Podman container |
 | `packages/tool-tinytex` | Tool component: TinyTeX, for PDFs made with LaTeX, pinned per architecture; reads LaTeX logs for missing packages |
-| `packages/sync-git` | Sync component: the online copy, a git server each save is pushed to and fetched and merged from every few minutes |
+| `packages/sync-git` | Sync component: the personal backup, a git server each save is pushed to and fetched and merged from every few minutes |
 | `packages/run-components` | The run components that ship, for the programs that start a host; the host imports none |
 | `packages/editor-kit` | The contract for a format's editor module (types only) |
 | `packages/format-pandoc` | Pandoc markdown: schema, position-preserving parser, block-preserving serializer; `/editor`: cues, keys, footnotes |

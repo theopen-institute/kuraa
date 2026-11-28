@@ -406,6 +406,21 @@ export class Peers {
   /** The device whose work is being brought in (inside host.serial): whose commits the gate judges. */
   private bringing: string | null = null;
 
+  /**
+   * Bring in what came from this person's backup (0115, inside host.serial): as
+   * work from one of their own devices, this one. Commits no one known signed
+   * are theirs, judged by what they may change, as every device that takes the
+   * work from here judges them too.
+   */
+  async asOwnDevice<T>(fn: () => Promise<T>): Promise<T> {
+    this.bringing = this.node.myKey;
+    try {
+      return await fn();
+    } finally {
+      this.bringing = null;
+    }
+  }
+
   /** Ask a device for the policy operations its commits name that this one lacks; those it does not hold, it says (unheld). */
   private askFor(link: PeerLink, ops: string[]): void {
     const unheld = this.unheld.get(link.key);

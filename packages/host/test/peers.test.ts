@@ -30,6 +30,7 @@ import type { PeerNode } from '../src/peers/node.js';
 import type { JoinProgress } from '../src/peers/join.js';
 import type { HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
+import syncGit from '@kuraa/sync-git';
 
 /** A 1×1 PNG: an image to add (0109). */
 const PIXEL = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082', 'hex');
@@ -360,6 +361,45 @@ describe('annotations are their authors’ own (0082)', () => {
     bo.write(insertAt(bo.read(), 'The tide', 'Bo was here: '));
     await new Promise((r) => setTimeout(r, 1500));
     expect(ada.read().textContent).not.toContain('Bo was here');
+  });
+});
+
+describe('a personal backup (0115)', () => {
+  it('judges what its backup holds as work from its person’s own device, and every other device judges it alike', async () => {
+    const { a, b, dirA, dirB } = await pair({ run: { engines: [], components: [syncGit] } });
+    const adaId = (await personFor(dirA)).id;
+    const boId = (await personFor(dirB)).id;
+    // Only Ada may change the notes; only Bo may make other.md.
+    await a.host.peers!.setRule('notes.md', [adaId]);
+    await a.host.peers!.setRule('other.md', [boId]);
+    await until(async () => ((await (await api(b, '/api/access?path=notes.md')).json()) as { canWrite: boolean }).canWrite === false, 20_000, 'the rules on Bo’s device');
+    // Ada's backup: an empty repository, everything pushed to it.
+    const bare = mkdtempSync(join(tmpdir(), 'kuraa-backup-'));
+    dirs.push(bare);
+    git(bare, 'init', '-q', '--bare', '-b', 'main');
+    git(dirA, 'remote', 'add', 'backup', bare);
+    git(dirA, 'config', '--add', 'kuraa.online', 'backup');
+    expect((await a.host.syncNow()).ok).toBe(true);
+    // Something no device of the workspace made reaches it: unsigned, as plain git makes it, pushed there directly.
+    const elsewhere = mkdtempSync(join(tmpdir(), 'kuraa-elsewhere-'));
+    dirs.push(elsewhere);
+    git(elsewhere, 'clone', '-q', bare, '.');
+    git(elsewhere, 'config', 'user.name', 'Someone');
+    git(elsewhere, 'config', 'user.email', 'someone@example.org');
+    writeFileSync(join(elsewhere, 'notes.md'), `${NOTES}\nAdded at the backup.\n`);
+    writeFileSync(join(elsewhere, 'other.md'), 'Not Ada’s to make.\n');
+    git(elsewhere, 'add', '-A');
+    git(elsewhere, 'commit', '-q', '-m', 'At the backup');
+    git(elsewhere, 'push', '-q', 'origin', 'main');
+    // Ada's device brings it in as hers: the notes taken, other.md (Bo's alone) kept out, on record.
+    await a.host.syncNow();
+    await until(() => file(dirA).includes('Added at the backup.'), 15_000, 'the backup’s change on Ada’s device');
+    expect(existsSync(join(dirA, 'other.md'))).toBe(false);
+    expect(git(dirA, 'log', '-1', '--format=%B')).toMatch(/Kuraa-Refused: [0-9a-f]+ other\.md/);
+    // Bo's device, taking it from Ada's, judges it the same: the same files, the same history.
+    await until(() => head(dirB) === head(dirA), 30_000, 'Bo’s device at Ada’s commit');
+    expect(file(dirB)).toContain('Added at the backup.');
+    expect(existsSync(join(dirB, 'other.md'))).toBe(false);
   });
 });
 

@@ -128,7 +128,7 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     port: o.port ?? SERVER_PORT,
     token: o.token,
     // Formats and features to read with; no code run on a server yet (0099: running code for a device that cannot is to come).
-    // No online copy either: syncs are a person's, with their credentials (0059); a server's would only cost a timer each.
+    // No backup either: syncs are a person's, with their credentials (0059, 0115); a server has no person.
     hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents.map((c) => ({ ...c, syncs: [] })) } },
     peers,
     log: o.log,

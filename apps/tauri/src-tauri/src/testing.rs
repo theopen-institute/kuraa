@@ -114,6 +114,10 @@ mod control {
                 let w = app.get_webview_window(&s("window").unwrap_or_else(|| "main".into())).ok_or("no window")?;
                 Ok(json!(w.title().map_err(|e| e.to_string())?))
             }
+            Some("visible") => {
+                let w = app.get_webview_window(&s("window").unwrap_or_else(|| "main".into())).ok_or("no window")?;
+                Ok(json!(w.is_visible().map_err(|e| e.to_string())?))
+            }
             Some("windows") => Ok(json!(app.webview_windows().keys().cloned().collect::<Vec<_>>())),
             Some("menu") => {
                 crate::menu::chose(app, &s("id").unwrap_or_default());

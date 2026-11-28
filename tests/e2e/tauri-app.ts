@@ -33,6 +33,8 @@ export interface Launched {
   title(window?: string): Promise<string>;
   url(window?: string): Promise<string>;
   windows(): Promise<string[]>;
+  /** Whether a window is shown, as the system has it (a page's own visibilityState is not, in WebView2). */
+  visible(window?: string): Promise<boolean>;
   /** Choose an item of the app's menu, by its id (menu.rs). */
   menu(id: string): Promise<void>;
   /** The next folder dialog picks `path` (null: cancelled). */
@@ -160,6 +162,7 @@ export async function launchTauri(o: LaunchOptions = {}): Promise<Launched> {
     title: (window = 'main') => ask<string>({ op: 'title', window }),
     url: (window = 'main') => ask<string>({ op: 'url', window }),
     windows: () => ask<string[]>({ op: 'windows' }),
+    visible: (window = 'main') => ask<boolean>({ op: 'visible', window }),
     menu: (id) => ask({ op: 'menu', id }),
     answerFolder: (path) => ask({ op: 'folder', path }),
     answerConfirm: (asking, answer) => ask({ op: 'confirm', asking, answer }),

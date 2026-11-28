@@ -309,7 +309,7 @@ test('flags set what runs and which formats are on; the window shows only the ap
     expect(await app.evaluate(`window.open('file:///etc/hosts') === null`)).toBe(true);
     expect(await app.windows()).toEqual(['main']);
     // Out of sight while testing: no window was shown.
-    if (!process.env.KURAA_SHOW_WINDOWS) expect(await app.evaluate(`document.visibilityState`)).toBe('hidden');
+    if (!process.env.KURAA_SHOW_WINDOWS) expect(await app.visible()).toBe(false);
   } finally {
     await app.quit();
   }

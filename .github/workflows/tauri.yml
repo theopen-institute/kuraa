@@ -1,9 +1,9 @@
-# The Tauri app (decision 0127), on every push to main and every pull request:
-# built on each platform it ships on (macOS, Windows, Linux: the system's webview
-# each, WKWebView, WebView2, WebKitGTK), and on macOS driven by its desktop tests
-# (tauri.spec.ts). Unsigned, and not released: a workflow of its own, which no
-# release waits for (release.yml still releases the Electron app). The packages
-# each build made are kept a week, to try.
+# The Tauri app (decision 0127), on every push to main and every pull request,
+# on each platform it ships on (macOS, Windows, Linux: the system's webview each,
+# WKWebView, WebView2, WebKitGTK): built for its desktop tests (tauri.spec.ts) and
+# tested, then, on Windows and Linux, built as released and packaged (unsigned).
+# A workflow of its own, which no release waits for (release.yml still releases
+# the Electron app). The packages are kept a week, to try.
 name: Tauri
 
 on:
@@ -42,28 +42,36 @@ jobs:
           cache: pnpm
       # Rust, as the runners have rustup.
       - run: rustup toolchain install stable --profile minimal && rustup default stable
-      # What Tauri builds against on Linux: WebKitGTK and GTK; rpm, for its .rpm package.
+      # What Tauri builds against on Linux: WebKitGTK and GTK; rpm, for its .rpm package; a display for the tests.
       - if: matrix.name == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev patchelf rpm file
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev patchelf rpm file xvfb xauth dbus dbus-x11
       - run: pnpm install --frozen-lockfile
-      # What it carries (the web client, Node, git, pandoc and Typst), then the app: for the tests on macOS, for release elsewhere.
-      - run: pnpm --filter @kuraa/tauri stage
-      - if: matrix.name == 'macos'
-        run: node apps/tauri/scripts/build.mjs --test
-      - if: matrix.name != 'macos'
-        run: node apps/tauri/scripts/build.mjs
-      - if: matrix.name == 'macos'
-        run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
-      - if: matrix.name == 'macos'
+      # What it carries (the web client, Node, git, pandoc and Typst), then the app the tests drive.
+      - run: pnpm --filter @kuraa/tauri gather
+      - run: node apps/tauri/scripts/build.mjs --test
+      # The tests make commits: git needs someone to make them as.
+      - run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
+      - if: matrix.name != 'linux'
         run: pnpm test:e2e --project tauri
         env:
           KURAA_TAURI_BUILT: '1'
-      - if: failure() && matrix.name == 'macos'
+      # Linux: the window on a display of its own, with a session bus; WebKitGTK without a GPU.
+      - if: matrix.name == 'linux'
+        run: dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" pnpm test:e2e --project tauri
+        env:
+          KURAA_TAURI_BUILT: '1'
+          KURAA_SHOW_WINDOWS: '1'
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+      - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: tauri-test-results
+          name: tauri-test-results-${{ matrix.name }}
           path: test-results/
           retention-days: 7
+      # As released (the tests' build differs only by its feature), packaged.
+      - if: matrix.name != 'macos'
+        run: node apps/tauri/scripts/build.mjs
       - if: matrix.name != 'macos'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

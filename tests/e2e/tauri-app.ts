@@ -8,10 +8,21 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
-export const TAURI_APP = resolve(import.meta.dirname, '../../apps/tauri/src-tauri/target/release/bundle/macos/Kuraa.app/Contents/MacOS/Kuraa');
+const RELEASE = resolve(import.meta.dirname, '../../apps/tauri/src-tauri/target/release');
+/**
+ * The app's program, as `build:test` leaves it: in its bundle on a Mac; elsewhere in the build's folder, with what it
+ * carries beside it (Tauri puts the resources and Node there). KURAA_TAURI_APP names another.
+ */
+export const TAURI_APP =
+  process.env.KURAA_TAURI_APP ??
+  (process.platform === 'darwin' ? join(RELEASE, 'bundle/macos/Kuraa.app/Contents/MacOS/Kuraa') : join(RELEASE, process.platform === 'win32' ? 'Kuraa.exe' : 'Kuraa'));
+/** The Node the app carries, beside its program. */
+export const TAURI_NODE = join(dirname(TAURI_APP), process.platform === 'win32' ? 'node.exe' : 'node');
+/** Where the app's own pages are (the launcher's, the starting page's): Tauri's address for them, which is http on Windows. */
+export const APP_PAGES = process.platform === 'win32' ? 'http://tauri.localhost/' : 'tauri://localhost/';
 
 export interface Launched {
   /** Work out an expression (perhaps a promise) in a window's page: its value, as JSON. */

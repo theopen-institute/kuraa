@@ -32,16 +32,23 @@ use std::sync::atomic::Ordering;
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Manager, RunEvent, Theme, WebviewUrl, WebviewWindowBuilder};
 
+/// A path as other programs take it: on Windows, without the `\\?\` the system may put before a drive's
+/// (Node's module loader and git's sh do not take it).
+fn plain(path: std::path::PathBuf) -> std::path::PathBuf {
+    let stripped = path.to_string_lossy().strip_prefix(r"\\?\").filter(|rest| cfg!(windows) && !rest.starts_with("UNC\\")).map(std::path::PathBuf::from);
+    stripped.unwrap_or(path)
+}
+
 /// The Node the app carries, beside its own program (Tauri's externalBin).
 fn node() -> std::path::PathBuf {
-    let exe = std::env::current_exe().expect("the app's program");
+    let exe = plain(std::env::current_exe().expect("the app's program"));
     exe.parent().expect("the app's folder").join(if cfg!(windows) { "node.exe" } else { "node" })
 }
 
 /// Start the hub's process, and what it shows first once it has (--open, --join, or your workspaces).
 fn start_host(app: &AppHandle) -> Result<(), String> {
     let shell = app.state::<Shared>().inner().clone();
-    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let resources = plain(app.path().resource_dir().map_err(|e| e.to_string())?);
     let script = resources.join("host").join("kuraa-desktop.mjs");
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut env = vec![("KURAA_APP_VERSION", app.package_info().version.to_string())];

@@ -10,19 +10,19 @@
 // system's spell checker.
 //
 // Driven through tauri-app.ts (the build `pnpm --filter @kuraa/tauri build:test`
-// makes, which beforeAll makes unless KURAA_TAURI_BUILT=1). On a Mac only, for now.
+// makes, which beforeAll makes unless KURAA_TAURI_BUILT=1), on macOS, Windows and
+// Linux (where a display is needed: xvfb-run in CI, and in apps/tauri/scripts/test-linux.mjs).
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { standardFeatures } from '../../packages/features/src/index.js';
 import { NOTES } from './env.js';
-import { launchTauri, type Launched } from './tauri-app.js';
+import { APP_PAGES, launchTauri, TAURI_NODE, type Launched } from './tauri-app.js';
 
-test.skip(process.platform !== 'darwin', 'the Tauri app is tested on a Mac');
 test.describe.configure({ mode: 'serial' });
 
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -72,7 +72,7 @@ async function clickButton(app: Launched, text: string, within = 'body'): Promis
 
 /** A button of the launcher (the app's own page), once it shows: the window says its address as it starts going there. */
 async function clickLauncher(app: Launched, id: string): Promise<void> {
-  await app.waitFor(`(() => { const b = location.protocol === 'tauri:' && document.getElementById(${JSON.stringify(id)}); if (!b) return false; b.click(); return true; })()`);
+  await app.waitFor(`(() => { const b = (location.protocol === 'tauri:' || location.hostname === 'tauri.localhost') && document.getElementById(${JSON.stringify(id)}); if (!b) return false; b.click(); return true; })()`);
 }
 
 const textOf = (app: Launched, testid: string) => app.evaluate<string>(inPage(`return $t(${JSON.stringify(testid)})?.textContent ?? '';`));
@@ -216,7 +216,7 @@ test('opens folders with the system’s dialog: from the page, from the menu, an
 
     // Leaving goes to the launcher, this app's hub stopped; its Open folder… asks with the system's own question.
     await app.evaluate(`window.kuraa.leave(), true`);
-    await expect.poll(() => app.url()).toBe('tauri://localhost/launcher.html');
+    await expect.poll(() => app.url()).toBe(`${APP_PAGES}launcher.html`);
     await expect.poll(() => app.title()).toBe('Kuraa');
     const another = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
     writeFileSync(join(another, 'notes.md'), NOTES);
@@ -229,14 +229,14 @@ test('opens folders with the system’s dialog: from the page, from the menu, an
     expect(git(another, 'log', '--format=%s')).toBe('Initialise workspace');
     // Declined: nothing is added, and the launcher stays.
     await app.evaluate(`window.kuraa.leave(), true`);
-    await expect.poll(() => app.url()).toBe('tauri://localhost/launcher.html');
+    await expect.poll(() => app.url()).toBe(`${APP_PAGES}launcher.html`);
     const declined = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
     await app.answerFolder(declined);
     await app.answerConfirm(`Use “${basename(declined)}”`, false);
     await clickLauncher(app, 'open');
     await expect.poll(async () => (await app.asked()).includes(`Use “${basename(declined)}” as a workspace?`)).toBe(true);
     expect(existsSync(join(declined, '.git'))).toBe(false);
-    expect(await app.url()).toBe('tauri://localhost/launcher.html');
+    expect(await app.url()).toBe(`${APP_PAGES}launcher.html`);
     // Your workspaces, from the launcher: all three.
     await clickLauncher(app, 'home');
     await click(app, 'workspace-switcher');
@@ -346,10 +346,11 @@ test('preferences, from the menu, apply at once and are kept where the Electron 
     // The workspace is shared, so it syncs: git reaches other devices through git-remote-kuraa, which runs with the app's Node.
     const helper = join(dir, '.git', 'kuraa', 'bin');
     await expect.poll(() => existsSync(join(helper, 'git-remote-kuraa'))).toBe(true);
-    expect(readFileSync(join(helper, 'git-remote-kuraa'), 'utf8')).toContain('Kuraa.app/Contents/MacOS/node');
+    // The helper names the app's Node (with forward slashes on Windows, for git's sh).
+    expect(readFileSync(join(helper, 'git-remote-kuraa'), 'utf8')).toContain(TAURI_NODE.replace(/\\/g, '/'));
     let answer = '';
     try {
-      execFileSync('git', ['ls-remote', `kuraa://${'ab'.repeat(32)}`], { cwd: dir, env: { ...process.env, PATH: `${helper}:${process.env.PATH}` }, stdio: 'pipe' });
+      execFileSync('git', ['ls-remote', `kuraa://${'ab'.repeat(32)}`], { cwd: dir, env: { ...process.env, PATH: `${helper}${delimiter}${process.env.PATH}` }, stdio: 'pipe' });
     } catch (e) {
       answer = String((e as { stderr: Buffer }).stderr);
     }
@@ -397,14 +398,16 @@ test('you on this computer: made from your name, and said in each workspace that
   }
 });
 
-test('the system’s spell checker, for the editor’s own menus; the Help menu shows the page’s sheet', async () => {
+test('the system’s spell checker (a Mac’s), for the editor’s own menus; the Help menu shows the page’s sheet', async () => {
   const dir = makeRepo();
   const app = await launchTauri({ args: ['--open', dir], timings: TIMINGS });
   try {
     await openNotes(app);
-    // Misspelled: its suggestions; spelled right: none asked for.
+    // Misspelled: its suggestions; spelled right: none. Only a Mac's can be asked yet (0127): elsewhere the editor's
+    // menus offer none, as if every word were spelled right (the webview still checks as you type).
     const suggestions = await app.evaluate<string[] | null>(`window.kuraa.spellingSuggestions('recieve')`);
-    expect(suggestions).toContain('receive');
+    if (process.platform === 'darwin') expect(suggestions).toContain('receive');
+    else expect(suggestions).toBeNull();
     expect(await app.evaluate(`window.kuraa.spellingSuggestions('receive')`)).toBeNull();
     // Help › Markdown and Shortcuts: the page's own sheet.
     await app.menu('help');

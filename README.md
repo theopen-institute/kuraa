@@ -834,16 +834,17 @@ from one to the other keeps everything. The Electron app is still the one releas
 
 ```sh
 pnpm --filter @kuraa/tauri build        # this platform's app and packages, in apps/tauri/src-tauri/target/release/bundle
-pnpm --filter @kuraa/tauri build:test   # the app the desktop tests drive (macOS)
+pnpm --filter @kuraa/tauri build:test   # the app the desktop tests drive
 pnpm test:e2e --project tauri           # those tests (KURAA_TAURI_BUILT=1: the app built already)
+node apps/tauri/scripts/test-linux.mjs  # the same on Linux, in a Podman container, from any computer
 ```
 
 It takes the Electron app's flags (`Kuraa.app/Contents/MacOS/Kuraa --open <folder>`, `--join <url> --token
 <code>`, `--workspaces`, `--engine`, …). Signing and updates come from the environment, as `apps/tauri/scripts/build.mjs` says:
 `KURAA_SIGN_IDENTITY` (a Developer ID) and Apple's credentials to notarize on a Mac; `KURAA_UPDATES` with
 `TAURI_UPDATER_PUBKEY` and `TAURI_SIGNING_PRIVATE_KEY` (from `pnpm --filter @kuraa/tauri tauri signer
-generate`) for updating itself. GitHub builds it on macOS, Windows and Linux, and runs its tests on macOS,
-on every push to main and every pull request (the Tauri workflow).
+generate`) for updating itself. GitHub builds it and runs its tests on macOS, Windows and Linux on every
+push to main and every pull request (the Tauri workflow).
 
 ## Checks
 

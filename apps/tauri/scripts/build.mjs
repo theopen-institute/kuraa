@@ -3,7 +3,8 @@
 // (signing, notarizing, the zip and DMG, the update files).
 //
 //   node scripts/build.mjs           the app, for release (what it updates from: KURAA_UPDATES)
-//   node scripts/build.mjs --test    the app the desktop tests drive (src/testing.rs), never released
+//   node scripts/build.mjs --test    the app the desktop tests drive (src/testing.rs), never released: on a Mac
+//                                    its bundle; elsewhere target/release/Kuraa, its resources beside it
 //
 // Updates: KURAA_UPDATES says where the app looks for newer releases, as for the
 // Electron app: `github:<owner>/<repo>` (each release's latest.json, at
@@ -55,7 +56,8 @@ const overlay = join(APP, 'build', 'tauri.build.json');
 mkdirSync(join(APP, 'build'), { recursive: true });
 writeFileSync(overlay, `${JSON.stringify(config, null, 2)}\n`);
 
-const bundles = test ? 'app' : { darwin: 'app', win32: 'nsis', linux: 'deb,rpm,appimage' }[platform];
+// The tests run a Mac's app from its bundle, and elsewhere the program as built, with what it carries beside it.
+const bundles = test ? (platform === 'darwin' ? 'app' : null) : { darwin: 'app', win32: 'nsis', linux: 'deb,rpm,appimage' }[platform];
 const args = ['exec', 'tauri', 'build', '--config', overlay, ...(bundles ? ['--bundles', bundles] : ['--no-bundle']), ...(test ? ['--features', 'test-control'] : [])];
 // A Mac's app is signed by package-mac.mjs, not by Tauri's bundler (whose copy of each file would then be sealed
 // before Tauri is done with it).

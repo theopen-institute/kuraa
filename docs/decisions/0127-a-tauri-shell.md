@@ -90,8 +90,9 @@ Chromium was.
 
 ## Tested
 
-`tests/e2e/tauri.spec.ts` (the `tauri` project), the Electron app's desktop tests for this app, on a
-Mac. Playwright drives Electron, not the system's webview, and Tauri's WebDriver has no macOS driver, so
+`tests/e2e/tauri.spec.ts` (the `tauri` project), the Electron app's desktop tests for this app, on
+macOS, Windows and Linux (on a Mac the app in its bundle; elsewhere the program as built, with what it
+carries beside it, as `--test` leaves it). Playwright drives Electron, not the system's webview, and Tauri's WebDriver has no macOS driver, so
 a build with the `test-control` feature (`build:test`, never released; `src/testing.rs`) takes a test's
 requests on loopback, with a code: work something out in a page, choose from the menu, answer the
 dialogs ahead of time, read the title, quit (`tests/e2e/tauri-app.ts`). They open a folder, edit, reload
@@ -105,8 +106,19 @@ Updating was tried end to end by hand, with a throwaway key and a release served
 (`KURAA_UPDATES=http://127.0.0.1:<port>` is allowed for that): found, downloaded with its progress shown,
 checked, said ready in the window and the page, put in place by Restart now, and started again.
 
-The Tauri workflow builds it on macOS, Windows and Linux and runs these tests on macOS, on every push
-to main and every pull request; no release waits for it.
+The Tauri workflow builds it and runs these tests on macOS, Windows and Linux (on a display of its own,
+Xvfb), then packages it on Windows and Linux, on every push to main and every pull request; no release
+waits for it. `apps/tauri/scripts/test-linux.mjs` runs the Linux tests from any computer with Podman, in a
+container (`apps/tauri/linux/Containerfile`) with WebKitGTK and a display, the checkout copied in as it is.
+The spell checker's suggestions are a Mac's only, so elsewhere the tests expect none. Run so, the Linux
+tests (WebKitGTK, arm64) pass as the Mac's do.
+
+Linux found a bug in the host, older than this app (the Electron app on Linux, and servers, had it too):
+Node's recursive file watching there watches each file itself, and once the host saves a file (a
+temporary file renamed over it) it goes on watching the old one, so edits other programs made to that
+file afterwards were never seen. `packages/host/src/watch.ts` watches each folder instead on Linux
+(which tells of any change to a name in it), following folders as they come and go, and not looking
+into git's own folders inside `.git`; macOS and Windows keep the system's recursive watching.
 
 ## Not yet
 
@@ -118,8 +130,7 @@ to main and every pull request; no release waits for it.
   same name replaces the old. Untried until a signed release.
 - **The release workflow** (release.yml) still builds the Electron app; building, signing and
   publishing this one there (with `latest.json` merged from every platform) is the switch.
-- **Windows and Linux** are built by CI but not yet run or tested by anyone; WebView2 and WebKitGTK
-  should behave as the browser tests' Chromium and WebKit do. Windows signing is given to Tauri as a
+- **Windows** is built and tested by CI only, never by hand. Windows signing is given to Tauri as a
   command (`KURAA_WINDOWS_SIGN_COMMAND`).
 - **Spell suggestions on Windows and Linux** in the editor's own menus (the system's spell checker
   there: ISpellChecker, Enchant).

@@ -261,7 +261,16 @@ function ask<T>(a: ServerAddress, path: string, o: { method?: string; body?: unk
 }
 
 /** A workspace the server holds, and whether the workspace has taken it in yet (its join reached the policy there). */
-export interface ServerWorkspace { id: string; name: string; path: string; in: boolean; opening?: boolean; error?: string }
+export interface ServerWorkspace {
+  id: string;
+  name: string;
+  path: string;
+  in: boolean;
+  /** Out (0112): taken out by its owner, or its key blocked; its copy here goes within the minute. */
+  out?: 'removed' | 'blocked';
+  opening?: boolean;
+  error?: string;
+}
 
 /** How a join is going, as the server says it (its steps, and how far a copy is). */
 export interface JoinStep { step: 'waiting' | 'looking' | 'letting-in' | 'copying' | 'opening'; slowNetwork: boolean; from?: string; copied?: string }

@@ -93,7 +93,8 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     if (command === 'list') {
       const list = await listServer(data);
       if (!list.length) say(`no workspaces yet: ${name} join <invite link>`);
-      for (const w of list) console.log(`${w.id}  ${w.name}  ${w.error ? `(not open: ${w.error})` : w.opening ? 'opening…' : w.in ? 'in' : 'not taken in yet'}`);
+      const state = (w: (typeof list)[number]) => (w.error ? `(not open: ${w.error})` : w.opening ? 'opening…' : w.out === 'blocked' ? 'blocked by its owner: deleting its copy' : w.out === 'removed' ? 'taken out by its owner: deleting its copy' : w.in ? 'in' : 'not taken in yet');
+      for (const w of list) console.log(`${w.id}  ${w.name}  ${state(w)}`);
       process.exit(0);
     }
     if (command === 'remove') {

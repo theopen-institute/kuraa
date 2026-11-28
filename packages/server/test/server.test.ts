@@ -98,6 +98,20 @@ describe('a server, run from its folder (0099)', () => {
     expect((await listServer(data)).length).toBe(1);
   });
 
+  it('deletes its copy of a workspace once its owner takes it out, as it holds every space (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    await a.host.peers!.removeServer(s.key);
+    // Listed as out, once it hears; then let go of (looked at each minute; here, at once).
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.out === 'removed'), 20_000, 'the server hearing it is out');
+    await s.hub.hub.sweepRemoved();
+    expect(await listServer(data)).toEqual([]);
+    expect(existsSync(w.path)).toBe(false);
+  });
+
   it('takes members’ connections on its port from the first workspace it joins, not only after a restart (its own process)', async () => {
     const a = await owner();
     const data = tmp('data');

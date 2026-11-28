@@ -13,9 +13,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  use: { baseURL: E2E.url, trace: 'retain-on-failure' },
+  // No motion (0115): nothing waits on an animation; motion.spec.ts turns it back on to see it.
+  use: { baseURL: E2E.url, trace: 'retain-on-failure', reducedMotion: 'reduce' },
   projects: [
-    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|render-builtin|export|search|versions|polish|tools|preferences|features|comments|coding|navigation|compile|feature-contexts|feature-hooks|words|corkboard)\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'web', testMatch: /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|render-builtin|export|search|versions|polish|tools|preferences|features|comments|coding|navigation|compile|feature-contexts|feature-hooks|words|corkboard|motion)\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
     { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],

@@ -570,8 +570,11 @@ describe('the online copy: a git server each save is pushed to, and work is fetc
       c.write(insertAt(c.read(), 'Notes', 'Last '));
       await until(() => readFileSync(join(dir, 'notes.md'), 'utf8').includes('Last Notes'), 5000, 'the edit written');
       c.destroy();
-      await own.close();
+      // Said once committed here, before the push (0131): what the desktop app's Quit Now waits for.
+      let atSaved: string | null = null;
+      await own.close({ saved: () => (atSaved = execFileSync('git', ['log', '--format=%s', branch], { cwd: dir, encoding: 'utf8' }).trim()) });
       closed = true;
+      expect(atSaved).toMatch(/^Edit notes\.md[^\n]*\nCreate notes\.md/);
       expect(there()).toMatch(/^Edit notes\.md[^\n]*\nCreate notes\.md/);
     } finally {
       if (!closed) await own.close();

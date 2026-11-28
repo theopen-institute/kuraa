@@ -8,6 +8,7 @@ import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { TextSelection, type Command } from 'prosemirror-state';
 import type { EditorView, NodeView, NodeViewConstructor } from 'prosemirror-view';
 import { isConflictAttrs, isVersionAttrs } from '../merge.js';
+import { hasClass } from '../attributes.js';
 
 const DIV = 'fenced_div';
 
@@ -194,7 +195,8 @@ class PlainDivView implements NodeView {
     this.dom.dataset.attrs = String(node.attrs.attrs);
   }
   update(node: PMNode): boolean {
-    if (node.type.name !== DIV || isConflictAttrs(String(node.attrs.attrs)) || isVersionAttrs(String(node.attrs.attrs))) return false;
+    const attrs = String(node.attrs.attrs);
+    if (node.type.name !== DIV || isConflictAttrs(attrs) || isVersionAttrs(attrs) || hasClass(attrs, 'columns') || hasClass(attrs, 'column')) return false;
     this.dom.dataset.attrs = String(node.attrs.attrs);
     return true;
   }

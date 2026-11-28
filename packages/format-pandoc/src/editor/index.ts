@@ -15,9 +15,10 @@ import { InputRule, inputRules, textblockTypeInputRule, undoInputRule, wrappingI
 import { keymap } from 'prosemirror-keymap';
 import { footnotes } from './notes.js';
 import { headerBehaviour, headerSpec } from './header.js';
-import { conflictViews, nextConflict } from './conflicts.js';
+import { nextConflict } from './conflicts.js';
+import { columnBackspace, columnDelete, columnsOnEnter, columnsPlugin, divViews } from './columns.js';
 import { citationPlugins, citationRules, citationViews } from './citations.js';
-import { imagePlugins, imageRules, imageViews } from './images.js';
+import { imagePlacement, imagePlugins, imageRules, imageViews } from './images.js';
 import { insertTable, tableEnter, tableKeys, tablePlugins } from './tables.js';
 import { joinAfterList, liftAtItemStart, listRules, switchList } from './lists.js';
 import { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
@@ -30,7 +31,8 @@ export { addColumn, addRow, buildTable, cellAt, deleteColumn, deleteRow, deleteT
 export { workspacePath } from './paths.js';
 export { joinAfterList, liftAtItemStart, listRules, switchList } from './lists.js';
 export { splitTask, taskPlugin, taskRules, untask } from './tasks.js';
-export { IMAGE_TYPES, MAX_IMAGE_BYTES } from './images.js';
+export { IMAGE_TYPES, MAX_IMAGE_BYTES, aloneImage, imagePlacement } from './images.js';
+export { besideBlock, columnBackspace, columnDelete, columnNode, columnsOnEnter, columnsNode, columnsPlugin, columnWidth, dropBeside, isColumn, isColumns, scaledWidths, sideOf, tidyColumns } from './columns.js';
 
 export interface PandocEditorExtension {
   /**
@@ -248,7 +250,7 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
     'Mod-Alt-c': setBlockType(n.code_block!),
     'Mod-Alt-t': insertTable,
     ...notes.keys,
-    Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), mathOnEnter(schema), ...tableEnter, splitTask(splitListItem(n.list_item!))),
+    Enter: chainCommands(...(notes.enter ? [notes.enter] : []), fenceOnEnter(schema, ext), columnsOnEnter, mathOnEnter(schema), ...tableEnter, splitTask(splitListItem(n.list_item!))),
     'Shift-Enter': chainCommands(
       (state, dispatch, view) => (notes.inNote(state) ? newParagraph(state, dispatch, view) : false),
       exitCode,
@@ -257,7 +259,8 @@ export function pandocKeys(schema: Schema, ctx: EditorContext, ext: PandocEditor
         return true;
       },
     ),
-    Backspace: chainCommands(undoInputRule, untask(n.list_item!), liftAtItemStart(n.list_item!), joinAfterList),
+    Backspace: chainCommands(undoInputRule, untask(n.list_item!), liftAtItemStart(n.list_item!), columnBackspace, joinAfterList),
+    Delete: columnDelete,
     ...tableKeys(),
     Tab: chainCommands(tableKeys().Tab!, sinkListItem(n.list_item!)),
     'Shift-Tab': chainCommands(tableKeys()['Shift-Tab']!, liftListItem(n.list_item!)),
@@ -297,6 +300,8 @@ export const PANDOC_HELP: HelpItem[] = [
   { group: INSERT, does: 'Inline note', type: '^[text]' },
   { group: INSERT, does: 'Citation', type: '@', note: 'pick from the bibliography' },
   { group: INSERT, does: 'Image', type: '![caption](file.png)', note: 'or paste or drop one' },
+  { group: INSERT, does: 'Image’s width and place', type: '{width=50% fig-align=right}', note: 'straight after an image; or select it, drag its sides, and place it from the bar above' },
+  { group: INSERT, does: 'Columns', type: '::: columns', enter: true, note: 'or drag an image or selected text to the side of a paragraph; drag the gap between them' },
   { group: INSERT, does: 'Math', type: '$x^2$' },
   { group: INSERT, does: 'Display math', type: '$$', enter: true },
   { group: INSERT, does: 'Table', type: '| a | b |', enter: true, keys: ['Mod-Alt-t'] },
@@ -317,7 +322,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
       const { schema } = ctx;
       const notes = footnotes(schema, ctx);
       const header = headerBehaviour(schema, ctx);
-      if (ctx.readOnly) return [...notes.plugins, taskPlugin(true)];
+      if (ctx.readOnly) return [...notes.plugins, taskPlugin(true), imagePlacement()];
       const keys = pandocKeys(schema, ctx, ext, notes);
       return [
         ...citationPlugins(ctx),
@@ -325,6 +330,8 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
         keymap(keys),
         ...tablePlugins(ctx),
         ...imagePlugins(ctx),
+        imagePlacement(),
+        columnsPlugin(ctx),
         ...notes.plugins,
         ...header.plugins,
         taskPlugin(false),
@@ -333,7 +340,7 @@ export function createPandocEditor(ext: PandocEditorExtension = {}): FormatEdito
     nodeViews: (ctx) => ({
       ...footnotes(ctx.schema, ctx).nodeViews,
       ...headerBehaviour(ctx.schema, ctx).nodeViews,
-      ...conflictViews(!!ctx.readOnly, ctx),
+      ...divViews(!!ctx.readOnly, ctx),
       ...citationViews(ctx),
       ...imageViews(ctx),
     }),

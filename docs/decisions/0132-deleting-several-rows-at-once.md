@@ -1,4 +1,4 @@
-# 0130 · Deleting several rows of a table at once
+# 0132 · Deleting several rows of a table at once
 
 From feedback: a table's rows could be deleted only one at a time, a right-click each. A table's
 right-click menu ([0102](0102-grid-tables.md)) acted on the cell the cursor was in, and the

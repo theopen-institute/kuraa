@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The hardened runtime's exceptions, for the Node the app carries (scripts/sign-mac.mjs signs it with
+     these): V8 compiles JavaScript and WebAssembly (pandoc's, Typst's) as it runs, and Node's own build
+     asks for the same. The shell itself needs none; the webview's own processes are the system's. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

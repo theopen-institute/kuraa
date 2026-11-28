@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hub",
+  "description": "The web client, served by this app's hub on this computer (bridge.rs checks it is this app's hub, at its port).",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": [
+    "allow-open-folder",
+    "allow-join",
+    "allow-leave",
+    "allow-home",
+    "allow-choose-folder",
+    "allow-update-ready",
+    "allow-restart-to-update",
+    "allow-spelling",
+    "allow-learn-word",
+    "allow-test-result"
+  ]
+}

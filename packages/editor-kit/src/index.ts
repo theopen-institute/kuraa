@@ -46,8 +46,8 @@ export interface ImageToAdd {
 
 /** A spell checker the page can ask. */
 export interface Spelling {
-  /** A misspelled word's suggestions (perhaps none); null if it is spelled right. */
-  suggest(word: string): string[] | null;
+  /** A misspelled word's suggestions (perhaps none); null if it is spelled right. At once, or once the spell checker answers (the Tauri app's). */
+  suggest(word: string): string[] | null | Promise<string[] | null>;
   /** Take a word as spelled right from now on (the computer's dictionary). */
   learn(word: string): void;
 }

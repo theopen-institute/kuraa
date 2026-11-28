@@ -1,7 +1,7 @@
 // The host: relay, bridge, committer and git peer for one workspace.
 import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
+import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat, writeFile as writeFileAsync } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -28,6 +28,7 @@ import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './pe
 import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
 import { gitHistory } from './history.js';
+import { watchTree, type TreeWatcher } from './watch.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 /** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
@@ -128,10 +129,9 @@ export interface HostOptions {
    */
   manageOnline?: boolean;
   /**
-   * Watch the folder for edits made outside the app (default yes). Not a
-   * server's (0099): nothing edits its folder, and on Linux watching a folder
-   * whole holds one watch for every file in it, .git included, which runs out
-   * with a few dozen workspaces.
+   * Watch the folder for edits made outside the app (default yes; watch.ts). Not a
+   * server's (0099): nothing edits its folder, and on Linux watching takes one
+   * watch for every folder in it, which runs out with many large workspaces.
    */
   watchFiles?: boolean;
   /** Your identity changed through this host's API: tell every workspace that syncs (the hub's), not just this one. */
@@ -312,7 +312,7 @@ export class Host {
   runner!: Runner;
   /** Documents rendered to HTML, Word, PDF and EPUB (renders.ts). */
   renders!: Renders;
-  private watcher: FSWatcher | null = null;
+  private watcher: TreeWatcher | null = null;
   private cacheDir = '';
   private watchTimers = new Map<string, NodeJS.Timeout>();
   /** What the file list shows of files not open in a room, by path, with the file's size and time when read. */
@@ -1770,9 +1770,7 @@ export class Host {
 
   private startWatcher(): void {
     try {
-      this.watcher = watch(this.dir, { recursive: true }, (_event, filename) => {
-        if (!filename) return;
-        const rel = String(filename).split(sep).join('/');
+      this.watcher = watchTree(this.dir, (rel) => {
         // A branch switched, or an operation begun or ended, outside the app: follow it (and the poll does, if this is missed).
         const gitFile = /^\.git\/(HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|BISECT_LOG|rebase-merge|rebase-apply)$/.test(rel);
         if (!gitFile && (rel.startsWith('.git/') || rel === '.git' || rel.includes('.kuraa-tmp-'))) return;
@@ -1782,13 +1780,15 @@ export class Host {
           this.watchTimers.delete(rel);
           (gitFile ? this.checkGit() : this.checkPath(rel)).catch((e) => this.log(`checking ${rel} failed: ${e}`));
         }, 50));
-      });
-      // Watches run out (Linux, a large folder): said once, the watching given up, rather than an error nothing catches
-      // each time a file is made.
-      this.watcher.on('error', (err) => {
+      }, (err) => {
+        // Watches run out (Linux, a large folder): said once, the watching given up, rather than an error nothing catches
+        // each time a file is made.
         this.log(`file watching stopped: ${err.message} (edits made outside the app are taken up when the app next saves the file)`);
-        this.watcher?.close();
         this.watcher = null;
+      }, {
+        // Where folders are watched one by one (Linux): git's own folder, not the thousands inside it (objects, refs);
+        // what matters there (HEAD, an operation's files and folders) is in .git itself.
+        skip: (rel) => rel.startsWith('.git/'),
       });
     } catch (err) {
       this.log(`file watching unavailable: ${err}`);

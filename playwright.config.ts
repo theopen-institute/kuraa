@@ -24,6 +24,8 @@ export default defineConfig({
     { name: 'webkit', testMatch: WEB, use: { browserName: 'webkit' } },
     { name: 'firefox', testMatch: WEB, use: { browserName: 'firefox' } },
     { name: 'desktop', testMatch: /desktop\.spec\.ts/ },
+    // The Tauri app (0127): driven through its own control (tauri-app.ts), no browser launched.
+    { name: 'tauri', testMatch: /tauri\.spec\.ts/ },
     { name: 'dev', testMatch: /dev\.spec\.ts/, use: { browserName: 'chromium' } },
   ],
   webServer: {

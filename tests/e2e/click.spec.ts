@@ -3,7 +3,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
 
 async function openNew(page: Page, path: string, content: string): Promise<void> {
   const res = await fetch(`${E2E.url}/api/files`, {
@@ -15,6 +15,8 @@ async function openNew(page: Page, path: string, content: string): Promise<void>
   await page.goto(`/?token=${E2E.token}&name=Clicker&email=click%40example.org`);
   await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('peers')).toContainText('Clicker');
+  // Its scroll area there before the tests measure it (it can come a moment after the peers, in Firefox).
+  await expect(page.locator('.editor-scroll:not(.editor-preview)')).toBeVisible();
 }
 
 /** Click the editor's scroll area at a fraction of its width, `fromBottom` px above its bottom edge. */
@@ -112,7 +114,7 @@ test('a drag that starts in the empty space selects, as in the text; so does Shi
 
   // Shift-click below the text: from the cursor to the end.
   await editor.locator('p').nth(1).click();
-  await page.keyboard.press('Home');
+  await page.keyboard.press(KEYS.lineStart);
   await page.keyboard.down('Shift');
   await page.mouse.click(scroll.x + scroll.width / 2, scroll.y + scroll.height - 40);
   await page.keyboard.up('Shift');

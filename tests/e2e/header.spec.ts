@@ -1,6 +1,7 @@
 // The header: not in the page, edited in its own dialog (right-click the file),
 // shown as text in the Source view.
 import { expect, test, type Page } from '@playwright/test';
+import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ test('the header is edited in Document settings; the page shows only its title',
     // Typing at the very start of the text goes into the text, not the header.
     await editor.getByText('Introduction').click();
     await page.keyboard.press('ControlOrMeta+ArrowUp');
-    await page.keyboard.press('Home');
+    await page.keyboard.press(KEYS.lineStart);
     await page.keyboard.type('An ');
     await expect.poll(onDisk(dir, 'paper.md')).toContain('# An Introduction');
     expect(onDisk(dir, 'paper.md')()).toContain('---\n# Set by the journal\ntitle: Old title\nauthor: Ada Lovelace\n---');
@@ -62,7 +63,7 @@ test('the header is edited in Document settings; the page shows only its title',
     await expect(dialog.getByRole('textbox', { name: 'Authors 1', exact: true })).toHaveValue('Ada Lovelace');
     await dialog.getByRole('textbox', { name: 'Title', exact: true }).fill('A better title: with a colon');
     // A second author: Enter starts the next one.
-    await dialog.getByRole('textbox', { name: 'Authors 1', exact: true }).press('End');
+    await dialog.getByRole('textbox', { name: 'Authors 1', exact: true }).press(KEYS.lineEnd);
     await dialog.getByRole('textbox', { name: 'Authors 1', exact: true }).press('Enter');
     await page.keyboard.type('Grace Hopper');
     // Pandoc's fields are offered by name.

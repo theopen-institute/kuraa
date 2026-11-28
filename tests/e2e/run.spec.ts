@@ -1,12 +1,23 @@
 // Running R chunks from the browser: outputs appear under each chunk, for
 // everyone with the document open, survive a reload, and never touch the file.
 // R runs in Podman containers; skipped where Podman is not installed and running.
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type BrowserContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
 import { E2E } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const MAC = process.platform === 'darwin';
 const MOD = MAC ? 'Meta' : 'Control';
@@ -31,7 +42,7 @@ const DOC = [
 test.skip(!podmanWorks(), 'Podman is not installed and running');
 
 async function open(browser: Browser, name: string, path: string): Promise<Page> {
-  const page = await (await browser.newContext()).newPage();
+  const page = await (await ownContext(browser)).newPage();
   page.on('pageerror', (e) => console.error(`[${name}] page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${encodeURIComponent(name)}&email=${name.toLowerCase()}%40example.org`);
   await page.getByTestId(`file:${path}`).click();

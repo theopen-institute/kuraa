@@ -1,10 +1,21 @@
 // M2: two browser pages type into the same paragraph at once, converge to the
 // same text, and show each other's cursors. Also checks, through the real UI,
 // that the host writes the file (M3) and the history panel shows the commit (M4).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E, NOTES } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const PARAGRAPH = 'The tide was already on the turn when we arrived.';
 
@@ -21,7 +32,7 @@ async function createNotes(): Promise<string> {
 }
 
 async function open(browser: Browser, name: string, email: string, path: string): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await ownContext(browser);
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error(`[${name}] page error: ${e.message}`));
   await page.goto(`/?token=${E2E.token}&name=${encodeURIComponent(name)}&email=${encodeURIComponent(email)}`);

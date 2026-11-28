@@ -799,8 +799,14 @@ The app has no icon of its own yet: put `icon.png` (1024×1024) in `apps/desktop
 
 ```sh
 pnpm check       # lint (including the package dependency rules), typecheck, unit and host tests
-pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromium` once first
+pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromium webkit firefox` once first
+pnpm test:e2e --project web       # the browser tests in Chromium only (or --project webkit, --project firefox)
 ```
+
+The browser tests run in Chromium (`web`), WebKit (`webkit`: Safari, and a webview on macOS and
+Linux) and Firefox (`firefox`), the same tests in each ([0114](docs/decisions/0114-every-browser-engine.md)).
+Beside another checkout's run, give a run its own port, temporary folder and output folder:
+`KURAA_E2E_PORT=4472 TMPDIR=/private/tmp/k2 pnpm test:e2e --output /private/tmp/k2/results`.
 
 The desktop tests run the app with its windows hidden, so they do not take over the screen;
 `KURAA_SHOW_WINDOWS=1 pnpm test:e2e` shows them, to watch.

@@ -4,6 +4,7 @@
 // remove anyone until the first makes them an admin (0066); then they rename
 // their device and remove the first. On a local DHT, so nothing leaves this machine.
 import { expect, test } from '@playwright/test';
+import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,11 +59,11 @@ test('people on two devices edit one document; a member made owner renames their
 
     // Typing on one device appears on the other.
     await ada.getByTestId('editor').getByText('The tide was out.').click();
-    await ada.keyboard.press('End');
+    await ada.keyboard.press(KEYS.lineEnd);
     await ada.keyboard.type(' Ada was here.');
     await expect(bo.getByTestId('editor')).toContainText('The tide was out. Ada was here.', { timeout: 20_000 });
     await bo.getByTestId('editor').getByText('Ada was here.').click();
-    await bo.keyboard.press('End');
+    await bo.keyboard.press(KEYS.lineEnd);
     await bo.keyboard.type(' So was Bo.');
     await expect(bo.getByTestId('editor')).toContainText('Ada was here. So was Bo.');
     await expect(ada.getByTestId('editor')).toContainText('Ada was here. So was Bo.', { timeout: 20_000 });

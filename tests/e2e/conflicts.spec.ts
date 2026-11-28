@@ -1,6 +1,7 @@
 // Conflicts a merge kept: both versions in the page, who wrote each, and a way
 // to choose; the sidebar counts them until they are settled.
 import { expect, test } from '@playwright/test';
+import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ test('a conflict block shows both versions, and choosing settles it for everyone
 
     // The versions can be edited before choosing; the rest of the page as usual.
     await ada.getByText('Dried at 60 °C.').click();
-    await ada.keyboard.press('End');
+    await ada.keyboard.press(KEYS.lineEnd);
     await ada.keyboard.type(' Then weighed.');
 
     // Keep Bo's version of the first.

@@ -1,11 +1,22 @@
 // Finding your way in a document: ⌘F finds and replaces (replacing is ordinary
 // editing, so the other person sees it), ⌥⌘O shows the outline, following the
 // document, and a file's conflict count opens it at its first conflict.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E } from './env.js';
+import { E2E, KEYS } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const MAC = process.platform === 'darwin';
 const MOD = MAC ? 'Meta' : 'Control';
@@ -23,7 +34,7 @@ test('find and replace in the document, seen by everyone', async ({ browser }) =
   const path = `find-${Date.now().toString(36)}.md`;
   await create(path, '# Tides\n\nThe tide came in. The Tide went out.\n\nNo tide today.\n');
   const open = async (name: string) => {
-    const page = await (await browser.newContext()).newPage();
+    const page = await (await ownContext(browser)).newPage();
     page.on('pageerror', (e) => console.error(`page error: ${e.message}`));
     await page.goto(`/?token=${E2E.token}&name=${name}`);
     await page.getByTestId(`file:${path}`).click();
@@ -32,7 +43,12 @@ test('find and replace in the document, seen by everyone', async ({ browser }) =
   };
   const ada = await open('Ada');
   const bo = await open('Bo');
+  // The caret at the start, so the first match is the one found first (a click's caret lands where each browser puts it).
+  // ProseMirror takes the click's caret from the browser a moment later: ⌘↑ before then would be undone by it.
   await ada.getByTestId('editor').locator('p').first().click();
+  await ada.waitForTimeout(100);
+  await ada.keyboard.press(KEYS.docStart);
+  await ada.waitForTimeout(100);
   await ada.keyboard.press(`${MOD}+f`);
   const bar = ada.getByTestId('find-bar');
   await expect(bar).toBeVisible();

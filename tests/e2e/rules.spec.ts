@@ -2,6 +2,7 @@
 // Workspace settings; on another person's device it opens read only, saying
 // who may, with nothing to edit it by; the admin's edits reach it. On a local DHT.
 import { expect, test } from '@playwright/test';
+import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,7 +79,7 @@ test('an admin says who can change a document; to someone else it is read only, 
 
     // Ada edits it.
     await ada.getByTestId('editor').getByText('The tide was out.').click();
-    await ada.keyboard.press('End');
+    await ada.keyboard.press(KEYS.lineEnd);
     await ada.keyboard.type(' Bo saw a heron.');
     await expect(ada.getByTestId('editor')).toContainText('Bo saw a heron.');
     // It reaches Bo's device, still read only there.

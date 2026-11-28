@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
-import { pandocWasm, typstProgram } from '../../packages/render-pandoc/src/where.js';
+import { pandocWasm, typstParts } from '../../packages/render-pandoc/src/where.js';
 import { E2E } from './env.js';
 
 const api = (path: string, init: RequestInit = {}) =>
@@ -193,7 +193,7 @@ test('a folder compiled to EPUB with its own settings: author, cover, contents, 
 });
 
 test('a folder compiled to Word with a template from the workspace, and to PDF with contents and every heading numbered (0106)', async ({ page }) => {
-  test.skip(!pandocWasm() || !typstProgram(), 'pandoc and Typst have not been fetched');
+  test.skip(!pandocWasm() || !typstParts(), 'pandoc and Typst have not been fetched');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
   const folder = `word-${id}`;

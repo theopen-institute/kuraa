@@ -12,12 +12,12 @@
     "start": "pnpm run build && node start.mjs",
     "fetch-git": "node scripts/fetch-git.mjs",
     "fetch-render-tools": "node ../../scripts/fetch-render-tools.mjs --into vendor/render",
-    "dist:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render mac-arm64 mac-x64 && electron-builder --config electron-builder.config.cjs --mac",
-    "dist:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render win-x64 && electron-builder --config electron-builder.config.cjs --win",
-    "dist:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 linux-arm64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render linux-x64 linux-arm64 && electron-builder --config electron-builder.config.cjs --linux",
-    "release:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render mac-arm64 mac-x64 && electron-builder --config electron-builder.config.cjs --mac --publish always",
-    "release:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render win-x64 && electron-builder --config electron-builder.config.cjs --win --publish always",
-    "release:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 linux-arm64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render linux-x64 linux-arm64 && electron-builder --config electron-builder.config.cjs --linux --publish always"
+    "dist:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --mac",
+    "dist:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --win",
+    "dist:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 linux-arm64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --linux",
+    "release:mac": "pnpm run build && node scripts/fetch-git.mjs mac-arm64 mac-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --mac --publish always",
+    "release:win": "pnpm run build && node scripts/fetch-git.mjs win-x64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --win --publish always",
+    "release:linux": "pnpm run build && node scripts/fetch-git.mjs linux-x64 linux-arm64 && node ../../scripts/fetch-render-tools.mjs --into vendor/render && electron-builder --config electron-builder.config.cjs --linux --publish always"
   },
   "devDependencies": {
     "@electron/fuses": "1.8.0",

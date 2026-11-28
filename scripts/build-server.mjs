@@ -1,6 +1,6 @@
 // Builds the server as released (decision 0052): kuraa-host (packages/server/src/
 // release.ts: one program, a host or, with `server`, a server, 0099) bundled into
-// one file, with the web client beside it, pandoc.wasm (0107), and
+// one file, with the web client beside it, pandoc.wasm and Typst's (0107, 0113), and
 // Hyperswarm's native parts for every platform it ships on, in one folder that
 // needs only Node 24 and git; then that folder as an archive and, with the
 // release key, its signature. (Its checksum is the one GitHub lists for it.)
@@ -20,7 +20,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
-import { fetchPandoc } from './fetch-render-tools.mjs';
+import { fetchFonts, fetchPandoc, typstCompiler } from './fetch-render-tools.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const NATIVE = ['sodium-native', 'udx-native'];
@@ -94,10 +94,12 @@ for (const pkg of NATIVE) {
   }
 }
 cpSync(web, join(dir, 'web'), { recursive: true });
-// pandoc.wasm, with its licence, where @kuraa/render-pandoc looks beside the bundle (render/): Markdown
-// rendered without Podman (0107). Typst, a program per platform, is not carried: a host started from
-// this archive uses one the computer has (on PATH), else makes PDFs where code runs.
-cpSync(await fetchPandoc(), join(dir, 'render'), { recursive: true, filter: (p) => !p.endsWith('.kuraa-fetched') });
+// pandoc.wasm, with its licence, and Typst's (typst.ts) with its fonts, where @kuraa/render-pandoc looks
+// beside the bundle (render/): Markdown rendered without Podman (0107, 0113), the same on every platform.
+const fetched = (p) => !p.endsWith('.kuraa-fetched');
+cpSync(await fetchPandoc(), join(dir, 'render', 'pandoc'), { recursive: true, filter: fetched });
+cpSync(await fetchFonts(), join(dir, 'render', 'typst-fonts'), { recursive: true, filter: fetched });
+cpSync(typstCompiler(), join(dir, 'render', 'typst'), { recursive: true, filter: (p) => !/\.d\.ts$|wasm-pack-shim/.test(p) });
 writeFileSync(join(dir, 'VERSION'), `${version}\n`);
 // The Node it needs: a server does not switch to a release its Node cannot run (selfupdate.ts).
 writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server', version, type: 'module', private: true, engines: { node: '>=24' } }, null, 2)}\n`);

@@ -97,15 +97,17 @@ function useBundledGit(): void {
 }
 useBundledGit();
 
-/** The pandoc and Typst this app ships, for rendering Markdown without Podman (0107); in development, the checkout's (@kuraa/render-pandoc finds them). */
+/** The pandoc and Typst this app ships, for rendering Markdown without Podman (0107, 0113); in development, the checkout's (@kuraa/render-pandoc finds them). */
 function useBundledRenderTools(): void {
   if (!app.isPackaged) return;
-  const pandoc = join(process.resourcesPath, 'render', 'pandoc', 'pandoc.wasm');
-  const typst = join(process.resourcesPath, 'render', 'typst', process.platform === 'win32' ? 'typst.exe' : 'typst');
+  const render = join(process.resourcesPath, 'render');
+  const pandoc = join(render, 'pandoc', 'pandoc.wasm');
   if (existsSync(pandoc)) process.env.KURAA_PANDOC_WASM = pandoc;
   else console.error(`[desktop] no pandoc at ${pandoc}; Markdown renders only where code runs`);
-  if (existsSync(typst)) process.env.KURAA_TYPST = typst;
-  else console.error(`[desktop] no Typst at ${typst}; PDFs only where code runs`);
+  if (existsSync(join(render, 'typst')) && existsSync(join(render, 'typst-fonts'))) {
+    process.env.KURAA_TYPST_WASM = join(render, 'typst');
+    process.env.KURAA_TYPST_FONTS = join(render, 'typst-fonts');
+  } else console.error(`[desktop] no Typst in ${render}; PDFs only where code runs`);
 }
 useBundledRenderTools();
 

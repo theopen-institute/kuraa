@@ -1,6 +1,6 @@
-// A Markdown document rendered by pandoc.wasm, and Typst for a PDF (decision
-// 0107), with nothing of the computer's open to either but this render's
-// scratch folder:
+// A Markdown document rendered by pandoc.wasm, and Typst for a PDF (decisions
+// 0107, 0113), with nothing of the computer's open to either but what this
+// render's scratch folder holds:
 //
 //   1. the document, copied into scratch/work, read by pandoc into its syntax
 //      tree (JSON);
@@ -11,21 +11,20 @@
 //      pointing at the copy; an image that cannot be had is its description;
 //   3. the tree written to the format by pandoc, seeing scratch/work and
 //      scratch/out alone;
-//   4. for a PDF, Typst on what pandoc wrote: its root scratch (it reads
-//      nothing outside), with no packages and nowhere to fetch one from (a
-//      proxy that answers nothing), so a document's own Typst can do no more.
-import { execFile } from 'node:child_process';
+//   4. for a PDF, Typst (typst.ts, WebAssembly, sealed: typst.ts) on what
+//      pandoc wrote, given the copies and its own fonts and nothing else: no
+//      file of the computer's, no package, nothing of Node's, so a document's
+//      own Typst can do no more.
 import { appendFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import type { RenderFormat, RenderRequest, RenderResult, RendererContext } from '@kuraa/run-kit';
 import { headerOf, headerOptions } from './header.js';
+import { runTypst } from './typst.js';
 import { runPandoc } from './wasi.js';
 
 const NAMES: Record<RenderFormat, string> = { html: 'HTML', docx: 'Word', pdf: 'PDF', epub: 'EPUB' };
 /** What a render's log keeps. */
 const MAX_LOG = 400_000;
-/** An address that answers nothing: where Typst is told to fetch packages through. */
-const NOWHERE = 'http://127.0.0.1:9';
 
 const inside = (root: string, p: string) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
 const toPosix = (p: string) => p.split(sep).join('/');
@@ -44,7 +43,7 @@ function each(v: unknown, fn: (n: Node) => void): void {
 /** A reference that is not a file here: a web address, data. */
 const notAFile = (ref: string) => /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith('//') || ref.startsWith('#');
 
-export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, programs: { wasm: string; typst: string | null }): Promise<RenderResult> {
+export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, programs: { wasm: string; typst: { glue: string; module: string; fonts: string } | null }): Promise<RenderResult> {
   const deadline = Date.now() + ctx.timeLimitMs;
   const left = () => Math.max(1000, deadline - Date.now());
   const ext = req.format;
@@ -198,33 +197,11 @@ export async function renderMarkdown(ctx: RendererContext, req: RenderRequest, p
     if (!programs.typst) return { ok: false, message: 'Making a PDF needs Typst, which is not on this computer. Render to HTML, Word or EPUB instead.', log: await log() };
     if (o.latex) notes.push(`The header asks for ${o.latex}; PDFs are made with LaTeX only where code runs (Podman), which is not here, so this one was made with Typst: settings only LaTeX understands were left out.`);
     ctx.status('Making the PDF…');
-    const typst = await runTypst(programs.typst, ctx.scratch, left(), ctx.signal);
+    const typst = await runTypst(programs.typst, ctx.scratch, { timeLimitMs: left(), signal: ctx.signal });
     await writeFile(logFile, `${await readFile(logFile, 'utf8')}\n${typst.said}`);
     if (!typst.ok) return { ok: false, message: `The document could not be rendered: ${typst.message}`, log: await log() };
   }
   return { ok: true, output: `out/document.${ext}`, message: [`Rendered to ${NAMES[ext]}.`, ...notes].join(' '), log: await log() };
-}
-
-/** Typst, reading only scratch, with no packages and nowhere to fetch one from. */
-function runTypst(program: string, scratch: string, timeLimitMs: number, signal: AbortSignal): Promise<{ ok: boolean; message: string; said: string }> {
-  const keep = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR', 'TMPDIR', 'TEMP', 'TMP', 'LANG'];
-  const env: Record<string, string> = Object.fromEntries(keep.flatMap((k) => (process.env[k] ? [[k, process.env[k]!]] : [])));
-  Object.assign(env, {
-    TYPST_PACKAGE_PATH: join(scratch, 'packages'),
-    TYPST_PACKAGE_CACHE_PATH: join(scratch, 'packages'),
-    HTTPS_PROXY: NOWHERE, HTTP_PROXY: NOWHERE, ALL_PROXY: NOWHERE, https_proxy: NOWHERE, http_proxy: NOWHERE, all_proxy: NOWHERE, NO_PROXY: '', no_proxy: '',
-  });
-  return new Promise((done) => {
-    execFile(program, ['compile', '--root', scratch, join(scratch, 'out', 'document.typ'), join(scratch, 'out', 'document.pdf')], { env, cwd: scratch, timeout: timeLimitMs, signal, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-      const said = `${stdout}${stderr}`.trim();
-      if (!err) return done({ ok: true, message: '', said });
-      const e = err as NodeJS.ErrnoException & { killed?: boolean };
-      if (e.name === 'AbortError') return done({ ok: false, message: 'The render was stopped.', said });
-      if (e.killed) return done({ ok: false, message: `The render took longer than ${Math.round(timeLimitMs / 1000)} seconds, the most this host allows, and was stopped.`, said });
-      const last = said.split('\n').find((l) => /^error:/.test(l.trim()));
-      done({ ok: false, message: `Typst: ${last?.replace(/^\s*error:\s*/, '') ?? e.message}`, said });
-    });
-  });
 }
 
 /** The LaTeX engine a document's header asks for, if any, for a PDF. */

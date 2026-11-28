@@ -5,7 +5,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pandocWasm, typstProgram } from '../../packages/render-pandoc/src/where.js';
+import { pandocWasm, typstParts } from '../../packages/render-pandoc/src/where.js';
 import { E2E } from './env.js';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -54,5 +54,5 @@ test('the Preview panel renders Markdown with the built-in pandoc, and saves Wor
     return readFileSync((await (await download).path())!);
   };
   expect((await save('docx')).subarray(0, 2).toString()).toBe('PK');
-  if (typstProgram()) expect((await save('pdf')).subarray(0, 5).toString()).toBe('%PDF-');
+  if (typstParts()) expect((await save('pdf')).subarray(0, 5).toString()).toBe('%PDF-');
 });

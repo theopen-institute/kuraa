@@ -68,9 +68,10 @@ module.exports = {
   asarUnpack: ['build/native/**'],
   extraResources: [
     { from: 'vendor/git/${os}-${arch}', to: 'git', filter: ['**/*', '!.kuraa-git'] },
-    // Markdown rendered without Podman (decision 0107): pandoc.wasm for every platform, Typst for this one, with their licences.
+    // Markdown rendered without Podman (decisions 0107, 0113): pandoc.wasm and Typst's (typst.ts) with its fonts, the same for every platform.
     { from: 'vendor/render/pandoc', to: 'render/pandoc' },
-    { from: 'vendor/render/${os}-${arch}', to: 'render/typst' },
+    { from: 'vendor/render/typst', to: 'render/typst' },
+    { from: 'vendor/render/typst-fonts', to: 'render/typst-fonts' },
   ],
   electronFuses: {
     // git-remote-kuraa runs the app as Node (ELECTRON_RUN_AS_NODE): devices fetch from each other through it.

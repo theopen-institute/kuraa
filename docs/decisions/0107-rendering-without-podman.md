@@ -1,5 +1,7 @@
 # 0107 · Rendering Markdown without Podman
 
+*Since [0113](0113-typst-sealed-in-webassembly.md):* PDFs are made by Typst's WebAssembly build (typst.ts), sealed in a context with nothing of Node's and given only copies, not by Typst's own program; the app and the server download carry it, the same for every platform.
+
 **Status: built.** Markdown documents, and every book Compile makes, render to HTML, Word, PDF and
 EPUB with no Podman: pandoc's WebAssembly build makes them, inside the host, and Typst makes the
 PDFs. R Markdown, whose chunks are code, still renders where code runs. So does a PDF whose header

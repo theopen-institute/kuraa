@@ -3,7 +3,7 @@
 // no network, no programs to start, no environment variables. What it says
 // goes to a log file. The module is compiled once and shared.
 import { readFile } from 'node:fs/promises';
-import { Worker } from 'node:worker_threads';
+import { runWorker } from './worker.js';
 
 // A script of its own (no file to find in a bundle): CommonJS, as eval'd workers are.
 const WORKER = String.raw`
@@ -55,26 +55,6 @@ export interface PandocRun {
  */
 export async function runPandoc(wasm: string, args: string[], o: { preopens: Record<string, string>; log: string; stdin: string; timeLimitMs: number; signal: AbortSignal }): Promise<PandocRun> {
   const module = await moduleOf(wasm);
-  if (o.signal.aborted) return { code: null, stopped: 'The render was stopped.' };
-  const worker = new Worker(WORKER, { eval: true, workerData: { module, args, preopens: o.preopens, log: o.log, stdin: o.stdin } });
-  return await new Promise<PandocRun>((resolve) => {
-    let done = false;
-    const finish = (r: PandocRun) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      o.signal.removeEventListener('abort', onAbort);
-      resolve(r);
-    };
-    const stop = (why: string) => {
-      void worker.terminate();
-      finish({ code: null, stopped: why });
-    };
-    const timer = setTimeout(() => stop(`The render took longer than ${Math.round(o.timeLimitMs / 1000)} seconds, the most this host allows, and was stopped.`), o.timeLimitMs);
-    const onAbort = () => stop('The render was stopped.');
-    o.signal.addEventListener('abort', onAbort);
-    worker.once('message', (m: { code: number }) => finish({ code: m.code, stopped: null }));
-    worker.once('error', (e: Error) => finish({ code: null, stopped: `pandoc stopped unexpectedly: ${e.message}` }));
-    worker.once('exit', (code) => finish({ code: code === 0 ? 0 : null, stopped: code === 0 ? null : 'pandoc stopped unexpectedly.' }));
-  });
+  const r = await runWorker<{ code: number }>(WORKER, { module, args, preopens: o.preopens, log: o.log, stdin: o.stdin }, { timeLimitMs: o.timeLimitMs, signal: o.signal, what: 'pandoc' });
+  return { code: r.answer?.code ?? null, stopped: r.stopped };
 }

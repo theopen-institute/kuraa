@@ -21,9 +21,11 @@ This is the phase 0–1 prototype from the design doc. Deviations from that spec
 pnpm install
 ```
 
-`pnpm install` also fetches the pandoc (its WebAssembly build) and Typst that Markdown is rendered
-with, once per computer, into your cache folder (`node scripts/fetch-render-tools.mjs` again if it
-was offline; [decision 0107](docs/decisions/0107-rendering-without-podman.md)).
+`pnpm install` also fetches the pandoc (its WebAssembly build) and Typst's fonts that Markdown is
+rendered with, once per computer, into your cache folder (`node scripts/fetch-render-tools.mjs`
+again if it was offline); Typst's own WebAssembly build is a dependency
+([decisions 0107](docs/decisions/0107-rendering-without-podman.md),
+[0113](docs/decisions/0113-typst-sealed-in-webassembly.md)).
 
 If `pnpm desktop` reports that Electron failed to install, fetch its binary once with
 `node apps/desktop/node_modules/electron/install.js`.
@@ -239,8 +241,10 @@ renders that format and saves the file. The header's `output:` (or `format:`) se
 
 **Markdown needs no Podman** ([decision 0107](docs/decisions/0107-rendering-without-podman.md)): the
 app's own pandoc (its WebAssembly build) renders it inside the host, seeing only copies of the
-document and the workspace files it refers to (images, a bibliography), and Typst makes its PDFs,
-kept to those copies and off the network. So does every book Compile makes. **Render Markdown where
+document and the workspace files it refers to (images, a bibliography), and Typst's WebAssembly
+build makes its PDFs, sealed where nothing of the computer's can be reached, given those copies and
+its own fonts ([decision 0113](docs/decisions/0113-typst-sealed-in-webassembly.md)). So does every
+book Compile makes. **Render Markdown where
 code runs** (Settings › Host; `--render-where-code-runs`) sends Markdown to Podman instead, as R
 Markdown is: the R image's pandoc, and LaTeX for a PDF whose header asks for it.
 

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
-import pandocComponent, { pandocWasm, typstProgram } from '@kuraa/render-pandoc';
+import pandocComponent, { pandocWasm, typstParts } from '@kuraa/render-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { startHost, type RunningHost, type RunOptions } from '../src/index.js';
 import type { RenderInfo, RenderState } from '../src/renders.js';
@@ -207,7 +207,7 @@ describe.skipIf(!pandocWasm())('rendering Markdown with no environment (0107)', 
     expect(ran(await render('notes.md'))).toBe('Rendered to HTML.');
     // A PDF asking for LaTeX: the engine would, but Paper makes no PDFs, so the built-in pandoc does, saying so.
     writeFileSync(join(dir, 'latex.md'), '---\npdf-engine: xelatex\n---\n\nWords.\n');
-    if (typstProgram()) expect(ran(await render('latex.md', 'pdf'))).toMatch(/^Rendered to PDF\. The header asks for xelatex/);
+    if (typstParts()) expect(ran(await render('latex.md', 'pdf'))).toMatch(/^Rendered to PDF\. The header asks for xelatex/);
     await running!.close();
     rmSync(dir, { recursive: true, force: true });
     await host({ ...PAPER_ON, components: [PAPER, ENVS, pandocComponent], renderWhereCodeRuns: true });

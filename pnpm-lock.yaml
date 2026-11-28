@@ -849,6 +849,9 @@ importers:
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit
+      '@myriaddreamin/typst-ts-web-compiler':
+        specifier: 0.8.0-rc4
+        version: 0.8.0-rc4
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -1403,6 +1406,9 @@ packages:
 
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
+
+  '@myriaddreamin/typst-ts-web-compiler@0.8.0-rc4':
+    resolution: {integrity: sha512-iHjdc7z2G2jhi2A9DAOZEL40kEbJb1xkayFQFguaCuirhjxGK61t6agQ55NCdHiwaGykQx2+LGxLhdVLgRYcvg==}
 
   '@napi-rs/wasm-runtime@1.2.6':
     resolution: {integrity: sha512-mRyDmEw9/fCDXCGfL1sbgIw/GUK0PVxRW4YwgPN61F3LQ+fSyoBFarJVzgGyhF6kRzEQZ0FejDqm4WLXSeqQmw==}
@@ -4215,6 +4221,8 @@ snapshots:
       - supports-color
 
   '@marijn/find-cluster-break@1.0.4': {}
+
+  '@myriaddreamin/typst-ts-web-compiler@0.8.0-rc4': {}
 
   '@napi-rs/wasm-runtime@1.2.6(@emnapi/core@2.0.0-beta.2)(@emnapi/runtime@2.0.0-beta.2)':
     dependencies:

@@ -8,7 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RenderFormat, RendererContext } from '@kuraa/run-kit';
-import { pandocRenderer, pandocWasm, typstProgram } from '../src/index.js';
+import vm from 'node:vm';
+import { pandocRenderer, pandocWasm, sealGlue, typstParts } from '../src/index.js';
+import { codeOf } from '../src/typst.js';
 
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
@@ -99,7 +101,7 @@ describe.skipIf(!pandocWasm())('Markdown rendered without Podman (0107)', () => 
     expect(asked).toContain('novel/art/pixel.png');
   });
 
-  it.skipIf(!typstProgram())('makes a PDF with Typst', async () => {
+  it.skipIf(!typstParts())('makes a PDF with Typst', async () => {
     const pdf = await render(doc('---\ntitle: The Coast\n---\n\n# Arrival\n\n![A pixel](art/pixel.png)\n'), 'pdf');
     expect(pdf).toMatchObject({ ok: true, message: 'Rendered to PDF.' });
     expect(readFileSync(pdf.file!).subarray(0, 5).toString()).toBe('%PDF-');
@@ -118,19 +120,48 @@ describe.skipIf(!pandocWasm())('Markdown rendered without Podman (0107)', () => 
     expect(asked).toEqual(['.git/config']);
   });
 
-  it.skipIf(!typstProgram())('a document’s own Typst reads nothing outside the render, and fetches nothing', async () => {
-    const read = await render(doc('```{=typst}\n#read("/etc/hosts")\n```\n'), 'pdf');
-    expect(read.ok).toBe(false);
-    expect(read.message).toMatch(/Typst: file not found/);
-    const outside = await render(doc(`\`\`\`{=typst}\n#read("${join(dir, 'outside.png')}")\n\`\`\`\n`), 'pdf');
-    expect(outside.ok).toBe(false);
+  it.skipIf(!typstParts())('a document’s own Typst reads nothing but the copies, and gets no package', async () => {
+    for (const path of ['/etc/hosts', join(dir, 'outside.png'), '../../../../etc/hosts', '/work/ws/.git/config']) {
+      const r = await render(doc(`\`\`\`{=typst}\n#read("${path}")\n\`\`\`\n`), 'pdf');
+      expect(r.ok, path).toBe(false);
+      expect(r.message, path).toMatch(/^The document could not be rendered: Typst: (failed to load file|path .* would escape)/);
+    }
     const started = Date.now();
-    const fetch = await render(doc('```{=typst}\n#import "@preview/example:0.1.0": *\n```\n'), 'pdf');
-    expect(fetch.ok).toBe(false);
-    expect(fetch.message).toMatch(/failed to download package/);
+    const pkg = await render(doc('```{=typst}\n#import "@preview/example:0.1.0": *\n```\n'), 'pdf');
+    expect(pkg.ok).toBe(false);
+    expect(pkg.message).toMatch(/failed to load package/);
     expect(Date.now() - started).toBeLessThan(20_000);
-    // Its own Typst otherwise works: a page break.
-    expect((await render(doc('One.\n\n```{=typst}\n#pagebreak()\n```\n\nTwo.\n'), 'pdf')).ok).toBe(true);
+    // What was copied in, it can read (the image the document names); and its own Typst otherwise works: a page break.
+    expect((await render(doc('![A pixel](art/pixel.png)\n\n```{=typst}\n#let b = read("/work/ws/novel/art/pixel.png", encoding: none)\nBytes: #b.len()\n#pagebreak()\n```\n\nTwo.\n'), 'pdf')).ok).toBe(true);
+  });
+
+  it.skipIf(!typstParts())('seals Typst in a context with nothing of Node’s, no code from strings, and no imports', async () => {
+    const context = vm.createContext(vm.constants.DONT_CONTEXTIFY, { codeGeneration: { strings: false, wasm: true } });
+    vm.runInContext(await codeOf(typstParts()!.glue), context);
+    const probe = async (code: string) => {
+      try {
+        return String(await vm.runInContext(code, context));
+      } catch (e) {
+        return `throws ${(e as Error).name}`;
+      }
+    };
+    expect(await probe('typeof process + typeof require + typeof fetch + typeof Buffer')).toBe('undefinedundefinedundefinedundefined');
+    expect(await probe('new Function("return 1")()')).toBe('throws EvalError');
+    expect(await probe('eval("1")')).toBe('throws EvalError');
+    expect(await probe('globalThis.constructor.constructor("return typeof process")()')).toBe('throws EvalError');
+    expect(await probe('(async () => {}).constructor("return 1")')).toBe('throws EvalError');
+    expect(await probe('import("node:fs").then(() => "imported", (e) => "refused")')).toBe('refused');
+    // The glue's own new Function: the fixed few, nothing else.
+    expect(await probe('__fixed("return true")()')).toBe('true');
+    expect(await probe('__fixed("return process")')).toBe('throws Error');
+  });
+
+  it('refuses a typst.ts that makes or loads code in another way', () => {
+    const ok = 'export class TypstCompilerBuilder {}\nfunction initSync() {}\nconst ret = new Function(getStringFromWasm0(arg0, arg1));\n';
+    expect(sealGlue(ok)).not.toMatch(/new Function/);
+    expect(() => sealGlue(`${ok}\nconst other = new Function('a', 'b');\n`)).toThrow(/does not expect/);
+    expect(() => sealGlue(`${ok}\nawait import('fs');\n`)).toThrow(/does not expect/);
+    expect(() => sealGlue('function initSync() {}\n')).toThrow(/knows how to drive/);
   });
 
   it('would rather an engine made a PDF its header asks LaTeX for', async () => {

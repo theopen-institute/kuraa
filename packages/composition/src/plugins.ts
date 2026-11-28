@@ -1,4 +1,4 @@
-// Composition mode's part of the editor (0118): typewriter scrolling, and the
+// Composition mode's part of the editor (0120): typewriter scrolling, and the
 // paragraphs but the one being written faded. Each acts only while composition
 // mode is on and its setting is (`active`); told when either changes
 // (`refresh`), each open editor draws itself again.

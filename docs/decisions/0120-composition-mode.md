@@ -1,4 +1,4 @@
-# 0118 · Composition mode
+# 0120 · Composition mode
 
 **Status: built.** **Composition mode** (⌥⌘P, or the document's ⋯ menu) shows the page alone, full
 screen where the platform allows: nothing but what is being written. As each person chooses:

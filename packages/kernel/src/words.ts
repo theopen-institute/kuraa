@@ -83,7 +83,7 @@ export function wordChange(before: string | null, after: string | null): { net: 
 /**
  * The words of a document as it is open, counted as a file's are: each
  * paragraph's text, but code (blocks, inline), the header, maths and other
- * atoms, which are not prose. (Words' and Composition's: 0094, 0118.)
+ * atoms, which are not prose. (Words' and Composition's: 0094, 0120.)
  */
 export function liveWords(doc: PMNode): number {
   let n = 0;

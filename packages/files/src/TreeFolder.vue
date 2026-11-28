@@ -95,7 +95,7 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
       :tabindex="tabStop === c.file.path ? 0 : -1"
       :data-path="c.file.path"
       :style="lineAt"
-      :class="['tree-file', dropSide(c.file.path), { selected: selected === c.file.path, untyped: !c.file.type, untitled: untitled(c.file), dragging: dragging === c.file.path, 'has-conflicts': !!c.file.conflicts, muted: t.marksOf(c.file.path).some((m) => m.muted) }]"
+      :class="['tree-file', dropSide(c.file.path), { selected: selected === c.file.path, untyped: !c.file.type, untitled: untitled(c.file), dragging: dragging === c.file.path, muted: t.marksOf(c.file.path).some((m) => m.muted) }]"
       draggable="true"
       @focus.self="t.focused(c.file.path)"
       @dragstart="t.dragStart($event, c.file.path)"
@@ -121,10 +121,6 @@ const folderRow = (f: Folder) => ({ path: f.path, folder: true });
           @click.stop="t.showConflicts(c.file.path)"
         >{{ S.conflicts(c.file.conflicts) }}</span>
       </div>
-      <span class="tree-actions">
-        <button type="button" tabindex="-1" :title="S.rename" :aria-label="S.rename" @click.stop="t.rename(c.file.path)">✎</button>
-        <button type="button" tabindex="-1" :title="S.delete" :aria-label="S.delete" @click.stop="t.remove(c.file.path)">✕</button>
-      </span>
     </li>
   </template>
 </template>

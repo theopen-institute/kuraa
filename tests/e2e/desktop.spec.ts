@@ -124,8 +124,8 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
     await expect(page.getByTestId('file:day-one.md')).toContainText('Day one');
     await expect.poll(() => existsSync(join(dir, 'day-one.md'))).toBe(true);
     const row = page.locator('li.tree-file', { has: page.getByTestId('file:day-one.md') });
-    await row.hover();
-    await row.getByTitle('Rename').click();
+    await row.click({ button: 'right' });
+    await page.getByTestId('context:rename').click();
     await page.getByTestId('rename').getByLabel('Title').fill('Day 1');
     await page.getByTestId('rename').getByRole('button', { name: 'Rename' }).click();
     await expect(page.getByTestId('file:day-1.md')).toContainText('Day 1');

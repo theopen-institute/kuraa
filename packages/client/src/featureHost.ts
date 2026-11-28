@@ -208,7 +208,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     activated.clear();
   }
 
-  // The page alone (0118): asked by a component (composition mode); the app hides all else and goes full screen.
+  // The page alone (0120): asked by a component (composition mode); the app hides all else and goes full screen.
   const pageAlone = ref(false);
   const pageAloneListeners = new Set<(on: boolean) => void>();
   function setPageAlone(on: boolean) {
@@ -237,7 +237,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
   }
   const sidePanel = computed(() => shown(side.value));
   const overPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place !== 'dialog' && p.panel.place !== 'foot'));
-  /** At the foot of the page (0118): a count, a status. */
+  /** At the foot of the page (0120): a count, a status. */
   const footPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place === 'foot'));
   /** Dialogs (0092): over the whole page, each as it was asked for. */
   const dialogPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place === 'dialog'));

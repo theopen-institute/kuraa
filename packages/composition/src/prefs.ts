@@ -1,4 +1,4 @@
-// Composition mode's settings (0118): each person's, kept in this browser, as
+// Composition mode's settings (0120): each person's, kept in this browser, as
 // Words keeps a day's target (0094). Read where storage cannot be (a private
 // window): the defaults.
 export interface CompositionPrefs {

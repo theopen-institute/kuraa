@@ -173,7 +173,7 @@ const sidePanel = fh.sidePanel;
 const overPanels = fh.overPanels;
 const footPanels = fh.footPanels;
 
-// The page alone (0118): asked by a component (composition mode). All else hidden (style.css), full screen where the
+// The page alone (0120): asked by a component (composition mode). All else hidden (style.css), full screen where the
 // platform allows; left by Escape (where nothing else takes it), by leaving full screen, or when no document is open.
 const pageAlone = fh.pageAlone;
 let wentFull = false;
@@ -1185,7 +1185,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
                 />
               </template>
             </Editor>
-            <!-- At the page's foot (0118): a count, a status. -->
+            <!-- At the page's foot (0120): a count, a status. -->
             <div v-if="footPanels.length" class="foot-panels">
               <FeaturePanel
                 v-for="o in footPanels"

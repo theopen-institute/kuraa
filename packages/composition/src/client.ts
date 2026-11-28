@@ -1,4 +1,4 @@
-// Composition mode's client half (0118): the page alone (the core's: nothing
+// Composition mode's client half (0120): the page alone (the core's: nothing
 // but the open document, full screen), with typewriter scrolling, the other
 // paragraphs faded, and the document's words and target at the page's foot,
 // as each person's settings say (prefs.ts, Settings › You). ⌥⌘P, or the ⋯

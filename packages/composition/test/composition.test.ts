@@ -1,4 +1,4 @@
-// Composition mode (0118): its settings, kept in this browser; the block being
+// Composition mode (0120): its settings, kept in this browser; the block being
 // written marked (the rest fade); the count at the page's foot.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Schema } from 'prosemirror-model';

@@ -168,7 +168,7 @@ research files, and its notes in a Notes folder ([0116](docs/decisions/0116-impo
 **Composition mode** (⌥⌘P, or the document's ⋯ menu) shows the page alone, full screen, until Escape:
 with typewriter scrolling, the document's words and target at the foot of the page, and the other
 paragraphs faded, as you choose in Settings › Components › Composition mode
-([0118](docs/decisions/0118-composition-mode.md)).
+([0120](docs/decisions/0120-composition-mode.md)).
 
 The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as

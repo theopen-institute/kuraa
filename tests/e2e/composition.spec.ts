@@ -1,4 +1,4 @@
-// Composition mode (docs/decisions/0118-composition-mode.md): the page alone,
+// Composition mode (docs/decisions/0120-composition-mode.md): the page alone,
 // from the ⋯ menu or ⌥⌘P; typewriter scrolling keeps the line being written at
 // one height; the words and the target at the page's foot; the other
 // paragraphs faded where Settings › You says; Escape leaves it.

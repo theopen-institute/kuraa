@@ -145,6 +145,8 @@ export interface PeopleInfo {
   servers?: { key: string; name: string; devices: string[]; you: boolean }[];
   /** Whether you invite and remove servers: the owner (0099). */
   managesServers?: boolean;
+  /** Servers taken out before, not blocked (0115): the owner may block one still. */
+  formerServers?: { key: string; name: string }[];
   /** The latest removals (0072): people taken out, computers dropped, servers removed (0099); who has confirmed each so far. */
   removals?: { kind: 'person' | 'computer' | 'server' | 'server-out'; who: string; by: string | null; confirmedBy: string[] }[];
 }

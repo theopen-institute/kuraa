@@ -508,6 +508,8 @@ export const S = {
     block: 'Block this server’s access…',
     blockAbout: 'Only if its key may be in someone else’s hands: that key can never sync with this workspace again, and a server with a new key is added as a new one.',
     blockButton: 'Block access',
+    former: 'Removed servers',
+    formerAbout: 'Servers taken out of this workspace. Block one only if its key may now be in someone else’s hands.',
     onlyOwner: 'Only the workspace’s owner adds and removes servers.',
   },
 

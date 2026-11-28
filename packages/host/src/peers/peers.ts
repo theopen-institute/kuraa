@@ -271,6 +271,8 @@ export interface PeopleInfo {
   servers: { key: string; name: string; devices: string[]; you: boolean }[];
   /** Whether this person invites and removes servers: the owner (0099). */
   managesServers: boolean;
+  /** Servers taken out before, not blocked (0115): the owner may still block one whose key went astray since. */
+  formerServers: { key: string; name: string }[];
   /**
    * The latest removals (0072: people taken out, computers dropped; 0099:
    * servers), each with the names of those whose devices hold it so far.
@@ -645,6 +647,25 @@ export class Peers {
     return [...n.links.values()].some((l) => servers.has(l.key) && l.present.has(link.key));
   }
 
+  /**
+   * Whether a server this device relies on to pass a member's work on holds it
+   * (0115): its branch, as it said it, holds the member's latest, as the member
+   * said it. Else (a server showing each member only that member's work) the
+   * member's work is fetched from it directly after all.
+   */
+  private async serverHoldsTheirs(link: PeerLink): Promise<boolean> {
+    const n = this.node;
+    const branch = await this.host.git.branch().catch(() => null);
+    const theirs = branch ? link.heads?.[branch] : undefined;
+    if (!branch || !theirs) return true;
+    for (const l of n.links.values()) {
+      if (!l.accepted || l.closed || !n.isServerDevice(l.key) || !l.present.has(link.key)) continue;
+      const held = l.heads?.[branch];
+      if (held && (held === theirs || (await this.host.git.run(['merge-base', '--is-ancestor', theirs, held], { allowFail: true })).code === 0)) return true;
+    }
+    return false;
+  }
+
   /** When work from another device was last brought in here (0112: a server's status says it); null, not since starting. */
   lastBrought: number | null = null;
 
@@ -669,7 +690,13 @@ export class Peers {
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
-    if (this.syncsThroughServer(link)) return Promise.resolve();
+    // Through a server that holds the member's latest (0115): nothing to fetch from the member; else fetched after all.
+    if (this.syncsThroughServer(link)) return this.serverHoldsTheirs(link).then((held) => (held ? undefined : this.syncNow(link)));
+    return this.syncNow(link);
+  }
+
+  private syncNow(link: PeerLink): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const remote = link.remote!;
     // The newest link to it counts, whichever started the sync under way.
     if (!link.closed || !this.linkTo.has(remote)) this.linkTo.set(remote, link);
@@ -948,7 +975,7 @@ export class Peers {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
     // A server's device (0099): removing it would drop the whole server's key, for good. A server is taken out as one.
-    if (await this.node.identity.isServerDevice(key)) throw new NotAllowed('This is a server’s device: take the server out under Servers instead (Remove…)');
+    if (await this.node.identity.isServerDevice(key)) throw new NotAllowed('This is a server’s device: remove the server from its view under People instead');
     // An admin, or the same person: one's own lost or retired computer (0068).
     if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
     // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.
@@ -995,7 +1022,9 @@ export class Peers {
    */
   async removeServer(key: string, o: { forGood?: boolean } = {}): Promise<void> {
     const { policy, me } = await this.node.policy();
-    if (!policy.isServer(key)) throw new Error('No such server in this workspace');
+    // One taken out before stays the owner's to block (0115: its key may have gone astray since); not removed again.
+    const was = !policy.isServer(key) && (await this.node.identity.everServers()).has(key) && !policy.dropped.has(key);
+    if (!policy.isServer(key) && !(o.forGood && was)) throw new Error('No such server in this workspace');
     if (!policy.isOwner(me)) throw new NotAllowed('Only the workspace’s owner removes a server');
     const devices = (await this.node.identity.servers()).find((s) => s.key === key)?.devices.map((d) => d.key) ?? [];
     if (o.forGood) await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
@@ -1045,6 +1074,9 @@ export class Peers {
       people: policy.people().map((p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
       servers,
       managesServers: policy.founded && policy.isOwner(me),
+      formerServers: policy.founded && policy.isOwner(me)
+        ? [...(await id.everServers())].filter((k) => !policy.servers.has(k) && !policy.dropped.has(k)).map((key) => ({ key, name: nameOf(key) }))
+        : [],
       removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: nameOf(r.who), by: r.by ? nameOf(r.by) : null, confirmedBy: r.confirmedBy.map(nameOf) })),
     };
   }

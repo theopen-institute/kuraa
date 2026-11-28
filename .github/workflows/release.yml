@@ -214,6 +214,29 @@ jobs:
         with:
           name: server
           path: server
+      # What it signs is checked first (0115): one archive of this release's version, its entries all in its own
+      # folder, saying its version and protocol, and carrying this key's public half. Nothing in it is run.
+      - name: Check the archive
+        env:
+          SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}
+        run: |
+          set -eu
+          v="${TAG#v}"
+          a="server/kuraa-server-$v.tar.gz"
+          test "$(ls server/*.tar.gz | wc -l)" -eq 1 && test -f "$a"
+          if tar -tzf "$a" | grep -v -E "^kuraa-server-$v/" | grep -q .; then echo "entries outside kuraa-server-$v/"; exit 1; fi
+          if tar -tzf "$a" | grep -q -E '(^|/)\.\.(/|$)'; then echo "entries naming .."; exit 1; fi
+          mkdir unpacked && tar -xzf "$a" -C unpacked --no-same-owner
+          test "$(cat "unpacked/kuraa-server-$v/VERSION")" = "$v"
+          grep -q -E '^[0-9]+$' "unpacked/kuraa-server-$v/PROTOCOL"
+          node -e '
+            const { createPrivateKey, createPublicKey } = require("node:crypto");
+            const fs = require("node:fs");
+            const pem = createPublicKey(createPrivateKey(process.env.SERVER_SIGNING_KEY)).export({ type: "spki", format: "pem" }).toString();
+            const body = pem.split("\n").filter((l) => l && !l.startsWith("-----")).join("");
+            const bundle = fs.readFileSync(process.argv[1], "utf8").replace(/\\n/g, "");
+            if (!bundle.includes(body)) throw new Error("the server does not carry the release key");
+          ' "unpacked/kuraa-server-$v/kuraa-host.mjs"
       - name: Sign the server with the release key
         env:
           SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}

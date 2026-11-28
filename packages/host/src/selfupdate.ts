@@ -389,7 +389,12 @@ export function installServer(o: { here: string; version: string; root: string; 
   if (platform === 'linux') {
     const file = join(home, '.config', 'systemd', 'user', 'kuraa.service');
     mkdirSync(dirname(file), { recursive: true });
-    const quote = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `"${a.replace(/(["\\$`])/g, '\\$1')}"`);
+    // systemd's own: `%` begins a specifier there and `$` a variable, so each doubled (0115); quotes and backslashes
+    // escaped within quotes.
+    const quote = (a: string) => {
+      const p = a.replace(/%/g, '%%').replace(/\$/g, '$$$$');
+      return /^[\w@+=:,./-]+$/.test(p) ? p : `"${p.replace(/(["\\`])/g, '\\$1')}"`;
+    };
     writeFileSync(file, [
       '[Unit]',
       'Description=kuraa server',

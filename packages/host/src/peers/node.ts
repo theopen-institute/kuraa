@@ -143,7 +143,8 @@ function addressOf(conn: unknown): string {
  * not long.
  */
 export function saidByPeer(x: unknown, max = 200): string {
-  const s = String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
+  // And no characters that turn text around (0115: U+202A–202E, U+2066–2069), which can make a log line read otherwise.
+  const s = String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ');
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 /** On a server, whose port anyone reaches (0112): a stranger's time to be let in, and how many may wait at once. */
@@ -1683,7 +1684,7 @@ export class PeerNode {
       people.add(l.issuer.key);
       fromServer = !people.has(link.key);
       if (!known.has(link.key)) {
-        this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
+        this.o.log(`peers: ${saidByPeer(link.hello.name)} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
         link.close();
         return;
       }
@@ -1700,12 +1701,12 @@ export class PeerNode {
       // From a server (0099): the secret a person's device last made, as the records it sent say, where they say one.
       const ticket = this.o.ticket ? (() => { try { return decodeLink(this.o.ticket!); } catch { return undefined; } })() : undefined;
       if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret, ticket))) {
-        this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
+        this.o.log(`peers: ${saidByPeer(link.hello?.name ?? link.key.slice(0, 8))} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
         link.close();
         return;
       }
       if (!secret) {
-        this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} let this device in without the workspace's secret; not joining through it`);
+        this.o.log(`peers: ${saidByPeer(link.hello?.name ?? link.key.slice(0, 8))} let this device in without the workspace's secret; not joining through it`);
         link.close();
         return;
       }

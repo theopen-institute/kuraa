@@ -10,7 +10,7 @@
 // computers are listed instead.
 import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
-import { askText } from './ask.js';
+import { askConfirm, askText } from './ask.js';
 import { time } from './labels.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
@@ -67,6 +67,11 @@ async function copyServerLink() {
     // No clipboard here: select the text, to copy by hand.
     (document.querySelector('[data-testid=server-link]') as HTMLTextAreaElement | null)?.select();
   }
+}
+
+/** A server taken out before, blocked (0115): its key shut out of the workspace for good. */
+async function blockFormer(f: { key: string; name: string }) {
+  if (await askConfirm(S.keys.blockServerAsk(f.name), S.servers.blockButton, true)) await act(() => props.api.removeServer(f.key, true));
 }
 
 /** Where there is no policy yet, this computer is renamed from the list of computers (else from your own view). */
@@ -155,6 +160,20 @@ const noContact = (i: Info) =>
       <button v-if="info.people?.founded && managesServers(info) && !serverLink" type="button" :disabled="busy" data-testid="add-server" @click="addServer">{{ S.servers.add }}</button>
       <button v-if="!info.people?.founded" type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">{{ S.devices.rename }}</button>
     </div>
+
+    <!-- Servers taken out before (0115): the owner may still block one whose key went astray since. Closed, beneath. -->
+    <details v-if="info.people?.formerServers?.length && managesServers(info)" class="menu-details removals-details" data-testid="former-servers">
+      <summary>{{ S.servers.former }} ({{ info.people.formerServers.length }})</summary>
+      <div class="removals-body">
+        <p class="menu-facts">{{ S.servers.formerAbout }}</p>
+        <ul class="menu-devices">
+          <li v-for="f in info.people.formerServers" :key="f.key" :data-testid="`former-server:${f.name}`">
+            <span class="device-who">{{ f.name }}</span>
+            <button type="button" class="danger" :disabled="busy" :data-testid="`block-former:${f.name}`" @click="blockFormer(f)">{{ S.servers.block }}</button>
+          </li>
+        </ul>
+      </div>
+    </details>
 
     <!-- Removals not yet heard everywhere (0072): closed, beneath. -->
     <details v-if="info.people?.removals?.length" class="menu-details removals-details" data-testid="removals-details">

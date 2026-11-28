@@ -974,8 +974,19 @@ export class Hub {
       const peers = this.hosts.get(w.id)?.host.peers;
       const status = peers ? await peers.status().catch(() => null) : null;
       const members = (status?.devices ?? []).filter((d) => !d.server && !d.related);
-      return { id: w.id, name: w.name, in: w.in, ...(w.out ? { out: w.out } : {}), online: members.filter((d) => d.online).length, devices: members.length, lastBrought: peers?.lastBrought ?? null, bytes: await folderBytes(w.path) };
+      return { id: w.id, name: w.name, in: w.in, ...(w.out ? { out: w.out } : {}), online: members.filter((d) => d.online).length, devices: members.length, lastBrought: peers?.lastBrought ?? null, bytes: await this.sizeOf(w.path) };
     }));
+  }
+
+  /** Folders' sizes, worked out two at a time (0115: a status asked of a server with many workspaces is no burst on its disk). */
+  private sizing: Promise<unknown> = Promise.resolve();
+  private sizingNow = 0;
+  private async sizeOf(dir: string): Promise<number | null> {
+    while (this.sizingNow >= 2) await this.sizing;
+    this.sizingNow++;
+    const run = folderBytes(dir).finally(() => void this.sizingNow--);
+    this.sizing = run;
+    return run;
   }
 
   /** Whether a workspace's policy names this server as one of its servers. */

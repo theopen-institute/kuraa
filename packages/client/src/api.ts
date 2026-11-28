@@ -2,7 +2,7 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
-import type { BookContent, WordsDay } from '@kuraa/feature-kit/client';
+import type { BookContent, CompileRequest, WordsDay } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -196,7 +196,7 @@ export interface CommitInfo {
   kind: 'autosave' | 'merge' | 'commit' | 'not-kept';
 }
 
-export type RenderFormat = 'html' | 'docx' | 'pdf';
+export type RenderFormat = 'html' | 'docx' | 'pdf' | 'epub';
 /** A document's latest render in one format (the host's renders.ts). */
 export interface RenderState {
   path: string;
@@ -362,7 +362,7 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: CompileRequest): Promise<RenderState> {
     try {
       return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
     } catch (e) {
@@ -465,6 +465,7 @@ export interface HubSettings {
   allowWrite: boolean;
   allowNetwork: boolean;
   allowInstalls: boolean;
+  renderWhereCodeRuns: boolean;
   dataDir: string | null;
   formats: string[] | null;
   /** Features on, by id (0082); null for all. */

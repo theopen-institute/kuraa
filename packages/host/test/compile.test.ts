@@ -2,7 +2,7 @@
 // those left out skipped, how deep each is its heading's level; joined under
 // the book's title.
 import { describe, expect, it } from 'vitest';
-import { bookItems, documentsInOrder, headingsDown, joinBook, withoutHeader } from '../src/compile.js';
+import { bookItems, chapters, documentsInOrder, headingsDown, joinBook, separatorBlock, withoutHeader, type BookPart } from '../src/compile.js';
 
 describe('a folder’s book', () => {
   const entries = [
@@ -58,5 +58,40 @@ describe('a book joined', () => {
     expect(headingsDown('# A', 3)).toBe('#### A');
     expect(withoutHeader('---\ntitle: X\n---\nBody\n')).toBe('Body\n');
     expect(withoutHeader('No header\n---\n')).toBe('No header\n---\n');
+  });
+});
+
+describe('a book’s own settings (0106)', () => {
+  const scenes: BookPart[] = [
+    { kind: 'folder', level: 1, name: 'Arrival' },
+    { kind: 'document', level: 2, title: null, text: 'The boat.\n' },
+    { kind: 'document', level: 2, title: null, text: '---\ntitle: Quay\n---\nThe quay.\n' },
+    { kind: 'folder', level: 1, name: 'Departure' },
+    { kind: 'document', level: 2, title: null, text: 'The tide.\n' },
+  ];
+
+  it('gives its title page, table of contents, numbered sections, Word template and cover in its header', () => {
+    const book = joinBook({ title: 'The Coast', subtitle: 'A "novel"', author: 'Ada Byron', toc: true, numbering: 'sections', referenceDoc: 'reference.docx', cover: 'cover.png' }, []);
+    expect(book).toBe('---\ntitle: "The Coast"\nsubtitle: "A \\"novel\\""\nauthor: "Ada Byron"\ntoc: true\nnumber-sections: true\nreference-doc: "reference.docx"\ncover-image: "cover.png"\n---\n\n\n');
+  });
+
+  it('puts the separator between documents with no heading between them: a rule, or the text centred', () => {
+    expect(joinBook({ title: 'B', separator: '* * *' }, scenes)).toContain('# Arrival\n\nThe boat.\n\n* * *\n\nThe quay.\n\n# Departure\n\nThe tide.\n');
+    expect(joinBook({ title: 'B' }, scenes)).toContain('# Arrival\n\nThe boat.\n\nThe quay.\n\n# Departure');
+    expect(separatorBlock('---')).toBe('* * *');
+    expect(separatorBlock('#')).toBe('::: {.scene-break custom-style="Scene break" style="text-align: center"}\n\\#\n:::');
+    expect(separatorBlock('~ * ~')).toContain('\n\\~ \\* \\~\n');
+  });
+
+  it('numbers its top-level headings as chapters, outside code, but those marked unnumbered', () => {
+    const book = joinBook({ title: 'B', numbering: 'chapters' }, [
+      { kind: 'document', level: 1, title: 'Dedication {-}', text: 'For M.\n' },
+      ...scenes,
+      { kind: 'document', level: 1, title: 'Notes', text: '```\n# not a heading\n```\n# Its own {#own .unnumbered}\n' },
+    ]);
+    expect(book).toContain('# Dedication {-}\n\nFor M.\n\n# Chapter 1: Arrival\n');
+    expect(book).toContain('# Chapter 2: Departure\n');
+    expect(book).toContain('# Chapter 3: Notes\n\n```\n# not a heading\n```\n## Its own {#own .unnumbered}\n');
+    expect(chapters('# A\n## B\n# C {.unnumbered}\n#D')).toBe('# Chapter 1: A\n## B\n# C {.unnumbered}\n#D');
   });
 });

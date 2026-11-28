@@ -24,7 +24,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import {
   DEFAULT_POLICY, parseSize, readWorkspaceFile, writeWorkspaceFile,
   type ChunkOutput, type ComponentContext, type Engine, type EngineSession, type Environment, type EnvironmentStatus,
-  type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type RenderTools, type RunComponent,
+  type DocumentRenderer, type PackageContext, type PackageInfo, type PackageResult, type Policy, type RenderContext, type Renderer, type RenderTools, type RunComponent,
   type Tool, type ToolUse,
 } from '@kuraa/run-kit';
 import type { ChunkRef, MadeFrom, PresenceUser, RoomMessage, RunRecord, RunSessionInfo, RunStep } from '@kuraa/session/server';
@@ -65,6 +65,12 @@ export interface RunOptions {
   dataDir?: string;
   /** The longest a render of a document may take once its process has started, in ms (default: 10 minutes). */
   renderTimeoutMs?: number;
+  /**
+   * Render documents a renderer with no environment renders (Markdown, by the
+   * built-in pandoc: 0107) where code runs instead, wherever an engine there
+   * renders them: the R image's pandoc, and LaTeX. Off: the built-in pandoc.
+   */
+  renderWhereCodeRuns?: boolean;
 }
 
 /** The per-user folder for data shared by workspaces on this computer. */
@@ -102,6 +108,11 @@ export interface RunDescription {
 }
 
 const MAX_TEXT = 200_000;
+/** A file's extension, lower case, with the dot; '' for none. */
+const extensionOf = (path: string): string => {
+  const dot = path.lastIndexOf('.');
+  return dot > path.lastIndexOf('/') ? path.slice(dot).toLowerCase() : '';
+};
 /** The most outputs a run keeps (a loop that draws ten thousand plots, say). */
 const MAX_OUTPUTS = 1000;
 /** The most steps a session's history keeps (the oldest go first). */
@@ -347,10 +358,27 @@ export class Runner {
 
   /** The engine that renders a file, by its extension (renders.ts), if one that is on does. */
   rendererFor(path: string): { engine: Engine; renderer: DocumentRenderer } | null {
-    const dot = path.lastIndexOf('.');
-    const ext = dot > path.lastIndexOf('/') ? path.slice(dot).toLowerCase() : '';
+    const ext = extensionOf(path);
     if (!this.enabled || !ext) return null;
     for (const engine of this.engines) if (engine.render?.extensions.includes(ext)) return { engine, renderer: engine.render };
+    return null;
+  }
+
+  /** Whether documents are rendered where code runs even where a renderer with no environment would render them (0107). */
+  get renderWhereCodeRuns(): boolean {
+    return !!this.o.options?.renderWhereCodeRuns;
+  }
+
+  /** The longest a render may take, in ms. */
+  get renderTimeLimitMs(): number {
+    return this.o.options?.renderTimeoutMs ?? 10 * 60_000;
+  }
+
+  /** A renderer that needs no environment (0107) for a file, by its extension: on wherever it is loaded, code running or not. */
+  standaloneFor(path: string): Renderer | null {
+    const ext = extensionOf(path);
+    if (!ext) return null;
+    for (const r of this.o.components.renderers?.values() ?? []) if (r.extensions.includes(ext)) return r;
     return null;
   }
 
@@ -367,7 +395,7 @@ export class Runner {
       ...ctx,
       policy: { ...ctx.policy, workspace: 'read-only', network: false, hide: [...ctx.policy.hide, ...hide] },
       scratch,
-      timeLimitMs: this.o.options?.renderTimeoutMs ?? 10 * 60_000,
+      timeLimitMs: this.renderTimeLimitMs,
       signal,
       log: (m) => this.o.log(`${engine.id} render: ${m}`),
       status,

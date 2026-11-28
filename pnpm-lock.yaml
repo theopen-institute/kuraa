@@ -795,6 +795,9 @@ importers:
       '@kuraa/format-text':
         specifier: workspace:*
         version: link:../format-text
+      '@kuraa/render-pandoc':
+        specifier: workspace:*
+        version: link:../render-pandoc
       '@kuraa/sync-git':
         specifier: workspace:*
         version: link:../sync-git
@@ -841,6 +844,15 @@ importers:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
 
+  packages/render-pandoc:
+    dependencies:
+      '@kuraa/run-kit':
+        specifier: workspace:*
+        version: link:../run-kit
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
   packages/run-components:
     dependencies:
       '@kuraa/engine-r':
@@ -849,6 +861,9 @@ importers:
       '@kuraa/env-podman':
         specifier: workspace:*
         version: link:../env-podman
+      '@kuraa/render-pandoc':
+        specifier: workspace:*
+        version: link:../render-pandoc
       '@kuraa/run-kit':
         specifier: workspace:*
         version: link:../run-kit

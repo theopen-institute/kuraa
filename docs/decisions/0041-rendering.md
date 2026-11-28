@@ -1,5 +1,7 @@
 # 0041 · Rendering documents to HTML, Word and PDF, where code runs
 
+*Since [0107](0107-rendering-without-podman.md):* Markdown is rendered without Podman, by the app's own pandoc (WebAssembly) and Typst, given copies of what it reads; R Markdown, and LaTeX PDFs where possible, still here.
+
 *Since [0081](0081-what-outputs-were-made-from.md):* a render commits its document first, and its output says what it was made from; the files it was made from can be saved as a zip.
 
 Knitting is the core of the R Markdown workflow: a document becomes a page, a Word file or a PDF

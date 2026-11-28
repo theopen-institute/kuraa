@@ -9,6 +9,7 @@
   "dependencies": {
     "@kuraa/engine-r": "workspace:*",
     "@kuraa/env-podman": "workspace:*",
+    "@kuraa/render-pandoc": "workspace:*",
     "@kuraa/run-kit": "workspace:*",
     "@kuraa/sync-git": "workspace:*",
     "@kuraa/tool-tinytex": "workspace:*"

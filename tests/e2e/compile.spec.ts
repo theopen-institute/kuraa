@@ -3,11 +3,15 @@
 // rows), kept in its .kuraa-order; a document dragged in from another folder,
 // to a place; back to by name. A document left out of Compile (faded) and put
 // back; Compile… on the folder's menu opens its panel. Where Podman runs: the
-// folder compiled to HTML, its chapters in order, without what is left out.
+// folder compiled to HTML, its chapters in order, without what is left out;
+// and to EPUB with a book's own settings (0106): its author, a cover, a table
+// of contents, chapters numbered, scenes without titles and a separator.
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
+import { pandocWasm, typstProgram } from '../../packages/render-pandoc/src/where.js';
 import { E2E } from './env.js';
 
 const api = (path: string, init: RequestInit = {}) =>
@@ -80,7 +84,7 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
 });
 
 test('a folder compiled to HTML: in the tree’s order, how deep each is its heading’s level, without what is left out', async ({ page }) => {
-  test.skip(!podmanWorks(), 'Podman is not installed and running');
+  test.skip(!pandocWasm(), 'pandoc has not been fetched');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
   const folder = `compiled-${id}`;
@@ -125,6 +129,133 @@ test('a folder compiled to HTML: in the tree’s order, how deep each is its hea
   await expect(page.getByTestId('compile-saved')).toBeVisible();
   // Its title and format kept for the folder: a book by its name.
   await expect(page.getByTestId(`mark:compiled:${folder}`)).toBeAttached();
+});
+
+test('a folder compiled to EPUB with its own settings: author, cover, contents, chapters, scenes run on with a separator (0106)', async ({ page }) => {
+  test.skip(!pandocWasm(), 'pandoc has not been fetched');
+  test.setTimeout(600_000);
+  const id = Date.now().toString(36);
+  const folder = `epub-${id}`;
+  expect((await doc(`${folder}/Arrival/a.md`, 'Boat', 'The boat came in.')).status).toBe(201);
+  expect((await doc(`${folder}/Arrival/b.md`, 'Quay', 'The quay was empty.')).status).toBe(201);
+  expect((await doc(`${folder}/Departure/c.md`, 'Tide', 'The tide went out.')).status).toBe(201);
+  // A cover: an image in the workspace (a pixel).
+  mkdirSync(join(E2E.dir, folder, 'art'), { recursive: true });
+  writeFileSync(join(E2E.dir, folder, 'art', 'cover.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+
+  await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
+  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
+  await page.getByTestId('context:compile').click();
+  await page.getByTestId('compile-title').fill('The Coast');
+  await page.getByTestId('compile-subtitle').fill('A novel');
+  await page.getByTestId('compile-author').fill('Ada Byron');
+  await page.getByTestId('compile-author').press('Tab');
+  await page.getByTestId('compile-format:epub').check();
+  // The Word template is for Word only; the cover, for EPUB.
+  await expect(page.getByTestId('compile-template')).toHaveCount(0);
+  await page.getByTestId('compile-cover').selectOption(`${folder}/art/cover.png`);
+  await page.getByTestId('compile-toc').check();
+  await page.getByTestId('compile-numbering').selectOption('chapters');
+  await page.getByTestId('compile-separator').fill('#');
+  await page.getByTestId('compile-separator').press('Tab');
+  // Arrival's scenes without titles: no heading of their own in the outline.
+  const level = (path: string) => page.getByTestId(`compile-row:${folder}/${path}`).locator('.compile-level');
+  await expect(level('Arrival/a.md')).toHaveText('##');
+  await page.getByTestId(`compile-titles:${folder}/Arrival`).uncheck();
+  await expect(level('Arrival/a.md')).toHaveText('–');
+  await expect(level('Departure/c.md')).toHaveText('##');
+  // All kept in the folder's Compile file, as each was changed.
+  await expect.poll(() => readIn(`${folder}/.kuraa-compile.yml`)).toContain('author: Ada Byron');
+  const kept = readIn(`${folder}/.kuraa-compile.yml`);
+  for (const line of ['subtitle: A novel', 'toc: true', 'numbering: chapters', 'separator: "#"', `cover-image: ${folder}/art/cover.png`]) expect(kept).toContain(line);
+  await expect.poll(() => readIn(`${folder}/Arrival/.kuraa-compile.yml`)).toContain('titles: false');
+
+  const download = page.waitForEvent('download', { timeout: 590_000 });
+  await page.getByTestId('compile-button').click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe(`${folder}.epub`);
+  const epub = (await file.path())!;
+  const entries = execFileSync('unzip', ['-Z1', epub], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  expect(entries).toContain('mimetype');
+  // The cover: its page, and the image (pandoc names it).
+  expect(entries.some((e) => /cover\.xhtml$/.test(e))).toBe(true);
+  expect(entries.some((e) => /^EPUB\/media\/.*\.png$/.test(e))).toBe(true);
+  const read = (pattern: RegExp) => entries.filter((e) => pattern.test(e)).map((e) => execFileSync('unzip', ['-p', epub, e], { encoding: 'utf8' })).join('\n');
+  expect(read(/\.opf$/)).toContain('Ada Byron');
+  const text = read(/\.xhtml$/);
+  expect(text).toContain('Chapter 1: Arrival');
+  expect(text).toContain('Chapter 2: Departure');
+  // The scenes run on under their chapter, the separator between them; Tide keeps its title.
+  expect(text).not.toMatch(/<h\d[^>]*>Boat<\/h\d>/);
+  expect(text).toMatch(/The boat came in\.[\s\S]*class="scene-break"[\s\S]*#[\s\S]*The quay was empty\./);
+  expect(text).toMatch(/<h2[^>]*>Tide<\/h2>/);
+  await expect(page.getByTestId('compile-saved')).toBeVisible();
+});
+
+test('a folder compiled to Word with a template from the workspace, and to PDF with contents and every heading numbered (0106)', async ({ page }) => {
+  test.skip(!pandocWasm() || !typstProgram(), 'pandoc and Typst have not been fetched');
+  test.setTimeout(600_000);
+  const id = Date.now().toString(36);
+  const folder = `word-${id}`;
+  expect((await doc(`${folder}/a.md`, 'Arrival', 'We came by sea.')).status).toBe(201);
+  expect((await doc(`${folder}/b.md`, 'Boats', 'Small ones.')).status).toBe(201);
+  const renderLog = async (format: string) => ((await (await api(`/api/renders?path=${encodeURIComponent(`${folder}/`)}`)).json()) as { renders: { format: string; log: string }[] }).renders.find((r) => r.format === format)?.log ?? '';
+
+  await page.goto(`/?token=${E2E.token}&name=Writer&email=w%40example.org`);
+  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
+  await page.getByTestId('context:compile').click();
+  await page.getByTestId('compile-numbering').selectOption('chapters');
+  // Word, first without a template: what it makes becomes one, in the workspace.
+  await page.getByTestId('compile-format:docx').check();
+  let download = page.waitForEvent('download', { timeout: 590_000 });
+  await page.getByTestId('compile-button').click();
+  const first = await download;
+  expect(first.suggestedFilename()).toBe(`${folder}.docx`);
+  const docx = (await first.path())!;
+  expect(execFileSync('unzip', ['-p', docx, 'word/document.xml'], { encoding: 'utf8' })).toContain('Chapter 1: Arrival');
+  mkdirSync(join(E2E.dir, folder, 'templates'), { recursive: true });
+  writeFileSync(join(E2E.dir, folder, 'templates', 'house.docx'), readFileSync(docx));
+
+  // Compile… again: the template to choose, kept for the folder, given to pandoc.
+  await page.getByTestId(`folder:${folder}`).click({ button: 'right' });
+  await page.getByTestId('context:compile').click();
+  await page.getByTestId('compile-template').selectOption(`${folder}/templates/house.docx`);
+  await expect.poll(() => readIn(`${folder}/.kuraa-compile.yml`)).toContain(`reference-doc: ${folder}/templates/house.docx`);
+  download = page.waitForEvent('download', { timeout: 590_000 });
+  await page.getByTestId('compile-button').click();
+  await download;
+  expect(await renderLog('docx')).toMatch(/--reference-doc=\S*reference\.docx/);
+
+  // PDF: a table of contents, every heading numbered.
+  await page.getByTestId('compile-format:pdf').check();
+  await expect(page.getByTestId('compile-template')).toHaveCount(0);
+  await page.getByTestId('compile-toc').check();
+  await page.getByTestId('compile-numbering').selectOption('sections');
+  download = page.waitForEvent('download', { timeout: 590_000 });
+  await page.getByTestId('compile-button').click();
+  const pdf = await download;
+  expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+  expect(await renderLog('pdf')).toMatch(/--toc --number-sections/);
+});
+
+test('a single document rendered to EPUB too, Markdown and R Markdown (0106)', async () => {
+  test.skip(!podmanWorks(), 'Podman is not installed and running');
+  test.setTimeout(600_000);
+  const id = Date.now().toString(36);
+  expect((await doc(`single-${id}/a.md`, 'Harbour', 'Gulls.')).status).toBe(201);
+  expect((await api('/api/files', { method: 'POST', body: JSON.stringify({ path: `single-${id}/b.Rmd`, content: '---\ntitle: Tides\n---\n\n```{r}\n1 + 1\n```\n' }) })).status).toBe(201);
+  const by = { name: 'Writer', email: 'w@example.org', color: '#123456' };
+  for (const [path, words] of [[`single-${id}/a.md`, 'Gulls.'], [`single-${id}/b.Rmd`, '## [1] 2']] as const) {
+    const started = await api('/api/renders', { method: 'POST', body: JSON.stringify({ path, format: 'epub', by }) });
+    expect(started.status).toBe(202);
+    await expect.poll(async () => ((await (await api(`/api/renders?path=${encodeURIComponent(path)}`)).json()) as { renders: { format: string; state: string; message: string }[] }).renders.find((r) => r.format === 'epub')?.state, { timeout: 590_000, intervals: [1000] }).toBe('done');
+    const out = await api(`/api/renders/file?path=${encodeURIComponent(path)}&format=epub`);
+    expect(out.headers.get('content-type')).toBe('application/epub+zip');
+    const at = join(E2E.dir, '..', `single-${id}-${path.endsWith('md') ? 'md' : 'rmd'}.epub`);
+    writeFileSync(at, Buffer.from(await out.arrayBuffer()));
+    const text = execFileSync('unzip', ['-p', at, 'EPUB/text/*.xhtml'], { encoding: 'utf8' });
+    expect(text).toContain(words);
+  }
 });
 
 test('a move is shown at once, before the host has made it; one the host refuses goes back', async ({ page }) => {

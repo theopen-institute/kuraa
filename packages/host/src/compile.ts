@@ -5,8 +5,10 @@
 // folder's name and a document's title are `#` headings, one folder down `##`,
 // and so on; a document's own headings go below its title; past `######`, at
 // `######`. A folder said to have no heading adds none, and no level. Each
-// document's header is left out, the book's title given instead. What is asked
-// to be left out (a document, or a folder with all in it) is.
+// document's header is left out, the book's own given instead (0106: its
+// title page, a table of contents, numbering, a Word template, a cover). What
+// is asked to be left out (a document, or a folder with all in it) is. A
+// folder may give its documents no titles: they run on, a separator between.
 
 /** The documents a book is made of: pandoc's Markdown and Quarto's (R Markdown's chunks are not run when compiled, and show as code). */
 const BOOK_DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
@@ -95,23 +97,91 @@ export function headingsDown(text: string, by = 1): string {
   }).join('\n');
 }
 
-/** A part of a book: a folder's heading, or a document (its title, null for none, and its text). */
+/** A part of a book: a folder's heading, or a document (its title: null for none, or where its folder gives its documents none; and its text). */
 export type BookPart = { kind: 'folder'; name: string; level: number } | { kind: 'document'; title: string | null; text: string; level: number };
 
+/** What a book says of itself (0106): its title page, and how it is put together. */
+export interface BookMeta {
+  title: string;
+  subtitle?: string | null;
+  author?: string | null;
+  /** A table of contents. */
+  toc?: boolean;
+  /** Its top-level headings as chapters (Chapter 1: …), or every heading numbered (pandoc's `number-sections`). */
+  numbering?: 'chapters' | 'sections' | null;
+  /** Between two documents with no heading between them: a rule (`* * *`, `---`, `___`), or this text, centred. */
+  separator?: string | null;
+  /** Files beside the book, by name: a Word template (`reference-doc`), an EPUB's cover (`cover-image`). */
+  referenceDoc?: string | null;
+  cover?: string | null;
+}
+
+/** A Markdown rule: `* * *`, `---`, `___` and the like. */
+const RULE = /^ {0,3}([*_-])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/** What goes between two documents with nothing between them: a rule, or the text centred, as it is (its Markdown escaped). */
+export function separatorBlock(separator: string): string {
+  const text = separator.trim();
+  if (!text) return '';
+  if (RULE.test(text)) return '* * *';
+  const escaped = text.replace(/[!-/:-@[-`{-~]/g, (c) => `\\${c}`);
+  return `::: {.scene-break custom-style="Scene break" style="text-align: center"}\n${escaped}\n:::`;
+}
+
+/** The top-level headings, outside fenced code, as chapters (Chapter 1: …, Chapter 2: …); one marked unnumbered (`{-}`, `.unnumbered`) left as it is. */
+export function chapters(text: string): string {
+  let fence: string | null = null;
+  let n = 0;
+  return text.split('\n').map((line) => {
+    const f = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (f && (!fence || (f[0] === fence[0] && f.length >= fence.length))) {
+      fence = fence ? null : f;
+      return line;
+    }
+    const m = fence ? null : /^\s{0,3}#[ \t]+(.*)$/.exec(line);
+    if (!m || /\{(?:[^}]*\s)?(?:-|\.unnumbered)(?=[\s}])[^}]*\}\s*$/.test(line)) return line;
+    return `# Chapter ${++n}: ${m[1]}`;
+  }).join('\n');
+}
+
 /**
- * The book: its title as its header, then each folder's heading and each
- * document at its level: its title as its heading (unless it begins with that
- * heading already) and its own headings below it; a document without a title,
- * its own headings below its folder's.
+ * The book: its header (title, subtitle, author; a table of contents, numbered
+ * sections, a Word template and a cover where asked), then each folder's
+ * heading and each document at its level: its title as its heading (unless it
+ * begins with that heading already) and its own headings below it; a document
+ * without a title, its own headings below its folder's, and the separator
+ * before it where it follows another document with no heading between them.
  */
-export function joinBook(title: string, parts: readonly BookPart[]): string {
-  const out = parts.map((p) => {
-    if (p.kind === 'folder') return heading(p.level, p.name);
+export function joinBook(book: BookMeta | string, parts: readonly BookPart[]): string {
+  const meta: BookMeta = typeof book === 'string' ? { title: book } : book;
+  const sep = meta.separator ? separatorBlock(meta.separator) : '';
+  const out: string[] = [];
+  let afterDocument = false;
+  for (const p of parts) {
+    if (p.kind === 'folder') {
+      out.push(heading(p.level, p.name));
+      afterDocument = false;
+      continue;
+    }
     const body = withoutHeader(p.text).trim();
-    if (!p.title) return headingsDown(body, p.level - 1);
-    const first = body.split('\n', 1)[0]!.trim();
-    const rest = first === `# ${p.title}` ? body.slice(body.indexOf('\n') + 1 || body.length) : body;
-    return `${heading(p.level, p.title)}\n\n${headingsDown(rest.trim(), p.level)}`.trim();
-  });
-  return `---\ntitle: ${JSON.stringify(title)}\n---\n\n${out.filter(Boolean).join('\n\n')}\n`;
+    if (!p.title) {
+      if (sep && afterDocument) out.push(sep);
+      out.push(headingsDown(body, p.level - 1));
+    } else {
+      const first = body.split('\n', 1)[0]!.trim();
+      const rest = first === `# ${p.title}` ? body.slice(body.indexOf('\n') + 1 || body.length) : body;
+      out.push(`${heading(p.level, p.title)}\n\n${headingsDown(rest.trim(), p.level)}`.trim());
+    }
+    afterDocument = true;
+  }
+  const yaml = (s: string) => JSON.stringify(s);
+  const header = [`title: ${yaml(meta.title)}`];
+  if (meta.subtitle) header.push(`subtitle: ${yaml(meta.subtitle)}`);
+  if (meta.author) header.push(`author: ${yaml(meta.author)}`);
+  if (meta.toc) header.push('toc: true');
+  if (meta.numbering === 'sections') header.push('number-sections: true');
+  if (meta.referenceDoc) header.push(`reference-doc: ${yaml(meta.referenceDoc)}`);
+  if (meta.cover) header.push(`cover-image: ${yaml(meta.cover)}`);
+  const text = out.filter(Boolean).join('\n\n');
+  return `---\n${header.join('\n')}\n---\n\n${meta.numbering === 'chapters' ? chapters(text) : text}\n`;
 }

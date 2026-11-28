@@ -3,6 +3,9 @@
 // or below the header when there is nothing else, and gone at the first
 // character typed.
 // Only this view draws it; nothing is added to the document until someone types.
+// Screen readers and apps that read the screen get it as the editor's
+// placeholder (aria-placeholder), not as text: the drawn words are hidden from
+// them (style.css), so they don't take it for something written (0118).
 import type { Node as PMNode } from 'prosemirror-model';
 import { Plugin, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
@@ -29,6 +32,9 @@ export function emptyAt(doc: PMNode, header?: string): number | null {
 export function placeholderPlugin(text: string, header?: string): Plugin {
   return new Plugin({
     props: {
+      attributes(state): Record<string, string> {
+        return emptyAt(state.doc, header) === null ? {} : { 'aria-placeholder': text };
+      },
       decorations(state) {
         const at = emptyAt(state.doc, header);
         if (at === null) return null;
@@ -42,6 +48,7 @@ export function placeholderPlugin(text: string, header?: string): Plugin {
           el.className = 'empty-placeholder empty-placeholder-widget';
           el.dataset.placeholder = text;
           el.contentEditable = 'false';
+          el.setAttribute('aria-hidden', 'true');
           el.addEventListener('mousedown', (e) => {
             e.preventDefault();
             const block = defaultBlock(view.state.schema);

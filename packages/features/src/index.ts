@@ -7,6 +7,8 @@
 //   @kuraa/sidebar       navigation down the left (0087; on by default)
 //   @kuraa/files         the file tree, a navigation view (0087; on by default)
 //   @kuraa/compile       any folder compiled into one book, its documents in the file tree's order (0093)
+//   @kuraa/composition   composition mode: the page alone, full screen, typewriter scrolling (0120)
+//   @kuraa/import        a Word document or a Scrivener project made into a folder of documents (0116)
 //   @kuraa/annotations   comments and coding on documents, kept beside them
 //   @kuraa/preview       the document rendered beside it, and saved (0089; on by default)
 //   @kuraa/search        every file searched (0089; on by default)
@@ -20,6 +22,8 @@ import { annotationsFeature } from '@kuraa/annotations';
 import { codeFeature } from '@kuraa/code';
 import { filesFeature } from '@kuraa/files';
 import { compileFeature } from '@kuraa/compile';
+import { compositionFeature } from '@kuraa/composition';
+import { importFeature } from '@kuraa/import';
 import { sidebarFeature } from '@kuraa/sidebar';
 import { outlineFeature } from '@kuraa/outline';
 import { previewFeature } from '@kuraa/preview';
@@ -28,4 +32,4 @@ import { wordsFeature } from '@kuraa/words';
 import { detailsFeature } from '@kuraa/details';
 import { corkboardFeature } from '@kuraa/corkboard';
 
-export const standardFeatures: HostFeature[] = [sidebarFeature, filesFeature, compileFeature, previewFeature, searchFeature, outlineFeature, wordsFeature, detailsFeature, corkboardFeature, annotationsFeature, codeFeature];
+export const standardFeatures: HostFeature[] = [sidebarFeature, filesFeature, compileFeature, compositionFeature, importFeature, previewFeature, searchFeature, outlineFeature, wordsFeature, detailsFeature, corkboardFeature, annotationsFeature, codeFeature];

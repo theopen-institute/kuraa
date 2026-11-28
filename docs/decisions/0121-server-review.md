@@ -1,4 +1,4 @@
-# 0115 · Servers, reviewed again: links bound to their holders, rules the owner moves to, and running one
+# 0121 · Servers, reviewed again: links bound to their holders, rules the owner moves to, and running one
 
 **Status: built.** `PROTOCOL` 13, and a version of the policy's rules (13) that each workspace's owner
 moves it to. Changes what an invite link is and how a device proves it holds one, who may override what

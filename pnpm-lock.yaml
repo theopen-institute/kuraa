@@ -427,6 +427,24 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  packages/composition:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.9
+        version: 1.42.9
+
   packages/corkboard:
     dependencies:
       '@kuraa/details':
@@ -543,6 +561,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/composition':
+        specifier: workspace:*
+        version: link:../composition
       '@kuraa/corkboard':
         specifier: workspace:*
         version: link:../corkboard
@@ -555,6 +576,9 @@ importers:
       '@kuraa/files':
         specifier: workspace:*
         version: link:../files
+      '@kuraa/import':
+        specifier: workspace:*
+        version: link:../import
       '@kuraa/outline':
         specifier: workspace:*
         version: link:../outline
@@ -795,6 +819,9 @@ importers:
       '@kuraa/format-text':
         specifier: workspace:*
         version: link:../format-text
+      '@kuraa/import':
+        specifier: workspace:*
+        version: link:../import
       '@kuraa/render-pandoc':
         specifier: workspace:*
         version: link:../render-pandoc
@@ -807,6 +834,33 @@ importers:
       prosemirror-transform:
         specifier: ^1.12.5
         version: 1.12.5
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
+  packages/import:
+    dependencies:
+      '@kuraa/annotations':
+        specifier: workspace:*
+        version: link:../annotations
+      '@kuraa/compile':
+        specifier: workspace:*
+        version: link:../compile
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@6.0.3)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -1752,6 +1806,10 @@ packages:
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
 
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
+
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
     engines: {node: ^20.17.0 || >=22.9.0}
@@ -2350,6 +2408,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   file-entry-cache@11.1.5:
     resolution: {integrity: sha512-+PFTHITI08JIGhnNpGNI8T8inUpgZfk3GNEqfT9R2zZV2iFXg3CvqzSl/uEhs7TSGujYRELEANyDvS8Fj7+S7Q==}
@@ -4588,6 +4649,8 @@ snapshots:
 
   '@xmldom/xmldom@0.8.15': {}
 
+  '@xmldom/xmldom@0.9.12': {}
+
   abbrev@4.0.0: {}
 
   acorn-jsx@5.3.2(acorn@8.19.0):
@@ -5342,6 +5405,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  fflate@0.8.3: {}
 
   file-entry-cache@11.1.5:
     dependencies:

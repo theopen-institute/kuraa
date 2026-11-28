@@ -34,7 +34,7 @@ const OUTPUTS_ANNOUNCE_MS = 20;
 /** How long a server may not hold this device's work before it is no longer relied on to pass work on (0112). */
 const SERVER_BEHIND_MS = 10 * 60_000;
 /**
- * The policy operations held whole (0115): each whose parents are all held whole, back to one with none (a
+ * The policy operations held whole (0121): each whose parents are all held whole, back to one with none (a
  * genesis). One whose past is not all here counts as not held.
  */
 export function rootedOps(ops: { id: string; parents: string[] }[]): Set<string> {
@@ -66,9 +66,9 @@ export function rootedOps(ops: { id: string; parents: string[] }[]): Set<string>
   return whole;
 }
 
-/** How long work signed by someone not in the workspace waits for their join to come here (0115). */
+/** How long work signed by someone not in the workspace waits for their join to come here (0121). */
 const PERSON_WAIT_MS = 10 * 60_000;
-/** How long a server has to take in a member's latest, as they said it, before it is fetched from them directly (0115). */
+/** How long a server has to take in a member's latest, as they said it, before it is fetched from them directly (0121). */
 const SERVER_CATCHUP_MS = 30_000;
 /** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
@@ -148,7 +148,7 @@ export interface DeviceInfo {
    */
   holdsMine?: boolean;
   behindSince?: number | null;
-  /** A server's, connected (0115): how it says it stands (room on its disk, when it last took in work). */
+  /** A server's, connected (0121): how it says it stands (room on its disk, when it last took in work). */
   health?: ServerHealth | null;
   /** How it is connected here (0053): on the local network, over TCP to a server, through another device, or over the internet (the DHT, directly or by a relay). */
   via: Via | null;
@@ -275,7 +275,7 @@ export interface PeopleInfo {
   servers: { key: string; name: string; devices: string[]; you: boolean }[];
   /** Whether this person invites and removes servers: the owner (0099). */
   managesServers: boolean;
-  /** Servers taken out before, not blocked (0115): the owner may still block one whose key went astray since. */
+  /** Servers taken out before, not blocked (0121): the owner may still block one whose key went astray since. */
   formerServers: { key: string; name: string }[];
   /**
    * The latest removals (0072: people taken out, computers dropped; 0099:
@@ -360,7 +360,7 @@ export class Peers {
     },
     // Records came (the policy work waits for may be among them): what waits is tried again now.
     members: () => this.retryNow(),
-    // Operations its commits name that it does not hold: not waited for (knownFrom). Not a server's word (0115): it could
+    // Operations its commits name that it does not hold: not waited for (knownFrom). Not a server's word (0121): it could
     // so have work judged by less of the policy than there is, its makers' joins left out.
     unheld: (link, ids) => {
       if (this.node.can(link.key, 'relay')) return;
@@ -427,10 +427,10 @@ export class Peers {
     return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature), waitForPerson: (p) => this.waitForPerson(p) });
   }
 
-  /** Since when work signed by each person not in the workspace yet has waited for their join (0115). */
+  /** Since when work signed by each person not in the workspace yet has waited for their join (0121). */
   private readonly waitedFor = new Map<string, number>();
 
-  /** Whether to wait still for someone's join before judging work they signed (0115): ten minutes at most. */
+  /** Whether to wait still for someone's join before judging work they signed (0121): ten minutes at most. */
   private waitForPerson(person: string): boolean {
     const since = this.waitedFor.get(person);
     if (since === undefined) {
@@ -462,10 +462,25 @@ export class Peers {
   /** The device whose work is being brought in (inside host.serial): whose commits the gate judges. */
   private bringing: string | null = null;
 
+  /**
+   * Bring in what came from this person's backup (0115, inside host.serial): as
+   * work from one of their own devices, this one. Commits no one known signed
+   * are theirs, judged by what they may change, as every device that takes the
+   * work from here judges them too.
+   */
+  async asOwnDevice<T>(fn: () => Promise<T>): Promise<T> {
+    this.bringing = this.node.myKey;
+    try {
+      return await fn();
+    } finally {
+      this.bringing = null;
+    }
+  }
+
   /** Ask a device for the policy operations its commits name that this one lacks; those it does not hold, it says (unheld). */
   private askFor(link: PeerLink, ops: string[]): void {
     const unheld = this.unheld.get(link.key);
-    // People waited for (0115) are not operations to ask for: their joins come with the records.
+    // People waited for (0121) are not operations to ask for: their joins come with the records.
     const ask = ops.filter((id) => /^[0-9a-f]{64}$/.test(id) && !unheld?.has(id)).slice(0, 100);
     if (ask.length) link.send({ type: 'ops', ids: ask });
   }
@@ -482,7 +497,7 @@ export class Peers {
         const people = await id.people();
         const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
         const names = new Map(people.map((p) => [p.key, p.name]));
-        // Held whole (0115): an operation whose past is not all here is not known, so work naming it waits for the rest, and
+        // Held whole (0121): an operation whose past is not all here is not known, so work naming it waits for the rest, and
         // is not judged by a policy short of someone's join.
         const known = rootedOps(records.filter((r) => r.kind === 'policy').map((r) => ({ id: r.subject, parents: r.parents ?? [] })));
         // Servers, now or before (0099): the keys whose joins as a server counted.
@@ -653,7 +668,7 @@ export class Peers {
 
   /**
    * Whether a server this device relies on to pass a member's work on holds it
-   * (0115): its branch, as it said it, holds the member's latest, as the member
+   * (0121): its branch, as it said it, holds the member's latest, as the member
    * said it. Else (a server showing each member only that member's work) the
    * member's work is fetched from it directly after all.
    */
@@ -694,13 +709,13 @@ export class Peers {
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
-    // Through a server (0115): nothing to fetch from the member while it holds their latest; one that has not taken it
+    // Through a server (0121): nothing to fetch from the member while it holds their latest; one that has not taken it
     // in a while after they said it (it fetches too), fetched from the member after all.
     if (this.syncsThroughServer(link)) return this.serverHoldsTheirs(link).then((held) => (held ? undefined : this.unlessServerCatchesUp(link)));
     return this.syncNow(link);
   }
 
-  /** Members' work a server lacked when they said it, looked at again once it has had time to take it in (0115). */
+  /** Members' work a server lacked when they said it, looked at again once it has had time to take it in (0121). */
   private readonly catchingUp = new Map<string, NodeJS.Timeout>();
 
   private unlessServerCatchesUp(link: PeerLink): void {
@@ -1044,7 +1059,7 @@ export class Peers {
    */
   async removeServer(key: string, o: { forGood?: boolean } = {}): Promise<void> {
     const { policy, me } = await this.node.policy();
-    // One taken out before stays the owner's to block (0115: its key may have gone astray since); not removed again.
+    // One taken out before stays the owner's to block (0121: its key may have gone astray since); not removed again.
     const was = !policy.isServer(key) && (await this.node.identity.everServers()).has(key) && !policy.dropped.has(key);
     if (!policy.isServer(key) && !(o.forGood && was)) throw new Error('No such server in this workspace');
     if (!policy.isOwner(me)) throw new NotAllowed('Only the workspace’s owner removes a server');
@@ -1253,7 +1268,7 @@ export class Peers {
 
   /** A new space for an audience (0072: a folder's own, or a file's). */
   private async newSpace(audience: string[]): Promise<string> {
-    // Its ID its maker's (0115): no one makes it again at the same time, naming others.
+    // Its ID its maker's (0121): no one makes it again at the same time, naming others.
     const id = await this.node.identity.newSpace(this.cleanAudience(audience), await this.node.signingKeyNow());
     await this.node.membersChanged();
     return id;

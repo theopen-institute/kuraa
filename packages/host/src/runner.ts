@@ -374,6 +374,12 @@ export class Runner {
     return this.o.options?.renderTimeoutMs ?? 10 * 60_000;
   }
 
+  /** A renderer that converts files of a kind (an extension, '.docx') into Markdown (0116), if one is loaded. */
+  converterFor(ext: string): Renderer | null {
+    for (const r of this.o.components.renderers?.values() ?? []) if (r.convert && r.convertsFrom?.includes(ext.toLowerCase())) return r;
+    return null;
+  }
+
   /** A renderer that needs no environment (0107) for a file, by its extension: on wherever it is loaded, code running or not. */
   standaloneFor(path: string): Renderer | null {
     const ext = extensionOf(path);

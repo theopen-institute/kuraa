@@ -85,7 +85,7 @@ export function serverHolds(ds: Device[], now = Date.now()): { state: 'holds' } 
   return now - since < SAY_BEHIND_MS ? { state: 'holds' } : { state: 'behind', since, long: now - since >= LONG_BEHIND_MS };
 }
 
-/** How a server says it stands (0115), from its devices connected here: the latest said; null where none said. */
+/** How a server says it stands (0121), from its devices connected here: the latest said; null where none said. */
 export function serverHealth(ds: Device[]): NonNullable<Device['health']> | null {
   const said = ds.filter((d) => d.online && d.health).map((d) => d.health!);
   if (!said.length) return null;

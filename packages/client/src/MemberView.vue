@@ -48,7 +48,7 @@ const devices = computed<Device[]>(() => (i.value && m.value ? memberDevices(i.v
 const you = computed(() => !!m.value && (m.value.kind === 'person' ? m.value.p.you : m.value.s.you));
 /** A server's: whether it holds this device's latest work (0112). */
 const holding = computed(() => (m.value?.kind === 'server' && !you.value ? serverHolds(devices.value) : null));
-/** And how it says it stands (0115). */
+/** And how it says it stands (0121). */
 const health = computed(() => (m.value?.kind === 'server' && !you.value ? serverHealth(devices.value) : null));
 
 async function act(fn: () => Promise<unknown>) {
@@ -147,7 +147,7 @@ async function rename(current: string) {
       <p class="menu-facts">{{ m.kind === 'server' ? S.servers.about : m.p.role === 'owner' ? S.people.ownerTitle : m.p.role === 'admin' ? S.people.adminTitle : S.people.memberTitle }}</p>
       <!-- Whether it holds your latest work (0112): a server that does not, for a while, is said to be behind. -->
       <p v-if="m.kind === 'server' && holding" :class="['menu-facts', { warn: holding.state === 'behind' }]" data-testid="server-holding">{{ holding.state === 'holds' ? S.servers.holdsMine : S.servers.behind(time(new Date(holding.since).toISOString())) }}</p>
-      <!-- And how it says it stands (0115): room on its disk, when it last took in work. -->
+      <!-- And how it says it stands (0121): room on its disk, when it last took in work. -->
       <p v-if="health && (health.freeBytes !== null || health.lastFetch !== null)" :class="['menu-facts', { warn: health.lowOnSpace }]" data-testid="server-health">{{ health.lowOnSpace ? S.servers.lowOnSpace : S.servers.health(health.freeBytes !== null ? S.images.bytes(health.freeBytes) : null, health.lastFetch ? time(new Date(health.lastFetch).toISOString()) : null) }}</p>
 
       <h4 class="menu-subhead">{{ m.kind === 'server' ? S.people.serverDevices : S.people.computersOf }}</h4>

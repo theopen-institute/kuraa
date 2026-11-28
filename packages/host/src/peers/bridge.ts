@@ -77,7 +77,7 @@ export interface BridgeOptions {
   stateDir: string;
   /** A stream to a device's git service, or why there is none. */
   open(key: string, service: string, protocol: string): Duplex | string;
-  /** The most one fetch may bring, in bytes: asked as each starts (0115: the room left on the disk, too). */
+  /** The most one fetch may bring, in bytes: asked as each starts (0121: the room left on the disk, too). */
   maxBytes: number | (() => number);
   log(m: string): void;
 }

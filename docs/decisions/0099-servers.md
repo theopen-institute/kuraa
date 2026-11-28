@@ -94,7 +94,7 @@ The rules above are in the host's peer layer (`policy.ts`, `identity.ts`, `node.
 because every device must keep them, server or not: they are the published contract. What a server
 does has its command, its folder and its process in a package of its own, `packages/server`; what it
 does as a host (its few routes, letting a workspace go, merging) is in the host's own code, in the role
-(0115: `Policy.can`):
+(0121: `Policy.can`):
 
 - **`kuraa-server`** (`pnpm server`) runs a host as a server: everything in a folder of its own
   (`~/.kuraa/server-data`, or `--data`), no identity made or used, no code run, and a server's flags

@@ -52,7 +52,7 @@ describe('the TCP listener (0112)', () => {
     expect(handed).toBe(true);
   });
 
-  it('counts a connection until it is let in, past its first line, and closes it if it is not, however slowly it sends (0115)', async () => {
+  it('counts a connection until it is let in, past its first line, and closes it if it is not, however slowly it sends (0121)', async () => {
     let settle: (() => void) | null = null;
     const l = await listenTcp(KEY, 0, (_sock, settled) => void (settle ??= settled), () => undefined);
     stops.push(l!.stop);

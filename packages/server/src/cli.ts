@@ -197,7 +197,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
   });
   starting = started;
   server = await started.catch((e: Error) => {
-    // Another server holds the folder (0115): not this version's failing, so not counted against it by the launcher.
+    // Another server holds the folder (0121): not this version's failing, so not counted against it by the launcher.
     if (e instanceof LockHeld && o.released) uncountStart(o.released.here);
     return fail(e.message);
   });

@@ -69,7 +69,7 @@ async function copyServerLink() {
   }
 }
 
-/** A server taken out before, blocked (0115): its key shut out of the workspace for good. */
+/** A server taken out before, blocked (0121): its key shut out of the workspace for good. */
 async function blockFormer(f: { key: string; name: string }) {
   if (await askConfirm(S.keys.blockServerAsk(f.name), S.servers.blockButton, true)) await act(() => props.api.removeServer(f.key, true));
 }
@@ -161,7 +161,7 @@ const noContact = (i: Info) =>
       <button v-if="!info.people?.founded" type="button" :disabled="busy" data-testid="rename-device" @click="rename(info.device.name)">{{ S.devices.rename }}</button>
     </div>
 
-    <!-- Servers taken out before (0115): the owner may still block one whose key went astray since. Closed, beneath. -->
+    <!-- Servers taken out before (0121): the owner may still block one whose key went astray since. Closed, beneath. -->
     <details v-if="info.people?.formerServers?.length && managesServers(info)" class="menu-details removals-details" data-testid="former-servers">
       <summary>{{ S.servers.former }} ({{ info.people.formerServers.length }})</summary>
       <div class="removals-body">

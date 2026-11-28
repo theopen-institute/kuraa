@@ -318,7 +318,7 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 .cork-card-title { border: 0; background: none; padding: 0; text-align: left; font: inherit; font-weight: 600; cursor: pointer; color: var(--text); }
 .cork-card-title:hover { text-decoration: underline; }
 .cork-synopsis { flex: 1; border: 0; background: none; padding: 0; text-align: left; font: inherit; font-size: 13px; line-height: 1.4; color: var(--text); cursor: text; white-space: pre-wrap; overflow: hidden; }
-.cork-synopsis-edit { flex: 1; font: inherit; font-size: 13px; resize: vertical; }
+.cork-synopsis-edit { flex: 1; font: inherit; font-size: 13px; resize: none; }
 .cork-card-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: 11px; color: var(--muted); }
 .cork-label { color: var(--text); }
 .cork-words { margin-left: auto; font-variant-numeric: tabular-nums; }

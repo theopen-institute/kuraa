@@ -107,7 +107,7 @@ export interface HubOptions {
    */
   server?: boolean;
   /**
-   * A server's (0115): how long it keeps its copy of a workspace whose owner took
+   * A server's (0121): how long it keeps its copy of a workspace whose owner took
    * it out, in ms (a week by default): a taking out can still stop counting (a
    * clash settled otherwise once more is known), and work that reached only the
    * server is not lost at once. A server whose key the owner blocked keeps nothing.
@@ -128,7 +128,7 @@ interface Entry {
   name: string;
   dir: string;
   added: string;
-  /** A server's (0115): when it found its owner had taken it out; its copy kept a while (keepRemovedMs), then deleted. */
+  /** A server's (0121): when it found its owner had taken it out; its copy kept a while (keepRemovedMs), then deleted. */
   removedAt?: string;
 }
 
@@ -895,7 +895,7 @@ export class Hub {
     if (route === 'POST /hub/api/server/retire-key') return send(res, 200, { workspaces: await this.retireKey() });
     // How it stands (kuraa-host server status, 0112): since when it runs, and each workspace's members, latest work and size.
     if (route === 'GET /hub/api/server/status') return send(res, 200, { started: this.started, workspaces: await this.serverStatus() });
-    // The same, as metrics a monitor reads (0115: Prometheus's text format), with the access code as a bearer token.
+    // The same, as metrics a monitor reads (0121: Prometheus's text format), with the access code as a bearer token.
     if (route === 'GET /hub/api/server/metrics') {
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' });
       return void res.end(await this.serverMetrics());
@@ -984,7 +984,7 @@ export class Hub {
   }
 
   /**
-   * How the server stands, as metrics (0115): since when it runs, the room on
+   * How the server stands, as metrics (0121): since when it runs, the room on
    * its disk, and for each workspace (by its ID, never its name) whether it is
    * in, its members' devices connected and known, and when work last came in.
    * No folder sizes: a monitor asks often, and those are worked out on disk.
@@ -1013,7 +1013,7 @@ export class Hub {
     return lines.join('\n') + '\n';
   }
 
-  /** Folders' sizes, worked out two at a time (0115: a status asked of a server with many workspaces is no burst on its disk). */
+  /** Folders' sizes, worked out two at a time (0121: a status asked of a server with many workspaces is no burst on its disk). */
   private sizing: Promise<unknown> = Promise.resolve();
   private sizingNow = 0;
   private async sizeOf(dir: string): Promise<number | null> {
@@ -1034,7 +1034,7 @@ export class Hub {
 
   /**
    * How a server is out of a workspace, if it is (0112): its key blocked by the
-   * owner, its key given up by itself (0115: server new-key; kept until the
+   * owner, its key given up by itself (0121: server new-key; kept until the
    * operator finishes, so its drop is not lost before a member has it), or
    * taken out by its owner.
    */

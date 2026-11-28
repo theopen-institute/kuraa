@@ -106,7 +106,8 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 .panes.no-layout.history-open { grid-template-columns: 40px minmax(0, 1fr) 280px; }
 .panes.no-layout.side-open { grid-template-columns: 40px minmax(0, 1fr) minmax(320px, 38%); }
 .panes.no-layout.history-open.side-open { grid-template-columns: 40px minmax(0, 1fr) 280px minmax(320px, 34%); }
-.panes { position: relative; }
+/* Clipped at the sides (the window's), so a pane coming in from the right never widens the page. */
+.panes { position: relative; overflow-x: clip; }
 .fallback-nav { position: absolute; top: 6px; left: 4px; z-index: 5; }
 .fallback-button { display: grid; place-items: center; width: 32px; height: 30px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
 .fallback-button:hover { color: var(--text); background: var(--selected); }
@@ -123,6 +124,11 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 /* .pane-left is the sidebar's (@kuraa/sidebar), which styles the rest of it. */
 /* The space below the files: right-click for a new file or folder at the top level. */
 .pane-right { border-left: 1px solid var(--border); }
+/* Motion (0118): a pane beside the document comes in from the right as it opens (the document narrows at once,
+   its text wrapped again once); it closes at once. Only transform and opacity, so nothing is laid out again. */
+@keyframes pane-in { from { opacity: 0; transform: translateX(12px); } }
+.pane-right { animation: pane-in 160ms cubic-bezier(0.2, 0, 0, 1); }
+@media (prefers-reduced-motion: reduce) { .pane-right { animation: none; } }
 .pane-header {
   display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
@@ -382,7 +388,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* The document's title, from its header: the page's top heading, typed in to change it (the rest of the header is in Document settings). */
 .doc-title-block { cursor: default; }
 .prose h1.doc-title { margin: 0 0 0.6em; font-size: 2em; cursor: text; outline: none; overflow-wrap: anywhere; }
-.prose h1.doc-title:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+/* The words drawn in an empty title or document are not text: hidden from screen readers and apps that read the screen ("/ ''", with a fallback for a browser without it), which get them as a label or placeholder instead (0118). */
+.prose h1.doc-title:empty::before { content: attr(data-placeholder); content: attr(data-placeholder) / ''; color: var(--muted); pointer-events: none; }
 
 /* The header, in Document settings: a label column, the value, and a button to remove the field. */
 .header-form { display: grid; gap: 10px; }
@@ -632,7 +639,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 
 /* An empty document: how to start (placeholder.ts). */
 .prose .empty-placeholder::before {
-  content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
+  content: attr(data-placeholder); content: attr(data-placeholder) / ''; float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
 }
 .prose .empty-placeholder-widget { cursor: text; min-height: 1.45em; }
 .prose .empty-placeholder-widget::before { float: none; height: auto; }
@@ -860,3 +867,20 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* A folder in a component's view, in the main area (0096: a corkboard, an outline). */
 .folder-view-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .folder-view-pane > .folder-view { flex: 1; min-height: 0; overflow: auto; }
+
+/* The page alone (0120): the open document and nothing else; panels only at its foot. */
+/* Warnings stay (offline, not saved, not kept): they matter more than the quiet. */
+.app.page-alone .layout-area, .app.page-alone .layout-none, .app.page-alone .fallback-nav, .app.page-alone .side-panel,
+.app.page-alone .pane-right, .app.page-alone .feature-over { display: none !important; }
+.app.page-alone .panes { grid-template-columns: minmax(0, 1fr) !important; }
+.app.page-alone .document-menu-button { opacity: 0; transition: opacity 0.2s; }
+.app.page-alone .document-menu-button:hover, .app.page-alone .document-menu-button:focus-visible { opacity: 1; }
+/* At the page's foot (0120). */
+.foot-panels { display: flex; justify-content: center; gap: 16px; padding: 4px 12px 6px; color: var(--muted); font-size: 12px; }
+.app.page-alone .foot-panels { position: fixed; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, var(--surface) 40%); padding-top: 14px; }
+
+/* Composition mode (0120), its part of the editor: room below the end for typewriter scrolling; the other paragraphs faded. */
+.composition-typewriter { padding-bottom: 55vh !important; }
+.composition-fading > * { opacity: 0.3; transition: opacity 0.25s; }
+.composition-fading > .composition-current { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .composition-fading > * { transition: none; } }

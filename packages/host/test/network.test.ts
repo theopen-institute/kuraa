@@ -146,7 +146,7 @@ describe('invites and pairing, under a policy', () => {
     expect(await id.refuseGrant({ ...l, issuer: { key: 'cd'.repeat(32), name: 'x' } })).toBe('the link is not signed by the person it names');
     // A grant from before, which signed neither: ask for a new link.
     const g = l.grant!;
-    // (A link from before had no key of its own either: 0115.)
+    // (A link from before had no key of its own either: 0121.)
     const { linkKey: _key, ...before } = g;
     void _key;
     const old = { ...l, grant: { ...before, signature: crypto.sign(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once), adaKey.secretKey).toString('hex') } };
@@ -172,7 +172,7 @@ describe('invites and pairing, under a policy', () => {
     const dee = deviceOf(ws.id, deeId, 'Dee');
     const l = decodeLink(await id.createLink(1, true, { relays: [], tcp: [] }, { key: adaKey }));
     const g = l.grant!;
-    // With the link's key's word that Dee's signing key is its holder's (0115).
+    // With the link's key's word that Dee's signing key is its holder's (0121).
     const joinOp = { t: 'join' as const, group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key, linkKey: g.linkKey!, linkProof: linkProofFor(l, hex(dee.signing))! };
     const record = (e: ReturnType<typeof makeOp>) => signRecord({ kind: 'policy', workspace: ws.id, subject: e.id, op: e.op, parents: e.parents, signer: e.signer, proof: e.proof }, dee.device);
     // Not let in by anyone yet: her join, with the grant alone, does not count.

@@ -1,4 +1,4 @@
-// The rules of 0115, as a workspace's owner says it is judged by them (`rules` 13): no one overrides what anyone ever
+// The rules of 0121, as a workspace's owner says it is judged by them (`rules` 13): no one overrides what anyone ever
 // made an admin is, or an admin's or a server's join, by naming old parents (at the same time is the maker's to say),
 // but the owner; a space made with a nonce is its maker's ID; a link of its own key is joined by its holder alone.
 import { describe, expect, it } from 'vitest';
@@ -32,7 +32,7 @@ function history(rules: boolean) {
   return { entries, now, add, person, O, genesis };
 }
 
-describe('the rules of 0115: who may override whom', () => {
+describe('the rules of 0121: who may override whom', () => {
   it('counts a rules operation only from the owner, and judges the whole history by it', () => {
     const h = history(false);
     const A = h.person();
@@ -114,7 +114,7 @@ describe('the rules of 0115: who may override whom', () => {
   });
 });
 
-describe('spaces made with a nonce (0115)', () => {
+describe('spaces made with a nonce (0121)', () => {
   it('are their makers’: no one else makes them again, with a nonce or without', () => {
     const h = history(true);
     const Ana = h.person();
@@ -136,7 +136,7 @@ describe('spaces made with a nonce (0115)', () => {
   });
 });
 
-describe('links of their own key (0115)', () => {
+describe('links of their own key (0121)', () => {
   const joinOp = (h: ReturnType<typeof history>, link: string, linkKey: Key, signer: Key, o: { role?: 'member' | 'admin' | 'server'; proofFor?: Key } = {}): PolicyOp => {
     const role = o.role ?? 'member';
     const reads = role === 'server' ? 'all' : '';

@@ -69,7 +69,7 @@ type OpSpec =
   | { t: 'out-server'; which: number }
   | { t: 'grant-server'; which: number; group: number }
   | { t: 'space-server'; id: number; audience: number[]; which: number }
-  // The rules a workspace is judged by (0115): only the owner's counts; the whole history judged again by them.
+  // The rules a workspace is judged by (0121): only the owner's counts; the whole history judged again by them.
   | { t: 'rules' };
 
 const honest = fc.integer({ min: 0, max: HONEST - 1 });

@@ -20,7 +20,7 @@ function menu(synced: string[] = []) {
     canAdd: true,
     syncs: {
       a: { pending: 0, busy: false, failed: false, lines: ['Syncing with your other device'] },
-      b: { pending: 3, busy: false, failed: true, lines: ['Not shared with other devices', 'Online copy: the last sync did not go through'] },
+      b: { pending: 3, busy: false, failed: true, lines: ['Not shared with other devices', 'Personal backup: the last sync did not go through'] },
       d: { pending: 0, busy: false, failed: false, lines: [] },
     },
   }, act);
@@ -38,7 +38,7 @@ describe('the workspaces menu', () => {
 
   it('says how one stands when pointed at, counts the saves its online copy lacks, and marks a failed sync', () => {
     const sync = menu()[1]!.icons![0]!;
-    expect(sync.label).toBe('Sync now (3 saves not on the online copy yet)\nNot shared with other devices\nOnline copy: the last sync did not go through');
+    expect(sync.label).toBe('Sync now (3 saves not in your backup yet)\nNot shared with other devices\nPersonal backup: the last sync did not go through');
     expect(sync.count).toBe(3);
     expect(sync.warn).toBe(true);
   });
@@ -55,7 +55,7 @@ describe('the workspaces menu', () => {
 describe('how a workspace syncs, in words', () => {
   it('is its devices, then its online copy', () => {
     expect(syncLines({ reachable: true, devices: { online: 1, total: 2 }, online: { pending: 2, busy: false, failed: false } }))
-      .toEqual(['Syncing with 1 of 2 devices', 'Online copy: 2 saves not there yet']);
+      .toEqual(['Syncing with 1 of 2 devices', 'Personal backup: 2 saves not there yet']);
     expect(syncLines({ reachable: true, devices: null, online: null })).toEqual(['Not shared with other devices']);
     expect(syncLines({ reachable: false, devices: null, online: null })).toEqual([]);
   });

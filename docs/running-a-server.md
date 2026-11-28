@@ -4,7 +4,7 @@ For whoever runs a Kuraa server for a team: what it holds, who can read it, how 
 what to do when something goes wrong. How to install one is in the [README](../README.md) (*A server
 in your workspaces*); why it works as it does is in decisions
 [0099](decisions/0099-servers.md), [0110](decisions/0110-the-owner-reads-everything.md),
-[0112](decisions/0112-server-hardening.md) and [0115](decisions/0115-server-review.md).
+[0112](decisions/0112-server-hardening.md) and [0121](decisions/0121-server-review.md).
 
 ## What it holds, and who can read it
 

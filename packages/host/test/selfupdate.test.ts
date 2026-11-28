@@ -231,7 +231,7 @@ describe('a released server', () => {
     expect(restarted).toBe(1);
   });
 
-  it('switches to a held release only once devices of two of its workspaces run its protocol, and keeps it held across a restart (0115)', async () => {
+  it('switches to a held release only once devices of two of its workspaces run its protocol, and keeps it held across a restart (0121)', async () => {
     const root = installed();
     const next = published('0.2.0', privateKey, PROTOCOL + 1);
     const start = () => {

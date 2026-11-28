@@ -94,19 +94,19 @@ export type PolicyOp =
       /** The link's expiry and maker (0071: signed in the grant, linkGrantMessage); none in a join from before. */
       expires?: number; issuer?: string;
       /**
-       * The link's own key (0115), signed in its grant (boundGrantMessage), and its
+       * The link's own key (0121), signed in its grant (boundGrantMessage), and its
        * signature of the signing key the join is made with (linkProofMessage): only
        * whoever holds the link, not whoever has seen it, joins by it.
        */
       linkKey?: string; linkProof?: string;
-      /** What a server joined by it reads (0115): everything, as 0110 has it (the only reading there is yet). */
+      /** What a server joined by it reads (0121): everything, as 0110 has it (the only reading there is yet). */
       reads?: 'all';
     }
   | { t: 'rule'; path: string; by: string[] }
-  /** `nonce` (0115): the space's ID is its maker's (spaceIdFor), so no one else makes it again. */
+  /** `nonce` (0121): the space's ID is its maker's (spaceIdFor), so no one else makes it again. */
   | { t: 'space'; id: string; audience: string[]; nonce?: string }
   /**
-   * The rules a workspace is judged by from now on (0115), the owner's to say: a
+   * The rules a workspace is judged by from now on (0121), the owner's to say: a
    * device that knows them no older judges its whole history by them; one that
    * does not know them says it is to be updated.
    */
@@ -223,30 +223,30 @@ export const admittedGrantMessage = (workspace: string, genesis: string | null, 
   Buffer.from(['kuraa-grant/3', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer].join('\0'));
 
 /**
- * What an admin's signing key signs, since 0115, to let an invite link's holder
+ * What an admin's signing key signs, since 0121, to let an invite link's holder
  * in: as admittedGrantMessage, with the link's own key, whose holder alone can
  * join by it (linkProofMessage), and what a server joined by it reads.
  */
 export const boundGrantMessage = (workspace: string, genesis: string | null, link: string, group: string, role: JoinRole, once: boolean, expires: number, issuer: string, linkKey: string, reads: string) =>
   Buffer.from(['kuraa-grant/4', workspace, genesis ?? '', link, group, role, once ? 'once' : 'anyone', String(expires), issuer, linkKey, reads].join('\0'));
 
-/** What a link's own key signs (0115): that the holder of this signing key joins by the link. */
+/** What a link's own key signs (0121): that the holder of this signing key joins by the link. */
 export const linkProofMessage = (workspace: string, link: string, signer: string) => Buffer.from(['kuraa-link-proof', workspace, link, signer].join('\0'));
 
-/** A space's ID, its maker's (0115): no one else can make a space of the same ID. */
+/** A space's ID, its maker's (0121): no one else can make a space of the same ID. */
 export const spaceIdFor = (workspace: string, maker: string, nonce: string) => sha256(['kuraa-space', workspace, maker, nonce].join('\0')).slice(0, 32);
 
 /**
- * What a kind of member does (0115; Policy.can):
+ * What a kind of member does (0121; Policy.can):
  * - `change`: changes files, as the rules let it (people; a server changes none: 0099)
  * - `readAll`: reads every space (the owner, and servers: 0110)
  * - `merge`: makes the merges, brings together work made apart (servers: 0099)
- * - `relay`: passes members' work on to each other; its word that it lacks operations not taken (servers: 0115)
+ * - `relay`: passes members' work on to each other; its word that it lacks operations not taken (servers: 0121)
  * - `exposed`: always on and open to all: lets in only by bound one-person links, waits less for hellos (servers: 0112)
  */
 export type Capability = 'change' | 'readAll' | 'merge' | 'relay' | 'exposed';
 
-/** The rules this build judges by (0115): `rules` operations up to this version. */
+/** The rules this build judges by (0121): `rules` operations up to this version. */
 export const KNOWN_RULES = 13;
 
 /** Make an operation, signed with a person's signing key. */
@@ -357,7 +357,7 @@ export function readOp(v: unknown): PolicyOp | null {
       return cutoff ? { t: 'revoke', group: o.group, who: o.who, cutoff } : null;
     }
     case 'join': {
-      // A server's join (0099): for the workspace alone. A link's key and its proof (0115): both, or neither; and only
+      // A server's join (0099): for the workspace alone. A link's key and its proof (0121): both, or neither; and only
       // with the link's maker and expiry. What a server reads: only for a server's.
       const bound = o.linkKey !== undefined || o.linkProof !== undefined;
       if (bound && !(typeof o.linkKey === 'string' && hexKey.test(o.linkKey) && typeof o.linkProof === 'string' && hexSig.test(o.linkProof) && typeof o.issuer === 'string')) return null;
@@ -496,7 +496,7 @@ export interface PolicyParts {
   workspace?: string;
   /** Servers in the workspace (0099): their signing keys. */
   servers?: Set<string>;
-  /** The rules the owner said it is judged by (0115); 12 where they said none. */
+  /** The rules the owner said it is judged by (0121); 12 where they said none. */
   rulesVersion?: number;
 }
 
@@ -517,7 +517,7 @@ export class Policy {
   readonly unlinked: Set<string>;
   readonly workspace: string;
   readonly servers: Set<string>;
-  /** The rules the owner said the workspace is judged by (0115): 12 where they said none. */
+  /** The rules the owner said the workspace is judged by (0121): 12 where they said none. */
   readonly rulesVersion: number;
 
   constructor(p: PolicyParts) {
@@ -540,13 +540,13 @@ export class Policy {
     this.rulesVersion = p.rulesVersion ?? 12;
   }
 
-  /** Whether the owner said the workspace is judged by rules this build does not know (0115): it is to be updated. */
+  /** Whether the owner said the workspace is judged by rules this build does not know (0121): it is to be updated. */
   get rulesUnknown(): boolean {
     return this.rulesVersion > KNOWN_RULES;
   }
 
   /**
-   * What a key in the workspace does by its kind (0115): the one place that says
+   * What a key in the workspace does by its kind (0121): the one place that says
    * what a server does that others do not, so the code asks what may be done,
    * not who is a server, and a kind to come says its own. Who may read a space
    * or change a file is still mayRead's and mayWrite's.
@@ -726,7 +726,7 @@ export function evaluate(entries: PolicyEntry[], ctx: PolicyContext): Policy {
   const genesis = ctx.pin ? order.find((e) => e.id === ctx.pin && e.op.t === 'genesis' && !e.op.legacy) : undefined;
   if (!genesis) return new Policy({ groups: new Map([[WORKSPACE, new Map()]]), geneses: [], applied: [], heads: [], workspace: ctx.workspace });
   const first = apply(order, genesis, ctx);
-  // The owner said the workspace is judged by later rules (0115): its whole history judged again by them, as far as
+  // The owner said the workspace is judged by later rules (0121): its whole history judged again by them, as far as
   // this build knows them (where it knows them no further, the policy says so: rulesUnknown).
   if (first.rulesVersion > 12) {
     const again = apply(order, genesis, ctx, Math.min(first.rulesVersion, KNOWN_RULES));
@@ -827,7 +827,7 @@ interface State {
   /** Servers' signing keys (0099); and every key that has been one. */
   servers: Set<string>;
   wasServer: Set<string>;
-  /** The rules the owner said the workspace is judged by (0115): 12 until they say. */
+  /** The rules the owner said the workspace is judged by (0121): 12 until they say. */
   rules: number;
 }
 
@@ -881,11 +881,11 @@ interface Env {
   ctx: PolicyContext;
   /** Grants in joins, checked once each: whether by a link let in by (`/3`), and whether signed at all. */
   grants: Map<string, { admitted: boolean; ok: boolean }>;
-  /** The rules judged by (0115): 12, or the owner's `rules` once one counts (evaluate: a second pass). */
+  /** The rules judged by (0121): 12, or the owner's `rules` once one counts (evaluate: a second pass). */
   rules: number;
-  /** Everyone ever made an admin, or the owner, anywhere in the history (0115): only the owner overrides what they are. */
+  /** Everyone ever made an admin, or the owner, anywhere in the history (0121): only the owner overrides what they are. */
   everAdmins: Set<string>;
-  /** Spaces made with a nonce (0115): their IDs their makers'. */
+  /** Spaces made with a nonce (0121): their IDs their makers'. */
   nonceSpaces: Set<string>;
 }
 
@@ -900,7 +900,7 @@ function grantOf(e: PolicyEntry, env: Pick<Env, 'grants' | 'ctx'>): { admitted: 
   if (op.t !== 'join') return { admitted: false, ok: false };
   const ctx = env.ctx;
   const signed = (m: Buffer) => crypto.verify(m, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
-  // A link of its own key (0115): its grant names the key, and the key signed this join's signing key; else nothing.
+  // A link of its own key (0121): its grant names the key, and the key signed this join's signing key; else nothing.
   if (op.linkKey) {
     const bound = op.issuer !== undefined && signed(boundGrantMessage(ctx.workspace, ctx.pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer, op.linkKey, op.reads ?? ''))
       && crypto.verify(linkProofMessage(ctx.workspace, op.link, e.signer), Buffer.from(op.linkProof!, 'hex'), Buffer.from(op.linkKey, 'hex'));
@@ -922,7 +922,7 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Judging): boolean {
   const now = view(s, env.ctx.workspace);
   const ws = s.groups.get(WORKSPACE)!;
   const op = e.op;
-  // By the rules of 0115: what anyone ever made an admin, or the owner, is, only the owner undoes (or they themselves):
+  // By the rules of 0121: what anyone ever made an admin, or the owner, is, only the owner undoes (or they themselves):
   // judged by who they ever were, not who they were in the operation's past, which its maker chooses (its parents).
   const guarded = (who: string | null) => env.rules >= 13 && !!who && env.everAdmins.has(who) && who !== by && !now.isOwner(by);
   // Signed by a key dropped in its past: no one's word (0072). Made before 0078, of a kind that counts for nothing now.
@@ -1003,12 +1003,12 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Judging): boolean {
       if (!now.role(by)) return false;
       const holdsMaker = op.audience.some((w) => w === by || (w === 'admins' && now.isAdmin(by)) || (w.startsWith('group:') && now.role(by, w.slice(6)) !== null));
       if (had) return had.by === by || now.isOwner(by);
-      // Made with a nonce (0115): its ID must be its maker's. A space some made so, no one makes again without one.
+      // Made with a nonce (0121): its ID must be its maker's. A space some made so, no one makes again without one.
       if (op.nonce) return holdsMaker && op.id === spaceIdFor(env.ctx.workspace, by, op.nonce);
       return holdsMaker && !env.nonceSpaces.has(op.id);
     }
     case 'rules':
-      // The owner's to say (0115).
+      // The owner's to say (0121).
       return now.isOwner(by);
     case 'genesis':
     case 'seal':
@@ -1199,7 +1199,7 @@ function settle(live: PolicyEntry[], env: Env): { counted: Set<string>; lost: Ma
     if (!out) beats.set(from, (out = new Set()));
     out.add(to);
   };
-  // By the rules of 0115: one overrides what anyone ever made an admin (or the owner) is, or an admin's or a server's
+  // By the rules of 0121: one overrides what anyone ever made an admin (or the owner) is, or an admin's or a server's
   // join, only as the owner in its own past, or as that very person; else the one at the same time does not beat it.
   // At the same time is the maker's to say (it chooses its parents), so who may override is who they were then.
   const mayOverride = (a: PolicyEntry, subject: string | null, adminLevel: boolean): boolean => {
@@ -1251,7 +1251,7 @@ function settle(live: PolicyEntry[], env: Env): { counted: Set<string>; lost: Ma
   const unlinks = live.filter((u) => u.op.t === 'unlink');
   for (const j of live) {
     const op = j.op;
-    // A join that makes an admin, or a server, the owner's alone to undo so (0115).
+    // A join that makes an admin, or a server, the owner's alone to undo so (0121).
     const adminLevel = op.t === 'join' && (op.role === 'server' || (op.group === WORKSPACE && op.role === 'admin'));
     if (op.t === 'join') for (const u of unlinks) if (u.op.t === 'unlink' && u.op.link === op.link && u.op.group === op.group && mayOverride(u, null, adminLevel)) edge(u.id, j.id, 'unlinked');
   }
@@ -1399,7 +1399,7 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext, r
     anc.set(e.id, past);
     ops.push(e);
   }
-  // Everyone ever made an admin, or the owner, anywhere in it; spaces made with a nonce (0115).
+  // Everyone ever made an admin, or the owner, anywhere in it; spaces made with a nonce (0121).
   const everAdmins = new Set<string>(genesis.op.t === 'genesis' ? genesis.op.admins : []);
   const nonceSpaces = new Set<string>();
   for (const e of ops) {

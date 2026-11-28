@@ -58,7 +58,7 @@ export interface ServerOptions {
   bootstrap?: PeerOptions['bootstrap'];
   relays?: string[];
   log?: (m: string) => void;
-  /** How long it keeps its copy of a workspace it was taken out of, in days (0115: a week by default). */
+  /** How long it keeps its copy of a workspace it was taken out of, in days (0121: a week by default). */
   keepRemovedDays?: number;
   /** The release it runs, and how it updates itself: said in server.json, for `server status` (0112). */
   version?: string | null;
@@ -132,7 +132,7 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     port: o.port ?? SERVER_PORT,
     token: o.token,
     // Formats and features to read with; no code run on a server yet (0099: running code for a device that cannot is to come).
-    // No online copy either: syncs are a person's, with their credentials (0059); a server's would only cost a timer each.
+    // No backup either: syncs are a person's, with their credentials (0059, 0115); a server has no person.
     hosts: { features: standardFeatures, run: { engines: [], components: standardRunComponents.map((c) => ({ ...c, syncs: [] })) } },
     peers,
     log: o.log,
@@ -176,7 +176,7 @@ function bootedAt(): number {
   return Math.round((Date.now() - uptime() * 1000) / 1000) * 1000;
 }
 
-/** Another server holds the folder (0115): a refusal, not a version that failed to start (selfupdate.ts counts none). */
+/** Another server holds the folder (0121): a refusal, not a version that failed to start (selfupdate.ts counts none). */
 export class LockHeld extends Error {}
 
 function alive(pid: number): boolean {
@@ -197,7 +197,7 @@ async function lockFolder(data: string): Promise<() => Promise<void>> {
   const file = join(data, 'server.lock');
   // This process's own: a lock naming it is held, not left over, where it holds it (a second server in one process).
   if (heldHere.has(file)) throw new Error(`Another server is running from ${data} (this process)`);
-  // With when this computer started (0115): a lock left by a server before a restart of the computer names a process
+  // With when this computer started (0121): a lock left by a server before a restart of the computer names a process
   // whose number another may have now, and is not held.
   const booted = bootedAt();
   for (let tries = 0; ; tries++) {
@@ -370,7 +370,7 @@ export async function statusServer(data = defaultServerData()): Promise<ServerSt
 export async function retireServerKey(data = defaultServerData()): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
   const a = await readAddress(data, { waitMs: STARTING_MS });
   const { workspaces } = await ask<{ workspaces: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] }>(a, '/hub/api/server/retire-key', { method: 'POST', body: {} });
-  // What the second step goes by (0115): its key, and the workspaces where its drop did not count, or no member heard it.
+  // What the second step goes by (0121): its key, and the workspaces where its drop did not count, or no member heard it.
   const note = { key: a.key, failed: workspaces.filter((w) => !w.dropped).map((w) => w.name), unheard: workspaces.filter((w) => w.dropped && !w.heardBy).map((w) => w.name) };
   await writeFile(join(resolve(data), 'retired-key'), `${JSON.stringify(note)}\n`, { mode: 0o600 });
   return workspaces;
@@ -386,7 +386,7 @@ export async function retireServerKey(data = defaultServerData()): Promise<{ id:
  */
 export async function startAfresh(data = defaultServerData(), o: { force?: boolean } = {}): Promise<string[]> {
   const dir = resolve(data);
-  // A server's folder (0115), not another given by mistake: its key, or its workspaces.
+  // A server's folder (0121), not another given by mistake: its key, or its workspaces.
   if (!existsSync(join(dir, 'signing.json')) && !existsSync(join(dir, 'workspaces')) && !existsSync(join(dir, 'devices'))) throw new Error(`${dir} is not a server's folder`);
   const unlock = await lockFolder(dir);
   try {
@@ -400,7 +400,7 @@ export async function startAfresh(data = defaultServerData(), o: { force?: boole
     }
     const registry = join(dir, 'workspaces', '.kuraa-workspaces.json');
     const held = await readFile(registry, 'utf8').then((t) => (JSON.parse(t) as { name?: string }[]).map((w) => String(w.name ?? '')), () => [] as string[]);
-    // The copies first, the key last (0115): stopped halfway, the next start is still the old server, which holds less.
+    // The copies first, the key last (0121): stopped halfway, the next start is still the old server, which holds less.
     await rm(join(dir, 'workspaces'), { recursive: true, force: true });
     await rm(join(dir, 'devices'), { recursive: true, force: true });
     if (key) {

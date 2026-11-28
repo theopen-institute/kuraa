@@ -35,6 +35,7 @@
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",
     "@kuraa/compile": "workspace:*",
+    "@kuraa/import": "workspace:*",
     "@kuraa/details": "workspace:*",
     "@kuraa/corkboard": "workspace:*",
     "yaml": "^2.9.1",

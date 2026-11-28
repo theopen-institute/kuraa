@@ -113,7 +113,7 @@ describe('a server, run from its folder (0099)', () => {
     writeFileSync(join(a.host.dir, 'more.md'), '# More\n');
     await a.host.serial(() => a.host.commitPaths(['more.md'], 'More'));
     await until(async () => !!(await statusServer(data)).workspaces[0]!.lastBrought, 20_000, 'work brought in, on record');
-    // And to its members (0115): how it stands, as it says, on its device in their status.
+    // And to its members (0121): how it stands, as it says, on its device in their status.
     await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.health && d.health.freeBytes !== null && d.health.lowOnSpace === false), 20_000, 'its health, said to its owner');
   });
 
@@ -154,7 +154,7 @@ describe('a server, run from its folder (0099)', () => {
     await a.host.peers!.removeServer(s.key);
     // Listed as out, once it hears; then let go of (looked at each minute; here, at once).
     await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.out === 'removed'), 20_000, 'the server hearing it is out');
-    // Kept a week first (0115: a removal undone, or made by mistake, finds its copy there); then, still out, deleted.
+    // Kept a week first (0121: a removal undone, or made by mistake, finds its copy there); then, still out, deleted.
     await s.hub.hub.sweepRemoved();
     expect(existsSync(w.path)).toBe(true);
     await s.hub.hub.sweepRemoved(Date.now() + 6 * 24 * 3600_000);
@@ -164,7 +164,7 @@ describe('a server, run from its folder (0099)', () => {
     expect(existsSync(w.path)).toBe(false);
   });
 
-  it('stays the owner’s to block once removed: its key then never let back, its copy gone when the week is out (0115)', async () => {
+  it('stays the owner’s to block once removed: its key then never let back, its copy gone when the week is out (0121)', async () => {
     const a = await owner();
     const data = tmp('data');
     const s = await server(data);
@@ -184,7 +184,7 @@ describe('a server, run from its folder (0099)', () => {
     expect(existsSync(w.path)).toBe(false);
   });
 
-  it('gives its metrics to a monitor with its access code, by workspace ID, never by name (0115)', async () => {
+  it('gives its metrics to a monitor with its access code, by workspace ID, never by name (0121)', async () => {
     const a = await owner();
     const data = tmp('data');
     const s = await server(data);
@@ -201,7 +201,7 @@ describe('a server, run from its folder (0099)', () => {
     expect(text).not.toContain(w.name);
   });
 
-  it('starts afresh only where a member heard its key was given up (0115)', async () => {
+  it('starts afresh only where a member heard its key was given up (0121)', async () => {
     const a = await owner();
     const data = tmp('data');
     const s = await server(data);

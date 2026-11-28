@@ -171,6 +171,47 @@ watch(() => status.value?.runner, () => fh.codeChanged());
 const features = fh.features;
 const sidePanel = fh.sidePanel;
 const overPanels = fh.overPanels;
+const footPanels = fh.footPanels;
+
+// The page alone (0120): asked by a component (composition mode). All else hidden (style.css), full screen where the
+// platform allows; left by Escape (where nothing else takes it), by leaving full screen, or when no document is open.
+const pageAlone = fh.pageAlone;
+let wentFull = false;
+watch(pageAlone, (on) => {
+  if (on) {
+    wentFull = false;
+    void document.documentElement.requestFullscreen?.().then(() => (wentFull = true), () => undefined);
+    // Writing is what it is for: the page has the focus (the menu it was asked from may have had it). Not given
+    // again where it has it: that would put back a selection the editor has not yet read from a click.
+    void nextTick(() => {
+      const v = editor.value?.view;
+      if (v && !v.hasFocus()) v.focus();
+    });
+  } else if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => undefined);
+});
+function onFullscreen() {
+  if (!document.fullscreenElement && wentFull && pageAlone.value) fh.setPageAlone(false);
+  if (!document.fullscreenElement) wentFull = false;
+}
+function onPageAloneKey(e: KeyboardEvent) {
+  if (!pageAlone.value || e.key !== 'Escape') return;
+  // A menu or a dialog over the page takes Escape first; otherwise it is the page alone's, before the editor's own.
+  if (document.querySelector('[role="dialog"], [role="menu"], .modal-backdrop')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  fh.setPageAlone(false);
+}
+onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreen);
+  window.addEventListener('keydown', onPageAloneKey, true);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreen);
+  window.removeEventListener('keydown', onPageAloneKey, true);
+});
+watch(() => !!path.value && !!type.value, (shown) => {
+  if (!shown) fh.setPageAlone(false);
+});
 watch(toolsKey, () => fh.toolsChanged());
 
 // Navigation (0087): a layout places it, views show the files; the core draws
@@ -305,6 +346,8 @@ const layoutMount = computed(() => {
 
 /** Open a file at a range of its text (a feature asked). */
 async function openAtText(p: string, at?: { from: number; to: number }) {
+  // A file the list does not have yet (just made by a feature: an import, 0116): the list as the host has it, first.
+  if (!files.value.some((f) => f.path === p)) await refreshTree();
   if (p !== path.value) select(p);
   else view(null);
   if (!at) return;
@@ -1029,7 +1072,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
 </script>
 
 <template>
-  <div class="app">
+  <div :class="['app', { 'page-alone': pageAlone }]">
     <div v-if="rejected" class="banner warn" role="alert" data-testid="rejected-banner">
       <template v-if="shell.managesHost">{{ S.offline.rejectedManaged }} <button type="button" data-testid="reconnect" @click="reconnect">{{ S.offline.reconnect }}</button></template>
       <template v-else>{{ S.offline.rejected }} <button type="button" data-testid="change-code" @click="openSettings('you')">{{ S.offline.changeCode }}</button></template>
@@ -1142,6 +1185,23 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
                 />
               </template>
             </Editor>
+            <!-- At the page's foot (0120): a count, a status. -->
+            <div v-if="footPanels.length" class="foot-panels">
+              <FeaturePanel
+                v-for="o in footPanels"
+                :key="`${o.active.feature.id}:${o.panel.id}`"
+                :active="o.active"
+                :panel="o.panel"
+                :path="path"
+                :document-tick="(editor?.tick ?? 0) + (editor?.featureTick ?? 0)"
+                :view="() => editor?.view ?? null"
+                :state="() => editor?.featureState(o.active.feature.id) ?? null"
+                :document="openDocument"
+                :asks="o.asks"
+                :header-spec="editorFor(type.id)?.header ?? null"
+                @close="fh.closePanel(o.active.feature.id, o.panel.id)"
+              />
+            </div>
           </div>
           <PastVersion
             v-if="viewing"

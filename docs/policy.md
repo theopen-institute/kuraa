@@ -21,14 +21,14 @@ person's, whatever vouches for it).
 | `genesis` | the workspace's first admin, its owner | no one: it is the root (below) |
 | `grant` | someone is in a group, as admin or member | an admin of the group, or of the workspace (a new group: the workspace's admins). Making or unmaking a workspace admin, only the owner. Into a group other than the workspace, only someone in it. Never the owner made a member |
 | `revoke` | someone is out of a group (`cutoff`: the commits the remover had); or a server out of the workspace | an admin of the group, or the person themselves (leaving). A workspace admin, only the owner (or themselves). Never the owner. A server, only the owner |
-| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. A grant signed since links have keys of their own (`kuraa-grant/4`, [0115](decisions/0115-server-review.md)): with that too, and the link key's signature of the join's signing key. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`), reading everything (`reads: 'all'`); a key not a server already (one taken out may come back so, by a new link) |
+| `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. A grant signed since links have keys of their own (`kuraa-grant/4`, [0121](decisions/0121-server-review.md)): with that too, and the link key's signature of the join's signing key. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`), reading everything (`reads: 'all'`); a key not a server already (one taken out may come back so, by a new link) |
 | `admit` | a device let the holder of a signing key in by an invite link (it checked, by its own clock, that the link had not expired nor been revoked) | anyone in the workspace; or a server (0099), whose admit counts only for a link for one person (0112) |
 | `unlink` | an invite link lets no one into its group any more | an admin of the group |
 | `owner` | someone in the workspace is the owner now | the owner |
 | `rule`, `perm` | who may change a path; who reads what is made in a folder | the workspace's admins |
-| `space` | a space's audience | anyone in the workspace who is in that audience (to make it: with a `nonce`, only where the space's ID is the hash of the workspace, its maker and the nonce; once a space was made so, never again without one: 0115); whoever made it, or the owner (to change it; [0110](decisions/0110-the-owner-reads-everything.md)) |
+| `space` | a space's audience | anyone in the workspace who is in that audience (to make it: with a `nonce`, only where the space's ID is the hash of the workspace, its maker and the nonce; once a space was made so, never again without one: 0121); whoever made it, or the owner (to change it; [0110](decisions/0110-the-owner-reads-everything.md)) |
 | `drop` | a signing key (one computer, or a server) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer; for a server's key, the owner alone, or the server itself: 0112). For good |
-| `rules` | the version of these rules the workspace is judged by (13; none: 12) | the owner ([0115](decisions/0115-server-review.md)) |
+| `rules` | the version of these rules the workspace is judged by (13; none: 12) | the owner ([0121](decisions/0121-server-review.md)) |
 
 Made before [0078](decisions/0078-restrictive-wins.md) and read only so a history that has them stays
 whole (what came after names them as parents), counting for nothing: `seal`, `verifier`, `witness`
@@ -92,7 +92,7 @@ the policy and are no longer taken: attestations (`attest`) and trustee rotation
    - a space's audience: the entries all of them name; where they name none in common, no one but
      the owner (and servers) reads it, not the admins (0112: else anyone could "make" a space again at
      the same time, naming the admins). A space made by two at once has no maker: only the owner
-     changes it. A space made with a nonce (0115) is made by its maker alone, so this is for spaces
+     changes it. A space made with a nonce (0121) is made by its maker alone, so this is for spaces
      made before.
 6. **Founded on what counts.** Each operation that counts must still be allowed by what counts of
    its past (applied in the one order). One whose maker had their say only through an operation
@@ -117,7 +117,7 @@ workspace always has one ([0070](decisions/0070-an-owner.md)).
 ## Versions of these rules
 
 The rules above change now and then; each change applies to the whole history. Which the workspace
-is judged by is its owner's to say, by a `rules` operation ([0115](decisions/0115-server-review.md));
+is judged by is its owner's to say, by a `rules` operation ([0121](decisions/0121-server-review.md));
 where none counts, 12. The policy is worked out by 12; then, where the owner said a later version, the
 whole history again by that one, as far as the device knows it. (Judging only what comes after the
 `rules` operation by it would not do: an operation's maker could choose parents from before it.) A

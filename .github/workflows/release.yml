@@ -214,7 +214,7 @@ jobs:
         with:
           name: server
           path: server
-      # What it signs is checked first (0115): one archive of this release's version, its entries all in its own
+      # What it signs is checked first (0121): one archive of this release's version, its entries all in its own
       # folder, saying its version and protocol, and carrying this key's public half. Nothing in it is run.
       - name: Check the archive
         env:

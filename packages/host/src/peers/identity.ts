@@ -65,7 +65,7 @@ const POLICY_KINDS = new Set<RecordKind>(['policy', 'key-event', 'vouch', 'revok
 
 /** At most this many invite links' topics are announced (the latest): each member announces every one (0099). */
 const MAX_LINK_TOPICS = 32;
-/** How long after a link expires it is unlinked (0115): a join of someone let in just before has time to come. */
+/** How long after a link expires it is unlinked (0121): a join of someone let in just before has time to come. */
 const GRACE_MS = 3600_000;
 
 /** The ID of the identity whose log this is (its inception's hash). */
@@ -394,7 +394,7 @@ export class Identity {
     const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
     const people = await this.devicesIn(list, workspace, { people: true });
     const made = records.filter((r) => r.kind === 'secret' && people.has(r.by));
-    // None sent (0115): as the link's maker had it, where the link says (a server that leaves the records out gains nothing).
+    // None sent (0121): as the link's maker had it, where the link says (a server that leaves the records out gains nothing).
     if (!made.length) return link?.secretHash ? secretHashOf(secret) === link.secretHash : true;
     const latest = made.reduce((a, b) => (b.at > a.at || (b.at === a.at && b.sig > a.sig) ? b : a));
     return latest.subject === secret;
@@ -414,7 +414,7 @@ export class Identity {
       if (r.kind !== 'policy' || op?.t !== 'join' || op.issuer === undefined) return false;
       const granter = w.personOf.get(op.granter)?.key ?? null;
       if (!policy.isAdmin(granter, op.group)) return false;
-      // A link of its own key (0115): its grant names the key, and the key's word on the join's signing key.
+      // A link of its own key (0121): its grant names the key, and the key's word on the join's signing key.
       const message = op.linkKey
         ? boundGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer, op.linkKey, op.reads ?? '')
         : admittedGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer);
@@ -1235,7 +1235,7 @@ export class Identity {
 
   /** Make a space, or change who reads it (0066): checked after, as the policy judges it. */
   /**
-   * A new space, its ID its maker's (0115: spaceIdFor), so no one else makes it
+   * A new space, its ID its maker's (0121: spaceIdFor), so no one else makes it
    * again at the same time: its ID.
    */
   async newSpace(audience: string[], key: KeyPair): Promise<string> {
@@ -1514,7 +1514,7 @@ export class Identity {
       if (role === 'server' && (!policy.isOwner(who) || group !== WORKSPACE || !once)) throw new Error('Only the workspace’s owner invites a server, one by each link');
       const genesis = await this.pin();
       // Counting only for whom a device in the workspace lets in by it (admit), which checks it has not expired; and
-      // (0115) only for its holder: a key of its own, whose public half the grant names and whose secret half the link
+      // (0121) only for its holder: a key of its own, whose public half the grant names and whose secret half the link
       // carries, signs the joiner's signing key. One who only sees the link (a device it is shown to) cannot.
       linkKeys = crypto.keyPair();
       const linkKey = linkKeys.publicKey.toString('hex');
@@ -1527,7 +1527,7 @@ export class Identity {
     // Where its maker's history was (0099): a device let in by a server takes what came before as its maker had it, and
     // checks only what came after.
     const tip = (await this.git.run(['rev-parse', '-q', '--verify', 'HEAD^{commit}'], { allowFail: true })).stdout.trim() || undefined;
-    // The workspace's secret's hash (0115), signed with the rest: a device let in by a server checks the secret it gives.
+    // The workspace's secret's hash (0121), signed with the rest: a device let in by a server checks the secret it gives.
     const secretHash = ws.secret ? secretHashOf(ws.secret) : undefined;
     const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic, tip, granted?.linkKey, secretHash), key.secretKey).toString('hex');
     const list = await this.links();
@@ -1553,7 +1553,7 @@ export class Identity {
     if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
     // Signed with the link's expiry and maker (0071): a grant from before is not, and could be put in a link that never expires.
     const signed = (m: Buffer) => crypto.verify(m, Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'));
-    // A link of its own key (0115): its grant names the key.
+    // A link of its own key (0121): its grant names the key.
     if (g.linkKey ? !signed(boundGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key, g.linkKey, g.role === 'server' ? 'all' : '')) : !signed(admittedGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key)) && !signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
       if (g.linkKey) return 'the link is not signed by the person it names';
       return signed(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once)) ? 'the link was made by an older kuraa: ask for a new one' : 'the link is not signed by the person it names';
@@ -1577,7 +1577,7 @@ export class Identity {
     const records = await this.records();
     const signer = key.publicKey.toString('hex');
     if (records.some((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.link === l.id && r.signer === signer)) return;
-    // A link of its own key (0115): its key's word that this signing key is its holder's.
+    // A link of its own key (0121): its key's word that this signing key is its holder's.
     const proof = g.linkKey ? linkProofFor(l, signer) : null;
     if (g.linkKey && !proof) throw new Error('This invite link is missing its key: ask for a new one');
     await this.makePolicy({
@@ -1649,9 +1649,9 @@ export class Identity {
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const used = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject));
     const stale = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name !== 'used' && r.by === self).map((r) => r.subject));
-    // An hour's grace (0115): an expired link unlinked at once could beat the join of someone let in just before it expired.
+    // An hour's grace (0121): an expired link unlinked at once could beat the join of someone let in just before it expired.
     const expired = (at: number | undefined) => !!at && at + GRACE_MS <= now;
-    // Judged by the rules of 0115: a link of no key of its own (from before) lets in whoever has seen it, so it is unlinked
+    // Judged by the rules of 0121: a link of no key of its own (from before) lets in whoever has seen it, so it is unlinked
     // too, while it could still let anyone in.
     const rules13 = (await this.policy(records)).rulesVersion >= 13;
     for (const l of await this.links()) if ((expired(l.expires) || (rules13 && l.admitted && !l.bound && !(l.expires && l.expires <= now))) && !used.has(l.id)) stale.add(l.id);
@@ -1664,7 +1664,7 @@ export class Identity {
 
   /**
    * The owner's device says the workspace is judged by the rules this build
-   * knows (0115), where it is not yet: every device that knows them judges its
+   * knows (0121), where it is not yet: every device that knows them judges its
    * whole history by them from then on. Whether it said so now.
    */
   async adoptRules(key: KeyPair): Promise<boolean> {
@@ -1730,7 +1730,7 @@ export interface IssuedLink {
   /** For a server (0099): unlinked when the owner takes a server out, so none comes back by a link left over. */
   server?: boolean;
   admitted?: boolean;
-  /** Of a key of its own (0115): only its holder joins by it. */
+  /** Of a key of its own (0121): only its holder joins by it. */
   bound?: boolean;
 }
 
@@ -1764,12 +1764,12 @@ export interface InviteLink {
   /** The commit its maker's branch was at (0099), signed with the rest: what a device let in by a server takes as is. */
   tip?: string;
   /**
-   * The secret half of the link's own key (0115), hex: whoever holds the link
+   * The secret half of the link's own key (0121), hex: whoever holds the link
    * proves it with it (linkProofFor), never showing it. Not signed (the grant
    * names the public half); not in a link shown to another device (withoutSecret).
    */
   linkSecret?: string;
-  /** The hash of the workspace's secret as its maker had it (0115), signed: a server's word on the secret, checked. */
+  /** The hash of the workspace's secret as its maker had it (0121), signed: a server's word on the secret, checked. */
   secretHash?: string;
 }
 
@@ -1783,7 +1783,7 @@ export interface LinkGrant {
   /** The signing key that signed it. */
   granter: string;
   signature: string;
-  /** The link's own key (0115), its public half, signed in the grant (boundGrantMessage). */
+  /** The link's own key (0121), its public half, signed in the grant (boundGrantMessage). */
   linkKey?: string;
 }
 
@@ -1796,10 +1796,10 @@ function decodeGrant(s: string | undefined): LinkGrant | undefined {
   return m ? { group: m[1]!, role: m[2] as JoinRole, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]!, ...(m[6] ? { linkKey: m[6] } : {}) } : undefined;
 }
 
-/** The hash of a workspace's secret, as a link carries it (0115). */
+/** The hash of a workspace's secret, as a link carries it (0121). */
 export const secretHashOf = (secret: string) => createHash('sha256').update(`kuraa-secret\0${secret}`).digest('hex');
 
-/** A link as shown to another device (0115): without the secret half of its key, which only its holder keeps. */
+/** A link as shown to another device (0121): without the secret half of its key, which only its holder keeps. */
 export function withoutSecret(code: string): string {
   const l = decodeLink(code);
   if (!l.linkSecret) return code;
@@ -1808,7 +1808,7 @@ export function withoutSecret(code: string): string {
   return encodeLink(rest);
 }
 
-/** The link's key's word (0115) that a signing key is its holder's; null where the link carries no key of its own. */
+/** The link's key's word (0121) that a signing key is its holder's; null where the link carries no key of its own. */
 export function linkProofFor(l: InviteLink, signer: string): string | null {
   if (!l.linkSecret || !l.grant?.linkKey) return null;
   const secret = Buffer.from(l.linkSecret, 'hex');
@@ -1816,7 +1816,7 @@ export function linkProofFor(l: InviteLink, signer: string): string | null {
   return crypto.sign(linkProofMessage(l.workspace.id, l.id, signer), secret).toString('hex');
 }
 
-/** Whether a device showing a link holds it (0115): its key signed the device's signing key. Links without a key: yes. */
+/** Whether a device showing a link holds it (0121): its key signed the device's signing key. Links without a key: yes. */
 export function linkProven(l: InviteLink, signer: unknown, proof: unknown): boolean {
   if (!l.grant?.linkKey) return true;
   if (typeof signer !== 'string' || !/^[0-9a-f]{64}$/.test(signer) || typeof proof !== 'string' || !/^[0-9a-f]{128}$/.test(proof)) return false;
@@ -1849,7 +1849,7 @@ export function encodeLink(l: InviteLink): string {
   const where = l.topic ? `t:${l.topic}` : l.workspace.secret ?? '';
   const hints = encodeHints(l.hints);
   const grant = encodeGrant(l.grant);
-  // Hints, then the grant, then the tip (0099), the link's key's secret half and the secret's hash (0115), each where
+  // Hints, then the grant, then the tip (0099), the link's key's secret half and the secret's hash (0121), each where
   // there is one (empty fields before one that is).
   const tail = [hints, grant, l.tip ? `p:${l.tip}` : '', l.linkSecret ? `k:${l.linkSecret}` : '', l.secretHash ? `h:${l.secretHash}` : ''];
   while (tail.length && !tail.at(-1)) tail.pop();

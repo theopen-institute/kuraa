@@ -47,7 +47,7 @@ const MAX_WAITING_FROM = 16;
 /** How long a connection has, from when it is taken, to say which device it is for (0112): a deadline, not an idle time. */
 const PRELUDE_MS = 5000;
 /**
- * And then to be let in (0115): the encrypted handshake and the hello, counted
+ * And then to be let in (0121): the encrypted handshake and the hello, counted
  * all the while, under a deadline no byte puts off. A device in is let in at
  * once; one that is not, is held no longer.
  */
@@ -75,7 +75,7 @@ export function addressGroup(addr: string): string {
 
 /**
  * A device's handler for a connection: the socket, and `settled`, to say it has
- * been let in (0115), after which it is no longer counted nor held to a deadline.
+ * been let in (0121), after which it is no longer counted nor held to a deadline.
  */
 export type TcpHandler = (sock: Socket, settled: () => void) => void;
 
@@ -83,7 +83,7 @@ function accept(sock: Socket, handlers: Map<string, TcpHandler>): void {
   sock.on('error', () => undefined);
   // A server's port is open to anyone (0099): connections not let in hold a socket each, so only so many; each
   // address, only so many of those; and when all are taken, the one waiting longest makes way (0112), as an honest
-  // device says which device it is for at once, and is let in at its hello. Counted until it is let in (0115), not
+  // device says which device it is for at once, and is let in at its hello. Counted until it is let in (0121), not
   // only until its first line: else a handshake begun and never ended held a socket for nothing.
   const from = addressGroup(sock.remoteAddress ?? '');
   if ((waitingFrom.get(from) ?? 0) >= MAX_WAITING_FROM) return void sock.destroy();

@@ -222,7 +222,7 @@ export function protocolOf(dir: string): number | null {
 }
 
 /**
- * This start does not count against the version (0115): it stopped for a
+ * This start does not count against the version (0121): it stopped for a
  * reason not its own (another server holds its folder), so the launcher does
  * not go back from it, nor mark it failed, for that. Run from an installed
  * release (`here`), else nothing.
@@ -236,7 +236,7 @@ export function uncountStart(here: string): void {
 
 /** Name an installed version as the one to run from the next start, its tries counted afresh, the old ones let go of. */
 export function placeVersion(root: string, version: string): void {
-  // Not one that is not there (0115): named, it would not start, and the launcher would go back from it, marked failed.
+  // Not one that is not there (0121): named, it would not start, and the launcher would go back from it, marked failed.
   if (!existsSync(join(root, 'versions', version, 'kuraa-host.mjs'))) throw new Error(`kuraa ${version} is not in place to run`);
   const before = existsSync(join(root, 'current')) ? currentVersion(root) : null;
   setCurrent(root, version);
@@ -389,7 +389,7 @@ export function installServer(o: { here: string; version: string; root: string; 
   if (platform === 'linux') {
     const file = join(home, '.config', 'systemd', 'user', 'kuraa.service');
     mkdirSync(dirname(file), { recursive: true });
-    // systemd's own: `%` begins a specifier there and `$` a variable, so each doubled (0115); quotes and backslashes
+    // systemd's own: `%` begins a specifier there and `$` a variable, so each doubled (0121); quotes and backslashes
     // escaped within quotes.
     const quote = (a: string) => {
       const p = a.replace(/%/g, '%%').replace(/\$/g, '$$$$');
@@ -493,12 +493,12 @@ export function autoUpdate(o: {
   /** Take releases that change the protocol at once, not when a device runs them (--auto-update-all). */
   all?: boolean;
   /**
-   * A device speaks a newer protocol it does not sync in (0115: with the
+   * A device speaks a newer protocol it does not sync in (0121: with the
    * protocol, and the workspace it is in): a held release that speaks it is put in
    * place once devices of enough of its workspaces do, and restarted to at once.
    */
   newer(fn: (protocol?: number, workspace?: string) => void): void;
-  /** How many workspaces it holds (0115): of two, a newer protocol in two of them switches it. */
+  /** How many workspaces it holds (0121): of two, a newer protocol in two of them switches it. */
   workspaces?: () => number;
   /** A device runs a newer release, speaking the same protocol (0099): looked for now, restarting at night. */
   newerRelease?(fn: (version: string) => void): void;
@@ -536,7 +536,7 @@ export function autoUpdate(o: {
     }, ms);
     restartTimer.unref();
   };
-  // A release held for its protocol (0112): placed once devices of its workspaces run the protocol it speaks (0115: of
+  // A release held for its protocol (0112): placed once devices of its workspaces run the protocol it speaks (0121: of
   // two workspaces, where it holds more than one, so one member saying so cannot switch every other workspace's
   // members off; at once, where they did before it was found). Kept on the disk, so a restart does not fetch it again.
   const heldFile = join(root, 'held');

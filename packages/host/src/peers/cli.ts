@@ -11,8 +11,8 @@
 //   kuraa-host remove-device <name> [--dir .]         out of the workspace for good (it keeps its copy)
 //   kuraa-host person [create <name> | export | import <line> | use [--dir .] | revoke <key>]
 //                                                     your identity, and this computer's signing key (person.ts)
-//   kuraa-host online [add <address|remote> | remove <name>] [--dir .]
-//                                                     the online copy: a git server synced with (backup)
+//   kuraa-host backup [add <address|remote> | remove <name>] [--dir .]
+//                                                     your personal backup: a git server synced with (0115; online, as before)
 //   kuraa-host fork     [--dir .]                     make this copy a workspace of its own
 //   kuraa-host refound  [--dir .]                     found a workspace from before 0066 again (0078): its
 //                                                     owner's (with none, an admin's) to do; they become its owner
@@ -86,7 +86,7 @@ async function identityAt(dir: string): Promise<{ git: Git; id: Identity }> {
   return { git, id: new Identity(git, join(await git.gitDir(), 'kuraa')) };
 }
 
-/** `components`: the run components the command line loads (@kuraa/run-components), for the online copy (a sync, decision 0059). */
+/** `components`: the run components the command line loads (@kuraa/run-components), for the personal backup (a sync, decisions 0059, 0115). */
 export async function peerCommand(argv: string[], o: { components?: (RunComponent | string)[] } = {}): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -358,8 +358,8 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
     case 'online': {
       const { git } = await identityAt(values.dir!);
       const sync = (await loadRunComponents(o.components)).syncs.get('online');
-      if (!sync) throw new Error('No online copy component is loaded (@kuraa/sync-git, in @kuraa/run-components).');
-      // Merging needs the host's document types: a running host brings the copy's work in, at its next sync (no bringIn).
+      if (!sync) throw new Error('No personal backup component is loaded (@kuraa/sync-git, in @kuraa/run-components).');
+      // Merging needs the host's document types: a running host brings the backup's work in, at its next sync (no bringIn).
       const online = sync.open({ git, nonInteractive: NON_INTERACTIVE, delayMs: 0, everyMs: 0, log: () => undefined, serial: (fn) => fn() });
       if (arg === 'add') {
         const name = await online.add(more.join(' '));
@@ -369,11 +369,11 @@ export async function peerCommand(argv: string[], o: { components?: (RunComponen
       }
       if (arg === 'remove') {
         await online.remove(more[0] ?? '');
-        return say(`${more[0]} is no longer an online copy; the repository there is as it was.`);
+        return say(`${more[0]} is no longer your backup; the repository there is as it was.`);
       }
-      if (arg) throw new Error('Usage: kuraa-host online [add <address|remote> | remove <name>]');
+      if (arg) throw new Error('Usage: kuraa-host backup [add <address|remote> | remove <name>]');
       const list = await online.list();
-      if (!list.length) return say('No online copy. kuraa-host online add <address> keeps this workspace on a git server (GitHub, GitLab, any), synced with it.');
+      if (!list.length) return say('No personal backup. kuraa-host backup add <address> keeps your copy of this workspace on a git server (GitHub, GitLab, any: a private repository), synced with it.');
       for (const c of list) say(`${c.name} ${c.url}`);
       return;
     }

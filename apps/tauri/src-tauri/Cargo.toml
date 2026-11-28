@@ -1,0 +1,20 @@
+[package]
+name = "kuraa-tauri"
+version = "0.0.0"
+description = "A prototype of Kuraa's desktop app as a Tauri shell"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+libc = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

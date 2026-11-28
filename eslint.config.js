@@ -36,7 +36,7 @@ const featureSrc = (glob) => FEATURES.map((f) => `packages/${f}/src/${glob}`);
 const noFeatures = { 'no-restricted-imports': ['error', { patterns: [{ regex: `^@kuraa/(${[...FEATURES, 'features'].join('|')}|feature-(?!(kit|ui)(/|$))[^/]+)(/.*)?$`, message: 'The core imports no feature: whoever starts it passes them (@kuraa/features). Their contract, @kuraa/feature-kit, and @kuraa/feature-ui, it may.' }] }] };
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', '.dev-workspaces/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', 'test-results/**', 'playwright-report/**', 'apps/desktop/build/**', 'apps/desktop/vendor/**', 'apps/tauri/src-tauri/target/**', 'apps/tauri/src-tauri/staged/**', 'apps/tauri/src-tauri/gen/**', '.dev-workspaces/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   // The client's components: Vue single-file components, their scripts in TypeScript.

@@ -41,7 +41,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGit, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGitFolder, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import type { ShellConfig } from '@kuraa/client';
@@ -80,20 +80,7 @@ function useBundledGit(): void {
     if (app.isPackaged) console.error(`[desktop] no git at ${dir}; using the computer's`);
     return;
   }
-  // Its own system-wide settings are left out (the Windows build's turn on autocrlf,
-  // which would change the line endings of files the app writes); the person's own (~/.gitconfig) apply.
-  const env: Record<string, string> = { GIT_CONFIG_NOSYSTEM: '1' };
-  if (process.platform === 'win32') {
-    // MinGit's layout: the programs git runs (and sh, for git-remote-kuraa) on PATH. Git
-    // itself is run directly, not through cmd\git.exe, a launcher that stopping would leave git running.
-    env.PATH = [join(dir, 'ucrt64', 'bin'), join(dir, 'usr', 'bin'), join(dir, 'cmd'), process.env.PATH ?? process.env.Path ?? ''].join(';');
-    env.GIT_EXEC_PATH = join(dir, 'ucrt64', 'libexec', 'git-core');
-    useGit(join(dir, 'ucrt64', 'bin', 'git.exe'), env);
-  } else {
-    env.GIT_EXEC_PATH = join(dir, 'libexec', 'git-core');
-    env.GIT_TEMPLATE_DIR = join(dir, 'share', 'git-core', 'templates');
-    useGit(join(dir, 'bin', 'git'), env);
-  }
+  useGitFolder(dir);
 }
 useBundledGit();
 

@@ -822,6 +822,19 @@ KURAA_DESKTOP_APP=$(node apps/desktop/scripts/testable-copy.mjs apps/desktop/dis
 
 The app has no icon of its own yet: put `icon.png` (1024×1024) in `apps/desktop/build-resources`.
 
+### A Tauri shell (a prototype)
+
+`apps/tauri` is the desktop app as a Tauri 2 shell, on macOS for now: the web client in the system's
+webview, the host as released run by a Node the app carries ([0123](docs/decisions/0123-a-tauri-shell-prototyped.md)).
+With Rust installed (`rustup`):
+
+```sh
+pnpm --filter @kuraa/tauri build   # the app, a zip and a DMG, in apps/tauri/src-tauri/target/release/bundle
+```
+
+Its data is its own (`~/Library/Application Support/org.kuraa.tauri-prototype`), never the Electron
+app's. It has no menus, native dialogs or updates yet.
+
 ## Checks
 
 ```sh

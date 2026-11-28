@@ -37,11 +37,13 @@
 //   --component <path or package>...   more run components; @kuraa/run-components always loads
 //   --allow-unsandboxed                an environment that is not sandboxed
 //   --podman <path>                    the Podman program (also KURAA_PODMAN)
+//
+// KURAA_GIT_DIR names a git a shell ships (scripts/fetch-git.mjs's layout), run instead of the computer's.
 import { parseArgs } from 'node:util';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import { dirname, join, resolve } from 'node:path';
-import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, defaultWorkspacesFolder, type Settings } from './index.js';
+import { defaultDataDir, lastResort, OWNER_OFF, SettingsStore, startHub, defaultWorkspacesFolder, useGitFolder, type Settings } from './index.js';
 import { PEER_COMMANDS, peerCommand } from './peers/cli.js';
 import { runsAsService } from './selfupdate.js';
 
@@ -150,6 +152,9 @@ const flags: Partial<Settings> = Object.fromEntries(Object.entries({
 // Kept with the app's data, apart from the desktop app's (its preferences.json and list).
 const settingsFile = resolve(values.settings ?? join(defaultDataDir(), 'settings.json'));
 const settings = new SettingsStore(settingsFile, flags);
+
+// A shell that ships its own git says where it is (the Tauri app; the Electron app calls useGitFolder itself).
+if (process.env.KURAA_GIT_DIR) useGitFolder(process.env.KURAA_GIT_DIR);
 
 // Every server is a hub (docs/decisions/0030-one-kind-of-server.md): of one folder (--dir), or of
 // your workspaces, in --workspaces or the settings' folder.

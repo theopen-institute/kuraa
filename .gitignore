@@ -10,3 +10,8 @@ apps/desktop/vendor/
 .try-desktop/
 # Chats' worktrees (CLAUDE.md): a checkout each, never committed here
 .claude/worktrees/
+# The Tauri prototype's build, and what it gathers to carry (apps/tauri/scripts)
+apps/tauri/src-tauri/target/
+apps/tauri/src-tauri/staged/
+apps/tauri/src-tauri/binaries/
+apps/tauri/src-tauri/gen/

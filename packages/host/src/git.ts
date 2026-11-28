@@ -40,6 +40,26 @@ export function useGit(command: string, env: Record<string, string> = {}): void 
   program = { command, env };
 }
 
+/**
+ * Run the git a shell ships in `dir` (GitHub Desktop's builds, scripts/fetch-git.mjs's layout).
+ * Its own system-wide settings are left out (the Windows build's turn on autocrlf, which would
+ * change the line endings of files the app writes); the person's own (~/.gitconfig) apply.
+ */
+export function useGitFolder(dir: string): void {
+  const env: Record<string, string> = { GIT_CONFIG_NOSYSTEM: '1' };
+  if (process.platform === 'win32') {
+    // MinGit's layout: the programs git runs (and sh, for git-remote-kuraa) on PATH. Git
+    // itself is run directly, not through cmd\git.exe, a launcher that stopping would leave git running.
+    env.PATH = [join(dir, 'ucrt64', 'bin'), join(dir, 'usr', 'bin'), join(dir, 'cmd'), process.env.PATH ?? process.env.Path ?? ''].join(';');
+    env.GIT_EXEC_PATH = join(dir, 'ucrt64', 'libexec', 'git-core');
+    useGit(join(dir, 'ucrt64', 'bin', 'git.exe'), env);
+  } else {
+    env.GIT_EXEC_PATH = join(dir, 'libexec', 'git-core');
+    env.GIT_TEMPLATE_DIR = join(dir, 'share', 'git-core', 'templates');
+    useGit(join(dir, 'bin', 'git'), env);
+  }
+}
+
 /** The PATH git sees, with `dir` first (where git finds `git-remote-kuraa`). */
 export function gitPath(dir: string): string {
   return [dir, program.env.PATH ?? process.env.PATH ?? ''].join(delimiter);

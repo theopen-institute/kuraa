@@ -176,7 +176,7 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
   expect(git(dir, 'status', '--porcelain', '--', 'notes.md')).toBe('');
 });
 
-test('closing the window quits, saying so, with the last edits saved (0129)', async () => {
+test('closing the window quits, saying so, with the last edits saved (0131)', async () => {
   const dir = makeRepo();
   // No commit before quitting: closing commits the last edits.
   const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 });

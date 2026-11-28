@@ -1253,7 +1253,7 @@ export class Hub {
     socket.on('close', end);
   }
 
-  /** Stop every workspace; `saved` once all of them have written and committed their open edits (0129). */
+  /** Stop every workspace; `saved` once all of them have written and committed their open edits (0131). */
   async close(o: CloseOptions = {}): Promise<void> {
     clearInterval(this.sweepTimer);
     const closed = new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));

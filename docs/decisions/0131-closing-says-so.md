@@ -1,4 +1,4 @@
-# 0129 · Closing says so, and waits less
+# 0131 · Closing says so, and waits less
 
 > Changes [0080](0080-tester-fixes.md) (the online copy gets the last saves as the host stops) and
 > [0039](0039-online-copy.md) (each save pushed half a minute after the last).

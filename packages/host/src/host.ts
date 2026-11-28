@@ -56,7 +56,7 @@ export interface HostTimings {
   gitPollMs: number;
 }
 
-/** How stopping goes, for whoever waits for it (the desktop app's closing page, 0129). */
+/** How stopping goes, for whoever waits for it (the desktop app's closing page, 0131). */
 export interface CloseOptions {
   /** Everything is written and committed on this computer: what is left (pushing, letting go of devices) may be cut short. */
   saved?: () => void;
@@ -499,7 +499,7 @@ export class Host {
   /**
    * Stop: every open room written and committed, then what the online copies lack pushed while the
    * other devices are let go of (both a while at most), then the rest. `saved` is called once
-   * everything is on this computer's disk: what is still to go then goes at the next start (0129).
+   * everything is on this computer's disk: what is still to go then goes at the next start (0131).
    */
   async close(o: CloseOptions = {}): Promise<void> {
     if (this.closed) return void o.saved?.();
@@ -529,7 +529,7 @@ export class Host {
     const savedIn = Date.now() - began;
     o.saved?.();
     // The saves just made, and any still waiting to be pushed, go to the online copies before they stop (a while at
-    // most), while the other devices are let go of: neither waits for the other (0129). The write rules still judge
+    // most), while the other devices are let go of: neither waits for the other (0131). The write rules still judge
     // what a push brings in (another device pushed first) until it is done: Peers lets go of them only then.
     const pushed = Promise.all([...this.syncs.values()].map(({ session }) => session.pushPending?.(FINAL_PUSH_MS).catch(() => undefined)));
     await Promise.all([

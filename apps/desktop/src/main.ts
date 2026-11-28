@@ -54,7 +54,7 @@ const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
 /** Shown at once while the hub starts, so the window is never blank. */
 const STARTING = join(__dirname, 'static', 'starting.html');
-/** Shown while the app quits and its hub stops: every workspace saved, then what is still to go sent (0129). */
+/** Shown while the app quits and its hub stops: every workspace saved, then what is still to go sent (0131). */
 const CLOSING = join(__dirname, 'static', 'closing.html');
 /** The only pages the windows may show. */
 const OWN_PAGES = [WEB_INDEX, LAUNCHER, STARTING, CLOSING, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
@@ -187,7 +187,7 @@ let quitNow: (() => void) | null = null;
 
 /**
  * Stop the hub as the app quits (or restarts to update), saying so in the window, never a page that has
- * lost its host (0129): every workspace's edits saved, then what is still to go sent, a while at most.
+ * lost its host (0131): every workspace's edits saved, then what is still to go sent, a while at most.
  * Done once the hub has stopped, or once Quit Now is pressed (only offered when everything is saved).
  */
 async function closeDown(restart = false): Promise<void> {
@@ -564,7 +564,7 @@ app.whenReady().then(async () => {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#171716' : '#fbfaf8',
     ...windowOptions(),
   });
-  // Closing the window quits the app: the window stays, saying so, while the hub stops (0129).
+  // Closing the window quits the app: the window stays, saying so, while the hub stops (0131).
   window.on('close', (event) => {
     if (closedDown || (!quitting && !hub && !hubStarting)) return;
     event.preventDefault();

@@ -37,7 +37,7 @@ const bridge: ShellBridge = {
 };
 contextBridge.exposeInMainWorld('kuraa', bridge);
 
-// The closing page's (static/closing.html, 0129): told once every workspace is saved, and Quit Now.
+// The closing page's (static/closing.html, 0131): told once every workspace is saved, and Quit Now.
 contextBridge.exposeInMainWorld('kuraaClosing', {
   onSaved: (show: () => void) => {
     ipcRenderer.on('kuraa:closing-saved', () => show());

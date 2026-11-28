@@ -1,6 +1,6 @@
 # 0080 · What a tester found: rooms of files gone, case renames, syncing on quit, and smaller things
 
-> Changed by [0129](0129-closing-says-so.md): the window says so while the last saves go, with Quit Now
+> Changed by [0131](0131-closing-says-so.md): the window says so while the last saves go, with Quit Now
 > once they are committed; the push goes beside letting go of the devices.
 
 > Changes [0076](0076-a-quieter-sidebar.md) (no Sync button; the light grey with no document

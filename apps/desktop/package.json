@@ -1,6 +1,6 @@
 {
   "name": "@kuraa/desktop",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "private": true,
   "description": "Edit folders of Pandoc markdown and R Markdown files, alone or live with others.",
   "author": "kuraa",

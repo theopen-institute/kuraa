@@ -382,7 +382,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* The document's title, from its header: the page's top heading, typed in to change it (the rest of the header is in Document settings). */
 .doc-title-block { cursor: default; }
 .prose h1.doc-title { margin: 0 0 0.6em; font-size: 2em; cursor: text; outline: none; overflow-wrap: anywhere; }
-.prose h1.doc-title:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+/* The words drawn in an empty title or document are not text: hidden from screen readers and apps that read the screen ("/ ''", with a fallback for a browser without it), which get them as a label or placeholder instead (0117). */
+.prose h1.doc-title:empty::before { content: attr(data-placeholder); content: attr(data-placeholder) / ''; color: var(--muted); pointer-events: none; }
 
 /* The header, in Document settings: a label column, the value, and a button to remove the field. */
 .header-form { display: grid; gap: 10px; }
@@ -632,7 +633,7 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 
 /* An empty document: how to start (placeholder.ts). */
 .prose .empty-placeholder::before {
-  content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
+  content: attr(data-placeholder); content: attr(data-placeholder) / ''; float: left; height: 0; pointer-events: none; color: var(--muted); font-style: italic;
 }
 .prose .empty-placeholder-widget { cursor: text; min-height: 1.45em; }
 .prose .empty-placeholder-widget::before { float: none; height: auto; }

@@ -46,9 +46,22 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   await openFile(page, path);
   const placeholder = page.getByTestId('editor').locator('.empty-placeholder');
   await expect(placeholder).toHaveAttribute('data-placeholder', 'Start writing…');
+  // Drawn, but not text for screen readers and apps that read the screen: the editor's placeholder (0117).
+  const editor = page.getByTestId('editor');
+  await expect(editor).toHaveAttribute('aria-placeholder', 'Start writing…');
+  expect(await placeholder.evaluate((el) => getComputedStyle(el, '::before').content)).toContain('Start writing…');
+  const axText = async () => {
+    const cdp = await page.context().newCDPSession(page);
+    const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+    await cdp.detach();
+    return nodes.filter((n) => n.role?.value === 'StaticText').map((n) => String(n.name?.value ?? '')).join('\n');
+  };
+  expect(await axText()).not.toContain('Start writing');
+  expect(await axText()).not.toMatch(/^Title$/m);
   await placeholder.click();
   await page.keyboard.type('Now there is text.');
   await expect(placeholder).toHaveCount(0);
+  await expect(editor).not.toHaveAttribute('aria-placeholder', /./);
 
   // ⌘/ (Ctrl+/): the sheet, for this system's keys, from the editor modules' own lists.
   await page.keyboard.press(`${MOD}+Slash`);

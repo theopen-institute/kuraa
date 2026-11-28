@@ -9,6 +9,7 @@
 // Where the programs are: where.ts (the desktop app's resources, a bundle's
 // render/ folder, or scripts/fetch-render-tools.mjs's cache).
 import { defineRunComponent, type Renderer, type RenderFormat } from '@kuraa/run-kit';
+import { convertToMarkdown, READERS } from './convert.js';
 import { latexAsked, renderMarkdown } from './render.js';
 import { pandocWasm, typstParts } from './where.js';
 
@@ -38,6 +39,13 @@ export const pandocRenderer: Renderer = {
     const wasm = pandocWasm();
     if (!wasm) return { ok: false, message: NO_PANDOC, log: '' };
     return renderMarkdown(ctx, req, { wasm, typst: typstParts() });
+  },
+  // Importing (0116): Word, OpenDocument, RTF, EPUB and HTML into Markdown.
+  convertsFrom: Object.keys(READERS),
+  async convert(ctx, req) {
+    const wasm = pandocWasm();
+    if (!wasm) return { ok: false, message: NO_PANDOC, log: '' };
+    return convertToMarkdown(ctx, req, wasm);
   },
 };
 

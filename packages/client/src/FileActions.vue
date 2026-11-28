@@ -13,6 +13,7 @@ import { askConfirm, askText } from './ask.js';
 import { fileTypeChoices } from './tree.js';
 import { pathForTitle, slugify } from './filenames.js';
 import { S } from './strings.js';
+import NewFileDialog from './NewFileDialog.vue';
 import RenameDialog from './RenameDialog.vue';
 import ContextMenu, { type ContextItem } from './ContextMenu.vue';
 
@@ -132,6 +133,17 @@ async function nameAfterTitle(made: { path: string; title: string | null; api: H
   const to = pathForTitle(title, extension, folder, paths.value, path);
   if (to === path || !paths.value.includes(path)) return;
   await act(() => props.api.renameFile(path, to), props.selected);
+}
+
+// New file…, from a menu: the kind chosen, and a document's title or a file's name (NewFileDialog).
+const creating = ref<string | null>(null);
+async function made(file: { path: string; type: string; title: string | null }) {
+  creating.value = null;
+  const type = props.registry.get(file.type);
+  // Named or titled, it has something in it: written at once (a draft is for a document with nothing yet: 0097).
+  const content = file.title && type?.title ? type.title.write('', file.title) : '';
+  emit('reveal', file.path);
+  await act(() => props.api.createFile(file.path, content), file.path);
 }
 
 async function newFolder(inside?: string) {
@@ -276,7 +288,8 @@ function menuItems(path: string, plus = false): ContextItem[] {
   const folder = path.replace(/\/+$/, '');
   const where = kind === 'folder' ? S.tree.inFolder(folder.slice(folder.lastIndexOf('/') + 1)) : '';
   return [
-    { label: S.tree.newFileMenu(where), run: () => void create(folder), testid: 'context:new-file' },
+    // From a menu, its kind chosen first (the dialog: a title, or a file's name); ＋ itself and a folder's ＋ make a document at once (0097).
+    { label: S.tree.newFileMenu(where), run: () => (creating.value = folder ? `${folder}/` : ''), testid: 'context:new-file' },
     { label: S.tree.newFolderMenu(where), run: () => void newFolder(folder), testid: 'context:new-folder' },
     // Arranged by hand (0093): back to by name. Not in ＋, which is for making.
     ...(!plus && props.orders?.[folder] ? [{ label: S.tree.sortByName, run: () => void sortByName(folder), testid: 'context:sort-by-name' }] : []),
@@ -292,9 +305,16 @@ function menuItems(path: string, plus = false): ContextItem[] {
 
 /** The menu for a file, a folder (ending in `/`) or the top level (''), at a point. */
 function fileMenu(path: string, at: { x: number; y: number }) {
-  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once).
-  const extra = path === '' ? (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 })) : [];
+  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once), and what features add for it (as the folder `/`: 0116).
+  const extra = path === '' ? topItems() : [];
   menu.value = { x: at.x, y: at.y, items: [...menuItems(path), ...extra] };
+}
+
+/** What views add to ＋ and features add for the top level (as the folder `/`: Import…, Compile…), after the core's. */
+function topItems(): ContextItem[] {
+  const views = (props.newItems?.() ?? []).map((i): ContextItem => ({ label: i.label, run: i.run, testid: i.testid }));
+  const features = (props.featureItems?.('/') ?? []).map((i) => ({ ...i }));
+  return [...views, ...features].map((i, n) => ({ ...i, divided: n === 0 }));
 }
 
 /** ＋ (decision 0086): the top level's menu, a new file or folder, and what the views add, under the button. */
@@ -308,8 +328,7 @@ function newMenu(at: HTMLElement) {
   }
   plusAt = at;
   const box = at.getBoundingClientRect();
-  const extra = (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 }));
-  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems('', true), ...extra], plus: true };
+  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems('', true), ...topItems()], plus: true };
 }
 function menuClosed(outside?: Event) {
   closedByPlus = !!menu.value?.plus && !!outside && !!plusAt?.contains(outside.target as Node);
@@ -323,6 +342,16 @@ defineExpose({ create, newFolder, rename, remove, move, place, sortByName, fileM
 
 <template>
   <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menu.items" @close="menuClosed" />
+  <NewFileDialog
+    v-if="creating !== null"
+    :folder="creating"
+    :types="typeChoices"
+    :default-type="NEW_TYPE"
+    :paths="paths"
+    :type-of="typeOf"
+    @create="made"
+    @cancel="creating = null"
+  />
   <RenameDialog
     v-if="renaming"
     :path="renaming.path"

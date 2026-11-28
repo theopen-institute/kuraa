@@ -17,10 +17,9 @@ import { commitSigner } from '../signing.js';
 import { digestOf } from './node.js';
 import { clashWords } from './clashes.js';
 import { isAncestor, mergeTrailerValue } from '../merging.js';
-import { randomBytes } from 'node:crypto';
 import { PEER_SPACES } from './node.js';
 import { spaceRef } from '../spaces.js';
-import { PROTOCOL, type PeerLink } from './link.js';
+import { PROTOCOL, type PeerLink, type ServerHealth } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
@@ -34,6 +33,43 @@ import type { KeyPair } from '../keys.js';
 const OUTPUTS_ANNOUNCE_MS = 20;
 /** How long a server may not hold this device's work before it is no longer relied on to pass work on (0112). */
 const SERVER_BEHIND_MS = 10 * 60_000;
+/**
+ * The policy operations held whole (0121): each whose parents are all held whole, back to one with none (a
+ * genesis). One whose past is not all here counts as not held.
+ */
+export function rootedOps(ops: { id: string; parents: string[] }[]): Set<string> {
+  const byId = new Map(ops.map((o) => [o.id, o]));
+  const children = new Map<string, string[]>();
+  const missing = new Map<string, number>();
+  const ready: string[] = [];
+  for (const o of byId.values()) {
+    const parents = [...new Set(o.parents)];
+    // A parent not here: never whole, nor anything after it.
+    if (parents.some((p) => !byId.has(p))) continue;
+    missing.set(o.id, parents.length);
+    if (!parents.length) ready.push(o.id);
+    for (const p of parents) {
+      const list = children.get(p);
+      if (list) list.push(o.id);
+      else children.set(p, [o.id]);
+    }
+  }
+  const whole = new Set<string>();
+  for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
+    whole.add(id);
+    for (const c of children.get(id) ?? []) {
+      const left = missing.get(c)! - 1;
+      missing.set(c, left);
+      if (left === 0) ready.push(c);
+    }
+  }
+  return whole;
+}
+
+/** How long work signed by someone not in the workspace waits for their join to come here (0121). */
+const PERSON_WAIT_MS = 10 * 60_000;
+/** How long a server has to take in a member's latest, as they said it, before it is fetched from them directly (0121). */
+const SERVER_CATCHUP_MS = 30_000;
 /** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
@@ -112,6 +148,8 @@ export interface DeviceInfo {
    */
   holdsMine?: boolean;
   behindSince?: number | null;
+  /** A server's, connected (0121): how it says it stands (room on its disk, when it last took in work). */
+  health?: ServerHealth | null;
   /** How it is connected here (0053): on the local network, over TCP to a server, through another device, or over the internet (the DHT, directly or by a relay). */
   via: Via | null;
   /** When it was last connected here (ms since 1970), if ever. */
@@ -237,6 +275,8 @@ export interface PeopleInfo {
   servers: { key: string; name: string; devices: string[]; you: boolean }[];
   /** Whether this person invites and removes servers: the owner (0099). */
   managesServers: boolean;
+  /** Servers taken out before, not blocked (0121): the owner may still block one whose key went astray since. */
+  formerServers: { key: string; name: string }[];
   /**
    * The latest removals (0072: people taken out, computers dropped; 0099:
    * servers), each with the names of those whose devices hold it so far.
@@ -320,8 +360,10 @@ export class Peers {
     },
     // Records came (the policy work waits for may be among them): what waits is tried again now.
     members: () => this.retryNow(),
-    // Operations its commits name that it does not hold: not waited for (knownFrom).
+    // Operations its commits name that it does not hold: not waited for (knownFrom). Not a server's word (0121): it could
+    // so have work judged by less of the policy than there is, its makers' joins left out.
     unheld: (link, ids) => {
+      if (this.node.can(link.key, 'relay')) return;
       const had = this.unheld.get(link.key) ?? new Set<string>();
       for (const id of ids) had.add(id);
       this.unheld.set(link.key, had);
@@ -365,7 +407,7 @@ export class Peers {
     host.gate = (x, y, space, o) => this.gate(x, y, space ?? null, o?.ours ?? false);
     // Whether each server connected holds this device's work (0112), looked at each minute, window open or not.
     this.holdingTimer = setInterval(() => {
-      for (const l of this.node.links.values()) if (l.accepted && !l.closed && this.node.isServerDevice(l.key)) void this.serverHolding(l).catch(() => undefined);
+      for (const l of this.node.links.values()) if (l.accepted && !l.closed && this.node.can(l.key, 'relay')) void this.serverHolding(l).catch(() => undefined);
     }, 60_000);
     this.holdingTimer.unref();
   }
@@ -382,7 +424,21 @@ export class Peers {
     const from = this.bringing && !ours ? await this.node.identity.whoIs(this.bringing) : undefined;
     // Verdicts kept by commit, with the records they were judged by (0099): each judged once, not at every merge.
     const cacheKey = `${this.gateCache?.digest ?? ''}\0${ctx.policy.version}\0${mergeTrailerValue(this.host.mergeSignature)}`;
-    return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+    return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature), waitForPerson: (p) => this.waitForPerson(p) });
+  }
+
+  /** Since when work signed by each person not in the workspace yet has waited for their join (0121). */
+  private readonly waitedFor = new Map<string, number>();
+
+  /** Whether to wait still for someone's join before judging work they signed (0121): ten minutes at most. */
+  private waitForPerson(person: string): boolean {
+    const since = this.waitedFor.get(person);
+    if (since === undefined) {
+      this.waitedFor.set(person, Date.now());
+      if (this.waitedFor.size > 1000) this.waitedFor.delete(this.waitedFor.keys().next().value!);
+      return true;
+    }
+    return Date.now() - since < PERSON_WAIT_MS;
   }
 
   /**
@@ -406,10 +462,26 @@ export class Peers {
   /** The device whose work is being brought in (inside host.serial): whose commits the gate judges. */
   private bringing: string | null = null;
 
+  /**
+   * Bring in what came from this person's backup (0115, inside host.serial): as
+   * work from one of their own devices, this one. Commits no one known signed
+   * are theirs, judged by what they may change, as every device that takes the
+   * work from here judges them too.
+   */
+  async asOwnDevice<T>(fn: () => Promise<T>): Promise<T> {
+    this.bringing = this.node.myKey;
+    try {
+      return await fn();
+    } finally {
+      this.bringing = null;
+    }
+  }
+
   /** Ask a device for the policy operations its commits name that this one lacks; those it does not hold, it says (unheld). */
   private askFor(link: PeerLink, ops: string[]): void {
     const unheld = this.unheld.get(link.key);
-    const ask = ops.filter((id) => !unheld?.has(id)).slice(0, 100);
+    // People waited for (0121) are not operations to ask for: their joins come with the records.
+    const ask = ops.filter((id) => /^[0-9a-f]{64}$/.test(id) && !unheld?.has(id)).slice(0, 100);
     if (ask.length) link.send({ type: 'ops', ids: ask });
   }
 
@@ -425,7 +497,9 @@ export class Peers {
         const people = await id.people();
         const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
         const names = new Map(people.map((p) => [p.key, p.name]));
-        const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
+        // Held whole (0121): an operation whose past is not all here is not known, so work naming it waits for the rest, and
+        // is not judged by a policy short of someone's join.
+        const known = rootedOps(records.filter((r) => r.kind === 'policy').map((r) => ({ id: r.subject, parents: r.parents ?? [] })));
         // Servers, now or before (0099): the keys whose joins as a server counted.
         const servers = await id.everServers(records);
         return { policy, known, servers, personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? (servers.has(p) ? 'a server' : null), cutKeys: await id.cutKeys() };
@@ -580,16 +654,35 @@ export class Peers {
    */
   private syncsThroughServer(link: PeerLink): boolean {
     const n = this.node;
-    if (n.isServerDevice(n.myKey) || n.isServerDevice(link.key) || n.via(link.key) !== 'tunnel') return false;
+    if (n.can(n.myKey, 'relay') || n.can(link.key, 'relay') || n.via(link.key) !== 'tunnel') return false;
     // Not a server that has kept not taking this device's work in (0112): it may be broken, or withholding it.
     const now = Date.now();
     const relied = (key: string) => {
       const since = this.behind.get(key);
       return since === undefined || now - since < SERVER_BEHIND_MS;
     };
-    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.isServerDevice(l.key) && relied(l.key)).map((l) => l.key));
+    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.can(l.key, 'relay') && relied(l.key)).map((l) => l.key));
     // The member is connected to one of them, as that server says (it told this device whom it is connected to).
     return [...n.links.values()].some((l) => servers.has(l.key) && l.present.has(link.key));
+  }
+
+  /**
+   * Whether a server this device relies on to pass a member's work on holds it
+   * (0121): its branch, as it said it, holds the member's latest, as the member
+   * said it. Else (a server showing each member only that member's work) the
+   * member's work is fetched from it directly after all.
+   */
+  private async serverHoldsTheirs(link: PeerLink): Promise<boolean> {
+    const n = this.node;
+    const branch = await this.host.git.branch().catch(() => null);
+    const theirs = branch ? link.heads?.[branch] : undefined;
+    if (!branch || !theirs) return true;
+    for (const l of n.links.values()) {
+      if (!l.accepted || l.closed || !n.can(l.key, 'relay') || !l.present.has(link.key)) continue;
+      const held = l.heads?.[branch];
+      if (held && (held === theirs || (await this.host.git.run(['merge-base', '--is-ancestor', theirs, held], { allowFail: true })).code === 0)) return true;
+    }
+    return false;
   }
 
   /** When work from another device was last brought in here (0112: a server's status says it); null, not since starting. */
@@ -616,7 +709,31 @@ export class Peers {
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
-    if (this.syncsThroughServer(link)) return Promise.resolve();
+    // Through a server (0121): nothing to fetch from the member while it holds their latest; one that has not taken it
+    // in a while after they said it (it fetches too), fetched from the member after all.
+    if (this.syncsThroughServer(link)) return this.serverHoldsTheirs(link).then((held) => (held ? undefined : this.unlessServerCatchesUp(link)));
+    return this.syncNow(link);
+  }
+
+  /** Members' work a server lacked when they said it, looked at again once it has had time to take it in (0121). */
+  private readonly catchingUp = new Map<string, NodeJS.Timeout>();
+
+  private unlessServerCatchesUp(link: PeerLink): void {
+    if (this.catchingUp.has(link.key)) return;
+    const t = setTimeout(() => {
+      this.catchingUp.delete(link.key);
+      if (this.closed || link.closed) return;
+      const through = this.syncsThroughServer(link);
+      void (through ? this.serverHoldsTheirs(link) : Promise.resolve(false))
+        .then((held) => (held ? undefined : this.syncNow(link)))
+        .catch(() => undefined);
+    }, SERVER_CATCHUP_MS);
+    t.unref();
+    this.catchingUp.set(link.key, t);
+  }
+
+  private syncNow(link: PeerLink): Promise<void> {
+    if (this.closed) return Promise.resolve();
     const remote = link.remote!;
     // The newest link to it counts, whichever started the sync under way.
     if (!link.closed || !this.linkTo.has(remote)) this.linkTo.set(remote, link);
@@ -710,8 +827,8 @@ export class Peers {
     // A server makes the merges (0099: it brings together work made apart, members never online at once), and a member
     // takes its merges; between two others, people or servers, the lower key, as ever. Still one merger for each pair.
     // Between two servers (0112), as between two people: the lower key, else both would merge each other's merges for ever.
-    const meServer = this.node.isServerDevice(this.node.myKey);
-    const themServer = this.node.isServerDevice(link.key);
+    const meServer = this.node.can(this.node.myKey, 'merge');
+    const themServer = this.node.can(link.key, 'merge');
     const forwardOnly = meServer === themServer ? link.key < this.node.myKey : themServer;
     let retry = false;
     // Each on its own (0071): one that fails (a file in the way, the policy not here yet) holds up none of the others.
@@ -895,7 +1012,7 @@ export class Peers {
     if (key === this.node.myKey) throw new Error('This is this device: another device removes it');
     if (!(await this.node.identity.members()).some((m) => m.key === key)) throw new Error('No such device in this workspace');
     // A server's device (0099): removing it would drop the whole server's key, for good. A server is taken out as one.
-    if (await this.node.identity.isServerDevice(key)) throw new NotAllowed('This is a server’s device: take the server out under Servers instead (Remove…)');
+    if (await this.node.identity.isServerDevice(key)) throw new NotAllowed('This is a server’s device: remove the server from its view under People instead');
     // An admin, or the same person: one's own lost or retired computer (0068).
     if (!(await this.node.identity.mayRemove(this.node.myKey, key))) throw new NotAllowed('Only an admin of this workspace (the owner, for an admin’s), or whoever it is, can remove a computer');
     // One's own: its signing key revoked too, if this computer keeps one's identity, so what it signs from now on is no one's.
@@ -942,7 +1059,9 @@ export class Peers {
    */
   async removeServer(key: string, o: { forGood?: boolean } = {}): Promise<void> {
     const { policy, me } = await this.node.policy();
-    if (!policy.isServer(key)) throw new Error('No such server in this workspace');
+    // One taken out before stays the owner's to block (0121: its key may have gone astray since); not removed again.
+    const was = !policy.isServer(key) && (await this.node.identity.everServers()).has(key) && !policy.dropped.has(key);
+    if (!policy.isServer(key) && !(o.forGood && was)) throw new Error('No such server in this workspace');
     if (!policy.isOwner(me)) throw new NotAllowed('Only the workspace’s owner removes a server');
     const devices = (await this.node.identity.servers()).find((s) => s.key === key)?.devices.map((d) => d.key) ?? [];
     if (o.forGood) await this.node.identity.dropKey(key, await this.node.branchTips(), await this.node.signingKeyNow());
@@ -992,6 +1111,9 @@ export class Peers {
       people: policy.people().map((p) => ({ id: p.id, role: (p.id === policy.owner ? 'owner' : p.role) as Role | 'owner', name: known.get(p.id)?.name ?? null, devices: known.get(p.id)?.devices ?? [], you: p.id === me })),
       servers,
       managesServers: policy.founded && policy.isOwner(me),
+      formerServers: policy.founded && policy.isOwner(me)
+        ? [...(await id.everServers())].filter((k) => !policy.servers.has(k) && !policy.dropped.has(k)).map((key) => ({ key, name: nameOf(key) }))
+        : [],
       removals: (await id.confirmations()).map((r) => ({ kind: r.kind, who: nameOf(r.who), by: r.by ? nameOf(r.by) : null, confirmedBy: r.confirmedBy.map(nameOf) })),
     };
   }
@@ -1146,8 +1268,8 @@ export class Peers {
 
   /** A new space for an audience (0072: a folder's own, or a file's). */
   private async newSpace(audience: string[]): Promise<string> {
-    const id = randomBytes(16).toString('hex');
-    await this.node.identity.makeSpace(id, this.cleanAudience(audience), await this.node.signingKeyNow());
+    // Its ID its maker's (0121): no one makes it again at the same time, naming others.
+    const id = await this.node.identity.newSpace(this.cleanAudience(audience), await this.node.signingKeyNow());
     await this.node.membersChanged();
     return id;
   }
@@ -1431,7 +1553,7 @@ export class Peers {
         kuraa: versionOf(this.node.versions.get(m.key)),
         via: this.node.via(m.key),
         lastSeen: this.node.lastSeen(m.key),
-        ...(link?.accepted && this.node.isServerDevice(m.key) ? await this.serverHolding(link) : {}),
+        ...(link?.accepted && this.node.isServerDevice(m.key) ? { ...(await this.serverHolding(link)), health: link.health } : {}),
       });
     }
     const connected = devices.some((d) => d.online);
@@ -1450,6 +1572,7 @@ export class Peers {
     this.closed = true;
     clearTimeout(this.announceTimer);
     clearInterval(this.holdingTimer);
+    for (const t of this.catchingUp.values()) clearTimeout(t);
     for (const t of this.retries.values()) clearTimeout(t);
     this.retries.clear();
     this.stopRefs?.();

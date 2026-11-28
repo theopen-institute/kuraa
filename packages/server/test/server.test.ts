@@ -113,6 +113,8 @@ describe('a server, run from its folder (0099)', () => {
     writeFileSync(join(a.host.dir, 'more.md'), '# More\n');
     await a.host.serial(() => a.host.commitPaths(['more.md'], 'More'));
     await until(async () => !!(await statusServer(data)).workspaces[0]!.lastBrought, 20_000, 'work brought in, on record');
+    // And to its members (0121): how it stands, as it says, on its device in their status.
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.health && d.health.freeBytes !== null && d.health.lowOnSpace === false), 20_000, 'its health, said to its owner');
   });
 
   it('gives up its key for a new one: blocked by itself in every workspace, then started afresh, holding nothing (0112)', async () => {
@@ -152,9 +154,69 @@ describe('a server, run from its folder (0099)', () => {
     await a.host.peers!.removeServer(s.key);
     // Listed as out, once it hears; then let go of (looked at each minute; here, at once).
     await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.out === 'removed'), 20_000, 'the server hearing it is out');
+    // Kept a week first (0121: a removal undone, or made by mistake, finds its copy there); then, still out, deleted.
     await s.hub.hub.sweepRemoved();
+    expect(existsSync(w.path)).toBe(true);
+    await s.hub.hub.sweepRemoved(Date.now() + 6 * 24 * 3600_000);
+    expect(existsSync(w.path)).toBe(true);
+    await s.hub.hub.sweepRemoved(Date.now() + 8 * 24 * 3600_000);
     expect(await listServer(data)).toEqual([]);
     expect(existsSync(w.path)).toBe(false);
+  });
+
+  it('stays the owner’s to block once removed: its key then never let back, its copy gone when the week is out (0121)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    await a.host.peers!.removeServer(s.key);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.out === 'removed'), 20_000, 'the server hearing it is out');
+    await s.hub.hub.sweepRemoved();
+    // Listed among the removed servers, and blocked from there: dropped for good, no longer listed.
+    expect((await a.host.peers!.people()).formerServers).toMatchObject([{ key: s.key }]);
+    await a.host.peers!.removeServer(s.key, { forGood: true });
+    const { policy } = await a.host.peers!.node.policy();
+    expect(policy.dropped.has(s.key)).toBe(true);
+    expect((await a.host.peers!.people()).formerServers).toEqual([]);
+    // The server, no longer connected, does not hear it; its copy goes as a removed one's does.
+    await s.hub.hub.sweepRemoved(Date.now() + 8 * 24 * 3600_000);
+    expect(existsSync(w.path)).toBe(false);
+  });
+
+  it('gives its metrics to a monitor with its access code, by workspace ID, never by name (0121)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await statusServer(data)).workspaces.some((x) => x.id === w.id && x.in && x.online === 1), 20_000, 'the server in, its owner online');
+    const url = `${s.hub.url}/hub/api/server/metrics`;
+    expect((await fetch(url)).status).toBe(401);
+    const res = await fetch(url, { headers: { authorization: `Bearer ${s.hub.token}` } });
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
+    const text = await res.text();
+    expect(text).toContain(`kuraa_server_workspace_in{workspace="${w.id}"} 1`);
+    expect(text).toContain(`kuraa_server_members_online{workspace="${w.id}"} 1`);
+    expect(text).toMatch(/^kuraa_server_disk_free_bytes \d+$/m);
+    expect(text).not.toContain(w.name);
+  });
+
+  it('starts afresh only where a member heard its key was given up (0121)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    // Its owner's device gone: no member to hear the drop.
+    await a.close();
+    running.splice(running.indexOf(a), 1);
+    expect(await retireServerKey(data)).toMatchObject([{ id: w.id, dropped: true, heardBy: 0 }]);
+    await s.close();
+    running.splice(running.indexOf(s), 1);
+    await expect(startAfresh(data)).rejects.toThrow('No member was online');
+    // Nothing was deleted, and the key is where it was.
+    expect(existsSync(w.path)).toBe(true);
+    expect(existsSync(join(data, 'keys-retired'))).toBe(false);
   });
 
   it('takes members’ connections on its port from the first workspace it joins, not only after a restart (its own process)', async () => {

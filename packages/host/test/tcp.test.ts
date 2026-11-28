@@ -52,6 +52,33 @@ describe('the TCP listener (0112)', () => {
     expect(handed).toBe(true);
   });
 
+  it('counts a connection until it is let in, past its first line, and closes it if it is not, however slowly it sends (0121)', async () => {
+    let settle: (() => void) | null = null;
+    const l = await listenTcp(KEY, 0, (_sock, settled) => void (settle ??= settled), () => undefined);
+    stops.push(l!.stop);
+    // Sixteen say which device, then nothing more (a handshake begun and never ended): the seventeenth is refused.
+    const open = Array.from({ length: 16 }, () => {
+      const s = connect(l!.port, '127.0.0.1');
+      s.on('error', () => undefined);
+      s.write(`kuraa ${KEY}\n`);
+      sockets.push(s);
+      return s;
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const extra = connect(l!.port, '127.0.0.1');
+    extra.on('error', () => undefined);
+    sockets.push(extra);
+    const refused = closed(extra);
+    expect(await refused).toBeLessThan(2000);
+    // One let in: no longer counted, nor held to the deadline; the others closed by it, a byte now and then or not.
+    settle!();
+    const drip = setInterval(() => open.forEach((s) => s.write('x')), 1000);
+    const ends = await Promise.all(open.slice(1).map(closed));
+    clearInterval(drip);
+    expect(Math.max(...ends)).toBeLessThan(17_000);
+    expect(open[0]!.destroyed).toBe(false);
+  }, 25_000);
+
   it('takes no more than sixteen waiting from one address', async () => {
     const l = await listenTcp(KEY, 0, () => undefined, () => undefined);
     stops.push(l!.stop);

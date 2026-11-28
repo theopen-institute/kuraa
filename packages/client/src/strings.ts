@@ -5,7 +5,7 @@
 // object of the same shape.
 //
 // The words: a document is *saved* (written to its file, and kept in its
-// history as a *version*); a workspace has an *online copy* and other
+// history as a *version*); a workspace has a *personal backup* and other
 // *devices*; the app talks to a *host* with an *access code*. Commit ids,
 // branch names and command-line flags stay behind a "Details" disclosure.
 // Spelling is British, as in the docs.
@@ -75,10 +75,10 @@ export const S = {
     noHost: 'Cannot reach the host',
     devices: (online: number, total: number, servers = 0) => (total === 1 && servers === 1 ? (online ? 'Syncing with the server' : 'The server is not connected') : total === 1 ? (online ? 'Syncing with your other device' : 'Your other device is not connected') : `Syncing with ${online.toLocaleString()} of ${total.toLocaleString()} devices`),
     alone: 'Not shared with other devices',
-    onlineSyncing: 'Online copy: syncing…',
-    onlineFailed: 'Online copy: the last sync did not go through',
-    onlinePending: (n: number) => `Online copy: ${count(n, 'save', 'saves')} not there yet`,
-    onlineUpToDate: 'Online copy: up to date',
+    onlineSyncing: 'Personal backup: syncing…',
+    onlineFailed: 'Personal backup: the last sync did not go through',
+    onlinePending: (n: number) => `Personal backup: ${count(n, 'save', 'saves')} not there yet`,
+    onlineUpToDate: 'Personal backup: up to date',
   },
 
   /** The banners at the top of the page while the connection is lost. */
@@ -290,7 +290,7 @@ export const S = {
     newFileIn: (name: string) => `New file in ${name}`,
     referencesLeft: (paths: string[]) => `Moved. ${listOf(paths)} ${paths.length === 1 ? 'still points' : 'still point'} to the old place: ${paths.length === 1 ? 'it is' : 'they are'} not yours to change.`,
     newFolderIn: (name: string) => `New folder in ${name}`,
-    newFileMenu: (where: string) => `New file${where}`,
+    newFileMenu: (where: string) => `New file${where}…`,
     /** The space below the files, with none yet: its menu has a new file or folder. */
     space: 'New file or folder…',
     newFolderMenu: (where: string) => `New folder${where}…`,
@@ -312,6 +312,18 @@ export const S = {
     untitled: (path: string) => `${path}: no title yet (Rename… or Document settings… gives it one)`,
   },
 
+
+  newFile: {
+    title: 'New file',
+    type: 'File type',
+    titleLabel: 'Title',
+    titlePlaceholder: 'Field notes from the harbour',
+    savedAs: 'Saved as',
+    name: 'Name',
+    needsTitle: 'A document needs a title.',
+    needsName: 'A file needs a name.',
+    exists: (p: string) => `${p} already exists.`,
+  },
 
   rename: {
     title: 'Rename',
@@ -502,12 +514,17 @@ export const S = {
     removeFromWorkspace: 'Remove from workspace…',
     removeAbout: 'It stops syncing here and deletes its copy; you can invite it back later.',
     holdsMine: 'Holds your latest work.',
+    /** How it says it stands (0121): room on its disk, when it last took in work. */
+    health: (free: string | null, last: string | null) => [free ? `${free} free on its disk` : null, last ? `last took in work at ${last}` : null].filter(Boolean).join('; ').replace(/^./, (c) => c.toUpperCase()) + '.',
+    lowOnSpace: 'It has stopped taking in work: less than 1 GB is free on its disk. Make room there, or move it to a larger disk.',
     behind: (since: string) => `Has not taken in your latest work since ${since}. Your work reaches others directly where it can; if this goes on, see that the server runs, and is up to date.`,
     behindTag: 'behind',
     behindTitle: 'It has not taken in your latest work for a while: see its view',
     block: 'Block this server’s access…',
     blockAbout: 'Only if its key may be in someone else’s hands: that key can never sync with this workspace again, and a server with a new key is added as a new one.',
     blockButton: 'Block access',
+    former: 'Removed servers',
+    formerAbout: 'Servers taken out of this workspace. Block one only if its key may now be in someone else’s hands.',
     onlyOwner: 'Only the workspace’s owner adds and removes servers.',
   },
 
@@ -623,7 +640,11 @@ export const S = {
     owner: 'owner',
     ownerTitle: 'The owner is an admin who also makes and unmakes admins, and can give the role to someone else.',
     makeOwner: 'Transfer ownership',
-    makeOwnerAsk: (name: string) => `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins.`,
+    /** Handing over the workspace (0121): what goes with it, the servers named. */
+    makeOwnerAsk: (name: string, servers: string[]) =>
+      `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins` +
+      (servers.length ? `, and add, remove and block its servers (${servers.join(', ')}), which keep running where they are` : ', and add and remove servers') +
+      `. ${name} will read every space; you, only those whose readers include you.`,
     removeAsk: (who: string) => `Remove ${who} from this workspace? Their computers stop syncing with everyone here; they keep their copy of everything up to now. You can invite them back later.`,
     removals: 'Recent removals',
     removalsAbout: 'A removal counts at once on each device that has it. Until the others have it too, a device that has not heard of it may still sync with whoever was removed.',
@@ -951,7 +972,7 @@ export const S = {
     connectionAbout: 'The host this app works with, and the access code it lets you in with.',
     host: 'This computer’s host',
     network: 'Other computers',
-    syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through the online copy where it has one.',
+    syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through a server where it has one.',
     advanced: 'Advanced',
     bootstrap: 'Starting points for finding other computers, one per line as address:port. Leave empty to use the public ones; a private network names its own.',
     relays: 'Relays, one key per line, for computers that cannot connect to each other directly (some office, campus and phone networks). The other computers of a workspace relay for each other already; name one here when a workspace is on only two. Whoever runs one gets its key from kuraa-host relay. A relay passes on what it cannot read.',
@@ -1019,7 +1040,7 @@ export const S = {
     settings: 'Workspace settings',
     allSettings: 'Settings…',
     syncNow: 'Sync now',
-    syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
+    syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not in your backup yet)`,
     syncing: 'Syncing…',
     /** How syncing a workspace that is not open went, said with its name. */
     syncedOther: (name: string, message: string) => `${quote(name)}: ${message}`,
@@ -1030,10 +1051,10 @@ export const S = {
     accessCode: 'The host did not accept your access code. Check it in Settings.',
     gitBusy: 'Another program is using this folder’s history just now. Try again in a moment.',
     gitOperation: 'Saving is paused while a git operation outside the app (a merge or rebase) is under way in this folder. Finish it there, then try again.',
-    remoteAuth: 'The online copy did not accept your sign-in. Check your SSH key or git sign-in for it.',
-    remoteUnreachable: 'Cannot reach the online copy. Check its address and your connection.',
-    remoteMissing: 'There is no repository at the online copy’s address. Check the address, and that the repository exists.',
-    remoteAhead: 'The online copy has work this computer does not have yet. Sync again to bring it in first.',
+    remoteAuth: 'The backup did not accept your sign-in. Check your SSH key or git sign-in for it.',
+    remoteUnreachable: 'Cannot reach the backup. Check its address and your connection.',
+    remoteMissing: 'There is no repository at the backup’s address. Check the address, and that the repository exists.',
+    remoteAhead: 'The backup has work this computer does not have yet. Sync again to bring it in first.',
     permission: 'This computer did not allow the file to be written. Check the folder’s permissions.',
     diskFull: 'The disk is full. Free some space; your edits are kept meanwhile.',
     notFound: 'That file or folder is not there any more: it may have been moved or deleted elsewhere.',

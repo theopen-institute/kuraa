@@ -5,6 +5,8 @@ import { annotationsClient } from '@kuraa/annotations/client';
 import { codeClient } from '@kuraa/code/client';
 import { filesClient } from '@kuraa/files/client';
 import { compileClient } from '@kuraa/compile/client';
+import { compositionClient } from '@kuraa/composition/client';
+import { importClient } from '@kuraa/import/client';
 import { sidebarClient } from '@kuraa/sidebar/client';
 import { outlineClient } from '@kuraa/outline/client';
 import { previewClient } from '@kuraa/preview/client';
@@ -17,6 +19,8 @@ export const standardFeatureClients: Record<string, ClientFeature> = {
   sidebar: sidebarClient,
   files: filesClient,
   compile: compileClient,
+  composition: compositionClient,
+  import: importClient,
   preview: previewClient,
   search: searchClient,
   outline: outlineClient,

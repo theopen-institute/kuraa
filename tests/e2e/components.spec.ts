@@ -91,9 +91,9 @@ test('the host’s flags decide; the panel only shows them', async ({ page }) =>
     // The online copy is a component too (0059), listed with the others; its settings, for the open workspace, a
     // subpanel of its own. On this host, not set up from the app.
     await page.getByTestId('kind:syncs').click();
-    await expect(page.getByTestId('component-sync:online')).toContainText('Online copy');
+    await expect(page.getByTestId('component-sync:online')).toContainText('Personal backup');
     await page.getByTestId('sync-settings:online').click();
-    await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Personal backup');
     const online = page.getByTestId('subpanel-sync:online').getByTestId('sync:online');
     await expect(online).toContainText('Added and removed on the computer running this host');
     await expect(online.getByTestId('sync-address')).toHaveCount(0);

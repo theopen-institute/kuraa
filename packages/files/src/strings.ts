@@ -17,8 +17,6 @@ export const S = {
   writers: (words: string) => `Who can change it: ${words}`,
   fold: 'Close the folder',
   unfold: 'Open the folder',
-  rename: 'Rename',
-  delete: 'Delete',
   /** The group of its keys on the Markdown and shortcuts sheet: the client's own. */
   helpGroup: 'File list',
   help: {

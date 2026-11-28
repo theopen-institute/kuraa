@@ -26,7 +26,7 @@ import type { Git } from '../git.js';
 import { serialQueue } from '../serial.js';
 import { reservedName } from '../files.js';
 import { aboutItself, byPerson, judge, policyEntry, readRecord, sign, signRecord, signsMessage, vouchMessage, type MemberRecord, type RecordKind, type Standing } from './records.js';
-import { admittedGrantMessage, evaluate, grantMessage, isGroupName, linkGrantMessage, makeOp, WORKSPACE, type JoinRole, type Policy, type PolicyEntry, type PolicyOp, type Role } from './policy.js';
+import { KNOWN_RULES, admittedGrantMessage, boundGrantMessage, evaluate, spaceIdFor, grantMessage, isGroupName, linkGrantMessage, linkProofMessage, makeOp, WORKSPACE, type JoinRole, type Policy, type PolicyEntry, type PolicyOp, type Role } from './policy.js';
 import { evaluateLegacy, frozenPolicy, mayRefound, type LegacySnapshot } from './legacy.js';
 import { eventHash, resolve, revocationCounts, vouchCounts, type IdentityState, type KeyEvent } from './kel.js';
 import type { Person } from './person.js';
@@ -65,6 +65,8 @@ const POLICY_KINDS = new Set<RecordKind>(['policy', 'key-event', 'vouch', 'revok
 
 /** At most this many invite links' topics are announced (the latest): each member announces every one (0099). */
 const MAX_LINK_TOPICS = 32;
+/** How long after a link expires it is unlinked (0121): a join of someone let in just before has time to come. */
+const GRACE_MS = 3600_000;
 
 /** The ID of the identity whose log this is (its inception's hash). */
 const person0 = (events: KeyEvent[]) => resolve(events)!.id;
@@ -388,11 +390,12 @@ export class Identity {
    * the latest a person's device made, as the records it sent say; where they say
    * none (never made anew since the workspace began), any.
    */
-  async secretMatches(list: unknown[], workspace: string, secret: string): Promise<boolean> {
+  async secretMatches(list: unknown[], workspace: string, secret: string, link?: InviteLink): Promise<boolean> {
     const records = list.map(readRecord).filter((r): r is MemberRecord => !!r && r.workspace === workspace);
     const people = await this.devicesIn(list, workspace, { people: true });
     const made = records.filter((r) => r.kind === 'secret' && people.has(r.by));
-    if (!made.length) return true;
+    // None sent (0121): as the link's maker had it, where the link says (a server that leaves the records out gains nothing).
+    if (!made.length) return link?.secretHash ? secretHashOf(secret) === link.secretHash : true;
     const latest = made.reduce((a, b) => (b.at > a.at || (b.at === a.at && b.sig > a.sig) ? b : a));
     return latest.subject === secret;
   }
@@ -411,7 +414,12 @@ export class Identity {
       if (r.kind !== 'policy' || op?.t !== 'join' || op.issuer === undefined) return false;
       const granter = w.personOf.get(op.granter)?.key ?? null;
       if (!policy.isAdmin(granter, op.group)) return false;
-      return crypto.verify(admittedGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer), Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
+      // A link of its own key (0121): its grant names the key, and the key's word on the join's signing key.
+      const message = op.linkKey
+        ? boundGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer, op.linkKey, op.reads ?? '')
+        : admittedGrantMessage(ws!.id, pin, op.link, op.group, op.role, op.once, op.expires ?? 0, op.issuer);
+      if (op.linkKey && !crypto.verify(linkProofMessage(ws!.id, op.link, r.signer ?? ''), Buffer.from(op.linkProof ?? '', 'hex'), Buffer.from(op.linkKey, 'hex'))) return false;
+      return crypto.verify(message, Buffer.from(op.grant, 'hex'), Buffer.from(op.granter, 'hex'));
     });
   }
 
@@ -1226,9 +1234,24 @@ export class Identity {
   }
 
   /** Make a space, or change who reads it (0066): checked after, as the policy judges it. */
-  async makeSpace(id: string, audience: string[], key: KeyPair): Promise<void> {
+  /**
+   * A new space, its ID its maker's (0121: spaceIdFor), so no one else makes it
+   * again at the same time: its ID.
+   */
+  async newSpace(audience: string[], key: KeyPair): Promise<string> {
+    const ws = await this.workspace();
+    if (!ws) throw new Error('This repository is not a workspace shared between devices');
+    const me = this.who(await this.records()).personOf.get(key.publicKey.toString('hex'))?.key;
+    if (!me) throw new Error('Only a person makes a space');
+    const nonce = randomBytes(16).toString('hex');
+    const id = spaceIdFor(ws.id, me, nonce);
+    await this.makeSpace(id, audience, key, nonce);
+    return id;
+  }
+
+  async makeSpace(id: string, audience: string[], key: KeyPair, nonce?: string): Promise<void> {
     if (!(await this.pin())) throw new Error(REFOUND_FIRST);
-    const op: PolicyOp = { t: 'space', id, audience: [...new Set(audience)].sort() };
+    const op: PolicyOp = { t: 'space', id, audience: [...new Set(audience)].sort(), ...(nonce ? { nonce } : {}) };
     const made = await this.makePolicy(op, key);
     if (!(await this.policy()).applied.includes(made)) throw new Error('That audience is not one you may make');
   }
@@ -1473,6 +1496,7 @@ export class Identity {
     const expires = hours === null ? 0 : Date.now() + hours * 3600_000;
     const issuer = key.publicKey.toString('hex');
     let granted: LinkGrant | undefined;
+    let linkKeys: KeyPair | undefined;
     if (policy.founded) {
       if (!(await this.pin())) throw new Error(REFOUND_FIRST);
       if (!grant) throw new Error('Only a person can invite to this workspace: this computer has no identity');
@@ -1489,8 +1513,12 @@ export class Identity {
       // A server (0099): the owner's to invite, to the workspace, one by each link.
       if (role === 'server' && (!policy.isOwner(who) || group !== WORKSPACE || !once)) throw new Error('Only the workspace’s owner invites a server, one by each link');
       const genesis = await this.pin();
-      // Counting only for whom a device in the workspace lets in by it (admit), which checks it has not expired.
-      granted = { group, role, genesis, granter: signer, signature: crypto.sign(admittedGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer), grant.key.secretKey).toString('hex') };
+      // Counting only for whom a device in the workspace lets in by it (admit), which checks it has not expired; and
+      // (0121) only for its holder: a key of its own, whose public half the grant names and whose secret half the link
+      // carries, signs the joiner's signing key. One who only sees the link (a device it is shown to) cannot.
+      linkKeys = crypto.keyPair();
+      const linkKey = linkKeys.publicKey.toString('hex');
+      granted = { group, role, genesis, granter: signer, linkKey, signature: crypto.sign(boundGrantMessage(ws.id, genesis, id, group, role, once, expires, issuer, linkKey, role === 'server' ? 'all' : ''), grant.key.secretKey).toString('hex') };
     }
     const through = await this.cameInThrough();
     // Its own topic, not the workspace's secret: whoever holds the link finds the members by it
@@ -1499,13 +1527,15 @@ export class Identity {
     // Where its maker's history was (0099): a device let in by a server takes what came before as its maker had it, and
     // checks only what came after.
     const tip = (await this.git.run(['rev-parse', '-q', '--verify', 'HEAD^{commit}'], { allowFail: true })).stdout.trim() || undefined;
-    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic, tip), key.secretKey).toString('hex');
+    // The workspace's secret's hash (0121), signed with the rest: a device let in by a server checks the secret it gives.
+    const secretHash = ws.secret ? secretHashOf(ws.secret) : undefined;
+    const signature = crypto.sign(linkMessage(ws.id, id, expires, once, issuer, through, topic, tip, granted?.linkKey, secretHash), key.secretKey).toString('hex');
     const list = await this.links();
-    list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true, ...(granted.role === 'server' ? { server: true } : {}) } : {}) });
+    list.push({ id, expires, once, created: Date.now(), ...(granted ? { group: granted.group, admitted: true, bound: true, ...(granted.role === 'server' ? { server: true } : {}) } : {}) });
     await mkdir(this.stateDir, { recursive: true });
     await writeWhole(this.linksFile, JSON.stringify(list));
     await this.decide('link', id, { topic, expires });
-    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}), ...(tip ? { tip } : {}) });
+    return encodeLink({ workspace: { id: ws.id, secret: null, forkedFrom: ws.forkedFrom }, topic, issuer: { key: issuer, name: await this.deviceName() }, through, id, expires, once, signature, hints, ...(granted ? { grant: granted } : {}), ...(tip ? { tip } : {}), ...(linkKeys ? { linkSecret: linkKeys.secretKey.toString('hex') } : {}), ...(secretHash ? { secretHash } : {}) });
   }
 
   /**
@@ -1523,7 +1553,9 @@ export class Identity {
     if (g.genesis !== (await this.pin())) return 'the link is for another history of this workspace';
     // Signed with the link's expiry and maker (0071): a grant from before is not, and could be put in a link that never expires.
     const signed = (m: Buffer) => crypto.verify(m, Buffer.from(g.signature, 'hex'), Buffer.from(g.granter, 'hex'));
-    if (!signed(admittedGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key)) && !signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
+    // A link of its own key (0121): its grant names the key.
+    if (g.linkKey ? !signed(boundGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key, g.linkKey, g.role === 'server' ? 'all' : '')) : !signed(admittedGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key)) && !signed(linkGrantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once, l.expires, l.issuer.key))) {
+      if (g.linkKey) return 'the link is not signed by the person it names';
       return signed(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once)) ? 'the link was made by an older kuraa: ask for a new one' : 'the link is not signed by the person it names';
     }
     // Unlinked in the policy (revoked by an admin, wherever): it lets no one in.
@@ -1545,7 +1577,14 @@ export class Identity {
     const records = await this.records();
     const signer = key.publicKey.toString('hex');
     if (records.some((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.link === l.id && r.signer === signer)) return;
-    await this.makePolicy({ t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key }, key);
+    // A link of its own key (0121): its key's word that this signing key is its holder's.
+    const proof = g.linkKey ? linkProofFor(l, signer) : null;
+    if (g.linkKey && !proof) throw new Error('This invite link is missing its key: ask for a new one');
+    await this.makePolicy({
+      t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key,
+      ...(g.linkKey && proof ? { linkKey: g.linkKey, linkProof: proof } : {}),
+      ...(g.linkKey && g.role === 'server' ? { reads: 'all' as const } : {}),
+    }, key);
   }
 
   /**
@@ -1610,12 +1649,32 @@ export class Identity {
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const used = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject));
     const stale = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name !== 'used' && r.by === self).map((r) => r.subject));
-    for (const l of await this.links()) if (l.expires && l.expires <= now && !used.has(l.id)) stale.add(l.id);
+    // An hour's grace (0121): an expired link unlinked at once could beat the join of someone let in just before it expired.
+    const expired = (at: number | undefined) => !!at && at + GRACE_MS <= now;
+    // Judged by the rules of 0121: a link of no key of its own (from before) lets in whoever has seen it, so it is unlinked
+    // too, while it could still let anyone in.
+    const rules13 = (await this.policy(records)).rulesVersion >= 13;
+    for (const l of await this.links()) if ((expired(l.expires) || (rules13 && l.admitted && !l.bound && !(l.expires && l.expires <= now))) && !used.has(l.id)) stale.add(l.id);
     for (const r of records) {
       const op = r.kind === 'policy' ? r.op : undefined;
-      if (op?.t === 'join' && !op.once && op.role !== 'server' && op.expires && op.expires <= now) stale.add(op.link);
+      if (op?.t === 'join' && !op.once && op.role !== 'server' && (expired(op.expires) || (rules13 && !op.linkKey))) stale.add(op.link);
     }
     for (const id of stale) await this.unlink(id, key);
+  }
+
+  /**
+   * The owner's device says the workspace is judged by the rules this build
+   * knows (0121), where it is not yet: every device that knows them judges its
+   * whole history by them from then on. Whether it said so now.
+   */
+  async adoptRules(key: KeyPair): Promise<boolean> {
+    if (!(await this.workspace()) || !(await this.pin())) return false;
+    const records = await this.records();
+    const policy = await this.policy(records);
+    const me = this.who(records).personOf.get(key.publicKey.toString('hex'))?.key ?? null;
+    if (!policy.founded || !policy.isOwner(me) || policy.rulesVersion >= KNOWN_RULES) return false;
+    await this.makePolicy({ t: 'rules', v: KNOWN_RULES }, key);
+    return true;
   }
 
   /**
@@ -1671,6 +1730,8 @@ export interface IssuedLink {
   /** For a server (0099): unlinked when the owner takes a server out, so none comes back by a link left over. */
   server?: boolean;
   admitted?: boolean;
+  /** Of a key of its own (0121): only its holder joins by it. */
+  bound?: boolean;
 }
 
 /**
@@ -1702,6 +1763,14 @@ export interface InviteLink {
   grant?: LinkGrant;
   /** The commit its maker's branch was at (0099), signed with the rest: what a device let in by a server takes as is. */
   tip?: string;
+  /**
+   * The secret half of the link's own key (0121), hex: whoever holds the link
+   * proves it with it (linkProofFor), never showing it. Not signed (the grant
+   * names the public half); not in a link shown to another device (withoutSecret).
+   */
+  linkSecret?: string;
+  /** The hash of the workspace's secret as its maker had it (0121), signed: a server's word on the secret, checked. */
+  secretHash?: string;
 }
 
 /** What an invite link lets its holder be (0066): signed (grantMessage) by an admin's signing key. */
@@ -1714,15 +1783,44 @@ export interface LinkGrant {
   /** The signing key that signed it. */
   granter: string;
   signature: string;
+  /** The link's own key (0121), its public half, signed in the grant (boundGrantMessage). */
+  linkKey?: string;
 }
 
 function encodeGrant(g: LinkGrant | undefined): string {
-  return g ? `g:${g.group},${g.role},${g.genesis ?? '-'},${g.granter},${g.signature}` : '';
+  return g ? `g:${g.group},${g.role},${g.genesis ?? '-'},${g.granter},${g.signature}${g.linkKey ? `,${g.linkKey}` : ''}` : '';
 }
 
 function decodeGrant(s: string | undefined): LinkGrant | undefined {
-  const m = s ? /^g:([a-z0-9][a-z0-9-]{0,39}),(admin|member|server),([0-9a-f]{64}|-),([0-9a-f]{64}),([0-9a-f]{128})$/.exec(s) : null;
-  return m ? { group: m[1]!, role: m[2] as JoinRole, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]! } : undefined;
+  const m = s ? /^g:([a-z0-9][a-z0-9-]{0,39}),(admin|member|server),([0-9a-f]{64}|-),([0-9a-f]{64}),([0-9a-f]{128})(?:,([0-9a-f]{64}))?$/.exec(s) : null;
+  return m ? { group: m[1]!, role: m[2] as JoinRole, genesis: m[3] === '-' ? null : m[3]!, granter: m[4]!, signature: m[5]!, ...(m[6] ? { linkKey: m[6] } : {}) } : undefined;
+}
+
+/** The hash of a workspace's secret, as a link carries it (0121). */
+export const secretHashOf = (secret: string) => createHash('sha256').update(`kuraa-secret\0${secret}`).digest('hex');
+
+/** A link as shown to another device (0121): without the secret half of its key, which only its holder keeps. */
+export function withoutSecret(code: string): string {
+  const l = decodeLink(code);
+  if (!l.linkSecret) return code;
+  const rest = { ...l };
+  delete rest.linkSecret;
+  return encodeLink(rest);
+}
+
+/** The link's key's word (0121) that a signing key is its holder's; null where the link carries no key of its own. */
+export function linkProofFor(l: InviteLink, signer: string): string | null {
+  if (!l.linkSecret || !l.grant?.linkKey) return null;
+  const secret = Buffer.from(l.linkSecret, 'hex');
+  if (secret.length !== 64 || secret.subarray(32).toString('hex') !== l.grant.linkKey) return null;
+  return crypto.sign(linkProofMessage(l.workspace.id, l.id, signer), secret).toString('hex');
+}
+
+/** Whether a device showing a link holds it (0121): its key signed the device's signing key. Links without a key: yes. */
+export function linkProven(l: InviteLink, signer: unknown, proof: unknown): boolean {
+  if (!l.grant?.linkKey) return true;
+  if (typeof signer !== 'string' || !/^[0-9a-f]{64}$/.test(signer) || typeof proof !== 'string' || !/^[0-9a-f]{128}$/.test(proof)) return false;
+  return crypto.verify(linkProofMessage(l.workspace.id, l.id, signer), Buffer.from(proof, 'hex'), Buffer.from(l.grant.linkKey, 'hex'));
 }
 
 /** Ways into a workspace besides the DHT, as an invite link carries them. */
@@ -1743,17 +1841,18 @@ function decodeHints(s: string | undefined): LinkHints | undefined {
 }
 
 /** What a link's maker signs: all it says but the secret (a link before 0050 has one, and no topic). */
-const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[], topic: string | null, tip?: string) =>
-  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}${topic ? `\0${topic}` : ''}${tip ? `\0tip:${tip}` : ''}`);
+const linkMessage = (workspace: string, id: string, expires: number, once: boolean, issuer: string, through: string[], topic: string | null, tip?: string, linkKey?: string, secretHash?: string) =>
+  Buffer.from(`kuraa-invite\0${workspace}\0${id}\0${expires}\0${once ? 'once' : 'anyone'}\0${issuer}\0${through.join(',')}${topic ? `\0${topic}` : ''}${tip ? `\0tip:${tip}` : ''}${linkKey ? `\0key:${linkKey}` : ''}${secretHash ? `\0secret:${secretHash}` : ''}`);
 
 export function encodeLink(l: InviteLink): string {
   // The second field: the topic, as `t:<topic>`; in a link before 0050, the workspace's secret.
   const where = l.topic ? `t:${l.topic}` : l.workspace.secret ?? '';
   const hints = encodeHints(l.hints);
   const grant = encodeGrant(l.grant);
-  // Hints, then the grant, then the tip (0099), each where there is one (empty fields before one that is).
-  const tip = l.tip ? `p:${l.tip}` : '';
-  const tail = tip ? [hints, grant, tip] : grant ? [hints, grant] : hints ? [hints] : [];
+  // Hints, then the grant, then the tip (0099), the link's key's secret half and the secret's hash (0121), each where
+  // there is one (empty fields before one that is).
+  const tail = [hints, grant, l.tip ? `p:${l.tip}` : '', l.linkSecret ? `k:${l.linkSecret}` : '', l.secretHash ? `h:${l.secretHash}` : ''];
+  while (tail.length && !tail.at(-1)) tail.pop();
   const payload = [l.workspace.id, where, l.workspace.forkedFrom ?? '', l.issuer.key, l.issuer.name, l.id, String(l.expires), l.once ? '1' : '0', l.signature, l.through.join(','), ...tail].join('|');
   return `kuraa-invite:${Buffer.from(payload, 'utf8').toString('base64url')}`;
 }
@@ -1761,7 +1860,7 @@ export function encodeLink(l: InviteLink): string {
 export function decodeLink(code: string): InviteLink {
   const m = /^kuraa-invite:([A-Za-z0-9_-]+)$/.exec(code.trim());
   if (!m) throw new Error('Not an invite link (it starts with kuraa-invite:)');
-  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField, grantField, tipField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
+  const [id, where, forkedFrom, key, name, linkId, expires, once, signature, throughField, hintsField, grantField, tipField, keyField, hashField] = Buffer.from(m[1]!, 'base64url').toString('utf8').split('|');
   const through = throughField ? throughField.split(',') : [];
   const topic = where?.startsWith('t:') ? where.slice(2) : null;
   const secret = topic === null ? where : null;
@@ -1774,7 +1873,14 @@ export function decodeLink(code: string): InviteLink {
   if (grantField && !grant) throw new Error('This invite link is damaged');
   const tip = tipField && /^p:[0-9a-f]{40,64}$/.test(tipField) ? tipField.slice(2) : undefined;
   if (tipField && !tip) throw new Error('This invite link is damaged');
-  return { workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature, ...(hints ? { hints } : {}), ...(grant ? { grant } : {}), ...(tip ? { tip } : {}) };
+  const linkSecret = keyField && /^k:[0-9a-f]{128}$/.test(keyField) ? keyField.slice(2) : undefined;
+  if (keyField && !linkSecret) throw new Error('This invite link is damaged');
+  const secretHash = hashField && /^h:[0-9a-f]{64}$/.test(hashField) ? hashField.slice(2) : undefined;
+  if (hashField && !secretHash) throw new Error('This invite link is damaged');
+  return {
+    workspace: { id, secret: secret ?? null, forkedFrom: forkedFrom || null }, topic, issuer: { key, name }, through, id: linkId, expires: Number(expires), once: once === '1', signature,
+    ...(hints ? { hints } : {}), ...(grant ? { grant } : {}), ...(tip ? { tip } : {}), ...(linkSecret ? { linkSecret } : {}), ...(secretHash ? { secretHash } : {}),
+  };
 }
 
 /**
@@ -1793,7 +1899,7 @@ export function checkLink(l: InviteLink, o: { workspace: string; members: string
 
 /** Whether a link is as the device it names made it: its signature over all it says but the workspace's secret. */
 export function linkSigned(l: InviteLink): boolean {
-  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic, l.tip), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
+  return crypto.verify(linkMessage(l.workspace.id, l.id, l.expires, l.once, l.issuer.key, l.through, l.topic, l.tip, l.grant?.linkKey, l.secretHash), Buffer.from(l.signature, 'hex'), Buffer.from(l.issuer.key, 'hex'));
 }
 
 /**

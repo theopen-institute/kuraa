@@ -3,8 +3,8 @@
 For whoever runs a Kuraa server for a team: what it holds, who can read it, how to look after it, and
 what to do when something goes wrong. How to install one is in the [README](../README.md) (*A server
 in your workspaces*); why it works as it does is in decisions
-[0099](decisions/0099-servers.md), [0110](decisions/0110-the-owner-reads-everything.md) and
-[0112](decisions/0112-server-hardening.md).
+[0099](decisions/0099-servers.md), [0110](decisions/0110-the-owner-reads-everything.md),
+[0112](decisions/0112-server-hardening.md) and [0121](decisions/0121-server-review.md).
 
 ## What it holds, and who can read it
 
@@ -55,23 +55,36 @@ but a copy of the folder elsewhere would not know.
 - **How it stands:** `kuraa-host server status` says the release it runs, since when, how it updates,
   and for each workspace whether it is in, how many members' devices are online, when work last came
   in, and how much room it takes.
+- **Metrics:** `GET /hub/api/server/metrics` on its API, with its access code as a bearer token (in
+  `server.json`), answers the same in Prometheus's text format: when it started, the room left on its
+  disk, and for each workspace, by its ID (never its name), whether it is in, its members' devices
+  online and known, and when work last came in. Its API is on this computer only, so a monitor runs
+  there too, or reaches it through a tunnel.
 - **Updates:** with `--auto-update` (as its service runs it), it looks every six hours and restarts to
   update at night. A release that changes how devices sync is held until a device of its workspaces
-  runs it, as devices still on the old one would no longer sync with it; `--auto-update-all` takes it
-  at once. `kuraa-host update` takes the latest now, for the next start. If a new version fails to
+  runs it (devices of two of its workspaces, where it holds more than one), as devices still on the old
+  one would no longer sync with it; `--auto-update-all` takes it at once. A release held is kept
+  through a restart. `kuraa-host update` takes the latest now, for the next start. If a new version fails to
   start three times, it goes back to the last one that ran well.
 
 Members see whether the server holds their latest work, in its view under **People**. One that has
-not for a while is marked *behind*, and members stop relying on it to pass work on. If that happens,
-see that it runs (`server status`), that it is up to date, and that its disk is not full (it fetches
-nothing with less than 1 GB free).
+not for a while is marked *behind*, and members stop relying on it to pass work on. The same view
+says how the server says it stands: the room left on its disk, and when it last took in work, and
+warns when it has stopped taking work in for want of room. If that happens, see that it runs
+(`server status`), that it is up to date, and that its disk is not full (it fetches nothing with less
+than 1 GB free; with less than 10 GB, one workspace at a time, each no more than the room left).
 
 ## Taken out of a workspace
 
-- **Removed** by the owner (*Remove from workspace…*): it stops syncing there and deletes its copy as
-  soon as it hears. Invited back, it copies the workspace again.
-- **Blocked** by the owner (*Block this server's access…*): the same, and its key can never join that
-  workspace again. Only for a key that may be in someone else's hands.
+- **Removed** by the owner (*Remove from workspace…*): it stops syncing there as soon as it hears,
+  and keeps its copy **a week** (`--keep-removed-days`), in case the removal was a mistake: invited
+  back within it, it takes up where it was. After that, if it is still out, it deletes the copy.
+  `server list` says *removed* meanwhile.
+- **Blocked** by the owner (*Block this server's access…*): its key can never join that workspace
+  again, and it deletes its copy as soon as it hears. Only for a key that may be in someone else's
+  hands. A server removed before can still be blocked, from **People › Removed servers**; no longer
+  connected, it does not hear it, and deletes its copy when the week is out.
+- **Its own key given up** (`server new-key`, below): its copies kept until the second step.
 
 `server remove <id>` lets a workspace go from the server's side: its copy deleted, though the server
 stays in the workspace until its owner removes it.
@@ -80,8 +93,11 @@ stays in the workspace until its owner removes it.
 
 1. While the server runs: `kuraa-host server new-key`. It blocks its own key in every workspace it
    holds, at once, and says which had a member online to hear it.
-2. Stop it (`systemctl --user stop kuraa`), and run `kuraa-host server new-key` again: the old key is
-   put aside in `keys-retired/`, and every workspace's copy deleted.
+2. Stop it (`systemctl --user stop kuraa`), and run `kuraa-host server new-key` again: every
+   workspace's copy is deleted, and then the old key put aside in `keys-retired/`. It refuses where
+   the first step did not block the key in a workspace, or no member was online to hear it there
+   (else no one would know the key is no longer to be trusted): start the server again, wait until a
+   member is, and run the first step again. It runs only in a server's folder.
 3. Start it again: it makes a new key. Ask each workspace's owner for a new link for a server
    (**People › Add a server…**), and `server join` each.
 

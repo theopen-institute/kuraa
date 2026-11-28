@@ -1,5 +1,9 @@
 # 0039 · One online copy, pushed to and fetched from
 
+> Changed by [0115](0115-a-personal-backup.md): the online copy is a **personal backup**, one person's; what
+> comes in from it is judged as work from one of their own devices, and it is no meeting place for
+> other people (servers are).
+
 > Changed by [0059](0059-online-copy-is-a-component.md): the online copy is a component
 > (`@kuraa/sync-git`), set up in **Components…**, not the menu; `backups.ts` is its `online.ts`.
 

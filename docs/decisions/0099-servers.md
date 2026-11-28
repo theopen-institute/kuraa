@@ -92,7 +92,9 @@ nothing, and a server that later gets an identity stops being one.
 
 The rules above are in the host's peer layer (`policy.ts`, `identity.ts`, `node.ts`, `gate.ts`),
 because every device must keep them, server or not: they are the published contract. What a server
-does is in a package of its own, `packages/server`:
+does has its command, its folder and its process in a package of its own, `packages/server`; what it
+does as a host (its few routes, letting a workspace go, merging) is in the host's own code, in the role
+(0121: `Policy.can`):
 
 - **`kuraa-server`** (`pnpm server`) runs a host as a server: everything in a folder of its own
   (`~/.kuraa/server-data`, or `--data`), no identity made or used, no code run, and a server's flags
@@ -308,8 +310,8 @@ Asked three things the audit left open, the owner chose:
   by reading it.
 - **Running code for a device that cannot** (decided before, on hold until servers): to be asked of a
   server.
-- **Many workspaces on one server**: each still keeps its watcher, its topic on the DHT and its
-  timers. A server should wake a workspace when a member connects, and need not announce what its
+- **Many workspaces on one server**: each still keeps its topic on the DHT and its timers (a server
+  watches no folder). A server should wake a workspace when a member connects, and need not announce what its
   members reach by its address.
 - **Signing in from the web**, and the other things a server can do because it is always there.
 - **Signing in**, and with it any page a server serves.

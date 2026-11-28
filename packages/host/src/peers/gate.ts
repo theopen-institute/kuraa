@@ -85,7 +85,7 @@ export interface GateContext {
   cacheKey?: string;
   /**
    * Who the device the commits came from is (0099): a person, or a server's key;
-   * null, no one in the workspace; undefined, from no device (the online copy, a
+   * null, no one in the workspace; undefined, from no device (this one's own, a
    * push). A commit no one known signed (unsigned, or by a key that is no one's
    * here) is that device's: else a server would change anything by not signing.
    */
@@ -97,6 +97,15 @@ export interface GateContext {
   known: Set<string>;
   /** The person (identity ID) a signing key is; null if no one's. */
   personOf(signingKey: string): string | null;
+  /**
+   * Whether to wait for someone whose key signed work but who is not in the
+   * workspace yet (0121: their join may not have come here), rather than refuse
+   * their work for good; asked once for each, it says no once waited on long
+   * enough. None: never waited for.
+   */
+  waitForPerson?(person: string): boolean;
+  /** As membersOnly found it: the person a key is, in the workspace or not (0121). */
+  rawPersonOf?(signingKey: string): string | null;
   /** A person's name, to say whose a refused change is. */
   nameOf(id: string): string | null;
 }
@@ -137,6 +146,7 @@ function membersOnly(ctx: GateContext): GateContext {
       const p = ctx.personOf(k);
       return p && counts(p) ? p : null;
     },
+    rawPersonOf: (k) => ctx.personOf(k),
   };
 }
 
@@ -153,9 +163,12 @@ async function among(git: Git, c: string, heads: string[]): Promise<boolean> {
  * server or no one in the workspace. The same for every commit judged, and for
  * the changes a merge says it kept out (mergeChanges).
  */
-async function attribute(git: Git, c: string, ctx: GateContext): Promise<{ by: string | null; cut: boolean }> {
+async function attribute(git: Git, c: string, ctx: GateContext): Promise<{ by: string | null; cut: boolean; stranger: string | null }> {
   const signer = await commitSigner(git, c);
   let by = signer ? ctx.personOf(signer) : null;
+  // Someone the records say the key is, but not in the workspace, at least not yet (0121).
+  const raw = signer && !by ? ctx.rawPersonOf?.(signer) ?? null : null;
+  const stranger = raw && !ctx.cutKeys?.has(signer!) ? raw : null;
   let cut = false;
   const gone = signer ? ctx.cutKeys?.get(signer) : undefined;
   if (gone) {
@@ -173,7 +186,7 @@ async function attribute(git: Git, c: string, ctx: GateContext): Promise<{ by: s
     if (ctx.from === null || ctx.servers?.has(ctx.from)) cut = true;
     if (ctx.from !== null) by = ctx.from;
   }
-  return { by, cut };
+  return { by, cut, stranger };
 }
 
 /** Judge the commits in `theirs` that `ours` does not hold (null: none, a history arriving for the first time). */
@@ -203,6 +216,8 @@ export async function gate(git: Git, ours: string | null, theirs: string, given:
   type Taint = { commit: string; by: string | null } | null;
   // What each commit says of each file it changes, judged once (0099): a commit never changes, so with the same records,
   // the same space and the same device bringing it, the same; asked again for every merge and both sides of it, else.
+  // People whose keys signed work here but who are not in the workspace yet, waited for (0121).
+  const waitPeople = new Set<string>();
   for (const [c, ...parents] of list as [string, ...string[]][]) {
     const key = ctx.cache && ctx.cacheKey ? `${c}\0${ctx.cacheKey}\0${ctx.space ?? ''}\0${ctx.from === undefined ? '-' : ctx.from ?? 'none'}` : null;
     const known = key ? ctx.cache!.get(key) : undefined;
@@ -211,11 +226,13 @@ export async function gate(git: Git, ours: string | null, theirs: string, given:
       continue;
     }
     const said: [string, Taint][] = [];
+    const strangerBefore = waitPeople.size;
     await judgeOne(c, parents, (path, t) => {
       tainted.set(path, t);
       said.push([path, t]);
     });
-    if (key) {
+    // Not kept where it is waited on (0121): judged again once the person's join has come, or the wait is over.
+    if (key && waitPeople.size === strangerBefore) {
       ctx.cache!.set(key, said);
       // The oldest let go of, past so many.
       if (ctx.cache!.size > GATE_CACHE_MAX) ctx.cache!.delete(ctx.cache!.keys().next().value!);
@@ -237,7 +254,13 @@ export async function gate(git: Git, ours: string | null, theirs: string, given:
       return;
     }
     const message = messages.get(c) ?? await git.out(['show', '-s', '--format=%B', c]);
-    const { by, cut } = await attribute(git, c, ctx);
+    const { by, cut, stranger } = await attribute(git, c, ctx);
+    // Signed by someone not in the workspace, at least not here yet (0121): waited for, not refused for good (merged, a
+    // refusal is in the history for ever), while their join may still come; then judged as any.
+    if (stranger && ctx.waitForPerson?.(stranger)) {
+      waitPeople.add(stranger);
+      return;
+    }
     // A merge a server made (0099) is made again here whatever version of merging it names: else, naming another, it
     // could take one side's version of a file and so undo the other side's change unseen.
     const serverMade = !!by && !!ctx.servers?.has(by);
@@ -255,6 +278,8 @@ export async function gate(git: Git, ours: string | null, theirs: string, given:
       else set(path, { commit: c, by });
     }
   }
+  // Waiting for someone's join (0121): said as waiting, as for policy operations not here yet.
+  if (waitPeople.size) return { ...none, waitFor: [...waitPeople].sort().map((p) => `person:${p}`) };
   const keeps = new Map<string, string | null>();
   const refused: GateResult['refused'] = [];
   for (const [path, t] of [...tainted].sort(([a], [b]) => (a < b ? -1 : 1))) {

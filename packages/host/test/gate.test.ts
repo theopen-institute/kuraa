@@ -78,7 +78,7 @@ describe('the gate, step 4', () => {
     expect((await judged(bo.id)).refused.map((x) => x.path)).toEqual(['notes.md']);
     // From Ada's: as Ada's, both taken.
     expect((await judged(ada.id)).refused).toEqual([]);
-    // From no device (the online copy): as before, no one's (refused only where a rule says).
+    // From no device (this device's own work): as before, no one's (refused only where a rule says).
     expect((await judged(undefined, new Set())).refused.map((x) => x.path)).toEqual(['notes.md']);
     void unsigned;
   });

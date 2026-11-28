@@ -33,7 +33,7 @@ test('the Preview panel renders Markdown with the built-in pandoc, and saves Wor
   await expect(page.getByTestId('status')).toContainText('Connected');
 
   await page.getByTestId('document-menu-button').click();
-  await page.getByTestId('menu-preview').click();
+  await page.getByTestId('menu-export').click();
   const panel = page.getByTestId('preview-panel');
   await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 60_000 });
   const body = page.frameLocator('[data-testid="render-frame"]').locator('body');

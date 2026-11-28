@@ -5,6 +5,8 @@
 // processors count them.
 
 /** Letters or digits, with apostrophes and hyphens inside; or one character of a script written without spaces. */
+import type { Node as PMNode } from 'prosemirror-model';
+
 const WORD = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]|[\p{L}\p{N}\p{M}]+(?:['’‐-][\p{L}\p{N}\p{M}]+)*/gu;
 
 /** The words in plain text. */
@@ -76,4 +78,31 @@ export function wordChange(before: string | null, after: string | null): { net: 
   }
   for (const n of was.values()) net -= n;
   return { net, added };
+}
+
+/**
+ * The words of a document as it is open, counted as a file's are: each
+ * paragraph's text, but code (blocks, inline), the header, maths and other
+ * atoms, which are not prose. (Words' and Composition's: 0094, 0120.)
+ */
+export function liveWords(doc: PMNode): number {
+  let n = 0;
+  doc.descendants((node) => {
+    // Code blocks, the header (its YAML), raw blocks and display maths: not prose.
+    if (node.type.spec.code) return false;
+    if (!node.isTextblock) return true;
+    let text = '';
+    node.forEach((child) => {
+      text += child.isText && !child.marks.some((m) => m.type.spec.code) ? child.text : ' ';
+    });
+    n += countWords(text);
+    return false;
+  });
+  return n;
+}
+
+/** A target as a header or a field has it (`target-words`): a whole number above nought, or null. */
+export function targetOf(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d[\d,_ ]*\s*$/.test(v) ? Number(v.replace(/[,_ ]/g, '')) : NaN;
+  return Number.isFinite(n) && n >= 1 ? Math.round(n) : null;
 }

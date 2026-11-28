@@ -68,7 +68,9 @@ type OpSpec =
   | { t: 'drop-server'; which: number }
   | { t: 'out-server'; which: number }
   | { t: 'grant-server'; which: number; group: number }
-  | { t: 'space-server'; id: number; audience: number[]; which: number };
+  | { t: 'space-server'; id: number; audience: number[]; which: number }
+  // The rules a workspace is judged by (0121): only the owner's counts; the whole history judged again by them.
+  | { t: 'rules' };
 
 const honest = fc.integer({ min: 0, max: HONEST - 1 });
 const anyone = fc.integer({ min: 0, max: people.length - 1 });
@@ -94,6 +96,7 @@ const opSpec: fc.Arbitrary<OpSpec> = fc.oneof(
   { weight: 2, arbitrary: fc.record({ t: fc.constant('out-server' as const), which }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('grant-server' as const), which, group }) },
   { weight: 1, arbitrary: fc.record({ t: fc.constant('space-server' as const), id: fc.integer({ min: 0, max: SPACES.length - 1 }), audience: fc.uniqueArray(honest, { maxLength: 2 }), which }) },
+  { weight: 1, arbitrary: fc.record({ t: fc.constant('rules' as const) }) },
 );
 /** What a server does: its join, by a link for a server (anyone's grant, admitted or not), or anything else, as if it could. */
 const serverSpec: fc.Arbitrary<OpSpec> = fc.oneof(
@@ -166,6 +169,7 @@ function toOp(spec: OpSpec, by: number, ctx: PolicyContext, server?: number): Po
     case 'out-server': return { t: 'revoke', group: WORKSPACE, who: serverIds[spec.which]! };
     case 'grant-server': return { t: 'grant', group: GROUPS[spec.group]!, who: serverIds[spec.which]!, role: 'member' };
     case 'space-server': return { t: 'space', id: SPACES[spec.id]!, audience: [...spec.audience.map((i) => ids[i]!), serverIds[spec.which]!].sort() };
+    case 'rules': return { t: 'rules', v: 13 };
     case 'join': {
       const g = spec.role === 'server' ? WORKSPACE : GROUPS[spec.group]!;
       // A server's link: of its own (shared with admit-server's); a person's join by a link for a server, one of the people's.
@@ -452,7 +456,7 @@ describe('the policy, over histories made at random', () => {
     let serverOut = 0;
     let serverBack = 0;
     const whys = new Set<string>();
-    const samples = fc.sample(fc.array(fc.oneof(honestStep, adversarialStep), { minLength: 10, maxLength: 24 }), { numRuns: 300, seed: 7 });
+    const samples = fc.sample(fc.array(fc.oneof(honestStep, adversarialStep), { minLength: 10, maxLength: 24 }), { numRuns: 500, seed: 7 });
     for (const steps of samples) {
       const { ctx, all } = play(steps);
       const p = evaluate(all, ctx);

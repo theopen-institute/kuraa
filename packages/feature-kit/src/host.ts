@@ -142,6 +142,18 @@ export interface FeatureEvents {
 
 export type FeatureEvent = keyof FeatureEvents;
 
+/** A file converted into Markdown (FeatureContext.convert), or why not. */
+export type ConvertedFile =
+  | { ok: true; markdown: string; media: { name: string; bytes: Uint8Array }[] }
+  | { ok: false; message: string };
+
+/** A new file (FeatureContext.create): a workspace path, and its text or its bytes. */
+export interface NewFile {
+  path: string;
+  text?: string;
+  bytes?: Uint8Array;
+}
+
 /** What the host gives a feature for one workspace. */
 export interface FeatureContext {
   readonly id: string;
@@ -166,6 +178,22 @@ export interface FeatureContext {
   move(from: string, to: string): Promise<void>;
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
+  /**
+   * A file (by its name, for its kind: report.docx) converted into Markdown by
+   * whatever here converts its kind (0116: pandoc for Word, OpenDocument, RTF,
+   * EPUB, HTML), given nothing of the workspace: pandoc's Markdown and the
+   * media it held, by the names the Markdown gives them; or why not.
+   */
+  convert(name: string, bytes: Uint8Array): Promise<ConvertedFile>;
+  /**
+   * New files, all or none, committed together (0116: importing): documents,
+   * folders' orders, images and other files, `text` or `bytes`. Each must be
+   * new (nothing is overwritten) and somewhere this host's person may write;
+   * an image is kept without its details (0108), one whose details could not
+   * be found left out, as `skipped` says. Rejects, in words for people, what
+   * it may not add.
+   */
+  create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
   /** You: this host's person's identity ID; null until there is one (then nothing of yours can be written). */
   me(): string | null;
   /** A person's own file beside a document (by default yours, by this feature's first suffix and its room's extension, or `.json`). */

@@ -1,7 +1,7 @@
-# 0122 · Compile joins its own books
+# 0126 · Compile joins its own books
 
-The fourth step of the review of the core ([0119](0119-what-a-document-is-its-type-says.md) to
-[0121](0121-word-counts-read-the-history-themselves.md)). Compile's panel and settings were a
+The fourth step of the review of the core ([0123](0123-what-a-document-is-its-type-says.md) to
+[0125](0125-word-counts-read-the-history-themselves.md)). Compile's panel and settings were a
 component (`@kuraa/compile`), but a folder's book was put together by the host. That was
 `compile.ts`, `host.compileFolder`, `host.bookContents` and `/api/renders/contents`. The book's
 request (`CompileRequest`) and outline (`BookContent`) were types of the feature contract, and
@@ -40,4 +40,4 @@ a folder".
 - **The top level's default title**, when the panel sends none, is "Book". It was "book" before.
   The panel always sends one.
 
-`FEATURE_API_VERSION` stays 2, the same change on this branch as 0120.
+`FEATURE_API_VERSION` stays 2, the same change on this branch as 0124.

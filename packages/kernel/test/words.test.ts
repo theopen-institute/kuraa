@@ -11,7 +11,7 @@ describe('counting words (0094)', () => {
     expect(countWords('東京へ行く')).toBe(5);
   });
 
-  it('counts a document’s words as its type reads them, and none for a type without prose (0119)', () => {
+  it('counts a document’s words as its type reads them, and none for a type without prose (0123)', () => {
     const shouting = { prose: (text: string) => text.replace(/[A-Z]+/g, ' ') };
     expect(proseWords(shouting, 'one TWO three')).toBe(2);
     expect(proseWords({}, 'one two three')).toBeNull();

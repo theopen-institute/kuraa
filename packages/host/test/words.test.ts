@@ -1,5 +1,5 @@
 // Words written by day and person, from the history (0094; @kuraa/words's host
-// half through the feature contract, 0121): every commit but merges, on its own day, credited in full to everyone credited on it (its
+// half through the feature contract, 0125): every commit but merges, on its own day, credited in full to everyone credited on it (its
 // co-authors, else its author); renames followed; only documents counted; and
 // what is typed here not committed yet, today.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +16,7 @@ import { startHost, type RunningHost } from '../src/index.js';
 
 const FAST = { flushMs: 150, idleCommitMs: 500, maxCommitMs: 5000, dropMs: 400 };
 
-describe('reading git for features’ history (0121)', () => {
+describe('reading git for features’ history (0125)', () => {
   it('reads diff-tree’s batch: each commit’s paths, renames old and new', () => {
     const a = 'a'.repeat(40);
     const b = 'b'.repeat(40);
@@ -105,12 +105,12 @@ describe('words by day on a host', () => {
     // From a day on; counted once (kept), the same again.
     expect(await days('2026-01-12')).toEqual([{ date: '2026-01-12', people: [{ name: 'Ana', email: 'ana@example.org', net: 1, added: 1 }] }]);
     expect((await fetch(`${running.url}/api/features/words/days?since=yesterday`, { headers: { authorization: `Bearer ${running.token}` } })).status).toBe(400);
-    // What it counted is kept on this device, in its store (0121): in .git, never committed.
+    // What it counted is kept on this device, in its store (0125): in .git, never committed.
     expect(existsSync(join(dir, '.git/kuraa/features/words/commits.json'))).toBe(true);
     expect(git({}, 'status', '--porcelain')).toBe('');
   });
 
-  it('counts what is typed in an open document and not committed yet, today, for whoever typed it (0121: edited)', async () => {
+  it('counts what is typed in an open document and not committed yet, today, for whoever typed it (0125: edited)', async () => {
     running = await startHost({ dir, timings: { flushMs: 60_000, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 }, features: [wordsFeature] });
     const auth = { authorization: `Bearer ${running.token}` };
     const { room } = (await (await fetch(`${running.url}/api/rooms?path=notes.md`, { headers: auth })).json()) as { room: string };

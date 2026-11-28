@@ -1,15 +1,26 @@
 // Past versions: labelled by date and people (the commit behind Details),
 // compared with the document now, and restored as an edit that everyone sees
 // and that can be undone.
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type BrowserContext } from '@playwright/test';
 import { E2E, NOTES } from './env.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${E2E.url}${path}`, { ...init, headers: { authorization: `Bearer ${E2E.token}`, 'content-type': 'application/json' } });
 
 async function open(browser: Browser, name: string, path: string): Promise<Page> {
-  const page = await (await browser.newContext()).newPage();
+  const page = await (await ownContext(browser)).newPage();
   await page.goto(`/?token=${E2E.token}&name=${name}&email=${name.toLowerCase()}%40example.org`);
   await page.getByTestId(`file:${path}`).click();
   await expect(page.getByTestId('status')).toContainText('Connected');

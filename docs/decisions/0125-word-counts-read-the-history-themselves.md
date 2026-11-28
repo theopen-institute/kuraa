@@ -1,7 +1,7 @@
-# 0121 · Word counts read the history themselves
+# 0125 · Word counts read the history themselves
 
-The third step of the review of the core ([0119](0119-what-a-document-is-its-type-says.md),
-[0120](0120-search-searches-for-itself.md)). Word counts' client half was a component
+The third step of the review of the core ([0123](0123-what-a-document-is-its-type-says.md),
+[0124](0124-search-searches-for-itself.md)). Word counts' client half was a component
 ([0094](0094-word-counts-and-document-details.md)), but the words written each day were counted by
 the host. That was `wordlog.ts`, behind `host.wordsByDay` and `/api/words`, reached through a
 service of the core's (`CoreHost.history.wordsByDay`) whose `WordsDay` type was part of the
@@ -43,5 +43,5 @@ what):
 - **The count is kept in a new place**, so every commit is counted once again, the first time
   someone opens Word counts after updating. The old `.git/kuraa/words.json` is left where it is,
   unread.
-- **`FEATURE_API_VERSION` stays 2**: this branch already went from 1 to 2 in 0120, and this
+- **`FEATURE_API_VERSION` stays 2**: this branch already went from 1 to 2 in 0124, and this
   removal is part of the same change.

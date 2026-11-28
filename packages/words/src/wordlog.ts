@@ -1,9 +1,9 @@
 // Words written, by day and by person, from the workspace's history (0094),
-// read through the feature contract (0121: FeatureContext.history, edited and
+// read through the feature contract (0125: FeatureContext.history, edited and
 // store).
 //
 // Each commit that is not a merge is counted on its own: for each document it
-// changed (a file whose type has prose, 0119: Markdown, R Markdown; renames
+// changed (a file whose type has prose, 0123: Markdown, R Markdown; renames
 // followed), its words before and after it (kernel's wordChange): net (how
 // many more) and added (words written, so a rewrite counts). Merges are passed
 // over: they bring together work already counted in the commits on each side,
@@ -20,7 +20,7 @@
 import { wordChange } from '@kuraa/kernel';
 import type { CommitPerson, FeatureContext, FileAt, HistoryCommit, Json } from '@kuraa/feature-kit/host';
 
-/** What it keeps its counts under. 3: kept in the feature's store (0121), its documents by their type's prose (0119). */
+/** What it keeps its counts under. 3: kept in the feature's store (0125), its documents by their type's prose (0123). */
 const CACHE = 'commits';
 const CACHE_VERSION = 3;
 
@@ -57,7 +57,7 @@ export class WordLog {
 
   constructor(private readonly ctx: FeatureContext) {}
 
-  /** What a reader reads of a file's text, by its type (0119); null for one that is not a document of prose, or is kept beside one. */
+  /** What a reader reads of a file's text, by its type (0123); null for one that is not a document of prose, or is kept beside one. */
   private proseOf(path: string): ((text: string) => string) | null {
     if (this.ctx.belongsTo(path) !== null) return null;
     const type = this.ctx.typeOf(path);

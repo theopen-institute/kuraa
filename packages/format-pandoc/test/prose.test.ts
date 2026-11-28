@@ -1,4 +1,4 @@
-// What a reader reads of a Markdown document (0094, 0119): the type's prose,
+// What a reader reads of a Markdown document (0094, 0123): the type's prose,
 // whose words the app counts.
 import { describe, expect, it } from 'vitest';
 import { proseWords, wordChange } from '@kuraa/kernel';

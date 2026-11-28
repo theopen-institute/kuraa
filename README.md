@@ -163,7 +163,13 @@ OpenDocument, RTF, EPUB, HTML) or a Scrivener project (2 or 3, its folder or a .
 of documents, converted by the built-in pandoc. A Word document gets a document for each chapter (or
 section); a Scrivener project its binder's folders and documents in order, with each one's synopsis,
 label, status and keywords, what goes in its book and its title, author and target for Compile, its
-research files, and its notes in a Notes folder ([0116](docs/decisions/0116-importing.md)).
+research files, its notes and project notes in a Notes folder, its comments as comments (on the
+words they were on) and its linked footnotes as footnotes ([0116](docs/decisions/0116-importing.md)).
+
+**Composition mode** (⌥⌘P, or the document's ⋯ menu) shows the page alone, full screen, until Escape:
+with typewriter scrolling, the document's words and target at the foot of the page, and the other
+paragraphs faded, as you choose in Settings › Components › Composition mode
+([0120](docs/decisions/0120-composition-mode.md)).
 
 The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as
@@ -347,9 +353,11 @@ Members learn them from it, and invite links made from then on carry them. With
 `--auto-update`, it looks for a newer release every six hours, takes it only if it is signed with
 the release key, puts it beside the one running, and restarts to use it at night (between 3 and 5),
 or at once when a device of a workspace runs a newer kuraa (the two do not sync until then). A
-release that changes how devices sync (its protocol) is held until a device of its workspaces runs
-it, so it does not leave every member behind overnight; `--auto-update-all` takes it at once
-([decision 0112](docs/decisions/0112-server-hardening.md)). `install --service --no-auto-update`
+release that changes how devices sync (its protocol) is held until devices of two of its workspaces
+run it (of its one, if it holds one), so it does not leave every member behind overnight, nor take
+it on one member's word; `--auto-update-all` takes it at once
+([decisions 0112](docs/decisions/0112-server-hardening.md), [0121](docs/decisions/0121-server-review.md)). Removed
+from a workspace by its owner, a server keeps its copy a week (`--keep-removed-days`), then deletes it. `install --service --no-auto-update`
 makes a service that does not update itself: whoever runs it updates it, as below. Its
 service starts it again; the version before is kept. `~/.kuraa/server/kuraa-host update` takes the
 latest by hand, for the next start; `--version` says which runs. Run from the repository (`pnpm
@@ -818,8 +826,15 @@ The app has no icon of its own yet: put `icon.png` (1024×1024) in `apps/desktop
 
 ```sh
 pnpm check       # lint (including the package dependency rules), typecheck, unit and host tests
-pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromium` once first
+pnpm test:e2e    # browser and desktop tests; run `npx playwright install chromium webkit firefox` once first
+pnpm test:e2e --project web       # the browser tests in Chromium only (or --project webkit, --project firefox)
 ```
+
+The browser tests run in Chromium (`web`), WebKit (`webkit`: Safari, and a webview on macOS and
+Linux) and Firefox (`firefox`), the same tests in each ([0122](docs/decisions/0122-every-browser-engine.md)).
+GitHub runs them on every push to main and every pull request (the Browsers workflow, a job for each).
+Beside another checkout's run, give a run its own port, temporary folder and output folder:
+`KURAA_E2E_PORT=4472 TMPDIR=/private/tmp/k2 pnpm test:e2e --output /private/tmp/k2/results`.
 
 The desktop tests run the app with its windows hidden, so they do not take over the screen;
 `KURAA_SHOW_WINDOWS=1 pnpm test:e2e` shows them, to watch.

@@ -5,15 +5,24 @@
 // keywords go in its header (0094); whether it is in the Draft's compile, in
 // Compile's settings, as do the project's title, author and word target
 // (0093, 0106). Research's PDFs and images come as files; notes, into a Notes
-// folder. The Trash, snapshots and comments are left (the words a comment was
-// on are kept), and said so.
+// folder, with the project's notes (Scrivener 2's). Its comments become Kuraa's
+// comments on the words they were on (0082), its linked footnotes footnotes in
+// the text. The Trash and snapshots are left, and said so.
 //
-//   Scrivener 3: <Project>.scrivx, Files/Data/<UUID>/content.rtf, synopsis.txt, notes.rtf, content.<ext>
-//   Scrivener 2: <Project>.scrivx, Files/Docs/<ID>.rtf, <ID>_synopsis.txt, <ID>_notes.rtf, <ID>.<ext>
+//   Scrivener 3: <Project>.scrivx, Files/Data/<UUID>/content.rtf, synopsis.txt, notes.rtf, content.<ext>,
+//                content.comments (comments and linked footnotes)
+//   Scrivener 2: <Project>.scrivx, Files/Docs/<ID>.rtf, <ID>_synopsis.txt, <ID>_notes.rtf, <ID>.<ext>,
+//                <ID>.links (comments and linked footnotes), Files/ProjectNotes/index.xml and <ID>.rtf
+//
+// A comment or linked footnote is anchored in the text by a link to
+// scrivcmt://<its ID> on the words it is about; its own text is RTF, in the
+// comments file: Scrivener 2's <Links><CommentsAndFootnotes><Comment ID
+// IsFootnote><RTF>; Scrivener 3's <Comments><Comment ID Footnote Author Date>
+// with the RTF as its text (read leniently: either name, either place).
 import { DOMParser, type Element } from '@xmldom/xmldom';
 import type { ConvertedFile } from '@kuraa/feature-kit/host';
-import { splitHeader } from './word.js';
-import type { Planned, PlannedDocument, PlannedFolder } from './plan.js';
+import { splitHeader as headerOf } from './word.js';
+import type { ImportedComment, Planned, PlannedDocument, PlannedFolder } from './plan.js';
 
 export interface ScrivenerItem {
   id: string;
@@ -93,8 +102,103 @@ export function readProject(xml: string): ScrivenerProject {
   };
 }
 
-/** Where an item's text, synopsis, notes and media are among the project's files, Scrivener 3's way or 2's. */
-export function itemFiles(id: string, has: (path: string) => boolean, all: string[]): { text: string | null; synopsis: string | null; notes: string | null; media: string | null } {
+/** A comment or linked footnote, as its file keeps it: its text RTF. */
+export interface ScrivenerNote {
+  id: string;
+  footnote: boolean;
+  author: string | null;
+  date: string | null;
+  rtf: string;
+}
+
+/** A document's comments and linked footnotes (Scrivener 2's .links, 3's content.comments). */
+export function readNotes(xml: string): ScrivenerNote[] {
+  const doc = new DOMParser({ onError: () => undefined }).parseFromString(xml, 'text/xml');
+  const out: ScrivenerNote[] = [];
+  for (const c of [...doc.getElementsByTagName('Comment')]) {
+    const id = c.getAttribute('ID') ?? '';
+    if (!id) continue;
+    const flag = (c.getAttribute('IsFootnote') ?? c.getAttribute('Footnote') ?? '').toLowerCase();
+    // Its RTF: in a child of its own (RTF, Notes, Text), or its own text (CDATA).
+    const child = kid(c, 'RTF') ?? kid(c, 'Notes') ?? kid(c, 'Text');
+    let rtf = child?.textContent ?? '';
+    if (!child) for (let n = c.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 || n.nodeType === 4) rtf += n.nodeValue ?? '';
+    out.push({ id, footnote: flag === 'yes' || flag === 'true', author: c.getAttribute('Author') || null, date: c.getAttribute('Date') || null, rtf: rtf.trim() });
+  }
+  return out;
+}
+
+/** Scrivener 2's project notes: their IDs and titles (Files/ProjectNotes/index.xml). */
+export function readProjectNotes(xml: string): { id: string; title: string }[] {
+  const doc = new DOMParser({ onError: () => undefined }).parseFromString(xml, 'text/xml');
+  return [...doc.getElementsByTagName('Note')].map((n) => ({ id: n.getAttribute('ID') ?? '', title: text(kid(n, 'Title')) })).filter((n) => n.id);
+}
+
+/** Markdown as it reads, its spacing kept: notes' marks, links' addresses, emphasis and escapes taken away. */
+const asRead = (md: string) => md
+  .replace(/\[\^[^\]]*\]/g, '')
+  .replace(/!?\[([^\]]*)\]\([^)]*\)(\{[^}]*\})?/g, '$1')
+  .replace(/(\*\*|__|\*|_|~~|`)/g, '')
+  .replace(/\\(.)/g, '$1')
+  .replace(/\n/g, ' ');
+
+/** A converted note's text, for a comment (as it is) or a footnote (its paragraphs after the first indented). */
+const footnoteText = (md: string) => md.split('\n').map((l, i) => (i === 0 || !l ? l : `    ${l}`)).join('\n');
+
+/**
+ * A document's text with its notes' anchors made Kuraa's: a comment's link
+ * gives back its words, and the comment quotes them (with what is around
+ * them); a footnote's, its words and a footnote ([^s1]) defined at the end.
+ * Notes whose anchor is not in the text are comments on the whole document.
+ */
+export function anchorNotes(markdown: string, notes: Map<string, { footnote: boolean; body: string; author: string | null; date: string | null }>): { text: string; comments: ImportedComment[] } {
+  const comments: ImportedComment[] = [];
+  const footnotes: string[] = [];
+  const LINK = /\[((?:[^\]\\]|\\.)*)\]\(scrivcmt:\/\/([^)\s]*)\)(\{[^}]*\})?/g;
+  const idOf = (raw: string) => raw.replace(/\/+$/, '');
+  // A note's anchor may come as several links, where its words change formatting: each note's last, for its footnote's place.
+  const lastOf = new Map<string, number>();
+  for (const m of markdown.matchAll(LINK)) lastOf.set(idOf(m[2]!), m.index!);
+  /** Each comment's anchor, from its first piece to its last, in the text made. */
+  const spans = new Map<string, { from: number; to: number }>();
+  let out = '';
+  let last = 0;
+  for (const m of markdown.matchAll(LINK)) {
+    out += markdown.slice(last, m.index);
+    last = m.index! + m[0].length;
+    const id = idOf(m[2]!);
+    const note = notes.get(id);
+    const from = out.length;
+    out += m[1]!;
+    if (!note) continue;
+    if (note.footnote) {
+      if (lastOf.get(id) === m.index) {
+        footnotes.push(footnoteText(note.body));
+        out += `[^s${footnotes.length}]`;
+      }
+    } else spans.set(id, { from: spans.get(id)?.from ?? from, to: out.length });
+  }
+  out += markdown.slice(last);
+  for (const [id, n] of notes) {
+    const span = spans.get(id);
+    const exact = span ? asRead(out.slice(span.from, span.to)).replace(/\s+/g, ' ').trim() : '';
+    if (!span || !exact) {
+      // Not in the text (or on nothing): a comment on the whole document; a footnote whose anchor was not found, too.
+      if (!span && n.footnote && lastOf.has(id)) continue;
+      comments.push({ body: n.footnote ? `Footnote: ${n.body}` : n.body, author: n.author, date: n.date, quote: null });
+      continue;
+    }
+    // What is around it in its paragraph, as it reads (the quote decides; this says which, where it is there twice).
+    const before = out.slice(0, span.from).split(/\n\s*\n/).pop()!;
+    const after = out.slice(span.to).split(/\n\s*\n/)[0]!;
+    comments.push({ body: n.body, author: n.author, date: n.date, quote: { exact, prefix: asRead(before).slice(-32), suffix: asRead(after).slice(0, 32) } });
+  }
+  const text = footnotes.length ? `${out.replace(/\s+$/, '')}\n\n${footnotes.map((f, i) => `[^s${i + 1}]: ${f}`).join('\n\n')}` : out;
+  return { text, comments };
+}
+
+/** Where an item's text, synopsis, notes, comments and media are among the project's files, Scrivener 3's way or 2's. */
+export function itemFiles(id: string, has: (path: string) => boolean, all: string[]): { text: string | null; synopsis: string | null; notes: string | null; comments: string | null; media: string | null } {
   const first = (...paths: string[]) => paths.find(has) ?? null;
   const v3 = `Files/Data/${id}/`;
   const v2 = `Files/Docs/${id}`;
@@ -105,18 +209,9 @@ export function itemFiles(id: string, has: (path: string) => boolean, all: strin
     text: first(`${v3}content.rtf`, `${v2}.rtf`),
     synopsis: first(`${v3}synopsis.txt`, `${v2}_synopsis.txt`),
     notes: first(`${v3}notes.rtf`, `${v2}_notes.rtf`),
+    comments: first(`${v3}content.comments`, `${v2}.links`),
     media,
   };
-}
-
-/** Scrivener's comments in the text (links to scrivcmt://), their words kept: the text, and how many there were. */
-export function withoutComments(markdown: string): { text: string; comments: number } {
-  let comments = 0;
-  const text = markdown.replace(/\[((?:[^\]\\]|\\.)*)\]\(scrivcmt:\/\/[^)]*\)(\{[^}]*\})?/g, (_m, words: string) => {
-    comments++;
-    return words;
-  });
-  return { text, comments };
 }
 
 const FOLDERS = new Set(['DraftFolder', 'ResearchFolder', 'Folder', 'Root']);
@@ -135,13 +230,16 @@ export async function planScrivener(project: ScrivenerProject, name: string, fil
   const all = [...files.keys()];
   const has = (p: string) => files.has(p);
   const left: string[] = [];
-  let comments = 0;
   let trashed = 0;
   let failed = 0;
   const skippedKinds = new Map<string, number>();
 
-  // Every text to convert, a few at a time.
-  const wanted: { item: ScrivenerItem; what: 'text' | 'notes'; file: string }[] = [];
+  // Every text to convert, a few at a time: documents', notes', comments' and footnotes', the project's notes.
+  const wanted: { key: string; name: string; bytes: Uint8Array }[] = [];
+  const want = (key: string, bytes: Uint8Array | undefined) => {
+    if (bytes) wanted.push({ key, name: `${key.replace(/[^A-Za-z0-9-]+/g, '-')}.rtf`, bytes });
+  };
+  const notesOf = new Map<string, ScrivenerNote[]>();
   const walk = (items: ScrivenerItem[], inTrash: boolean) => {
     for (const it of items) {
       if (it.type === 'TrashFolder') {
@@ -151,48 +249,65 @@ export async function planScrivener(project: ScrivenerProject, name: string, fil
       }
       if (inTrash) continue;
       const f = itemFiles(it.id, has, all);
-      if (f.text) wanted.push({ item: it, what: 'text', file: f.text });
-      if (f.notes) wanted.push({ item: it, what: 'notes', file: f.notes });
+      if (f.text) want(f.text, files.get(f.text));
+      if (f.notes) want(f.notes, files.get(f.notes));
+      if (f.comments) {
+        const list = readNotes(new TextDecoder().decode(files.get(f.comments)));
+        notesOf.set(it.id, list);
+        for (const n of list) if (n.rtf) want(`${f.comments}#${n.id}`, new TextEncoder().encode(n.rtf));
+      }
       walk(it.children, inTrash);
     }
   };
   walk(project.items, false);
+  const projectNotes = files.has('Files/ProjectNotes/index.xml') ? readProjectNotes(new TextDecoder().decode(files.get('Files/ProjectNotes/index.xml'))) : [];
+  for (const p of projectNotes) want(`Files/ProjectNotes/${p.id}.rtf`, files.get(`Files/ProjectNotes/${p.id}.rtf`));
   const converted = new Map<string, { body: string; media: { name: string; bytes: Uint8Array }[] }>();
   let next = 0;
   let done = 0;
   const worker = async () => {
     while (next < wanted.length) {
       const w = wanted[next++]!;
-      const r = await convert(`${w.item.id}.rtf`, files.get(w.file)!);
-      if (r.ok) {
-        const clean = withoutComments(splitHeader(r.markdown).body.trim());
-        comments += clean.comments;
-        converted.set(w.file, { body: clean.text, media: r.media });
-      } else failed++;
+      const r = await convert(w.name, w.bytes);
+      if (r.ok) converted.set(w.key, { body: headerOf(r.markdown).body.trim(), media: r.media });
+      else failed++;
       o.progress?.(++done, wanted.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, wanted.length) }, worker));
 
   const notes: PlannedDocument[] = [];
+  for (const p of projectNotes) {
+    const c = converted.get(`Files/ProjectNotes/${p.id}.rtf`);
+    if (c?.body) notes.push({ kind: 'document', title: p.title || 'Project notes', body: c.body, media: c.media });
+  }
   const decode = (p: string | null) => (p ? new TextDecoder().decode(files.get(p)).trim() : '');
+  /** A document's text, its comments and footnotes made Kuraa's. */
+  const contentOf = (it: ScrivenerItem, f: ReturnType<typeof itemFiles>) => {
+    const c = f.text ? converted.get(f.text) : undefined;
+    const list = notesOf.get(it.id) ?? [];
+    const byId = new Map(list.map((n) => [n.id, { footnote: n.footnote, author: n.author, date: n.date, body: converted.get(`${f.comments}#${n.id}`)?.body ?? '' }]));
+    if (!c && !byId.size) return undefined;
+    const anchored = anchorNotes(c?.body ?? '', byId);
+    return { body: anchored.text, media: c?.media ?? [], comments: anchored.comments };
+  };
   const plan = (it: ScrivenerItem): Planned | null => {
     const f = itemFiles(it.id, has, all);
-    const content = f.text ? converted.get(f.text) : undefined;
+    const content = contentOf(it, f);
     const title = it.title || 'Untitled';
     const details = { synopsis: decode(f.synopsis), label: it.label ?? undefined, status: it.status ?? undefined, keywords: it.keywords };
     if (f.notes && converted.get(f.notes)?.body) notes.push({ kind: 'document', title, body: converted.get(f.notes)!.body, media: converted.get(f.notes)!.media });
     if (FOLDERS.has(it.type) || it.children.length) {
       const folder: PlannedFolder = { kind: 'folder', title, items: [], ...(it.include ? {} : { leftOut: true }) };
       // Its own text first, without a title of its own: the folder's name is its heading.
-      if (content?.body) folder.items.push({ kind: 'document', title: null, name: title, details, body: content.body, media: content.media });
+      if (content?.body || content?.comments.length) folder.items.push({ kind: 'document', title: null, name: title, details, body: content.body, media: content.media, comments: content.comments });
       for (const c of it.children) {
         const p = plan(c);
         if (p) folder.items.push(p);
       }
       return folder;
     }
-    if (it.type === 'Text') return { kind: 'document', title, details, body: content?.body ?? '', media: content?.media ?? [], ...(it.include ? {} : { leftOut: true }) };
+    if (it.type === 'Text') return { kind: 'document', title, details, body: content?.body ?? '', media: content?.media ?? [], comments: content?.comments ?? [], ...(it.include ? {} : { leftOut: true }) };
     // Research: a PDF, an image, a film, as it is.
     if (f.media) {
       const ext = f.media.slice(f.media.lastIndexOf('.')).toLowerCase();
@@ -215,7 +330,6 @@ export async function planScrivener(project: ScrivenerProject, name: string, fil
   }
   if (notes.length) root.items.push({ kind: 'folder', title: 'Notes', items: notes });
   if (trashed) left.push(`${trashed} ${trashed === 1 ? 'item' : 'items'} in Scrivener’s Trash`);
-  if (comments) left.push(comments === 1 ? '1 comment (the words it was on are kept)' : `${comments} comments (the words they were on are kept)`);
   for (const [kind, n] of skippedKinds) left.push(`${n} ${kind === 'WebArchive' ? (n === 1 ? 'web page' : 'web pages') : `${kind} ${n === 1 ? 'item' : 'items'}`} kept in the project in a way that cannot be brought`);
   if (failed) left.push(`${failed} ${failed === 1 ? 'text' : 'texts'} that could not be read`);
   if (o.snapshots) left.push('snapshots (earlier versions Scrivener kept)');

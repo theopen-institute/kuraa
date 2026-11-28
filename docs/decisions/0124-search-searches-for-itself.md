@@ -1,6 +1,6 @@
-# 0120 · Search searches for itself
+# 0124 · Search searches for itself
 
-The second step of the review of the core ([0119](0119-what-a-document-is-its-type-says.md)):
+The second step of the review of the core ([0123](0123-what-a-document-is-its-type-says.md)):
 Search's client half was a component ([0089](0089-preview-search-and-outline-are-components.md)),
 but the searching was the host's ([0042](0042-search.md)). It was reached through a service of the
 core's (`CoreHost.search`), whose result types were part of the feature contract. A component can't
@@ -35,7 +35,7 @@ link, no larger than 2 MB, with no NUL byte (what git's `-I` left out as binary)
 what is kept beside documents and the app's own files in folders (`.kuraa-*`). There are at most
 100 matches a file and 1,000 in all, lines cut to 240 characters around the match, and a 400 for
 an empty phrase, one over 500 characters, or one of more than one line. A file's type and title
-are as its type reads them (0119), a document's title from its text as searched.
+are as its type reads them (0123), a document's title from its text as searched.
 
 ## What changed
 

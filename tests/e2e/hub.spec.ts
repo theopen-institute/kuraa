@@ -1,6 +1,7 @@
 // A hub in the browser: no workspaces at first; one made from the app, another
 // joined from an invite link; switching between them.
 import { expect, test } from '@playwright/test';
+import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,7 +70,7 @@ test('workspaces are added from the app: a new folder, or one joined from a link
     await expect(page.getByTestId('editor')).toContainText('Walk the transect.');
     // It syncs: an edit here reaches Bo's copy.
     await page.getByTestId('editor').getByText('Walk the transect.').click();
-    await page.keyboard.press('End');
+    await page.keyboard.press(KEYS.lineEnd);
     await page.keyboard.type(' Then the dunes.');
     await expect.poll(() => readFileSync(join(theirs, 'plan.md'), 'utf8'), { timeout: 30_000 }).toContain('Then the dunes.');
 

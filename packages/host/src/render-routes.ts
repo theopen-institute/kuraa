@@ -1,5 +1,5 @@
 // The HTTP routes for rendering documents (renders.ts), added to http.ts's
-// table. Searching is @kuraa/search's (0120), on its own routes.
+// table. Searching is @kuraa/search's (0124), on its own routes.
 import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Context, Route } from './http.js';
@@ -20,7 +20,7 @@ const pathOf = (c: Context, v: unknown) => {
   return `${folder}/`;
 };
 
-/** How a folder is compiled, as asked (0093, 0106): the body's `compile`, passed as it is to the feature that compiles folders (0122). */
+/** How a folder is compiled, as asked (0093, 0106): the body's `compile`, passed as it is to the feature that compiles folders (0126). */
 const compileOf = (path: string, body: Record<string, unknown>): Json | undefined => {
   if (!path.endsWith('/')) return undefined;
   const c = body.compile;

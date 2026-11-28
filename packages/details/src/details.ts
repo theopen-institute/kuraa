@@ -10,7 +10,7 @@
 //   keywords: [harbour, night]
 //   ---
 //
-// A document's type reads its header (DocumentType.header, 0119): YAML front
+// A document's type reads its header (DocumentType.header, 0123): YAML front
 // matter, for Pandoc's Markdown and R Markdown.
 import type { DocumentType } from '@kuraa/kernel';
 
@@ -26,7 +26,7 @@ export const DETAIL_KEYS = ['synopsis', 'label', 'status', 'keywords'] as const;
 /** The statuses offered where the workspace names none, as Scrivener's are. */
 export const DEFAULT_STATUSES = ['To do', 'First draft', 'Revised draft', 'Final draft', 'Done'];
 
-/** The documents that have details: those whose type has header fields (0119). */
+/** The documents that have details: those whose type has header fields (0123). */
 export const hasDetails = (type: { header?: unknown } | undefined): boolean => !!type?.header;
 
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null);

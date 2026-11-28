@@ -52,7 +52,7 @@ export interface FeatureHostOptions {
   codeSession?(): CodeSession | null;
   /** A feature's marks on files changed (0093): navigation asks for them again. */
   marksChanged?(): void;
-  /** A workspace file's type, as the client opens it (0119). */
+  /** A workspace file's type, as the client opens it (0123). */
   typeOf(path: string): DocumentType | undefined;
 }
 
@@ -144,6 +144,13 @@ export function useFeatureHost(o: FeatureHostOptions) {
     notify: (text, kind) => o.notify(text, kind),
     ui: o.ui,
     openPanel: (feature, panel) => askPanel(feature, panel),
+    closePanel: (feature, panel) => closePanel(feature, panel),
+    setPageAlone: (on) => setPageAlone(on),
+    pageAlone: () => pageAlone.value,
+    onPageAlone: (fn) => {
+      pageAloneListeners.add(fn);
+      return () => pageAloneListeners.delete(fn);
+    },
     openFile: (p, at) => o.openFile(p, at),
     openMatch: (p, target) => o.openMatch(p, target),
     host: coreHost,
@@ -201,6 +208,22 @@ export function useFeatureHost(o: FeatureHostOptions) {
     activated.clear();
   }
 
+  // The page alone (0120): asked by a component (composition mode); the app hides all else and goes full screen.
+  const pageAlone = ref(false);
+  const pageAloneListeners = new Set<(on: boolean) => void>();
+  function setPageAlone(on: boolean) {
+    if (on && !o.documentShown()) return;
+    if (pageAlone.value === on) return;
+    pageAlone.value = on;
+    for (const fn of [...pageAloneListeners]) {
+      try {
+        fn(on);
+      } catch (e) {
+        console.warn('[kuraa] a component did not take the page alone changing', e);
+      }
+    }
+  }
+
   // Panels (0082, 0089): one beside the document at a time, and any over it (the Outline).
   const side = shallowRef<OpenPanel | null>(null);
   const over = shallowRef<OpenPanel[]>([]);
@@ -213,12 +236,14 @@ export function useFeatureHost(o: FeatureHostOptions) {
     return { active, panel, asks: open.asks };
   }
   const sidePanel = computed(() => shown(side.value));
-  const overPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place !== 'dialog'));
+  const overPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place !== 'dialog' && p.panel.place !== 'foot'));
+  /** At the foot of the page (0120): a count, a status. */
+  const footPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place === 'foot'));
   /** Dialogs (0092): over the whole page, each as it was asked for. */
   const dialogPanels = computed(() => over.value.map(shown).filter((p): p is ShownPanel => !!p && p.panel.place === 'dialog'));
   function panelOpen(feature: string, panel: string): boolean {
     const same = (s: ShownPanel | null) => s?.active.feature.id === feature && s.panel.id === panel;
-    return same(sidePanel.value) || overPanels.value.some(same) || dialogPanels.value.some(same);
+    return same(sidePanel.value) || overPanels.value.some(same) || dialogPanels.value.some(same) || footPanels.value.some(same);
   }
   /** Ask for a panel: open it (beside the document, in place of the one there, or over it), or ask it again if it is open. */
   function askPanel(feature: string, panel: string) {
@@ -226,7 +251,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     const spec = findPanel(feature, panel);
     if (!spec) return;
     const same = (x: OpenPanel | null) => x?.feature === feature && x.panel === panel;
-    if (spec.place === 'over' || spec.place === 'dialog') {
+    if (spec.place === 'over' || spec.place === 'dialog' || spec.place === 'foot') {
       const was = over.value.find(same);
       over.value = was ? over.value.map((x) => (x === was ? { ...x, asks: x.asks + 1 } : x)) : [...over.value, { feature, panel, asks: 1 }];
     } else {
@@ -415,7 +440,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
   return {
     status, known, hidden, setHidden, load, turn, messages, coreHost, toolsChanged, codeChanged,
     features, forSettings, dispose,
-    sidePanel, overPanels, dialogPanels, askPanel, closePanel, panelOpen, panelButtons,
+    sidePanel, overPanels, dialogPanels, footPanels, askPanel, closePanel, panelOpen, panelButtons, pageAlone, setPageAlone,
     commands, editorCommands, commandKey, menuItems, menuLines, runCommand,
     documentMenu, documentFooter, fileMenu, fileMarks, help, pastEditors,
     layout, fallback, views, folderViews,

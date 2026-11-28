@@ -2747,7 +2747,7 @@ export class Host {
    */
   /**
    * Set fields of a document's header (0096: a corkboard's synopsis, an
-   * outline's status), as its type writes them (its `header`, 0119), open or
+   * outline's status), as its type writes them (its `header`, 0123), open or
    * not: written to the file, and where it is open, the room takes it
    * (everyone sees it at once). Not committed here.
    */
@@ -2893,7 +2893,7 @@ export class Host {
 
   /**
    * The documents open in rooms here, on the branch checked out, that people
-   * have changed since their last commit (0121: FeatureContext.edited): as
+   * have changed since their last commit (0125: FeatureContext.edited): as
    * they were at the branch's head and as their rooms have them now, and who
    * changed them.
    */
@@ -2929,7 +2929,7 @@ export class Host {
 
   /**
    * A folder compiled (0093: '' the top level), to render: joined by the
-   * feature on that compiles folders (0122: @kuraa/compile), its folders and
+   * feature on that compiles folders (0126: @kuraa/compile), its folders and
    * files resolved here, inside the workspace and never through a link. A
    * string says why there is nothing.
    */

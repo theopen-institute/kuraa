@@ -1,4 +1,4 @@
-// A folder compiled in Compile's host half (0122), through the feature contract
+// A folder compiled in Compile's host half (0126), through the feature contract
 // alone: here a contract of a few files in memory.
 import { describe, expect, it } from 'vitest';
 import type { FeatureContext } from '@kuraa/feature-kit/host';
@@ -25,7 +25,7 @@ const files = {
   'novel/notes.txt': 'not a document',
 };
 
-describe('a folder compiled through the contract (0122)', () => {
+describe('a folder compiled through the contract (0126)', () => {
   it('joins its documents in the order the tree shows them, as they are now, with the folders they are in', async () => {
     const ctx = fakeContext(files, { 'novel/b.md': '---\ntitle: Boats\n---\n\nThe boats, typed a moment ago.\n' });
     const book = await compileFolder(ctx, 'novel', { title: 'The Coast' }, 'html');

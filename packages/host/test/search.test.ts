@@ -1,4 +1,4 @@
-// Searching the workspace (@kuraa/search's host half, 0120): tracked and
+// Searching the workspace (@kuraa/search's host half, 0124): tracked and
 // untracked text files as .gitignore leaves them, never through links, not
 // binary or large files; open documents as they are being edited.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

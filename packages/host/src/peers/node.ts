@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
-import type { Policy } from './policy.js';
+import type { Capability, Policy } from './policy.js';
 import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
@@ -25,18 +25,18 @@ import { gitEnv, gitPath, spawnGit, type Git } from '../git.js';
 import { GitBridge } from './bridge.js';
 import { useDht } from './dht.js';
 import { isRelayKey, useRelay, type Relay } from './relay.js';
-import { Identity, MAX_PROOF, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, topicsFor, type Member, type WorkspaceIdentity } from './identity.js';
+import { Identity, MAX_PROOF, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, linkProofFor, linkProven, topicsFor, withoutSecret, type Member, type WorkspaceIdentity } from './identity.js';
 import { joinLan } from './lan.js';
 import NoiseSecretStream from '@hyperswarm/secret-stream';
 import type { Socket } from 'node:net';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
-import { dialTcp, listenTcp, parseAddress } from './tcp.js';
+import { addressGroup, dialTcp, listenTcp, parseAddress } from './tcp.js';
 import { recordKey, revokeKeyMessage, shortKey, type MemberRecord } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
 import { compareVersions, isVersion } from '../selfupdate.js';
-import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
+import { MIN_PROTOCOL, PROTOCOL, PeerLink, protocolsMeet, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
 
 export interface NodeOptions {
   /** The repository's working tree. */
@@ -130,13 +130,21 @@ const LET_IN_MS = 10 * 60_000;
 /** How long a device that connected may take to be let in (its hello, an invite link) before its link is closed (0071). */
 const HELLO_MS = 60_000;
 
+/** Where a connection is from, as limits count it (tcp.ts, addressGroup); '' where it cannot be said (0121). */
+function addressOf(conn: unknown): string {
+  const raw = (conn as { rawStream?: { remoteHost?: string; remoteAddress?: string } }).rawStream;
+  const addr = raw?.remoteHost ?? raw?.remoteAddress ?? '';
+  return addr ? addressGroup(addr) : '';
+}
+
 /**
  * What another device said, fit to log or show (0112): a string, no control
  * characters (no new lines, no terminal escapes, so no forged log lines), and
  * not long.
  */
 export function saidByPeer(x: unknown, max = 200): string {
-  const s = String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
+  // And no characters that turn text around (0121: U+202A–202E, U+2066–2069), which can make a log line read otherwise.
+  const s = String(x ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ');
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 /** On a server, whose port anyone reaches (0112): a stranger's time to be let in, and how many may wait at once. */
@@ -144,6 +152,12 @@ const SERVER_HELLO_MS = 15_000;
 const MAX_UNACCEPTED = 64;
 /** Space a fetch leaves on the disk (0112): below it, a device's work is not fetched until there is more. */
 const MIN_FREE_BYTES = 1024 ** 3;
+/** Below this room, fetches go one at a time in the process (0121). */
+const LOW_FREE_BYTES = 10 * 1024 ** 3;
+/** The most one fetch brings, but a server's first copy (2 GiB). */
+const DEFAULT_FETCH_BYTES = 2 * 1024 ** 3;
+/** The fetch whose turn it is, while room is short (0121). */
+let fetchTurn: Promise<void> = Promise.resolve();
 
 /** On the local network, how long the device with the higher key waits for the lower to connect before it does (0071: the lower one's firewall may refuse). */
 const LAN_FALLBACK_MS = 5_000;
@@ -353,9 +367,11 @@ export class PeerNode {
   constructor(private readonly o: NodeOptions, events: NodeEvents = {}) {
     this.events = events;
     this.identity = new Identity(o.git, o.stateDir);
+    this.maxFetchBytes = o.maxFetchBytes ?? DEFAULT_FETCH_BYTES;
     this.bridge = new GitBridge({
       stateDir: o.stateDir,
-      maxBytes: o.maxFetchBytes ?? 2 * 1024 ** 3,
+      // As much as it may, but never past the room on the disk less what is kept free (0121).
+      maxBytes: () => Math.max(0, Math.min(this.maxFetchBytes, this.freeBytes - MIN_FREE_BYTES)),
       log: (m) => this.o.log(m),
       open: (key, service, protocol) => {
         const link = this.links.get(key);
@@ -563,7 +579,7 @@ export class PeerNode {
    * and checked with this device's key, as the DHT's connections are.
    */
   private async startTcp(): Promise<void> {
-    this.tcp = await listenTcp(this.myKey, this.o.peerPort, (sock) => this.tcpAccept(sock), (m) => this.o.log(m));
+    this.tcp = await listenTcp(this.myKey, this.o.peerPort, (sock, settled) => this.tcpAccept(sock, settled), (m) => this.o.log(m));
     if (!this.tcp || this.closing || this.o.lan === false) return;
     const port = this.tcp.port;
     this.lan = await joinLan({
@@ -622,10 +638,17 @@ export class PeerNode {
     for (const m of await this.identity.members()) for (const a of this.hints.tcp[m.key] ?? []) this.dialTcpTo(m.key, a);
   }
 
-  private tcpAccept(sock: Socket): void {
+  private tcpAccept(sock: Socket, settled: () => void): void {
     const kind = LOCAL_ADDRESS.test(sock.remoteAddress ?? '') ? 'lan' : 'tcp';
-    this.ownOpened(new NoiseSecretStream(false, sock, { keyPair: this.key, keepAlive: 5000 }), kind, () => undefined);
+    const stream = new NoiseSecretStream(false, sock, { keyPair: this.key, keepAlive: 5000 });
+    // Counted, by the listener, until it is let in (0121): said so at its hello (hello).
+    this.settles.set(stream, settled);
+    stream.once('close', () => this.settles.delete(stream));
+    this.ownOpened(stream, kind, () => undefined);
   }
+
+  /** TCP connections not let in yet, and how to tell the listener they are (tcp.ts, 0121). */
+  private readonly settles = new WeakMap<object, () => void>();
 
   /**
    * A connection of this layer's own (local network, TCP, a tunnel): once the
@@ -792,6 +815,11 @@ export class PeerNode {
       if (origin) for (const t of topicsFor(origin)) want.set(t.toString('hex'), { server: true, client: true });
       // A server too (0099): it lets people in by their links while every member is away, so it announces them.
       if (!this.o.joining) {
+        // The owner's device: the workspace judged by the rules this build knows (0121), where it is not yet.
+        if (await this.identity.adoptRules(await this.signingKeyNow()).catch(() => false)) {
+          this.o.log('peers: this workspace is judged by the rules of kuraa’s policy 13 from now on (0121)');
+          void this.membersChanged().catch((e: Error) => this.logUnlessClosing(e));
+        }
         // A link from before that has expired since (its grant counts without anyone letting its holder in): unlinked.
         await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
         const links = await this.identity.linkTopics();
@@ -1188,6 +1216,12 @@ export class PeerNode {
     return !!a?.policy.isServer(a.personOf.get(device) ?? null);
   }
 
+  /** What a device does by its kind (0121: Policy.can), as the records said when the members last changed. */
+  can(device: string, cap: Capability): boolean {
+    const a = this.access;
+    return !!a?.policy.can(a.personOf.get(device) ?? null, cap);
+  }
+
   /** Whose a device is (its person's identity ID; a server's key, for a server's: 0099), as the records said when the members last changed; null if no one's known. */
   personOfDevice(device: string): string | null {
     return this.access?.personOf.get(device) ?? null;
@@ -1199,7 +1233,10 @@ export class PeerNode {
       const id = await this.identity.whoIs(d);
       if (id) personOf.set(d, id);
     }
+    const wasExposed = this.can(this.myKey, 'exposed');
     this.access = { policy: await this.identity.policy(), personOf };
+    // Taken in as a server just now (0121): how it stands said to the members connected, and every few minutes after.
+    if (!wasExposed && this.can(this.myKey, 'exposed') && !this.closing) void this.sayHealth().catch(() => undefined);
   }
 
   /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
@@ -1280,7 +1317,7 @@ export class PeerNode {
     const remote = await this.identity.addRemote(key, name);
     if (remote) this.letIn.set(key, { name: remote, until: Date.now() + LET_IN_MS });
     // A server lets go of the remote of one whose join never came (0112), once the time to come is over.
-    if (remote && this.isServerDevice(this.myKey)) {
+    if (remote && this.can(this.myKey, 'exposed')) {
       setTimeout(() => {
         if (this.closing) return;
         const now = Date.now();
@@ -1308,14 +1345,21 @@ export class PeerNode {
     // So many not let in yet at once (0112): past that, the one waiting longest makes way, as a device that is in is let in
     // at its hello, a moment after connecting.
     if (!this.o.joining) {
-      const waiting = [...this.links.values()].filter((l) => !l.accepted && !l.closed);
-      if (waiting.length >= MAX_UNACCEPTED) waiting[0]!.close();
+      // Not one that has said hello (0121): it is being let in (a join through a server takes a moment); of the rest, from
+      // the address that holds the most places, the one waiting longest.
+      const waiting = [...this.links.values()].filter((l) => !l.accepted && !l.closed && !l.hello);
+      if (waiting.length >= MAX_UNACCEPTED) {
+        const counts = new Map<string, number>();
+        for (const l of waiting) counts.set(addressOf(l.conn), (counts.get(addressOf(l.conn)) ?? 0) + 1);
+        const most = [...counts].sort((a, b) => b[1] - a[1])[0]![0];
+        waiting.find((l) => addressOf(l.conn) === most)?.close();
+      }
     }
     // Not let in a while after connecting (no hello, or none that lets it in): closed, not kept up by keepalives for good;
     // on a server, sooner.
     const helloTimer = setTimeout(() => {
       if (!link.accepted && !link.closed && !this.o.joining) link.close();
-    }, this.isServerDevice(this.myKey) ? SERVER_HELLO_MS : HELLO_MS);
+    }, this.can(this.myKey, 'exposed') ? SERVER_HELLO_MS : HELLO_MS);
     helloTimer.unref();
     const link: PeerLink = new PeerLink(conn, () => {
       clearTimeout(helloTimer);
@@ -1355,6 +1399,7 @@ export class PeerNode {
     return {
       type: 'hello',
       protocol: PROTOCOL,
+      minProtocol: MIN_PROTOCOL,
       ...(ownVersion ? { version: ownVersion } : {}),
       workspace: this.ws.id,
       forkedFrom: this.ws.forkedFrom,
@@ -1378,11 +1423,12 @@ export class PeerNode {
       ...(paired && this.dhtAddress ? { dht: this.dhtAddress } : {}),
       // A device joining shows its link to whomever it reaches; one that came in by a link, only to members
       // that may not know it yet (0071): a device not paired must not get a link that may still let people in.
-      ...(shown && (this.o.ticket || paired) ? { link: shown } : {}),
+      // Never with the secret half of its key (0121): only this device, its holder, proves it holds it (linkProof).
+      ...(shown && (this.o.ticket || paired) ? { link: withoutSecret(shown) } : {}),
       // To a device that may not know this one is in (0072): what shows it is.
       ...(!paired && !this.o.joining ? { proof: await this.identity.proof() } : {}),
       // Joining: the key its join will be signed with, for the device letting it in to say so in the policy (admit).
-      ...(this.o.joining && this.o.ticket ? { signer: (await this.signingKeyNow()).publicKey.toString('hex') } : {}),
+      ...(this.o.joining && this.o.ticket ? await this.joiningProof(this.o.ticket) : {}),
     };
   }
 
@@ -1395,6 +1441,13 @@ export class PeerNode {
       heads[ref!.slice('refs/heads/'.length)] = oid!;
     }
     return heads;
+  }
+
+  /** Joining by a link: the signing key its join is signed with, and the link's key's word that it is its holder's (0121). */
+  private async joiningProof(ticket: string): Promise<{ signer: string; linkProof?: string }> {
+    const signer = (await this.signingKeyNow()).publicKey.toString('hex');
+    const proof = linkProofFor(decodeLink(ticket), signer);
+    return { signer, ...(proof ? { linkProof: proof } : {}) };
   }
 
   private async linkToShow(): Promise<string | null> {
@@ -1465,6 +1518,11 @@ export class PeerNode {
     else if (m.type === 'also') {
       if (Array.isArray(m.entries)) this.heardAlso(link, m.entries);
     }
+    else if (m.type === 'health') {
+      // Only a server's word (0121), and only numbers: shown in its view, nothing done by it.
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+      if (this.can(link.key, 'exposed')) link.health = { freeBytes: num(m.freeBytes), lastFetch: num(m.lastFetch), lowOnSpace: m.lowOnSpace === true };
+    }
     else if (m.type === 'present') {
       link.present = new Set((Array.isArray(m.keys) ? m.keys : []).filter((k): k is string => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k)));
       await this.reach();
@@ -1483,7 +1541,10 @@ export class PeerNode {
       versionNews.emit('release', h.version);
     }
     const theirs = typeof h.protocol === 'number' && Number.isInteger(h.protocol) ? h.protocol : 1;
-    if (theirs !== PROTOCOL) {
+    const theirMin = typeof h.minProtocol === 'number' && Number.isInteger(h.minProtocol) && h.minProtocol <= theirs ? h.minProtocol : theirs;
+    // Another protocol, but one both speak, for rules this workspace is judged by (0121): synced, as the older speaks.
+    const rules = this.access?.policy.rulesVersion ?? 12;
+    if (theirs !== PROTOCOL && !protocolsMeet({ protocol: PROTOCOL, min: MIN_PROTOCOL }, { protocol: theirs, min: theirMin }, rules)) {
       const known = this.versions.get(link.key);
       this.versions.delete(link.key);
       this.versions.set(link.key, theirs);
@@ -1492,7 +1553,8 @@ export class PeerNode {
       if (known !== theirs) this.o.log(`peers: ${saidByPeer(h.name)} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
       if (theirs > PROTOCOL && inWorkspace && Date.now() - protocolToldAt > NEWS_MS) {
         protocolToldAt = Date.now();
-        versionNews.emit('newer');
+        // With the protocol it speaks and the workspace it is in (0121: a server switches only where its devices do).
+        versionNews.emit('newer', theirs, this.ws.id);
       }
       link.send({ type: 'bye', reason: theirs > PROTOCOL ? 'this device runs an older kuraa: update it to sync' : 'the other device runs an older kuraa: update that one to sync' });
       setTimeout(() => link.close(), 100);
@@ -1564,7 +1626,11 @@ export class PeerNode {
         const l = decodeLink(code);
         // A server lets people in by a link for one person only (0112): its admit counts for no other (policy.ts), and
         // by a link for anyone, a stranger with fresh keys could be let in, and fetch everything, over and over.
-        if (this.isServerDevice(this.myKey) && !l.once) return { why: 'a server lets people in only by a link for one person' };
+        if (this.can(this.myKey, 'exposed') && !l.once) return { why: 'a server lets people in only by a link for one person' };
+        // Its holder, not a device it was shown to (0121): the link's key signed the device's signing key. A server lets
+        // no one in by a link from before, which has no key: whoever saw one could be let in by it.
+        if (!linkProven(l, h.signer, h.linkProof)) return { why: 'the device did not show it holds the link (it may have been shown it by another)' };
+        if (this.can(this.myKey, 'exposed') && l.grant && !l.grant.linkKey) return { why: 'the link was made by an older kuraa, and a server lets no one in by one: ask for a new link' };
         const name = await this.admit(link.key, h.name);
         if (!name) return { why: 'this device was removed from the workspace' };
         // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
@@ -1586,6 +1652,9 @@ export class PeerNode {
       void this.membersChanged(link).catch((e: Error) => this.logUnlessClosing(e));
     }
     link.accepted = true;
+    // Let in: the listener counts it no longer (0121).
+    this.settles.get(link.conn)?.();
+    this.settles.delete(link.conn);
     link.remote = member.name;
     link.hello = h;
     link.heads = readHeads(h.heads);
@@ -1596,6 +1665,8 @@ export class PeerNode {
     // server's (0099), not from one let in by a link a moment ago.
     if (same && this.hintsFrom(link.key)) this.noteHints(link.key, h);
     this.hints.seen[link.key] = Date.now();
+    // A server says how it stands to each member let in, and every few minutes after (0121).
+    if (this.can(this.myKey, 'exposed')) void this.sayHealth(link).catch(() => undefined);
     this.events.accepted?.(link);
     this.tellPresence();
     this.sayAlso(link);
@@ -1629,7 +1700,7 @@ export class PeerNode {
       people.add(l.issuer.key);
       fromServer = !people.has(link.key);
       if (!known.has(link.key)) {
-        this.o.log(`peers: ${link.hello.name} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
+        this.o.log(`peers: ${saidByPeer(link.hello.name)} (${link.key.slice(0, 8)}…) offered to let this device in, but the records it sent do not show it to be in the workspace; not joining through it`);
         link.close();
         return;
       }
@@ -1644,13 +1715,14 @@ export class PeerNode {
     if (!this.ws.secret) {
       const secret = typeof m.secret === 'string' && /^[0-9a-f]{32,128}$/.test(m.secret) ? m.secret : null;
       // From a server (0099): the secret a person's device last made, as the records it sent say, where they say one.
-      if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret))) {
-        this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
+      const ticket = this.o.ticket ? (() => { try { return decodeLink(this.o.ticket!); } catch { return undefined; } })() : undefined;
+      if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret, ticket))) {
+        this.o.log(`peers: ${saidByPeer(link.hello?.name ?? link.key.slice(0, 8))} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
         link.close();
         return;
       }
       if (!secret) {
-        this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} let this device in without the workspace's secret; not joining through it`);
+        this.o.log(`peers: ${saidByPeer(link.hello?.name ?? link.key.slice(0, 8))} let this device in without the workspace's secret; not joining through it`);
         link.close();
         return;
       }
@@ -1719,9 +1791,21 @@ export class PeerNode {
   private async answerOps(link: PeerLink, ids: unknown[]): Promise<void> {
     const asked = new Set(ids.filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)));
     if (!asked.size) return;
-    const held = (await this.identity.records()).filter((r) => r.kind === 'policy' && asked.has(r.subject));
-    const unheld = [...asked].filter((id) => !held.some((r) => r.subject === id));
-    link.send({ type: 'records', records: held, unheld });
+    const all = (await this.identity.records()).filter((r) => r.kind === 'policy');
+    const byId = new Map(all.map((r) => [r.subject, r]));
+    const held = all.filter((r) => asked.has(r.subject));
+    const unheld = [...asked].filter((id) => !byId.has(id));
+    // With their pasts (0121): the device asking counts an operation as held only with all it descends from.
+    const sent = new Map(held.map((r) => [r.subject, r]));
+    for (let todo = held.flatMap((r) => r.parents ?? []); todo.length && sent.size < 2000;) {
+      const id = todo.pop()!;
+      if (sent.has(id)) continue;
+      const r = byId.get(id);
+      if (!r) continue;
+      sent.set(id, r);
+      todo.push(...(r.parents ?? []));
+    }
+    link.send({ type: 'records', records: [...sent.values()], unheld });
   }
 
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */
@@ -1882,6 +1966,36 @@ export class PeerNode {
   /** The disk was found all but full at the last fetch: said once, until there is room again. */
   private lowOnSpace = false;
 
+  /** When this device last took in work (a fetch that went through, ms since 1970). */
+  private lastFetch: number | null = null;
+
+  private healthTimer: NodeJS.Timeout | undefined;
+
+  /**
+   * How this server stands, said to a member (0121), or to all it is connected
+   * to; and every five minutes after, once begun.
+   */
+  private async sayHealth(to?: PeerLink): Promise<void> {
+    if (!this.healthTimer) {
+      this.healthTimer = setInterval(() => {
+        if (!this.closing && this.can(this.myKey, 'exposed')) void this.sayHealth().catch(() => undefined);
+      }, 5 * 60_000);
+      this.healthTimer.unref();
+    }
+    const free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => null);
+    const m: ControlMessage = { type: 'health', ...(free !== null ? { freeBytes: free } : {}), ...(this.lastFetch ? { lastFetch: this.lastFetch } : {}), lowOnSpace: this.lowOnSpace };
+    for (const l of to ? [to] : this.links.values()) if (l.accepted && !l.closed && this.hintsFrom(l.key)) l.send(m);
+  }
+  /** Room on the disk, as last looked at before a fetch (0121). */
+  private freeBytes = Infinity;
+  /** The most one fetch may bring (a server's first copy of a workspace more; each after, the usual). */
+  private maxFetchBytes = DEFAULT_FETCH_BYTES;
+
+  /** The most one fetch brings from now on (0121: a server's node, its first copy made, back to the usual). */
+  setMaxFetchBytes(bytes: number): void {
+    this.maxFetchBytes = bytes;
+  }
+
   /**
    * Fetch a paired device's branches into `<its remote>/…`, and the spaces it
    * lets this one fetch (0066) into `refs/kuraa/peer-spaces/<its remote>/…`; one
@@ -1921,8 +2035,26 @@ export class PeerNode {
    */
   private async fetchNow(remote: string, refspecs: string[], progress?: (said: string) => void): Promise<boolean> {
     if (this.closing) return false;
-    // Not where the disk is all but full (0112): a device sending more and more would fill it, refused or not.
-    const free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    // Not where the disk is all but full (0112): a device sending more and more would fill it, refused or not. While
+    // room is short, one fetch at a time in this process (0121), each limited to the room left: else several, each seeing
+    // the same room, would fill it between them.
+    let free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    let release: (() => void) | null = null;
+    if (free < LOW_FREE_BYTES) {
+      const before = fetchTurn;
+      fetchTurn = new Promise<void>((r) => (release = r));
+      await before;
+      free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    }
+    try {
+      return await this.fetchWithin(remote, refspecs, free, progress);
+    } finally {
+      (release as (() => void) | null)?.();
+    }
+  }
+
+  private async fetchWithin(remote: string, refspecs: string[], free: number, progress?: (said: string) => void): Promise<boolean> {
+    this.freeBytes = free;
     if (free < MIN_FREE_BYTES) {
       if (!this.lowOnSpace) this.o.log(`peers: not fetching from ${remote}: less than 1 GB is free on this disk`);
       this.lowOnSpace = true;
@@ -1940,6 +2072,7 @@ export class PeerNode {
         : { timeoutMs: 10 * 60_000 }),
     });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
+    if (r.code === 0) this.lastFetch = Date.now();
     return r.code === 0;
   }
 
@@ -1966,6 +2099,7 @@ export class PeerNode {
     clearTimeout(this.lookupTimer);
     clearTimeout(this.presenceTimer);
     clearTimeout(this.topicTimer);
+    clearInterval(this.healthTimer);
     for (const t of this.tunnelTimers.values()) clearTimeout(t);
     for (const t of this.lanLater.values()) clearTimeout(t);
     if (this.key && localNodes(this.computer).get(this.myKey) === this) localNodes(this.computer).delete(this.myKey);

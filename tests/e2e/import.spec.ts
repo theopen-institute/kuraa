@@ -2,7 +2,7 @@
 // Word document chosen and made into a folder of chapters, opened; a Scrivener
 // project's folder chosen and made into a folder as its binder is.
 import { expect, test } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pandocRenderer } from '../../packages/render-pandoc/src/index.js';
@@ -69,7 +69,8 @@ test('a Scrivener project’s folder imported at the top level: its binder as fo
 </Binder>
 <StatusSettings><StatusItems><Status ID="2">First Draft</Status></StatusItems></StatusSettings>
 <ProjectProperties><ProjectTitle>Tides ${id}</ProjectTitle></ProjectProperties></ScrivenerProject>`);
-  put('Files/Data/T1/content.rtf', rtf('The sea came in.'));
+  put('Files/Data/T1/content.rtf', rtf('The sea {\\field{\\*\\fldinst{HYPERLINK "scrivcmt://C1"}}{\\fldrslt came in}} at {\\field{\\*\\fldinst{HYPERLINK "scrivcmt://F1"}}{\\fldrslt dawn}}.'));
+  put('Files/Data/T1/content.comments', `<?xml version="1.0" encoding="UTF-8"?><Comments><Comment ID="C1" Footnote="No"><![CDATA[${rtf('How fast?')}]]></Comment><Comment ID="F1" Footnote="Yes"><![CDATA[${rtf('The log.')}]]></Comment></Comments>`);
   put('Files/Data/T1/synopsis.txt', 'In it comes.');
   put('Files/Data/T2/content.rtf', rtf('The sea went out.'));
   put('Files/search.indexes', 'not sent');
@@ -81,10 +82,14 @@ test('a Scrivener project’s folder imported at the top level: its binder as fo
   await page.getByTestId('context:import').click();
   await expect(page.getByTestId('import-dialog')).toContainText('Import');
   await page.getByTestId('import-folder').setInputFiles(project);
-  await expect(page.getByTestId('import-chosen')).toContainText(`“Tides ${id}”, a Scrivener project (4 files to send)`);
+  await expect(page.getByTestId('import-chosen')).toContainText(`“Tides ${id}”, a Scrivener project (5 files to send)`);
   await page.getByTestId('import-run').click();
-  await expect(page.getByTestId('import-made')).toContainText(`Made “Tides ${id}”: 2 documents, 1 folder in it.`, { timeout: 30_000 });
+  await expect(page.getByTestId('import-made')).toContainText(`Made “Tides ${id}”: 2 documents, 1 folder in it, 1 comment.`, { timeout: 30_000 });
   await expect(page.getByTestId('import-left')).toContainText('snapshots');
-  expect(readIn(`Tides ${id}/Draft/high-water.md`)).toBe('---\ntitle: High water\nsynopsis: In it comes.\nstatus: First Draft\n---\n\nThe sea came in.\n');
+  expect(readIn(`Tides ${id}/Draft/high-water.md`)).toBe('---\ntitle: High water\nsynopsis: In it comes.\nstatus: First Draft\n---\n\nThe sea came in at dawn[^s1].\n\n[^s1]: The log.\n');
+  // Its comment: the importing person's, on the words it was on.
+  const own = readdirSync(join(E2E.dir, `Tides ${id}/Draft/high-water.md.annotations`));
+  expect(own).toHaveLength(1);
+  expect(readIn(`Tides ${id}/Draft/high-water.md.annotations/${own[0]}`)).toMatch(/"exact":"came in"[\s\S]*"value":"How fast\?"|"value":"How fast\?"[\s\S]*"exact":"came in"/);
   expect(readIn(`Tides ${id}/Draft/.kuraa-order`)).toMatch(/\nhigh-water\.md\nlow-water\.md\n$/);
 });

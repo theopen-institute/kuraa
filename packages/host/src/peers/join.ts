@@ -187,6 +187,8 @@ export async function joinWorkspace(o: JoinOptions): Promise<Joined> {
     await node.identity.setJoinedLink(link);
     log(`joined: ${dir} on ${branch}, let in by ${from}`);
     kept = !!o.keep;
+    // Its first copy made: each fetch after, the usual most (0121), not a first copy's (a server's: 64 GiB).
+    if (kept) node.setMaxFetchBytes(2 * 1024 ** 3);
     return { dir, branch, inviter: remote, ...(kept ? { node } : {}) };
   } finally {
     clearInterval(watch);

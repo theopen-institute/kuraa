@@ -1,5 +1,5 @@
 // A Pandoc document's header fields (its YAML front matter), read and set by
-// name (0096, 0119): the type's `header`, for what reads or changes fields of a
+// name (0096, 0123): the type's `header`, for what reads or changes fields of a
 // document that may not be open (a corkboard's synopsis, an outline's status,
 // a document's details and target). Setting fields changes only those named;
 // the rest of the header (comments, order, how each is written) and the

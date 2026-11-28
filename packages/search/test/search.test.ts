@@ -14,7 +14,7 @@ describe('search, as a component (0089)', () => {
   });
 });
 
-describe('matches in a text (0120)', () => {
+describe('matches in a text (0124)', () => {
   it('finds each match on each line, and says where there were more than it lists', () => {
     expect(searchText('a tide\nno\nTide, tide', 'tide', false)).toEqual({
       matches: [

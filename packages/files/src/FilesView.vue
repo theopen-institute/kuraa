@@ -343,8 +343,6 @@ provide(TREE, {
   shownFolder,
   create: (folder) => ctx.newFile(folder),
   newFolder: (inside) => ctx.newFolder(inside ?? ''),
-  rename: (path) => ctx.rename(path),
-  remove: (path) => ctx.remove(path),
   iconFor: (f) => ctx.icon(f),
   folderMarks: computed(() => new Map(folders.value.map((m) => [m.path.replace(/\/$/, ''), m]))),
   contextMenu,
@@ -426,10 +424,7 @@ revealFolderOf(selected.value);
 .tree-mark-dot { width: 7px; height: 7px; border-radius: 50%; margin: 0 2px; }
 .tree-file.muted > .tree-row .tree-name, .tree-dir.muted > .tree-dir-row .tree-name { opacity: 0.5; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .tree [draggable='true'] { cursor: grab; }
-.tree-file:hover > .tree-actions, .tree-dir-row:hover > .tree-actions,
-.tree-file:focus-within > .tree-actions, .tree-dir:focus > .tree-dir-row > .tree-actions, .tree-actions:focus-within { display: flex; }
+/* Only a folder's row has buttons; a file is renamed and deleted from its right-click menu, F2 and Delete (0119). */
+.tree-dir-row:hover > .tree-actions, .tree-dir:focus > .tree-dir-row > .tree-actions, .tree-actions:focus-within { display: flex; }
 .tree-conflict { margin-left: 4px; color: var(--warn); font-size: 11px; cursor: pointer; text-decoration: underline dotted; }
-.tree-readers { flex: none; align-self: center; margin-left: 5px; color: var(--muted); }
-/* The count is what to click on a file with conflicts; Rename and Delete stay in its right-click menu. */
-.tree-file.has-conflicts:hover > .tree-actions { display: none; }
-</style>
+.tree-readers { flex: none; align-self: center; margin-left: 5px; color: var(--muted); }</style>

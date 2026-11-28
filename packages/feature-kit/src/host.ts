@@ -173,7 +173,7 @@ export interface FileAt {
   before?: boolean;
 }
 
-/** The workspace's history, read only (FeatureContext.history, 0121). */
+/** The workspace's history, read only (FeatureContext.history, 0125). */
 export interface FeatureHistory {
   /** The commits on the branch checked out, newest first: from a moment on (ISO 8601), merges left out where `merges` is false. */
   log(o?: { since?: string; merges?: boolean }): Promise<HistoryCommit[]>;
@@ -235,7 +235,7 @@ export interface FeatureContext {
    */
   read(path: string, o?: ReadOptions): Promise<string | null>;
   /**
-   * A document's text as its room here has it now (0120), what was typed a
+   * A document's text as its room here has it now (0124), what was typed a
    * moment ago, before it is written to its file; null where it has no room
    * here (read its file).
    */
@@ -260,7 +260,7 @@ export interface FeatureContext {
   /**
    * The type of a file, as this host opens it (among the formats it has on),
    * or undefined: what it is, asked of its type rather than guessed from its
-   * name (0119): whether it has words (`prose`), header fields (`header`), or
+   * name (0123): whether it has words (`prose`), header fields (`header`), or
    * is Markdown a book is made of (`markdown`).
    */
   typeOf(path: string): DocumentType | undefined;
@@ -281,19 +281,19 @@ export interface FeatureContext {
    */
   create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
   /**
-   * The workspace's history as this device holds it, read only (0121): its
+   * The workspace's history as this device holds it, read only (0125): its
    * commits on the branch checked out, what each changed, and files as they
    * were. The spaces' histories are not in it.
    */
   history: FeatureHistory;
   /**
    * The documents open in rooms here, on the branch checked out, that people
-   * have changed since their last commit (0121): each as it was at that commit
+   * have changed since their last commit (0125): each as it was at that commit
    * (null: not there) and as its room has it now, and who changed it.
    */
   edited(): Promise<EditedDocument[]>;
   /**
-   * What it keeps on this device for this workspace (0121): a cache, say, of
+   * What it keeps on this device for this workspace (0125): a cache, say, of
    * what it worked out from the history. Never synced, never committed; gone
    * when the workspace's folder goes. Its own, apart from every other feature's.
    */
@@ -307,7 +307,7 @@ export interface FeatureContext {
   /** The document a companion file of this feature belongs to, or null. */
   documentOf(path: string): string | null;
   /**
-   * The document any file is kept beside (0120), or null: any feature's
+   * The document any file is kept beside (0124), or null: any feature's
    * companion (0082) or a document's own files (0109). Such files are shown,
    * counted and searched with their document, not on their own.
    */
@@ -345,7 +345,7 @@ export interface FeatureRoute {
 
 /**
  * A folder compiled into one document to render (FeatureSession.compileFolder,
- * 0122): its text, pandoc's Markdown; the workspace's folders where what it
+ * 0126): its text, pandoc's Markdown; the workspace's folders where what it
  * refers to is found (its documents' images, say); and workspace files to put
  * beside it by a name its text gives them (a Word template, a cover: 0106).
  */
@@ -361,7 +361,7 @@ export interface FeatureSession {
   /**
    * A folder ('' the top level) joined into one document, to render it in a
    * format (`html`, `docx`, `pdf`, `epub`), as `request` asks (what that holds
-   * is the feature's to say: 0122). The core renders a folder (a path ending
+   * is the feature's to say: 0126). The core renders a folder (a path ending
    * in `/`) by asking the first feature on that has this, and keeps its
    * outputs as for a document. A string says why there is nothing to render.
    */

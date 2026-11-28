@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DocumentType } from '@kuraa/kernel';
 import { detailsOfText, hasDetails, isEmpty, keywordsOf, labelColour } from '../src/details.js';
 
-/** A type whose header is a line of `key=value` pairs (0119: any type's header will do). */
+/** A type whose header is a line of `key=value` pairs (0123: any type's header will do). */
 const plain = {
   header: {
     read: (text: string) => (text.startsWith('%') ? Object.fromEntries(text.split('\n')[0]!.slice(1).split(';').map((kv) => kv.split('=').map((x) => x.trim()))) : text.startsWith('!') ? null : {}),
@@ -18,7 +18,7 @@ describe('a document’s details (0094)', () => {
     expect(isEmpty(detailsOfText(plain, '! a header that cannot be read\n'))).toBe(true);
   });
 
-  it('are had by documents whose type has header fields (0119), none other', () => {
+  it('are had by documents whose type has header fields (0123), none other', () => {
     expect(hasDetails(plain)).toBe(true);
     expect(hasDetails({} as DocumentType)).toBe(false);
     expect(hasDetails(undefined)).toBe(false);

@@ -12,6 +12,19 @@ export const E2E = {
   dir: join(tmpdir(), 'kuraa-e2e-workspace'),
 };
 
+export const MAC = process.platform === 'darwin';
+
+/**
+ * Keys that move the caret in the text (and in a text box). Home and End do that on Windows and Linux;
+ * on a Mac they scroll, as Safari and Firefox have them (Chromium moves the caret anyway), and ⌘ with an
+ * arrow moves it. Code (CodeMirror) binds Home and End itself, on every platform.
+ */
+export const KEYS = {
+  lineStart: MAC ? 'Meta+ArrowLeft' : 'Home',
+  lineEnd: MAC ? 'Meta+ArrowRight' : 'End',
+  docStart: MAC ? 'Meta+ArrowUp' : 'Control+Home',
+};
+
 export const NOTES = `---
 title: Field notes
 ---

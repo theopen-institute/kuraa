@@ -40,7 +40,7 @@ export type Numbering = (typeof NUMBERINGS)[number];
 export const isTemplate = (path: string): boolean => /\.docx$/i.test(path);
 export const isCoverImage = (path: string): boolean => /\.(png|jpe?g|gif|svg|webp)$/i.test(path);
 
-/** Whether a file is a document a book is made of (as the host's compile has them): its type's text is Markdown (0119). */
+/** Whether a file is a document a book is made of (as the host's compile has them): its type's text is Markdown (0123). */
 export const isBookDocument = (type: { markdown?: boolean } | undefined): boolean => !!type?.markdown;
 
 export interface FolderCompile {

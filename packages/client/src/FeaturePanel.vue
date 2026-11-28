@@ -108,6 +108,7 @@ const mount = computed(() => {
 
 <template>
   <FeatureMount v-if="panel.place === 'over'" :key="`${active.feature.id}:${panel.id}`" class="feature-over" :testid="`feature-over-${active.feature.id}-${panel.id}`" :mount="mount" />
+  <FeatureMount v-else-if="panel.place === 'foot'" :key="`${active.feature.id}:${panel.id}`" class="feature-foot" :testid="`feature-foot-${active.feature.id}-${panel.id}`" :mount="mount" />
   <div v-else-if="panel.place === 'dialog'" class="modal-backdrop" @mousedown.self="tryClose">
     <div ref="dialog" class="modal feature-dialog" role="dialog" aria-modal="true" :aria-label="panel.label" :data-testid="`feature-dialog-${active.feature.id}-${panel.id}`">
       <FeatureMount :key="`${active.feature.id}:${panel.id}`" class="feature-dialog-body" :mount="mount" />

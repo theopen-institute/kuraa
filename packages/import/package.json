@@ -8,6 +8,7 @@
     "./client": "./src/client.ts"
   },
   "dependencies": {
+    "@kuraa/annotations": "workspace:*",
     "@kuraa/compile": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",
     "@kuraa/kernel": "workspace:*",

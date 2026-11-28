@@ -152,7 +152,7 @@ describe('Compile', () => {
 
   it('gives what a folder’s book could have: its folders and documents, nothing left out, each at its depth', async () => {
     await post('include', { path: 'novel/notes.md', include: false });
-    // Compile's own route (0122).
+    // Compile's own route (0126).
     const contents = async (folder: string) => api(`/api/features/compile/contents?folder=${encodeURIComponent(folder)}`);
     const r = await contents('novel');
     expect(r.status).toBe(200);

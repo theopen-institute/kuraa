@@ -1,6 +1,6 @@
 // Small Vue helpers for the client's components.
 import { onBeforeUnmount, onMounted, shallowRef, triggerRef, watch, type Directive, type Ref, type ShallowRef } from 'vue';
-import { trapFocus } from './focus.js';
+import { focusBack, focusPlace, trapFocus } from './focus.js';
 
 /**
  * An object that changes outside Vue and says so through subscribe (the chunk
@@ -31,8 +31,8 @@ export const vFocus: Directive<HTMLElement, boolean | undefined> = {
  */
 export function useDialog(root: Readonly<Ref<HTMLElement | null>>, onEscape?: () => void): void {
   let release: (() => void) | null = null;
-  // Where focus was before the dialog's fields (v-focus) took it.
-  const previous = document.activeElement as HTMLElement | null;
+  // Where focus was before the dialog's fields (v-focus) took it, and the caret.
+  const previous = focusPlace();
   onMounted(() => {
     if (root.value) release = trapFocus(root.value, { onEscape, previous });
   });
@@ -47,8 +47,8 @@ export function useDialog(root: Readonly<Ref<HTMLElement | null>>, onEscape?: ()
  * closes with focus inside it, focus goes back where it was before it opened.
  */
 export function useReturnFocus(root: Readonly<Ref<HTMLElement | null>>): void {
-  const previous = document.activeElement as HTMLElement | null;
+  const previous = focusPlace();
   onBeforeUnmount(() => {
-    if (root.value?.contains(document.activeElement) && previous?.isConnected) previous.focus();
+    if (root.value?.contains(document.activeElement) && previous.el?.isConnected) focusBack(previous);
   });
 }

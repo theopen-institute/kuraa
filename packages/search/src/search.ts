@@ -1,4 +1,4 @@
-// Searching the workspace's text files for a phrase (0042, 0120), through the
+// Searching the workspace's text files for a phrase (0042, 0124), through the
 // feature contract alone: the files this device holds (as .gitignore leaves
 // them, and the spaces it holds), read as text (UTF-8, never through a link,
 // large files left out); documents someone has open as their rooms have them

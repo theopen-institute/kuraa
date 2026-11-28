@@ -1,4 +1,4 @@
-# 0119 · What a document is, its type says
+# 0123 · What a document is, its type says
 
 The owner asked for a review of the core, to "suggest if anything there should be moved to a
 contract-based component", and then: "Yes, begin working through this." This is the first step.

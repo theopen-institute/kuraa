@@ -1,5 +1,5 @@
 // Search (docs/decisions/0089-preview-search-and-outline-are-components.md,
-// 0120): every text file of the workspace, and open documents as they are being
+// 0124): every text file of the workspace, and open documents as they are being
 // typed. Its host half searches (./search.ts), through the feature contract
 // alone: the workspace's files, read as text, and open documents as their rooms
 // have them now.

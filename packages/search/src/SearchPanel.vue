@@ -2,7 +2,7 @@
 // Search across the workspace (⇧⌘F): every text file, and open documents as
 // they are being edited. Results are grouped by file, documents by their title;
 // choosing one opens the file at the match (the core's openMatch). Asked for
-// again while open, the field takes focus (0089). Its host half searches (0120).
+// again while open, the field takes focus (0089). Its host half searches (0124).
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { FeaturePanelContext } from '@kuraa/feature-kit/client';
 import type { SearchMatch, SearchResult } from './search.js';

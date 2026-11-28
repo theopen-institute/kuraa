@@ -434,6 +434,24 @@ importers:
         specifier: workspace:*
         version: link:../format-pandoc
 
+  packages/composition:
+    dependencies:
+      '@kuraa/feature-kit':
+        specifier: workspace:*
+        version: link:../feature-kit
+      '@kuraa/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      prosemirror-model:
+        specifier: ^1.25.13
+        version: 1.25.13
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.9
+        version: 1.42.9
+
   packages/corkboard:
     dependencies:
       '@kuraa/details':
@@ -550,6 +568,9 @@ importers:
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile
+      '@kuraa/composition':
+        specifier: workspace:*
+        version: link:../composition
       '@kuraa/corkboard':
         specifier: workspace:*
         version: link:../corkboard
@@ -832,6 +853,9 @@ importers:
 
   packages/import:
     dependencies:
+      '@kuraa/annotations':
+        specifier: workspace:*
+        version: link:../annotations
       '@kuraa/compile':
         specifier: workspace:*
         version: link:../compile

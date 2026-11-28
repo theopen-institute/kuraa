@@ -83,7 +83,8 @@ test('an R script is highlighted, edits keep indentation and CRLF, and paste spl
   await page.evaluate(() => {
     const data = new DataTransfer();
     data.setData('text/plain', '\ny <- 2\nz <- 3');
-    document.querySelector('[data-testid=editor]')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    // The data set on the event, not given to it: Firefox empties what a page gives a ClipboardEvent it makes.
+    document.querySelector('[data-testid=editor]')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { bubbles: true, cancelable: true }), 'clipboardData', { value: data }));
   });
   await expect(editor.locator('.line').nth(3)).toHaveText('y <- 2');
   await expect(editor.locator('.line').nth(4)).toHaveText('z <- 3');

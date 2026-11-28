@@ -85,6 +85,13 @@ export function serverHolds(ds: Device[], now = Date.now()): { state: 'holds' } 
   return now - since < SAY_BEHIND_MS ? { state: 'holds' } : { state: 'behind', since, long: now - since >= LONG_BEHIND_MS };
 }
 
+/** How a server says it stands (0121), from its devices connected here: the latest said; null where none said. */
+export function serverHealth(ds: Device[]): NonNullable<Device['health']> | null {
+  const said = ds.filter((d) => d.online && d.health).map((d) => d.health!);
+  if (!said.length) return null;
+  return said.reduce((a, b) => ((b.lastFetch ?? 0) > (a.lastFetch ?? 0) ? b : a));
+}
+
 /** Whether you may invite here: an admin, or anyone where there is no policy yet. */
 export const isAdmin = (i: Info) => i.people?.admin ?? true;
 /** Whether you may change this person's role, or take them out: admins are the owner's to make and unmake (0070); the owner is no one's. */

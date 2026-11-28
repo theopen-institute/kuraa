@@ -1,4 +1,4 @@
-// What a reader reads of a Markdown document (0094, 0119): the type's `prose`,
+// What a reader reads of a Markdown document (0094, 0123): the type's `prose`,
 // whose words the app counts everywhere (the kernel's countWords and
 // wordChange), however a document is reached (open, on the host, in a book).
 import { countWords } from '@kuraa/kernel';

@@ -45,13 +45,13 @@ export interface FeaturePort {
   list(): Promise<string[]>;
   /** A file's type, as this host opens it. */
   typeFor(path: string): DocumentType | undefined;
-  /** A document's text as its open room has it now (on the branch checked out), if it has one here (0120). */
+  /** A document's text as its open room has it now (on the branch checked out), if it has one here (0124). */
   liveText(path: string): Promise<string | undefined>;
-  /** The workspace's history, read only (0121). */
+  /** The workspace's history, read only (0125). */
   history: FeatureHistory;
-  /** Documents changed in their rooms here since their last commit, and by whom (0121). */
+  /** Documents changed in their rooms here since their last commit, and by whom (0125). */
   edited(): Promise<EditedDocument[]>;
-  /** The repository's own folder (.git), where what features keep on this device is kept (0121). */
+  /** The repository's own folder (.git), where what features keep on this device is kept (0125). */
   gitDir(): Promise<string>;
   /** Tell the clients of rooms: those of `path`, or every one. */
   tell(feature: string, message: Json, path: string | null): void;
@@ -140,7 +140,7 @@ async function readPlain(abs: string, maxBytes = Infinity): Promise<string | nul
   }
 }
 
-/** What a feature keeps on this device (0121): JSON files in .git/kuraa/features/<id>/, never synced or committed. */
+/** What a feature keeps on this device (0125): JSON files in .git/kuraa/features/<id>/, never synced or committed. */
 export function featureStore(id: string, gitDir: () => Promise<string>): FeatureStore {
   const fileOf = async (name: string) => {
     if (!STORE_NAME.test(name)) throw new Error(`${name} is not a name to keep something under (${STORE_NAME})`);
@@ -202,7 +202,7 @@ export class HostFeatures {
 
   /** On for the workspace, here: the host has it on, and the workspace too. */
   /**
-   * A folder joined into one document to render (0122), by the first feature
+   * A folder joined into one document to render (0126), by the first feature
    * on that compiles folders; a string says why not.
    */
   async compileFolder(folder: string, request: Json, format: string): Promise<CompiledFolder | string> {

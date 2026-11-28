@@ -1,8 +1,8 @@
-// A folder compiled (0093, 0106), in Compile's host half (0122): what a folder's
+// A folder compiled (0093, 0106), in Compile's host half (0126): what a folder's
 // book could have, for the panel's outline, and the folder's documents joined
 // into one, for the core to render. Through the feature contract alone: the
 // files this device holds, their types (which are documents a book is made of,
-// their titles, their words: 0119), the folders' orders, and each document as
+// their titles, their words: 0123), the folders' orders, and each document as
 // it is now (its open room's text, else its file).
 import { orderedFolder, parseOrder, type CompiledFolder, type FeatureContext, type Json } from '@kuraa/feature-kit/host';
 import { proseWords } from '@kuraa/kernel';

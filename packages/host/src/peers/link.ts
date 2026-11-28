@@ -41,9 +41,29 @@ const CONTROL = 'kuraa/control/1';
  * may change the document: an older device would judge them by their folder);
  * 12: 0110 (the owner and servers read every space, and only a space's maker or
  * the owner changes its readers: an older device would count an admin's change,
- * and send it the space).
+ * and send it the space); 13: 0121 (links of their own key, joins proving it;
+ * spaces made with a nonce; the owner's `rules`, by which a workspace's history
+ * is judged: an older device reads none of them).
  */
-export const PROTOCOL = 12;
+export const PROTOCOL = 13;
+/**
+ * The oldest protocol this kuraa still syncs in (0121): from now on, a release
+ * that changes the protocol keeps syncing with devices on the one before where
+ * it can (it reads what they say, and says nothing they would misread), and a
+ * workspace moves to later rules only when its owner says (`rules`); two devices
+ * sync where each speaks the older one's protocol, and the workspace's rules are
+ * no later than it. 13: nothing older.
+ */
+export const MIN_PROTOCOL = 13;
+
+/**
+ * Whether two devices sync (0121): each speaks the protocol of the older (its
+ * oldest at most that), and the workspace is judged by rules no later than it.
+ */
+export function protocolsMeet(mine: { protocol: number; min: number }, theirs: { protocol: number; min: number }, rules: number): boolean {
+  const older = Math.min(mine.protocol, theirs.protocol);
+  return older >= mine.min && older >= theirs.min && rules <= older;
+}
 const GIT = 'kuraa/git/1';
 /**
  * Another device's encrypted connection, carried on this one (node.ts, tunnels):
@@ -100,6 +120,13 @@ const roomFrame: Encoding<RoomFrame> = {
 
 export type RoomMessage = Extract<ControlMessage, { type: 'room' }>;
 
+/** How a server stands, as it says (0121): bytes free on its disk, when it last took in work (ms since 1970), whether it stopped fetching for want of room. */
+export interface ServerHealth {
+  freeBytes: number | null;
+  lastFetch: number | null;
+  lowOnSpace: boolean;
+}
+
 /** Messages on the control channel. */
 export type ControlMessage =
   | {
@@ -110,6 +137,8 @@ export type ControlMessage =
       name: string;
       /** The version of what it says (PROTOCOL); none: 1. */
       protocol?: number;
+      /** The oldest protocol it still syncs in (0121): none, its own alone. */
+      minProtocol?: number;
       /** The version of kuraa it runs, as released (`0.10.0`); none from a build that is not one (pnpm dev). */
       version?: string;
       /** An invite link, from a device that joined (or is joining) by one. */
@@ -148,6 +177,12 @@ export type ControlMessage =
       proof?: unknown[];
       /** A device joining by a link: the signing key its join will be signed with (the device letting it in says so: policy.ts, admit). */
       signer?: string;
+      /**
+       * And (0121) the link's own key's word that this signing key is its holder's
+       * (identity.ts, linkProofFor): the link shown lacks the key's secret half, so
+       * a device it is shown to cannot join by it with a key of its own.
+       */
+      linkProof?: string;
     }
   /** The answer to a joining device: what it needs to set itself up, and the records (the joining device checks who welcomed it by them). */
   | { type: 'welcome'; name: string; members: { key: string; name: string }[]; branch: string; records: unknown[]; /** The workspace's secret: the link does not carry it (0050). */ secret?: string }
@@ -166,6 +201,8 @@ export type ControlMessage =
   | { type: 'also'; entries: { t: string; k: string }[] }
   /** The devices of the workspace this one is connected to now: sent whenever that changes (node.ts, reach). */
   | { type: 'present'; keys: string[] }
+  /** How a server stands (0121), to the members it is connected to, now and then: the room left on its disk, when it last took in work. */
+  | { type: 'health'; freeBytes?: number; lastFetch?: number; lowOnSpace?: boolean }
   | { type: 'bye'; reason: string }
   /** Rooms: what this device has open, and changes to them (see rooms.ts). */
   | { type: 'room'; [k: string]: unknown }
@@ -227,6 +264,8 @@ export class PeerLink {
   spaces: Record<string, string> | null = null;
   /** The run outputs it has, as it last said (device key → commit); null: not said. */
   outputs: Record<string, string> | null = null;
+  /** How it stands, a server, as it last said (0121); null: not said. */
+  health: ServerHealth | null = null;
   /** When the link was made: one never let in is closed after a while (node.ts). */
   readonly opened = Date.now();
   /** Streams the other end has open on this link now (git, tunnels): at most MAX_STREAMS. */

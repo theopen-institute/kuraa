@@ -2,7 +2,7 @@
 // the open document's words, live, along its foot, against its target (in its
 // header, `target-words`); the words written today, against a target of your
 // own (in this browser). Its host half counts the words written each day from
-// the workspace's history (./wordlog.ts, 0121), keeping what it counted on this
+// the workspace's history (./wordlog.ts, 0125), keeping what it counted on this
 // device; a folder's book's words are the core's, as Compile shows them.
 //
 //   its routes   GET days?since=YYYY-MM-DD

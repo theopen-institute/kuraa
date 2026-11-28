@@ -110,7 +110,7 @@ export class Renders {
     flush(path: string): Promise<void>;
     /** What code rendering a document reads now: the commits, and the files that differ from them (0081). */
     madeFrom(path: string): Promise<MadeFrom>;
-    /** A folder's documents joined, to compile it (0093: '' the top level) to a format, as `request` asks (0122: the feature's to read); a string says why not. */
+    /** A folder's documents joined, to compile it (0093: '' the top level) to a format, as `request` asks (0126: the feature's to read); a string says why not. */
     compile(folder: string, request: Json, format: RenderFormat): Promise<CompiledBook | string>;
     /**
      * A workspace file a renderer with no environment reads for a document

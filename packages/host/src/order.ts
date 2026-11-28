@@ -12,7 +12,7 @@ import { dirname } from 'node:path';
 import { ORDER_FILE, orderedFolder, orderFileOf, parseOrder } from '@kuraa/feature-kit';
 import { NotAllowed } from './errors.js';
 
-// The file's name and how it is read are the contract's (0122), for components to read it as the core does.
+// The file's name and how it is read are the contract's (0126), for components to read it as the core does.
 export { ORDER_FILE, orderedFolder, orderFileOf, parseOrder };
 
 const HEADER = '# The order of this folder in Kuraa: one file or folder name per line; others follow, by name.\n';

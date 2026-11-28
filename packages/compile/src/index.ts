@@ -3,7 +3,7 @@
 // the host's render; any document or folder left out. Its host half keeps what
 // Compile knows of each folder (a `.kuraa-compile.yml` in it: the book's title,
 // format and settings, and what in it is left out), and follows renames and
-// deletions. It joins a folder's documents into one (./compiling.ts, 0122),
+// deletions. It joins a folder's documents into one (./compiling.ts, 0126),
 // which the core renders as it renders a document (a folder's path ending in
 // `/`: renders.ts), keeping its outputs; the panel that asks for it is the
 // client half's.
@@ -226,7 +226,7 @@ export const compileFeature = defineFeature({
     ];
     return {
       routes,
-      // A folder's documents joined, for the core to render (0122).
+      // A folder's documents joined, for the core to render (0126).
       compileFolder: (folder: string, request: Json, format: string) => compileFolderBook(ctx, folder, request, format),
       close: () => stops.forEach((s) => s()),
     };

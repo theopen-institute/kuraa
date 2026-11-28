@@ -21,7 +21,7 @@ describe('header fields set in a document’s text', () => {
     expect(() => withHeaderFields('---\ntitle: [unclosed\n---\nText\n', { status: 'x' })).toThrow(/not valid YAML/);
   });
 
-  it('reads the fields by name: none where there is no header, null where it cannot be read as fields (0119)', () => {
+  it('reads the fields by name: none where there is no header, null where it cannot be read as fields (0123)', () => {
     expect(pandocHeader.read('---\ntitle: The harbour\ntarget-words: 1200\nkeywords: [a, b]\n---\n\nText.\n')).toEqual({ title: 'The harbour', 'target-words': 1200, keywords: ['a', 'b'] });
     expect(pandocHeader.read('No header.\n')).toEqual({});
     expect(pandocHeader.read('---\n---\nText\n')).toEqual({});

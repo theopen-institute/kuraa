@@ -99,7 +99,7 @@ export interface FeatureStatus {
  * The order of a folder's files and folders, as people arrange them (0093): a
  * plain file in the folder, one name per line, read by anyone and by any tool.
  * What it does not name comes after what it does; a name of nothing there is
- * passed over. The core writes it; components read it (0122).
+ * passed over. The core writes it; components read it (0126).
  */
 export const ORDER_FILE = '.kuraa-order';
 

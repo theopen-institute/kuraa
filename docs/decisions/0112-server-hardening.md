@@ -4,7 +4,8 @@
 spaces and a server's own key, the network's limits, how servers update themselves, what a server
 keeps when it is taken out, and what owners and operators can see. Adds to
 [0099](0099-servers.md), [0110](0110-the-owner-reads-everything.md) and
-[0111](0111-people-first.md); rides on `PROTOCOL` 12 (0110), still unreleased.
+[0111](0111-people-first.md); rode on `PROTOCOL` 12 (0110), released in 0.12.0. Reviewed again in
+[0121](0121-server-review.md).
 
 The owner asked, once 0110 and 0111 were merged: *"do another comprehensive review of server security
 and design. Make any recommendations for improvements"*, then, of the recommendations: *"Yes, fix

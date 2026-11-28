@@ -17,7 +17,7 @@ export interface CompileEntry {
   title?: string | null;
   /**
    * A document a book is made of: its type's text is pandoc's Markdown
-   * (DocumentType.markdown, 0119), as Pandoc markdown's and R Markdown's are
+   * (DocumentType.markdown, 0123), as Pandoc markdown's and R Markdown's are
    * (R Markdown's chunks are not run when compiled, and show as code).
    */
   book?: boolean;

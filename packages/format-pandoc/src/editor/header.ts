@@ -247,7 +247,8 @@ const titleKey = new PluginKey('doc-title');
 
 /**
  * The title for a document with no header yet (an empty heading to type it in),
- * and ↑ at the start of the text going up into the title.
+ * ↑ at the start of the text going up into the title, and ⌘↑ (Ctrl+Home) going
+ * to the start of the text, not into the title.
  */
 function titlePlugin(type: NodeType): Plugin {
   return new Plugin({
@@ -259,9 +260,20 @@ function titlePlugin(type: NodeType): Plugin {
         return DecorationSet.create(state.doc, [widget]);
       },
       handleKeyDown(view, e) {
-        if (e.key !== 'ArrowUp' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;
         const { selection, doc } = view.state;
         const start = Selection.findFrom(doc.resolve(headerEnd(doc, type)), 1);
+        // ⌘↑ (Ctrl+Home off the Mac), with or without Shift: to the start of the text. Left to the browser,
+        // Firefox puts the caret in the title above, where ProseMirror does not follow it, so what is
+        // typed next goes partly into the title.
+        const toStart = !e.altKey && ((e.key === 'ArrowUp' && e.metaKey && !e.ctrlKey) || (e.key === 'Home' && e.ctrlKey && !e.metaKey));
+        if (toStart) {
+          if (!start) return false;
+          e.preventDefault();
+          const to = e.shiftKey ? TextSelection.between(doc.resolve(selection.anchor), start.$from) : start;
+          view.dispatch(view.state.tr.setSelection(to).scrollIntoView());
+          return true;
+        }
+        if (e.key !== 'ArrowUp' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;
         if (!selection.empty || !start || selection.from !== start.from) return false;
         const h1 = titleIn(view);
         if (!h1) return false;

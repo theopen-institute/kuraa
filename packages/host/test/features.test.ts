@@ -348,7 +348,7 @@ describe('features', () => {
     expect((await clear()).status).toBe(200);
     expect(file(COMPANION)).toBeNull();
     expect(git(dir, 'log', '-1', '--format=%s')).toBe('1 mark removed');
-    // Search (a feature of its own, 0120) leaves another feature's companions out.
+    // Search (a feature of its own, 0124) leaves another feature's companions out.
     mkdirSync(join(dir, 'other.md.marks'), { recursive: true });
     writeFileSync(join(dir, `other.md.marks/@${ME}.json`), '{"marks": []} tide');
     const found = (await json('/api/features/search/search?q=tide')).body as { files: { path: string }[] };
@@ -431,7 +431,7 @@ describe('features', () => {
   });
 });
 
-describe('what a feature keeps on this device (0121)', () => {
+describe('what a feature keeps on this device (0125)', () => {
   it('keeps JSON by name, its own apart from others’, forgets on null, and refuses a name that is not one', async () => {
     const git = mkdtempSync(join(tmpdir(), 'kuraa-store-'));
     try {

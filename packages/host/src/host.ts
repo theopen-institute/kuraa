@@ -433,6 +433,7 @@ export class Host {
       flush: (path) => this.writeForRender(path),
       madeFrom: (path) => this.madeFrom(path),
       compile: (folder, o, format) => this.compileFolder(folder, o, format),
+      read: (path, file) => this.readForRender(path, file),
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) {
@@ -1401,6 +1402,27 @@ export class Host {
    * whose readers are not everyone who reads the document. Data flows from
    * wider to narrower audiences, never back.
    */
+  /**
+   * A workspace file a renderer with no environment reads for a document
+   * (0107: an image, a bibliography), as a render in Podman would see it: inside
+   * the workspace, not .git, through no link, not in a space hidden from the
+   * document's readers (0066), a plain file of a sensible size; null if not.
+   */
+  async readForRender(path: string, file: string): Promise<Buffer | null> {
+    let abs: string;
+    try {
+      abs = this.resolvePath(file);
+    } catch {
+      return null;
+    }
+    const rel = relative(this.dir, abs).split(sep).join('/');
+    const hidden = (await this.hiddenFrom(path)).map((h) => h.replace(/\/+$/, ''));
+    if (!rel || hidden.some((h) => rel === h || rel.startsWith(`${h}/`))) return null;
+    const st = await lstat(abs).catch(() => null);
+    if (!st?.isFile() || st.size > 256 * 1024 * 1024) return null;
+    return readFile(abs).catch(() => null);
+  }
+
   async hiddenFrom(path: string): Promise<string[]> {
     const entries = this.spaces?.entries() ?? [];
     if (!entries.length || !this.peers) return [];

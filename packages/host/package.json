@@ -31,6 +31,7 @@
     "@kuraa/env-podman": "workspace:*",
     "@kuraa/feature-example": "workspace:*",
     "@kuraa/format-pandoc": "workspace:*",
+    "@kuraa/render-pandoc": "workspace:*",
     "@kuraa/format-rmarkdown": "workspace:*",
     "@kuraa/format-text": "workspace:*",
     "@kuraa/compile": "workspace:*",

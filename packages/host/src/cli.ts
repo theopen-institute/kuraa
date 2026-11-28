@@ -17,6 +17,7 @@
 //   features:     [--feature <id> ...]   features on here (default: all loaded); each workspace turns them on too (0082)
 //   running code: [--engine r | --engine none] [--env podman]
 //                 [--allow-write] [--allow-network] [--no-allow-installs] [--data-dir path]
+//                 [--render-where-code-runs]   Markdown rendered in Podman too, not by the built-in pandoc (0107)
 //                 [--memory 4g] [--cpus 2] [--disk 2g]
 //                 [--r-image <image>]...   base images a workspace may name for R (besides the default)
 //   devices:      [--bootstrap host:port]...   servers to find other computers through (shared workspaces always sync)
@@ -81,6 +82,7 @@ const { values } = parseArgs({
     'allow-write': { type: 'boolean' },
     'allow-network': { type: 'boolean' },
     'allow-installs': { type: 'boolean' },
+    'render-where-code-runs': { type: 'boolean' },
     'data-dir': { type: 'string' },
     memory: { type: 'string' },
     cpus: { type: 'string' },
@@ -133,6 +135,7 @@ const flags: Partial<Settings> = Object.fromEntries(Object.entries({
   allowWrite: values['allow-write'],
   allowNetwork: values['allow-network'],
   allowInstalls: values['allow-installs'],
+  renderWhereCodeRuns: values['render-where-code-runs'],
   dataDir: values['data-dir'] ? resolve(values['data-dir']) : undefined,
   formats: values.format,
   features: values.feature,

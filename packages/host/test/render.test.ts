@@ -4,11 +4,12 @@
 // R and pandoc, is in render-podman.test.ts.
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'prosemirror-transform';
 import { pandocMarkdown } from '@kuraa/format-pandoc';
+import pandocComponent, { pandocWasm, typstProgram } from '@kuraa/render-pandoc';
 import { connectHeadless, type HeadlessClient } from '@kuraa/session/testing';
 import { startHost, type RunningHost, type RunOptions } from '../src/index.js';
 import type { RenderInfo, RenderState } from '../src/renders.js';
@@ -175,5 +176,43 @@ describe('rendering documents', () => {
     expect((await render('notes.md')).state.message).toContain('Rendering is turned off on this host');
     expect(existsSync(join(dir, 'notes.html'))).toBe(false);
     expect(readFileSync(join(dir, 'notes.md'), 'utf8')).toBe('# Notes\n\nThe tide was out.\n');
+  });
+});
+
+describe.skipIf(!pandocWasm())('rendering Markdown with no environment (0107)', () => {
+  it('renders Markdown with running code off, reading the workspace only as the host lets it; leaves R Markdown to where code runs', async () => {
+    await host({ engines: [], components: [pandocComponent] });
+    mkdirSync(join(dir, 'art'));
+    writeFileSync(join(dir, 'art', 'pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+    writeFileSync(join(dir, 'pictures.md'), '# Pictures\n\n![A pixel](art/pixel.png)\n\n![Git](.git/config)\n\n![Linked](linked.png)\n');
+    symlinkSync(join(dir, '.git', 'config'), join(dir, 'linked.png'));
+    writeFileSync(join(dir, 'report.Rmd'), '# Report\n');
+    const info = (await (await api('/api/renders?path=pictures.md')).json()) as RenderInfo;
+    expect(info).toMatchObject({ formats: ['html', 'docx', 'pdf', 'epub'], unavailable: null });
+    const html = await render('pictures.md');
+    expect(html).toMatchObject({ status: 202, state: { state: 'done' } });
+    expect(html.state.message).toMatch(/^Rendered to HTML\. 2 images could not be found/);
+    const page = await (await api('/api/renders/file?path=pictures.md&format=html')).text();
+    expect(page).toContain('data:image/png;base64');
+    expect(page).not.toContain('[core]');
+    expect((await render('pictures.md', 'docx')).state.state).toBe('done');
+    // R Markdown runs code: only an engine renders it, and none is here.
+    expect(((await (await api('/api/renders?path=report.Rmd')).json()) as RenderInfo).unavailable).toBe('Nothing on this host renders this kind of file.');
+  });
+
+  it('renders where code runs instead when the host’s Settings say so, or when the renderer would rather (LaTeX) and an engine can', async () => {
+    const ran = (r: { state: RenderState }) => r.state.message;
+    await host({ ...PAPER_ON, components: [PAPER, ENVS, pandocComponent] });
+    // Both could: the built-in pandoc does.
+    expect(ran(await render('notes.md'))).toBe('Rendered to HTML.');
+    // A PDF asking for LaTeX: the engine would, but Paper makes no PDFs, so the built-in pandoc does, saying so.
+    writeFileSync(join(dir, 'latex.md'), '---\npdf-engine: xelatex\n---\n\nWords.\n');
+    if (typstProgram()) expect(ran(await render('latex.md', 'pdf'))).toMatch(/^Rendered to PDF\. The header asks for xelatex/);
+    await running!.close();
+    rmSync(dir, { recursive: true, force: true });
+    await host({ ...PAPER_ON, components: [PAPER, ENVS, pandocComponent], renderWhereCodeRuns: true });
+    expect(ran(await render('notes.md'))).toBe('Rendered to html.');
+    // Where the engine cannot make a format, the built-in pandoc still does.
+    expect(ran(await render('notes.md', 'epub'))).toBe('Rendered to EPUB.');
   });
 });

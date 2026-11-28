@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
+import { pandocWasm, typstProgram } from '../../packages/render-pandoc/src/where.js';
 import { E2E } from './env.js';
 
 const api = (path: string, init: RequestInit = {}) =>
@@ -83,7 +84,7 @@ test('a folder arranged by hand in the file tree; a document left out of Compile
 });
 
 test('a folder compiled to HTML: in the tree’s order, how deep each is its heading’s level, without what is left out', async ({ page }) => {
-  test.skip(!podmanWorks(), 'Podman is not installed and running');
+  test.skip(!pandocWasm(), 'pandoc has not been fetched');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
   const folder = `compiled-${id}`;
@@ -131,7 +132,7 @@ test('a folder compiled to HTML: in the tree’s order, how deep each is its hea
 });
 
 test('a folder compiled to EPUB with its own settings: author, cover, contents, chapters, scenes run on with a separator (0106)', async ({ page }) => {
-  test.skip(!podmanWorks(), 'Podman is not installed and running');
+  test.skip(!pandocWasm(), 'pandoc has not been fetched');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
   const folder = `epub-${id}`;
@@ -192,7 +193,7 @@ test('a folder compiled to EPUB with its own settings: author, cover, contents, 
 });
 
 test('a folder compiled to Word with a template from the workspace, and to PDF with contents and every heading numbered (0106)', async ({ page }) => {
-  test.skip(!podmanWorks(), 'Podman is not installed and running');
+  test.skip(!pandocWasm() || !typstProgram(), 'pandoc and Typst have not been fetched');
   test.setTimeout(600_000);
   const id = Date.now().toString(36);
   const folder = `word-${id}`;
@@ -223,7 +224,7 @@ test('a folder compiled to Word with a template from the workspace, and to PDF w
   download = page.waitForEvent('download', { timeout: 590_000 });
   await page.getByTestId('compile-button').click();
   await download;
-  expect(await renderLog('docx')).toContain('--reference-doc=/scratch/in/reference.docx');
+  expect(await renderLog('docx')).toMatch(/--reference-doc=\S*reference\.docx/);
 
   // PDF: a table of contents, every heading numbered.
   await page.getByTestId('compile-format:pdf').check();

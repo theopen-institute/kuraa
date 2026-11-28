@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { startHost, type RunningHost } from '../../packages/host/src/index.js';
 import { NOTES } from './env.js';
 import { podmanWorks } from '../../packages/env-podman/src/index.js';
+import { pandocWasm } from '../../packages/render-pandoc/src/where.js';
 import { openSettings } from './settings.js';
 import { standardFeatures } from '../../packages/features/src/index.js';
 
@@ -230,6 +231,24 @@ test('opens a folder that is not yet a repository', async () => {
 });
 
 const PODMAN_RUNNING = podmanWorks();
+
+test('renders Markdown with the pandoc and Typst it ships, no code running (0107)', async () => {
+  // Packaged: only its own copies (the computer's cache pointed at nothing). In development, the checkout's.
+  test.skip(!PACKAGED && !pandocWasm(), 'pandoc has not been fetched');
+  const dir = makeRepo();
+  const { app, page } = await launch(['--open', dir, '--engine', 'none'], { flushMs: 300, idleCommitMs: 1000, maxCommitMs: 10_000, dropMs: 1000 },
+    PACKAGED ? { KURAA_RENDER_TOOLS: mkdtempSync(join(tmpdir(), 'kuraa-no-render-tools-')) } : {});
+  try {
+    await openNotes(page);
+    await page.getByTestId('document-menu-button').click();
+    await page.getByTestId('menu-preview').click();
+    const panel = page.getByTestId('preview-panel');
+    await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 60_000 });
+    await expect(page.frameLocator('[data-testid="render-frame"]').locator('body')).toContainText('Field notes');
+  } finally {
+    await app.close();
+  }
+});
 
 test('runs R chunks in a Podman container by default', async () => {
   test.skip(!PODMAN_RUNNING, 'Podman is not installed and running');

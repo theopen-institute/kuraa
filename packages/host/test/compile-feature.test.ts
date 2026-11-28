@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileFeature, emptyCompile } from '@kuraa/compile';
+import { compileFeature, emptyCompile, type FolderCompile } from '@kuraa/compile';
 import { startHost, type RunningHost } from '../src/index.js';
 
 const ANA = { name: 'Ana Lima', email: 'ana@example.org', color: '#d33' };
@@ -24,7 +24,7 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 15_000, what =
   throw new Error(`Timed out waiting for ${what}`);
 }
 
-type Folder = { folder: string; title: string | null; format: string | null; heading: boolean; target: number | null; exclude: string[] };
+type Folder = FolderCompile;
 
 describe('Compile', () => {
   let dir: string;

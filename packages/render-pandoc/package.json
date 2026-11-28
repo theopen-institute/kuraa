@@ -1,0 +1,13 @@
+{
+  "name": "@kuraa/render-pandoc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kuraa/run-kit": "workspace:*",
+    "yaml": "^2.9.1"
+  }
+}

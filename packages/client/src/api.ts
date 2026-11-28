@@ -463,6 +463,7 @@ export interface HubSettings {
   allowWrite: boolean;
   allowNetwork: boolean;
   allowInstalls: boolean;
+  renderWhereCodeRuns: boolean;
   dataDir: string | null;
   formats: string[] | null;
   /** Features on, by id (0082); null for all. */

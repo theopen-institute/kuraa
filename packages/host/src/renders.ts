@@ -11,6 +11,11 @@
 // One render runs at a time per document; asking again for one under way
 // joins it.
 //
+// Documents of a kind a renderer with no environment renders (Markdown:
+// decision 0107, pandoc.wasm and Typst) are rendered by it, code running here
+// or not, unless it says an engine should (a PDF asking for LaTeX) and one can.
+// It reads the workspace's files only through the host (read()).
+//
 // Tools (decision 0045): a render may use one (TeX), which the runner mounts
 // for it. A render whose log says the tool lacks parts (LaTeX packages) runs
 // again once they are added, where installs are allowed: a few times at most,
@@ -21,7 +26,7 @@ import { constants } from 'node:fs';
 import { copyFile, lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, posix, resolve } from 'node:path';
-import type { RenderFormat, RenderResult } from '@kuraa/run-kit';
+import type { Renderer, RenderFormat, RenderResult } from '@kuraa/run-kit';
 import type { MadeFrom, PresenceUser } from '@kuraa/session/server';
 import type { Runner } from './runner.js';
 import { renameOver } from './files.js';
@@ -107,6 +112,9 @@ const asRendered = (path: string): string => (path.endsWith('/') ? `${path === '
 /** What a compiled folder's book is called (its output's name): the folder's name. */
 export const bookName = (path: string): string => (path === '/' ? 'book' : path.replace(/\/$/, '').split('/').pop() || 'book');
 
+/** How a render is made: by a renderer with no environment (0107), by an engine where code runs, or why not. */
+type RenderRoute = { alone: Renderer } | { engine: NonNullable<ReturnType<Runner['rendererFor']>> } | { why: string };
+
 export class Renders {
   private readonly current = new Map<string, { state: RenderState; done: Promise<RenderState> }>();
   /** One render at a time per document. */
@@ -123,6 +131,12 @@ export class Renders {
     madeFrom(path: string): Promise<MadeFrom>;
     /** A folder's documents joined, to compile it (0093: '' the top level) to a format; a string says why not. */
     compile(folder: string, o: CompileOptions, format: RenderFormat): Promise<CompiledBook | string>;
+    /**
+     * A workspace file a renderer with no environment reads for a document
+     * (0107): inside the workspace, not .git, through no link, not hidden from
+     * the document's readers; null if not.
+     */
+    read(path: string, file: string): Promise<Buffer | null>;
     log(m: string): void;
   }) {}
 
@@ -137,25 +151,56 @@ export class Renders {
     return join(this.dir(path), `output.${format}`);
   }
 
-  /** Why a document cannot be rendered here, or null if it can. */
-  private async unavailable(path: string): Promise<string | null> {
+  /** Why a document cannot be rendered where code runs, here and now, or null if it can. */
+  private async engineUnavailable(path: string): Promise<string | null> {
     const { runner } = this.o;
-    if (!runner.enabled) return 'Rendering is turned off on this host: documents are rendered where code runs, and running code is off here. Whoever runs the host can turn it on.';
+    if (!runner.enabled) return runner.standaloneFor(asRendered(path)) ? 'This needs code to run (Podman), and running code is off on this host. Whoever runs the host can turn it on.' : 'Rendering is turned off on this host: documents are rendered where code runs, and running code is off here. Whoever runs the host can turn it on.';
     if (!runner.rendererFor(asRendered(path))) return 'Nothing on this host renders this kind of file.';
     const { environment } = await runner.describe();
     if (!environment?.available) return environment?.message ?? 'There is nowhere to render documents.';
     return null;
   }
 
+  /**
+   * How a format of a document is rendered (0107): by a renderer that needs no
+   * environment, where one renders its kind and can make the format here,
+   * unless it would rather an engine did (`prefersEngine`, asked once the input
+   * is there) and one can; else by an engine, where code runs; else why not.
+   */
+  private async route(path: string, format: RenderFormat, input?: string): Promise<RenderRoute> {
+    const { runner } = this.o;
+    const alone = runner.standaloneFor(asRendered(path));
+    const found = runner.rendererFor(asRendered(path));
+    const engine = async () => (found?.renderer.formats.includes(format) && !(await this.engineUnavailable(path)) ? found : null);
+    if (alone?.formats.includes(format)) {
+      const cannot = await alone.unavailable(format);
+      if (!cannot) {
+        // Where code runs, as the host's Settings may ask (Render Markdown where code runs), or as the renderer would rather.
+        const prefers = runner.renderWhereCodeRuns || (input && alone.prefersEngine ? await alone.prefersEngine({ input, format }).catch(() => null) : null);
+        const e = prefers ? await engine() : null;
+        return e ? { engine: e } : { alone };
+      }
+      const e = await engine();
+      return e ? { engine: e } : { why: cannot };
+    }
+    const why = await this.engineUnavailable(path);
+    if (why) return { why };
+    return found?.renderer.formats.includes(format) ? { engine: found } : { why: `This document cannot be rendered to ${format}.` };
+  }
+
   async info(path: string): Promise<RenderInfo> {
+    const alone = this.o.runner.standaloneFor(asRendered(path));
     const found = this.o.runner.rendererFor(asRendered(path));
+    const formats = RENDER_FORMATS.filter((f) => alone?.formats.includes(f) || found?.renderer.formats.includes(f));
     const renders: RenderState[] = [];
-    for (const format of found?.renderer.formats ?? []) {
+    for (const format of formats) {
       const live = this.current.get(`${path}\0${format}`);
       const saved = live?.state ?? (await this.saved(path, format));
       if (saved) renders.push(saved);
     }
-    return { formats: found ? found.renderer.formats.filter((f) => RENDER_FORMATS.includes(f)) : [], unavailable: await this.unavailable(path), renders };
+    // Whether it can be rendered at all: to HTML, as for the page.
+    const page = formats.length ? await this.route(path, 'html') : { why: 'Nothing on this host renders this kind of file.' };
+    return { formats, unavailable: 'why' in page ? page.why : null, renders };
   }
 
   private async saved(path: string, format: RenderFormat): Promise<RenderState | null> {
@@ -194,19 +239,19 @@ export class Renders {
     const under = this.current.get(key);
     if (under) return under;
     if (path.endsWith('/')) this.compiling.set(key, compile ?? { exclude: [], noHeading: [], title: path === '/' ? 'Book' : path.slice(0, -1).split('/').pop()! });
-    const why = await this.unavailable(path);
-    const found = this.o.runner.rendererFor(asRendered(path));
+    const route = await this.route(path, format);
     const previous = await this.saved(path, format);
     const now = new Date().toISOString();
     const state: RenderState = {
       path, format, state: 'rendering', message: 'Waiting to render…', progress: null, log: '', by,
       startedAt: now, finishedAt: null, output: previous?.output ?? null,
     };
-    if (why || !found || !found.renderer.formats.includes(format)) {
-      const failed = { ...state, state: 'failed' as const, message: why ?? `This document cannot be rendered to ${format}.`, finishedAt: now };
+    if ('why' in route) {
+      this.compiling.delete(key);
+      const failed = { ...state, state: 'failed' as const, message: route.why, finishedAt: now };
       return { state: failed, done: Promise.resolve(failed) };
     }
-    const job = (this.queues.get(path) ?? Promise.resolve()).then(() => this.run(state, found, person));
+    const job = (this.queues.get(path) ?? Promise.resolve()).then(() => this.run(state, person));
     const done = job.then(() => state, (e: Error) => {
       Object.assign(state, { state: 'failed', message: e.message, finishedAt: new Date().toISOString(), progress: null });
       return state;
@@ -225,7 +270,7 @@ export class Renders {
     return entry;
   }
 
-  private async run(state: RenderState, found: NonNullable<ReturnType<Runner['rendererFor']>>, person: PresenceUser | null): Promise<void> {
+  private async run(state: RenderState, person: PresenceUser | null): Promise<void> {
     const { path, format } = state;
     state.message = 'Rendering…';
     // A folder (0093): its documents joined, each as it is now, into one in scratch.
@@ -252,35 +297,56 @@ export class Renders {
     await mkdir(scratch, { recursive: true });
     await emptyDir(scratch);
     const progress = (m: string) => (state.progress = m);
-    const tools = this.o.runner.renderTools(person && person.email ? person : null, progress);
+    /** The document to render: its file, or (a folder: 0093) the book joined in scratch, the workspace being read-only to the render and staying as it is. */
+    const prepare = async (): Promise<string> => {
+      if (!joined) return resolve(this.o.root, path);
+      const input = join(scratch, 'in', `${bookName(path)}.md`);
+      await mkdir(dirname(input), { recursive: true });
+      await writeFile(input, joined.text);
+      // Beside it, by the names its header gives them: a Word template, a cover (0106).
+      for (const f of joined.files ?? []) await copyFile(f.from, join(scratch, 'in', f.name));
+      return input;
+    };
+    const resources = joined ? { resources: joined.resources } : {};
+    let tools: ReturnType<Runner['renderTools']> | null = null;
     try {
       let result: RenderResult;
-      const added: string[] = [];
-      for (let round = 0; ; round++) {
-        const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools, asRendered(path));
-        let input = resolve(this.o.root, path);
-        if (joined) {
-          // The joined document in scratch (the workspace is read-only to the render, and stays as it is).
-          input = join(scratch, 'in', `${bookName(path)}.md`);
-          await mkdir(dirname(input), { recursive: true });
-          await writeFile(input, joined.text);
-          // Beside it, by the names its header gives them: a Word template, a cover (0106).
-          for (const f of joined.files ?? []) await copyFile(f.from, join(scratch, 'in', f.name));
+      const input = await prepare();
+      const route = await this.route(path, format, input);
+      if ('why' in route) result = { ok: false, message: route.why, log: '' };
+      else if ('alone' in route) {
+        // Rendered with no environment (0107): given what it reads, as the host lets it have it.
+        const r = route.alone;
+        result = await r.render({
+          scratch,
+          workspace: this.o.root,
+          read: (file) => this.o.read(asRendered(path), file),
+          timeLimitMs: this.o.runner.renderTimeLimitMs,
+          signal: this.closing.signal,
+          log: (m) => this.o.log(`${r.id} render: ${m}`),
+          status: progress,
+        }, { input, format, ...resources });
+      } else {
+        const found = route.engine;
+        tools = this.o.runner.renderTools(person && person.email ? person : null, progress);
+        const added: string[] = [];
+        for (let round = 0; ; round++) {
+          const ctx = await this.o.runner.renderContext(found.engine, scratch, this.closing.signal, progress, tools, asRendered(path));
+          result = await found.renderer.render(ctx, { input: round ? await prepare() : input, format, ...resources });
+          if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;
+          // Parts its tools lacked (LaTeX packages): added, then rendered again.
+          const repair = await tools.repair(result.log);
+          if (!repair) break;
+          if (!repair.ok) {
+            result = { ...result, message: `${result.message} ${repair.message}` };
+            break;
+          }
+          added.push(...repair.added);
+          progress('Rendering again…');
+          await emptyDir(scratch);
         }
-        result = await found.renderer.render(ctx, { input, format, ...(joined ? { resources: joined.resources } : {}) });
-        if (result.ok || round >= MAX_REPAIRS || this.closing.signal.aborted) break;
-        // Parts its tools lacked (LaTeX packages): added, then rendered again.
-        const repair = await tools.repair(result.log);
-        if (!repair) break;
-        if (!repair.ok) {
-          result = { ...result, message: `${result.message} ${repair.message}` };
-          break;
-        }
-        added.push(...repair.added);
-        progress('Rendering again…');
-        await emptyDir(scratch);
+        if (added.length) result = { ...result, message: `${result.message} Added ${added.join(', ')} to this computer for it.` };
       }
-      if (added.length) result = { ...result, message: `${result.message} Added ${added.join(', ')} to this computer for it.` };
       state.needs = result.needs ? this.o.runner.toolOffer(result.needs.tool) : null;
       state.log = result.log.length > MAX_LOG ? `…\n${result.log.slice(-MAX_LOG)}` : result.log;
       state.message = result.message;
@@ -300,7 +366,7 @@ export class Renders {
         }
       } else state.state = 'failed';
     } finally {
-      tools.release();
+      tools?.release();
       state.progress = null;
       state.finishedAt = new Date().toISOString();
       await emptyDir(scratch).catch(() => undefined);

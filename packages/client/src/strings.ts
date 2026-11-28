@@ -886,6 +886,8 @@ export const S = {
     runsIn: (label: string) => `Code runs ${label}.`,
     installs: 'Let documents install packages and download tools',
     installsHint: 'Installs use the network, apart from your documents; the code in them never gets it this way.',
+    renderWhereCodeRuns: 'Render Markdown where code runs',
+    renderWhereCodeRunsHint: 'With the pandoc in Podman, as R Markdown is, rather than the one built in: slower to start, the same as R Markdown’s, and LaTeX for every PDF a header asks it for.',
     limits: 'Limits for each document’s code',
     memory: 'Memory',
     cpus: 'CPUs',

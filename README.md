@@ -21,6 +21,10 @@ This is the phase 0–1 prototype from the design doc. Deviations from that spec
 pnpm install
 ```
 
+`pnpm install` also fetches the pandoc (its WebAssembly build) and Typst that Markdown is rendered
+with, once per computer, into your cache folder (`node scripts/fetch-render-tools.mjs` again if it
+was offline; [decision 0107](docs/decisions/0107-rendering-without-podman.md)).
+
 If `pnpm desktop` reports that Electron failed to install, fetch its binary once with
 `node apps/desktop/node_modules/electron/install.js`.
 
@@ -228,16 +232,25 @@ document now (**Compare with now**: changed paragraphs, the words in them marked
 rmarkdown, Markdown by pandoc) and shows the page beside it, in a frame where nothing in the document
 runs; **Update when saved** renders it again each time it is saved. **Export as** PDF, Word, HTML or EPUB
 renders that format and saves the file. The header's `output:` (or `format:`) settings apply, as do
-`toc`, `number-sections`, `reference-doc` and `cover-image` at its top level. PDFs are
+`toc`, `number-sections`, `reference-doc` and `cover-image` at its top level.
+
+**Markdown needs no Podman** ([decision 0107](docs/decisions/0107-rendering-without-podman.md)): the
+app's own pandoc (its WebAssembly build) renders it inside the host, seeing only copies of the
+document and the workspace files it refers to (images, a bibliography), and Typst makes its PDFs,
+kept to those copies and off the network. So does every book Compile makes. **Render Markdown where
+code runs** (Settings › Host; `--render-where-code-runs`) sends Markdown to Podman instead, as R
+Markdown is: the R image's pandoc, and LaTeX for a PDF whose header asks for it.
+
+**R Markdown renders where code runs.** PDFs are
 made with Typst, which the environment has, so no TeX is needed. A header asking for a LaTeX engine
 (`latex_engine: xelatex`, `pdf-engine:`) gets TeX as a **tool**: where installs are allowed, the
 panel offers **Download PDF with LaTeX** (TinyTeX, about 54 MB, kept once on this computer) and
 renders again when it is there; LaTeX packages a document lacks are added when it first needs them
 and recorded in `.kuraa/tex-packages.json`, so other computers add them before their first PDF.
 Without permission, the PDF is made with Typst and says why
-([decision 0045](docs/decisions/0045-tools.md)). Rendering runs where code runs (in Podman, with the workspace
+([decision 0045](docs/decisions/0045-tools.md)). Rendering R Markdown runs where code runs (in Podman, with the workspace
 read-only and no network), so it needs `--engine r` and Podman, like running chunks; the panel says
-what is missing. Outputs are kept in `.git/kuraa/renders/`, never beside the document
+what is missing. A Markdown PDF whose header asks for LaTeX goes there too, where it can. Outputs are kept in `.git/kuraa/renders/`, never beside the document
 ([decision 0041](docs/decisions/0041-rendering.md)).
 
 ## An online copy

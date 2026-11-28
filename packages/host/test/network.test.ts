@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
 import { Git } from '../src/git.js';
-import { Identity, decodeLink } from '../src/peers/identity.js';
+import { Identity, decodeLink, linkProofFor } from '../src/peers/identity.js';
 import { digestOf, uploadPackArgs, uploadPackEnv } from '../src/peers/node.js';
 import { readHeads } from '../src/peers/link.js';
 import { FUTURE_MS, judge, sign, signRecord, signsMessage, vouchMessage } from '../src/peers/records.js';
@@ -146,7 +146,10 @@ describe('invites and pairing, under a policy', () => {
     expect(await id.refuseGrant({ ...l, issuer: { key: 'cd'.repeat(32), name: 'x' } })).toBe('the link is not signed by the person it names');
     // A grant from before, which signed neither: ask for a new link.
     const g = l.grant!;
-    const old = { ...l, grant: { ...g, signature: crypto.sign(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once), adaKey.secretKey).toString('hex') } };
+    // (A link from before had no key of its own either: 0115.)
+    const { linkKey: _key, ...before } = g;
+    void _key;
+    const old = { ...l, grant: { ...before, signature: crypto.sign(grantMessage(l.workspace.id, g.genesis, l.id, g.group, g.role, l.once), adaKey.secretKey).toString('hex') } };
     expect(await id.refuseGrant(old)).toMatch(/older kuraa/);
   });
 
@@ -169,7 +172,8 @@ describe('invites and pairing, under a policy', () => {
     const dee = deviceOf(ws.id, deeId, 'Dee');
     const l = decodeLink(await id.createLink(1, true, { relays: [], tcp: [] }, { key: adaKey }));
     const g = l.grant!;
-    const joinOp = { t: 'join' as const, group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key };
+    // With the link's key's word that Dee's signing key is its holder's (0115).
+    const joinOp = { t: 'join' as const, group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key, linkKey: g.linkKey!, linkProof: linkProofFor(l, hex(dee.signing))! };
     const record = (e: ReturnType<typeof makeOp>) => signRecord({ kind: 'policy', workspace: ws.id, subject: e.id, op: e.op, parents: e.parents, signer: e.signer, proof: e.proof }, dee.device);
     // Not let in by anyone yet: her join, with the grant alone, does not count.
     const early = makeOp(ws.id, joinOp, (await id.policy()).heads, dee.signing);

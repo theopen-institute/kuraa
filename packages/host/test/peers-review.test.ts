@@ -16,7 +16,7 @@ import Protomux from 'protomux';
 import c from 'compact-encoding';
 import type { SwarmConnection } from 'hyperswarm';
 import { Git } from '../src/git.js';
-import { Identity, decodeLink } from '../src/peers/identity.js';
+import { Identity, decodeLink, linkProofFor } from '../src/peers/identity.js';
 import { admittedGrantMessage, evaluate, linkGrantMessage, makeOp, type PolicyContext, type PolicyEntry, type PolicyOp } from '../src/peers/policy.js';
 import { sign, signRecord, signsMessage, vouchMessage } from '../src/peers/records.js';
 import { identityId, incept, type KeyEvent } from '../src/peers/kel.js';
@@ -281,7 +281,7 @@ describe('what a device not known to be in sends', () => {
     const l = decodeLink(await id.createLink(1, false, { relays: [], tcp: [] }, { key: adaKey }));
     const g = l.grant!;
     await id.admit(l.id, hex(dee.signing), adaKey);
-    const join = makeOp(ws.id, { t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key }, (await id.policy()).heads, dee.signing);
+    const join = makeOp(ws.id, { t: 'join', group: g.group, role: g.role, link: l.id, once: l.once, granter: g.granter, grant: g.signature, expires: l.expires, issuer: l.issuer.key, linkKey: g.linkKey!, linkProof: linkProofFor(l, hex(dee.signing))! }, (await id.policy()).heads, dee.signing);
     // With her proof: an operation of hers that counts for nothing, and someone else's records.
     const junk = makeOp(ws.id, { t: 'rule', path: '', by: [deeId] }, [join.id], dee.signing);
     const other = deviceOf(ws.id, identity(), 'Other');

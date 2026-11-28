@@ -25,7 +25,7 @@ import { gitEnv, gitPath, spawnGit, type Git } from '../git.js';
 import { GitBridge } from './bridge.js';
 import { useDht } from './dht.js';
 import { isRelayKey, useRelay, type Relay } from './relay.js';
-import { Identity, MAX_PROOF, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, topicsFor, type Member, type WorkspaceIdentity } from './identity.js';
+import { Identity, MAX_PROOF, TOPIC_WEEK, checkLink, decodeLink, lanKeyFor, linkProofFor, linkProven, topicsFor, withoutSecret, type Member, type WorkspaceIdentity } from './identity.js';
 import { joinLan } from './lan.js';
 import NoiseSecretStream from '@hyperswarm/secret-stream';
 import type { Socket } from 'node:net';
@@ -36,7 +36,7 @@ import { recordKey, revokeKeyMessage, shortKey, type MemberRecord } from './reco
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
 import { compareVersions, isVersion } from '../selfupdate.js';
-import { PROTOCOL, PeerLink, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
+import { MIN_PROTOCOL, PROTOCOL, PeerLink, protocolsMeet, readHeads, readOutputs, type ControlMessage, type OutputsFrame, type TunnelAsk } from './link.js';
 
 export interface NodeOptions {
   /** The repository's working tree. */
@@ -792,6 +792,11 @@ export class PeerNode {
       if (origin) for (const t of topicsFor(origin)) want.set(t.toString('hex'), { server: true, client: true });
       // A server too (0099): it lets people in by their links while every member is away, so it announces them.
       if (!this.o.joining) {
+        // The owner's device: the workspace judged by the rules this build knows (0115), where it is not yet.
+        if (await this.identity.adoptRules(await this.signingKeyNow()).catch(() => false)) {
+          this.o.log('peers: this workspace is judged by the rules of kuraa’s policy 13 from now on (0115)');
+          void this.membersChanged().catch((e: Error) => this.logUnlessClosing(e));
+        }
         // A link from before that has expired since (its grant counts without anyone letting its holder in): unlinked.
         await this.identity.unlinkStale(await this.signingKeyNow()).catch((e: Error) => this.o.log(`peers: could not unlink old invite links: ${e.message}`));
         const links = await this.identity.linkTopics();
@@ -1355,6 +1360,7 @@ export class PeerNode {
     return {
       type: 'hello',
       protocol: PROTOCOL,
+      minProtocol: MIN_PROTOCOL,
       ...(ownVersion ? { version: ownVersion } : {}),
       workspace: this.ws.id,
       forkedFrom: this.ws.forkedFrom,
@@ -1378,11 +1384,12 @@ export class PeerNode {
       ...(paired && this.dhtAddress ? { dht: this.dhtAddress } : {}),
       // A device joining shows its link to whomever it reaches; one that came in by a link, only to members
       // that may not know it yet (0071): a device not paired must not get a link that may still let people in.
-      ...(shown && (this.o.ticket || paired) ? { link: shown } : {}),
+      // Never with the secret half of its key (0115): only this device, its holder, proves it holds it (linkProof).
+      ...(shown && (this.o.ticket || paired) ? { link: withoutSecret(shown) } : {}),
       // To a device that may not know this one is in (0072): what shows it is.
       ...(!paired && !this.o.joining ? { proof: await this.identity.proof() } : {}),
       // Joining: the key its join will be signed with, for the device letting it in to say so in the policy (admit).
-      ...(this.o.joining && this.o.ticket ? { signer: (await this.signingKeyNow()).publicKey.toString('hex') } : {}),
+      ...(this.o.joining && this.o.ticket ? await this.joiningProof(this.o.ticket) : {}),
     };
   }
 
@@ -1395,6 +1402,13 @@ export class PeerNode {
       heads[ref!.slice('refs/heads/'.length)] = oid!;
     }
     return heads;
+  }
+
+  /** Joining by a link: the signing key its join is signed with, and the link's key's word that it is its holder's (0115). */
+  private async joiningProof(ticket: string): Promise<{ signer: string; linkProof?: string }> {
+    const signer = (await this.signingKeyNow()).publicKey.toString('hex');
+    const proof = linkProofFor(decodeLink(ticket), signer);
+    return { signer, ...(proof ? { linkProof: proof } : {}) };
   }
 
   private async linkToShow(): Promise<string | null> {
@@ -1483,7 +1497,10 @@ export class PeerNode {
       versionNews.emit('release', h.version);
     }
     const theirs = typeof h.protocol === 'number' && Number.isInteger(h.protocol) ? h.protocol : 1;
-    if (theirs !== PROTOCOL) {
+    const theirMin = typeof h.minProtocol === 'number' && Number.isInteger(h.minProtocol) && h.minProtocol <= theirs ? h.minProtocol : theirs;
+    // Another protocol, but one both speak, for rules this workspace is judged by (0115): synced, as the older speaks.
+    const rules = this.access?.policy.rulesVersion ?? 12;
+    if (theirs !== PROTOCOL && !protocolsMeet({ protocol: PROTOCOL, min: MIN_PROTOCOL }, { protocol: theirs, min: theirMin }, rules)) {
       const known = this.versions.get(link.key);
       this.versions.delete(link.key);
       this.versions.set(link.key, theirs);
@@ -1492,7 +1509,8 @@ export class PeerNode {
       if (known !== theirs) this.o.log(`peers: ${saidByPeer(h.name)} (${link.key.slice(0, 8)}…) runs ${theirs > PROTOCOL ? 'a newer' : 'an older'} kuraa; the two do not sync until ${theirs > PROTOCOL ? 'this one is' : 'it is'} updated`);
       if (theirs > PROTOCOL && inWorkspace && Date.now() - protocolToldAt > NEWS_MS) {
         protocolToldAt = Date.now();
-        versionNews.emit('newer');
+        // With the protocol it speaks and the workspace it is in (0115: a server switches only where its devices do).
+        versionNews.emit('newer', theirs, this.ws.id);
       }
       link.send({ type: 'bye', reason: theirs > PROTOCOL ? 'this device runs an older kuraa: update it to sync' : 'the other device runs an older kuraa: update that one to sync' });
       setTimeout(() => link.close(), 100);
@@ -1565,6 +1583,10 @@ export class PeerNode {
         // A server lets people in by a link for one person only (0112): its admit counts for no other (policy.ts), and
         // by a link for anyone, a stranger with fresh keys could be let in, and fetch everything, over and over.
         if (this.isServerDevice(this.myKey) && !l.once) return { why: 'a server lets people in only by a link for one person' };
+        // Its holder, not a device it was shown to (0115): the link's key signed the device's signing key. A server lets
+        // no one in by a link from before, which has no key: whoever saw one could be let in by it.
+        if (!linkProven(l, h.signer, h.linkProof)) return { why: 'the device did not show it holds the link (it may have been shown it by another)' };
+        if (this.isServerDevice(this.myKey) && l.grant && !l.grant.linkKey) return { why: 'the link was made by an older kuraa, and a server lets no one in by one: ask for a new link' };
         const name = await this.admit(link.key, h.name);
         if (!name) return { why: 'this device was removed from the workspace' };
         // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
@@ -1644,7 +1666,8 @@ export class PeerNode {
     if (!this.ws.secret) {
       const secret = typeof m.secret === 'string' && /^[0-9a-f]{32,128}$/.test(m.secret) ? m.secret : null;
       // From a server (0099): the secret a person's device last made, as the records it sent say, where they say one.
-      if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret))) {
+      const ticket = this.o.ticket ? (() => { try { return decodeLink(this.o.ticket!); } catch { return undefined; } })() : undefined;
+      if (secret && fromServer && !(await this.identity.secretMatches(records, this.ws.id, secret, ticket))) {
         this.o.log(`peers: ${link.hello?.name ?? link.key.slice(0, 8)} (a server) let this device in with a secret none of the workspace's people made; not joining through it`);
         link.close();
         return;
@@ -1719,9 +1742,21 @@ export class PeerNode {
   private async answerOps(link: PeerLink, ids: unknown[]): Promise<void> {
     const asked = new Set(ids.filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)));
     if (!asked.size) return;
-    const held = (await this.identity.records()).filter((r) => r.kind === 'policy' && asked.has(r.subject));
-    const unheld = [...asked].filter((id) => !held.some((r) => r.subject === id));
-    link.send({ type: 'records', records: held, unheld });
+    const all = (await this.identity.records()).filter((r) => r.kind === 'policy');
+    const byId = new Map(all.map((r) => [r.subject, r]));
+    const held = all.filter((r) => asked.has(r.subject));
+    const unheld = [...asked].filter((id) => !byId.has(id));
+    // With their pasts (0115): the device asking counts an operation as held only with all it descends from.
+    const sent = new Map(held.map((r) => [r.subject, r]));
+    for (let todo = held.flatMap((r) => r.parents ?? []); todo.length && sent.size < 2000;) {
+      const id = todo.pop()!;
+      if (sent.has(id)) continue;
+      const r = byId.get(id);
+      if (!r) continue;
+      sent.set(id, r);
+      todo.push(...(r.parents ?? []));
+    }
+    link.send({ type: 'records', records: [...sent.values()], unheld });
   }
 
   /** Signed records (records.ts): each taken if its signer may make it, whoever passed it on. */

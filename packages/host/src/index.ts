@@ -32,7 +32,7 @@ export async function onNewerRelease(fn: (version: string) => void): Promise<() 
   return () => versionNews.off('release', fn);
 }
 
-export async function onNewerVersion(fn: () => void): Promise<() => void> {
+export async function onNewerVersion(fn: (protocol?: number, workspace?: string) => void): Promise<() => void> {
   const { versionNews } = await import('./peers/node.js');
   versionNews.on('newer', fn);
   return () => versionNews.off('newer', fn);

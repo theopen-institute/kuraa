@@ -1162,10 +1162,11 @@ describe('another version of kuraa', () => {
     const heard = () => newer.push('newer');
     versionNews.on('newer', heard);
     try {
-      // Bo's device as a later kuraa: what it says is of a protocol Ada's does not know.
+      // Bo's device as a later kuraa: what it says is of a protocol Ada's does not know, and it no longer speaks hers
+      // (one that still did, said by minProtocol, would sync with it: 0115).
       const bNode = b.host.peers!.node as unknown as { helloFor(l: unknown): Promise<object>; links: Map<string, { close(): void }>; dial(key: string): void };
       const helloFor = bNode.helloFor.bind(bNode);
-      bNode.helloFor = async (l) => ({ ...(await helloFor(l)), protocol: 99 });
+      bNode.helloFor = async (l) => ({ ...(await helloFor(l)), protocol: 99, minProtocol: 99 });
       const ada = a.host.peers!.node.myKey;
       bNode.links.get(ada)!.close();
       bNode.dial(ada);

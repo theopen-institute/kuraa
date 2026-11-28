@@ -17,7 +17,6 @@ import { commitSigner } from '../signing.js';
 import { digestOf } from './node.js';
 import { clashWords } from './clashes.js';
 import { isAncestor, mergeTrailerValue } from '../merging.js';
-import { randomBytes } from 'node:crypto';
 import { PEER_SPACES } from './node.js';
 import { spaceRef } from '../spaces.js';
 import { PROTOCOL, type PeerLink } from './link.js';
@@ -34,6 +33,41 @@ import type { KeyPair } from '../keys.js';
 const OUTPUTS_ANNOUNCE_MS = 20;
 /** How long a server may not hold this device's work before it is no longer relied on to pass work on (0112). */
 const SERVER_BEHIND_MS = 10 * 60_000;
+/**
+ * The policy operations held whole (0115): each whose parents are all held whole, back to one with none (a
+ * genesis). One whose past is not all here counts as not held.
+ */
+export function rootedOps(ops: { id: string; parents: string[] }[]): Set<string> {
+  const byId = new Map(ops.map((o) => [o.id, o]));
+  const children = new Map<string, string[]>();
+  const missing = new Map<string, number>();
+  const ready: string[] = [];
+  for (const o of byId.values()) {
+    const parents = [...new Set(o.parents)];
+    // A parent not here: never whole, nor anything after it.
+    if (parents.some((p) => !byId.has(p))) continue;
+    missing.set(o.id, parents.length);
+    if (!parents.length) ready.push(o.id);
+    for (const p of parents) {
+      const list = children.get(p);
+      if (list) list.push(o.id);
+      else children.set(p, [o.id]);
+    }
+  }
+  const whole = new Set<string>();
+  for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
+    whole.add(id);
+    for (const c of children.get(id) ?? []) {
+      const left = missing.get(c)! - 1;
+      missing.set(c, left);
+      if (left === 0) ready.push(c);
+    }
+  }
+  return whole;
+}
+
+/** How long work signed by someone not in the workspace waits for their join to come here (0115). */
+const PERSON_WAIT_MS = 10 * 60_000;
 /** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
@@ -320,8 +354,10 @@ export class Peers {
     },
     // Records came (the policy work waits for may be among them): what waits is tried again now.
     members: () => this.retryNow(),
-    // Operations its commits name that it does not hold: not waited for (knownFrom).
+    // Operations its commits name that it does not hold: not waited for (knownFrom). Not a server's word (0115): it could
+    // so have work judged by less of the policy than there is, its makers' joins left out.
     unheld: (link, ids) => {
+      if (this.node.isServerDevice(link.key)) return;
       const had = this.unheld.get(link.key) ?? new Set<string>();
       for (const id of ids) had.add(id);
       this.unheld.set(link.key, had);
@@ -382,7 +418,21 @@ export class Peers {
     const from = this.bringing && !ours ? await this.node.identity.whoIs(this.bringing) : undefined;
     // Verdicts kept by commit, with the records they were judged by (0099): each judged once, not at every merge.
     const cacheKey = `${this.gateCache?.digest ?? ''}\0${ctx.policy.version}\0${mergeTrailerValue(this.host.mergeSignature)}`;
-    return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature) });
+    return gate(this.host.git, x, y, { ...ctx, space, from, cache: this.verdicts, cacheKey, known: this.knownFrom(ctx.known, this.bringing), remake: (a, b) => this.host.remakeMergeTree(a, b), mergeTrailer: mergeTrailerValue(this.host.mergeSignature), waitForPerson: (p) => this.waitForPerson(p) });
+  }
+
+  /** Since when work signed by each person not in the workspace yet has waited for their join (0115). */
+  private readonly waitedFor = new Map<string, number>();
+
+  /** Whether to wait still for someone's join before judging work they signed (0115): ten minutes at most. */
+  private waitForPerson(person: string): boolean {
+    const since = this.waitedFor.get(person);
+    if (since === undefined) {
+      this.waitedFor.set(person, Date.now());
+      if (this.waitedFor.size > 1000) this.waitedFor.delete(this.waitedFor.keys().next().value!);
+      return true;
+    }
+    return Date.now() - since < PERSON_WAIT_MS;
   }
 
   /**
@@ -409,7 +459,8 @@ export class Peers {
   /** Ask a device for the policy operations its commits name that this one lacks; those it does not hold, it says (unheld). */
   private askFor(link: PeerLink, ops: string[]): void {
     const unheld = this.unheld.get(link.key);
-    const ask = ops.filter((id) => !unheld?.has(id)).slice(0, 100);
+    // People waited for (0115) are not operations to ask for: their joins come with the records.
+    const ask = ops.filter((id) => /^[0-9a-f]{64}$/.test(id) && !unheld?.has(id)).slice(0, 100);
     if (ask.length) link.send({ type: 'ops', ids: ask });
   }
 
@@ -425,7 +476,9 @@ export class Peers {
         const people = await id.people();
         const byKey = new Map(people.flatMap((p) => p.keys.map((k) => [k, p.key] as const)));
         const names = new Map(people.map((p) => [p.key, p.name]));
-        const known = new Set(records.filter((r) => r.kind === 'policy').map((r) => r.subject));
+        // Held whole (0115): an operation whose past is not all here is not known, so work naming it waits for the rest, and
+        // is not judged by a policy short of someone's join.
+        const known = rootedOps(records.filter((r) => r.kind === 'policy').map((r) => ({ id: r.subject, parents: r.parents ?? [] })));
         // Servers, now or before (0099): the keys whose joins as a server counted.
         const servers = await id.everServers(records);
         return { policy, known, servers, personOf: (k: string) => byKey.get(k) ?? null, nameOf: (p: string) => names.get(p) ?? (servers.has(p) ? 'a server' : null), cutKeys: await id.cutKeys() };
@@ -1146,8 +1199,8 @@ export class Peers {
 
   /** A new space for an audience (0072: a folder's own, or a file's). */
   private async newSpace(audience: string[]): Promise<string> {
-    const id = randomBytes(16).toString('hex');
-    await this.node.identity.makeSpace(id, this.cleanAudience(audience), await this.node.signingKeyNow());
+    // Its ID its maker's (0115): no one makes it again at the same time, naming others.
+    const id = await this.node.identity.newSpace(this.cleanAudience(audience), await this.node.signingKeyNow());
     await this.node.membersChanged();
     return id;
   }

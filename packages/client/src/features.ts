@@ -34,6 +34,10 @@ export interface FeatureApp {
   notify(text: string, kind?: 'info' | 'warn'): void;
   ui: EditorUi;
   openPanel(feature: string, panel: string): void;
+  closePanel(feature: string, panel: string): void;
+  setPageAlone(on: boolean): void;
+  pageAlone(): boolean;
+  onPageAlone(fn: (on: boolean) => void): () => void;
   openFile(path: string, at?: { from: number; to: number }): void;
   openMatch(path: string, target: MatchTarget): void;
   /** The host's own calls, offered to components (0089). */
@@ -133,6 +137,10 @@ export function clientContext(feature: ClientFeature, status: () => FeatureStatu
     notify: (text, kind) => app.notify(text, kind),
     ui: app.ui,
     openPanel: (id) => app.openPanel(feature.id, id),
+    closePanel: (id) => app.closePanel(feature.id, id),
+    setPageAlone: (on) => app.setPageAlone(on),
+    pageAlone: () => app.pageAlone(),
+    onPageAlone: (fn) => app.onPageAlone(fn),
     openFile: (path, at) => app.openFile(path, at),
     onMessage: (fn) => messages.on(feature.id, fn),
     openMatch: (path, target) => app.openMatch(path, target),

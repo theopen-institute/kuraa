@@ -11,6 +11,7 @@
     "@kuraa/annotations": "workspace:*",
     "@kuraa/code": "workspace:*",
     "@kuraa/compile": "workspace:*",
+    "@kuraa/composition": "workspace:*",
     "@kuraa/corkboard": "workspace:*",
     "@kuraa/details": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",

@@ -247,6 +247,20 @@ export interface FeatureClientContext {
   ui: EditorUi;
   /** Open one of its panels. */
   openPanel(id: string): void;
+  /** Close one of its panels, if it is open (0118). */
+  closePanel(id: string): void;
+  /**
+   * The page alone (0118): the open document and nothing else on the screen
+   * (no navigation, menus or panels but those at its foot), full screen where
+   * the platform allows. Asked by a component (composition mode); left by
+   * asking again, by Escape, or by leaving full screen, and when no document
+   * is open.
+   */
+  setPageAlone(on: boolean): void;
+  /** Whether the page is alone now. */
+  pageAlone(): boolean;
+  /** Be told when the page is alone, and when it is not any more. Returns how to stop. */
+  onPageAlone(fn: (on: boolean) => void): () => void;
   /** Open a file, at a range of its text (offsets in the file's text), if given. */
   openFile(path: string, at?: { from: number; to: number }): void;
   /** Be told what its host half tells (FeatureContext.tell): with the path it was about, if any. Returns how to stop. */
@@ -724,7 +738,7 @@ export interface FeatureDocumentContext extends FeatureClientContext {
 }
 
 /** Where a panel is drawn (FeaturePanel.place). */
-export type PanelPlace = 'side' | 'over' | 'dialog';
+export type PanelPlace = 'side' | 'over' | 'dialog' | 'foot';
 
 /** A panel the feature draws: beside the open document, or about the workspace. */
 export interface FeaturePanel {
@@ -752,8 +766,12 @@ export interface FeaturePanel {
    *   it, unless held open: holdOpen); all inside it is the panel's own. Over
    *   any other window (Settings), which stays beneath it.
    *
-   * A place added later (a bar below the document, say) is a value added here;
-   * a client that does not know a panel's place draws it beside the document.
+   * - `foot` (0118): a document's panel in a strip at the foot of the page,
+   *   low and quiet (a count, a status), all of it the panel's own; it stays
+   *   open beside any other panel, and while the page is alone (setPageAlone).
+   *
+   * A place added later is a value added here; a client that does not know a
+   * panel's place draws it beside the document.
    */
   place?: PanelPlace;
   /** Its icon, drawn as a file's is: a workspace's panel with one is offered as a button where navigation is (Search's). */

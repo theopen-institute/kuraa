@@ -1,0 +1,17 @@
+{
+  "name": "@kuraa/composition",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/kernel": "workspace:*",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-view": "^1.42.9"
+  }
+}

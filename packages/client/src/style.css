@@ -866,3 +866,20 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 /* A folder in a component's view, in the main area (0096: a corkboard, an outline). */
 .folder-view-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .folder-view-pane > .folder-view { flex: 1; min-height: 0; overflow: auto; }
+
+/* The page alone (0118): the open document and nothing else; panels only at its foot. */
+/* Warnings stay (offline, not saved, not kept): they matter more than the quiet. */
+.app.page-alone .layout-area, .app.page-alone .layout-none, .app.page-alone .fallback-nav, .app.page-alone .side-panel,
+.app.page-alone .pane-right, .app.page-alone .feature-over { display: none !important; }
+.app.page-alone .panes { grid-template-columns: minmax(0, 1fr) !important; }
+.app.page-alone .document-menu-button { opacity: 0; transition: opacity 0.2s; }
+.app.page-alone .document-menu-button:hover, .app.page-alone .document-menu-button:focus-visible { opacity: 1; }
+/* At the page's foot (0118). */
+.foot-panels { display: flex; justify-content: center; gap: 16px; padding: 4px 12px 6px; color: var(--muted); font-size: 12px; }
+.app.page-alone .foot-panels { position: fixed; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, var(--surface) 40%); padding-top: 14px; }
+
+/* Composition mode (0118), its part of the editor: room below the end for typewriter scrolling; the other paragraphs faded. */
+.composition-typewriter { padding-bottom: 55vh !important; }
+.composition-fading > * { opacity: 0.3; transition: opacity 0.25s; }
+.composition-fading > .composition-current { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .composition-fading > * { transition: none; } }

@@ -12,9 +12,10 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import type { HostApi, PeersInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
 import { S } from './strings.js';
+import { time } from './labels.js';
 import ErrorBanner from './ErrorBanner.vue';
 import {
-  deviceState, kindWord, managesServers, mayBlock, mayManagePerson, memberDevices, memberName, members, memberState, nameOf, rolesFor,
+  deviceState, kindWord, managesServers, mayBlock, mayManagePerson, memberDevices, memberName, members, memberState, nameOf, rolesFor, serverHolds,
   type Device, type Info, type Member, type RoleChoice, type Who,
 } from './peopleView.js';
 
@@ -45,6 +46,8 @@ const i = computed<Info | null>(() => (info.value?.enabled ? info.value : null))
 const m = computed<Member | null>(() => (i.value ? members(i.value).find((x) => x.kind === props.who.kind && x.id === props.who.id) ?? null : null));
 const devices = computed<Device[]>(() => (i.value && m.value ? memberDevices(i.value, m.value) : []));
 const you = computed(() => !!m.value && (m.value.kind === 'person' ? m.value.p.you : m.value.s.you));
+/** A server's: whether it holds this device's latest work (0112). */
+const holding = computed(() => (m.value?.kind === 'server' && !you.value ? serverHolds(devices.value) : null));
 
 async function act(fn: () => Promise<unknown>) {
   busy.value = true;
@@ -140,6 +143,8 @@ async function rename(current: string) {
         <span class="member-state" data-testid="member-state">{{ memberState(i, m).text }}</span>
       </div>
       <p class="menu-facts">{{ m.kind === 'server' ? S.servers.about : m.p.role === 'owner' ? S.people.ownerTitle : m.p.role === 'admin' ? S.people.adminTitle : S.people.memberTitle }}</p>
+      <!-- Whether it holds your latest work (0112): a server that does not, for a while, is said to be behind. -->
+      <p v-if="m.kind === 'server' && holding" :class="['menu-facts', { warn: holding.state === 'behind' }]" data-testid="server-holding">{{ holding.state === 'holds' ? S.servers.holdsMine : S.servers.behind(time(new Date(holding.since).toISOString())) }}</p>
 
       <h4 class="menu-subhead">{{ m.kind === 'server' ? S.people.serverDevices : S.people.computersOf }}</h4>
       <ul class="menu-devices" data-testid="member-devices">

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
 import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { personKeys, startHost, type RunningHost } from '@kuraa/host';
-import { joinServer, listServer, readAddress, serverKey, startServer, type RunningServer } from '../src/index.js';
+import { joinServer, listServer, readAddress, serverKey, startServer, statusServer, type RunningServer } from '../src/index.js';
 
 const SLOW = Number(process.env.KURAA_TEST_SLOW ?? 1) || 1;
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -96,6 +96,23 @@ describe('a server, run from its folder (0099)', () => {
     const personLink = await a.host.peers!.inviteLink({ hours: 24, once: true });
     await expect(joinServer(personLink, data)).rejects.toThrow('A server joins by an invite link for a server');
     expect((await listServer(data)).length).toBe(1);
+  });
+
+  it('says how it stands: since when it runs, how it updates, each workspace’s members, latest work and size (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await statusServer(data)).workspaces.some((x) => x.id === w.id && x.in && x.online === 1), 20_000, 'the server in, its owner online');
+    const st = await statusServer(data);
+    expect(st).toMatchObject({ key: s.key, pid: process.pid, version: null, updates: 'off' });
+    expect(Date.now() - st.started).toBeLessThan(120_000);
+    expect(st.workspaces).toMatchObject([{ id: w.id, in: true, online: 1, devices: 1 }]);
+    expect(st.workspaces[0]!.bytes).toBeGreaterThan(0);
+    // Work brought in from a member, said when.
+    writeFileSync(join(a.host.dir, 'more.md'), '# More\n');
+    await a.host.serial(() => a.host.commitPaths(['more.md'], 'More'));
+    await until(async () => !!(await statusServer(data)).workspaces[0]!.lastBrought, 20_000, 'work brought in, on record');
   });
 
   it('deletes its copy of a workspace once its owner takes it out, as it holds every space (0112)', async () => {

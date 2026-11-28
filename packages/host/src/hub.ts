@@ -28,6 +28,7 @@
 // on its own (0103): one slow to open (its folder kept by a cloud service, say)
 // holds up only itself. The list says which are still opening, and a request to
 // one waits for it.
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { cp, lstat, mkdir, open as openFile, readdir, readFile, rename, rm } from 'node:fs/promises';
@@ -881,6 +882,8 @@ export class Hub {
   private async serverApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const route = `${req.method} ${url.pathname}`;
     if (route === 'GET /hub/api/server') return send(res, 200, { workspaces: await this.serverListing() });
+    // How it stands (kuraa-host server status, 0112): since when it runs, and each workspace's members, latest work and size.
+    if (route === 'GET /hub/api/server/status') return send(res, 200, { started: this.started, workspaces: await this.serverStatus() });
     if (route === 'POST /hub/api/workspaces') {
       const b = await readBody(req);
       if (b.kind !== 'join') throw new HttpError(403, 'A server holds workspaces shared with it: it makes none of its own');
@@ -914,6 +917,24 @@ export class Hub {
     return Promise.all(this.listing().workspaces.map(async (w) => {
       const out = await this.outOf(w.id);
       return { id: w.id, name: w.name, path: w.path, in: !out && (await this.isIn(w.id)), ...(out ? { out } : {}), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
+    }));
+  }
+
+  /** When this hub started (ms since 1970). */
+  private readonly started = Date.now();
+
+  /**
+   * Each workspace a server holds, with how it stands (0112): its listing, and
+   * the members' devices connected of those it knows, when work last came in
+   * from one, and how much room its folder takes.
+   */
+  private async serverStatus(): Promise<{ id: string; name: string; in: boolean; out?: string; online: number; devices: number; lastBrought: number | null; bytes: number | null }[]> {
+    const listed = await this.serverListing();
+    return Promise.all(listed.map(async (w) => {
+      const peers = this.hosts.get(w.id)?.host.peers;
+      const status = peers ? await peers.status().catch(() => null) : null;
+      const members = (status?.devices ?? []).filter((d) => !d.server && !d.related);
+      return { id: w.id, name: w.name, in: w.in, ...(w.out ? { out: w.out } : {}), online: members.filter((d) => d.online).length, devices: members.length, lastBrought: peers?.lastBrought ?? null, bytes: await folderBytes(w.path) };
     }));
   }
 
@@ -1130,6 +1151,16 @@ export class Hub {
     await Promise.all([...this.hosts.entries()].map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
     this.hosts.clear();
   }
+}
+
+/** How much room a folder takes on the disk, in bytes (du); null if it cannot be said. */
+async function folderBytes(dir: string): Promise<number | null> {
+  return new Promise((resolveBytes) => {
+    execFile('du', ['-sk', dir], { timeout: 30_000 }, (err, out) => {
+      const kb = err ? NaN : Number(String(out).split(/\s/)[0]);
+      resolveBytes(Number.isFinite(kb) ? kb * 1024 : null);
+    });
+  });
 }
 
 export interface RunningHub {

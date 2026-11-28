@@ -22,7 +22,7 @@
 // server key [--data <folder>]         its key: what workspaces know it by
 import { parseArgs } from 'node:util';
 import { lastResort, onNewerRelease, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
-import { defaultServerData, joinServer, listServer, removeFromServer, serverKey, startServer, PEER_PORT, SERVER_PORT } from './index.js';
+import { defaultServerData, joinServer, listServer, removeFromServer, serverKey, startServer, statusServer, PEER_PORT, SERVER_PORT } from './index.js';
 
 export interface ServerCliOptions {
   /** How it is called, in what it says: `kuraa-server` (default), or `kuraa-host server` released. */
@@ -108,7 +108,22 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
       console.log((await serverKey(data)).publicKey.toString('hex'));
       process.exit(0);
     }
-    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, remove <id>, key`, 2);
+    if (command === 'status') {
+      // How it stands (0112): what it runs, since when, how it updates; each workspace's members, latest work and size.
+      const st = await statusServer(data);
+      const ago = (ms: number) => { const m = Math.round((Date.now() - ms) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+      const size = (b: number | null) => (b === null ? '?' : b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${(b / 1024 ** 3).toFixed(1)} GB`);
+      console.log(`kuraa ${st.version ?? '(from the repository)'}, process ${st.pid}, running since ${new Date(st.started).toISOString()} (${ago(st.started)})`);
+      console.log(`updates: ${st.updates === 'off' ? 'not updating itself (kuraa-host update)' : st.updates === 'all' ? 'updating itself, a protocol change at once' : 'updating itself, a protocol change once a device runs it'}`);
+      console.log(`key: ${st.key}`);
+      if (!st.workspaces.length) console.log(`no workspaces yet: ${name} join <invite link>`);
+      for (const w of st.workspaces) {
+        const state = w.out ? `${w.out === 'blocked' ? 'blocked' : 'taken out'} by its owner: deleting its copy` : w.in ? 'in' : 'not taken in yet';
+        console.log(`${w.id}  ${w.name}  ${state}; members' devices online ${w.online} of ${w.devices}; work last brought in ${w.lastBrought ? ago(w.lastBrought) : 'not since it started'}; ${size(w.bytes)}`);
+      }
+      process.exit(0);
+    }
+    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, status, remove <id>, key`, 2);
   } catch (e) {
     fail((e as Error).message);
   }
@@ -156,6 +171,8 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     bootstrap: values.bootstrap,
     relays: values.relay,
     log: say,
+    version: o.released?.build.version ?? null,
+    updates: !(o.autoUpdate || values['auto-update'] || values['auto-update-all']) || !o.released ? 'off' : o.autoUpdateAll || values['auto-update-all'] ? 'all' : 'compatible',
   });
   starting = started;
   server = await started.catch((e: Error) => fail(e.message));

@@ -14,7 +14,7 @@ import { askText } from './ask.js';
 import { time } from './labels.js';
 import { S } from './strings.js';
 import ErrorBanner from './ErrorBanner.vue';
-import { deviceState, isAdmin, kindWord, kuraaOf, label, managesServers, memberDevices, memberName, members, memberState, others, type Info, type Member, type Who } from './peopleView.js';
+import { deviceState, isAdmin, kindWord, kuraaOf, label, managesServers, memberDevices, memberName, members, memberState, others, serverHolds, type Info, type Member, type Who } from './peopleView.js';
 
 const props = defineProps<{ api: HostApi }>();
 const emit = defineEmits<{ invite: []; open: [who: Who] }>();
@@ -76,6 +76,11 @@ async function rename(current: string) {
 }
 
 const testid = (m: Member) => `${m.kind}:${memberName(m)}`;
+/** A server that has not held this device's work for long (0112): flagged in the list. */
+const behindLong = (i: Info, m: Member) => {
+  const h = serverHolds(memberDevices(i, m));
+  return h?.state === 'behind' && h.long;
+};
 /** How long no other device may be connected before the section says this device may have been removed. */
 const NO_CONTACT_MS = 30 * 60_000;
 /** Since when no device has connected, as words, once that is long enough to mention (and the network is not the reason). */
@@ -105,6 +110,7 @@ const noContact = (i: Info) =>
           <span class="device-who">{{ memberName(m) }}<template v-if="m.kind === 'person' && m.p.you">{{ S.people.you }}</template></span>
           <span class="device-tag" :data-testid="`role:${memberName(m)}`">{{ kindWord(m) }}</span>
           <span v-if="kuraaOf(memberDevices(info, m))" class="device-tag warn" :title="kuraaOf(memberDevices(info, m)) === 'newer' ? S.devices.newerTitle : S.devices.olderTitle">{{ kuraaOf(memberDevices(info, m)) === 'newer' ? S.devices.newer : S.devices.older }}</span>
+          <span v-if="m.kind === 'server' && behindLong(info, m)" class="device-tag warn" :title="S.servers.behindTitle" :data-testid="`behind:${memberName(m)}`">{{ S.servers.behindTag }}</span>
           <span class="device-state" :data-testid="`state-of:${memberName(m)}`">{{ memberState(info, m).text }}</span>
           <span class="member-go" aria-hidden="true">›</span>
         </button>

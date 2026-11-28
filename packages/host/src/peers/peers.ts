@@ -32,6 +32,8 @@ import type { KeyPair } from '../keys.js';
 
 /** How soon this device tells the others its outputs changed, in ms: sooner than branches, which come in bursts. */
 const OUTPUTS_ANNOUNCE_MS = 20;
+/** How long a server may not hold this device's work before it is no longer relied on to pass work on (0112). */
+const SERVER_BEHIND_MS = 10 * 60_000;
 /** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
@@ -103,6 +105,13 @@ export interface DeviceInfo {
    * one is to be updated) or older (it is). The two do not sync until then.
    */
   kuraa: 'newer' | 'older' | null;
+  /**
+   * A server's, connected (0112): whether its branch holds this device's latest
+   * work; and if not, since when it has not (ms since 1970). A server that keeps
+   * not taking it in is no longer relied on (syncsThroughServer).
+   */
+  holdsMine?: boolean;
+  behindSince?: number | null;
   /** How it is connected here (0053): on the local network, over TCP to a server, through another device, or over the internet (the DHT, directly or by a relay). */
   via: Via | null;
   /** When it was last connected here (ms since 1970), if ever. */
@@ -354,7 +363,14 @@ export class Peers {
     this.stateDir = stateDir;
     // Who may change what, where work comes in (0066).
     host.gate = (x, y, space, o) => this.gate(x, y, space ?? null, o?.ours ?? false);
+    // Whether each server connected holds this device's work (0112), looked at each minute, window open or not.
+    this.holdingTimer = setInterval(() => {
+      for (const l of this.node.links.values()) if (l.accepted && !l.closed && this.node.isServerDevice(l.key)) void this.serverHolding(l).catch(() => undefined);
+    }, 60_000);
+    this.holdingTimer.unref();
   }
+
+  private readonly holdingTimer: NodeJS.Timeout;
 
   private readonly stateDir: string;
 
@@ -565,9 +581,36 @@ export class Peers {
   private syncsThroughServer(link: PeerLink): boolean {
     const n = this.node;
     if (n.isServerDevice(n.myKey) || n.isServerDevice(link.key) || n.via(link.key) !== 'tunnel') return false;
-    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.isServerDevice(l.key)).map((l) => l.key));
+    // Not a server that has kept not taking this device's work in (0112): it may be broken, or withholding it.
+    const now = Date.now();
+    const relied = (key: string) => {
+      const since = this.behind.get(key);
+      return since === undefined || now - since < SERVER_BEHIND_MS;
+    };
+    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.isServerDevice(l.key) && relied(l.key)).map((l) => l.key));
     // The member is connected to one of them, as that server says (it told this device whom it is connected to).
     return [...n.links.values()].some((l) => servers.has(l.key) && l.present.has(link.key));
+  }
+
+  /** When work from another device was last brought in here (0112: a server's status says it); null, not since starting. */
+  lastBrought: number | null = null;
+
+  /** Since when each server connected has not held this device's latest work (0112), by its device key. */
+  private readonly behind = new Map<string, number>();
+
+  /**
+   * Whether a server's branch holds this device's latest work (0112), as it last
+   * said its branches, and since when it has not; kept for syncsThroughServer.
+   */
+  private async serverHolding(link: PeerLink): Promise<{ holdsMine: boolean; behindSince: number | null }> {
+    const git = this.host.git;
+    const branch = await git.branch().catch(() => null);
+    const mine = branch ? (await git.run(['rev-parse', '-q', '--verify', `refs/heads/${branch}^{commit}`], { allowFail: true })).stdout.trim() : '';
+    const theirs = branch ? link.heads?.[branch] : undefined;
+    const holds = !mine || (!!theirs && (theirs === mine || (await git.run(['merge-base', '--is-ancestor', mine, theirs], { allowFail: true })).code === 0));
+    if (holds) this.behind.delete(link.key);
+    else if (!this.behind.has(link.key)) this.behind.set(link.key, Date.now());
+    return { holdsMine: holds, behindSince: this.behind.get(link.key) ?? null };
   }
 
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
@@ -741,7 +784,10 @@ export class Peers {
         const outcome = await this.host.bringSpace(id, branch, oid).finally(() => void (this.bringing = null));
         this.waitingForPolicy.delete(key);
         this.notBrought.delete(key);
-        if (outcome.kind !== 'same') this.host.log(`peers: brought in a space's ${branch} from ${link.remote}${describeOutcome(outcome)}`);
+        if (outcome.kind !== 'same') {
+          this.lastBrought = Date.now();
+          this.host.log(`peers: brought in a space's ${branch} from ${link.remote}${describeOutcome(outcome)}`);
+        }
         return false;
       } catch (e) {
         if (!(e instanceof WaitingForPolicy)) throw e;
@@ -791,7 +837,10 @@ export class Peers {
         return true;
       }
       this.waitingForPolicy.delete(`${from}/${branch}`);
-      if (branch === current && outcome.kind !== 'same') this.host.log(`peers: brought in ${branch} from ${from}${describeOutcome(outcome)}`);
+      if (branch === current && outcome.kind !== 'same') {
+        this.lastBrought = Date.now();
+        this.host.log(`peers: brought in ${branch} from ${from}${describeOutcome(outcome)}`);
+      }
       return false;
     });
   }
@@ -1382,6 +1431,7 @@ export class Peers {
         kuraa: versionOf(this.node.versions.get(m.key)),
         via: this.node.via(m.key),
         lastSeen: this.node.lastSeen(m.key),
+        ...(link?.accepted && this.node.isServerDevice(m.key) ? await this.serverHolding(link) : {}),
       });
     }
     const connected = devices.some((d) => d.online);
@@ -1399,6 +1449,7 @@ export class Peers {
   async close(): Promise<void> {
     this.closed = true;
     clearTimeout(this.announceTimer);
+    clearInterval(this.holdingTimer);
     for (const t of this.retries.values()) clearTimeout(t);
     this.retries.clear();
     this.stopRefs?.();

@@ -149,6 +149,8 @@ describe('a server in a workspace (0099)', () => {
     await stop(b);
     await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-ada.md', content: '# From Ada\n' }) });
     await until(() => read(dirS, 'from-ada.md') === '# From Ada\n', 20_000, 'Ada’s file on the server');
+    // Ada's device sees the server holds her latest work (0112).
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.holdsMine === true && d.behindSince === null), 20_000, 'the server holding Ada’s latest work, as her device sees it');
     // Ada goes away; Bo comes back, and has it from the server alone.
     await stop(a);
     b = await start(dirB, bo, boKey);

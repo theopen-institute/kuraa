@@ -57,6 +57,9 @@ export interface ServerOptions {
   bootstrap?: PeerOptions['bootstrap'];
   relays?: string[];
   log?: (m: string) => void;
+  /** The release it runs, and how it updates itself: said in server.json, for `server status` (0112). */
+  version?: string | null;
+  updates?: 'off' | 'compatible' | 'all';
 }
 
 export interface RunningServer {
@@ -69,7 +72,15 @@ export interface RunningServer {
 }
 
 /** How a running server is reached, as it wrote it in its folder. */
-export interface ServerAddress { url: string; token: string; key: string; pid: number }
+export interface ServerAddress {
+  url: string;
+  token: string;
+  key: string;
+  pid: number;
+  /** The release it runs (none: from the repository), and how it updates itself (0112). */
+  version?: string | null;
+  updates?: 'off' | 'compatible' | 'all';
+}
 
 /** A server's signing key: made the first time, in its folder, and kept (0099: one for all its workspaces). */
 export function serverKey(data = defaultServerData()): Promise<KeyPair> {
@@ -126,7 +137,7 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     await unlock();
     throw e;
   }
-  const address: ServerAddress = { url: hub.url, token: hub.token, key, pid: process.pid };
+  const address: ServerAddress = { url: hub.url, token: hub.token, key, pid: process.pid, version: o.version ?? null, updates: o.updates ?? 'off' };
   const file = join(data, 'server.json');
   // Readable only by whoever runs it: it holds the access code. Written whole (a command reading it meanwhile finds
   // the old or the new), and as soon as the API listens. Not written (a full disk): the server goes on, and says so.
@@ -316,6 +327,22 @@ const listing = async (a: ServerAddress) => (await ask<{ workspaces: ServerWorks
 export async function removeFromServer(id: string, data = defaultServerData()): Promise<void> {
   const a = await readAddress(data, { waitMs: STARTING_MS });
   await ask(a, `/hub/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** How the running server stands (0112): its release, since when it runs, and each workspace's members, latest work and size. */
+export interface ServerStatus {
+  key: string;
+  pid: number;
+  version: string | null;
+  updates: 'off' | 'compatible' | 'all';
+  started: number;
+  workspaces: { id: string; name: string; in: boolean; out?: string; online: number; devices: number; lastBrought: number | null; bytes: number | null }[];
+}
+
+export async function statusServer(data = defaultServerData()): Promise<ServerStatus> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  const s = await ask<{ started: number; workspaces: ServerStatus['workspaces'] }>(a, '/hub/api/server/status');
+  return { key: a.key, pid: a.pid, version: a.version ?? null, updates: a.updates ?? 'off', started: s.started, workspaces: s.workspaces };
 }
 
 /** The workspaces the running server holds. */

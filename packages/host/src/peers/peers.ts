@@ -68,6 +68,8 @@ export function rootedOps(ops: { id: string; parents: string[] }[]): Set<string>
 
 /** How long work signed by someone not in the workspace waits for their join to come here (0115). */
 const PERSON_WAIT_MS = 10 * 60_000;
+/** How long a server has to take in a member's latest, as they said it, before it is fetched from them directly (0115). */
+const SERVER_CATCHUP_MS = 30_000;
 /** Why someone may not change who reads a space (0110). */
 const SPACE_CHANGERS = 'Only whoever chose who reads it, or the workspace’s owner, changes that';
 
@@ -692,9 +694,27 @@ export class Peers {
   /** Fetch from a device and bring its work in; one at a time per device, again if asked meanwhile. */
   syncFrom(link: PeerLink): Promise<void> {
     if (this.closed) return Promise.resolve();
-    // Through a server that holds the member's latest (0115): nothing to fetch from the member; else fetched after all.
-    if (this.syncsThroughServer(link)) return this.serverHoldsTheirs(link).then((held) => (held ? undefined : this.syncNow(link)));
+    // Through a server (0115): nothing to fetch from the member while it holds their latest; one that has not taken it
+    // in a while after they said it (it fetches too), fetched from the member after all.
+    if (this.syncsThroughServer(link)) return this.serverHoldsTheirs(link).then((held) => (held ? undefined : this.unlessServerCatchesUp(link)));
     return this.syncNow(link);
+  }
+
+  /** Members' work a server lacked when they said it, looked at again once it has had time to take it in (0115). */
+  private readonly catchingUp = new Map<string, NodeJS.Timeout>();
+
+  private unlessServerCatchesUp(link: PeerLink): void {
+    if (this.catchingUp.has(link.key)) return;
+    const t = setTimeout(() => {
+      this.catchingUp.delete(link.key);
+      if (this.closed || link.closed) return;
+      const through = this.syncsThroughServer(link);
+      void (through ? this.serverHoldsTheirs(link) : Promise.resolve(false))
+        .then((held) => (held ? undefined : this.syncNow(link)))
+        .catch(() => undefined);
+    }, SERVER_CATCHUP_MS);
+    t.unref();
+    this.catchingUp.set(link.key, t);
   }
 
   private syncNow(link: PeerLink): Promise<void> {
@@ -1537,6 +1557,7 @@ export class Peers {
     this.closed = true;
     clearTimeout(this.announceTimer);
     clearInterval(this.holdingTimer);
+    for (const t of this.catchingUp.values()) clearTimeout(t);
     for (const t of this.retries.values()) clearTimeout(t);
     this.retries.clear();
     this.stopRefs?.();

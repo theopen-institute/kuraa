@@ -161,7 +161,8 @@ out of files. Now:
 - **Handing over the workspace** names its servers, which go with the role, and says who then reads
   what.
 - A member relies on a server to pass a member's work on only where the server's branch holds that
-  member's latest; else it fetches from the member directly.
+  member's latest; one that has not taken it in 30 seconds after the member said it, it fetches from
+  the member directly.
 - Peers' names are cleaned wherever they are logged, of characters that turn text around too.
 - `server status` works out folder sizes two at a time.
 

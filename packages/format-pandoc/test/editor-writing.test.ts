@@ -7,7 +7,7 @@ import type { EditorContext } from '@kuraa/editor-kit';
 import { pandocMarkdown as md } from '../src/index.js';
 import {
   addColumn, addRow, Bibliography, cellAt, citationLabel, conflictPositions, deleteColumn, deleteRow, goToCell,
-  headerCells, insertTable, nextConflict, versionDateLabel, wordAt, workspacePath,
+  headerCells, insertTable, nextConflict, spanAt, versionDateLabel, wordAt, workspacePath,
 } from '../src/editor/index.js';
 
 function stateAt(src: string, text: string, offset = 0): EditorState {
@@ -66,6 +66,33 @@ describe('tables', () => {
     s = run(stateAt(out(s), 'b'), deleteColumn);
     expect(out(s)).toBe('| a |  |\n|:---|---|\n| 1 |  |\n');
     expect(md.parse(out(s)).doc.eq(s.doc)).toBe(true);
+  });
+
+  /** A selection from `from` (its start) to `to` (its end) in the parsed source. */
+  const between = (src: string, from: string, to: string) => {
+    const a = stateAt(src, from);
+    const b = stateAt(src, to, to.length);
+    return a.apply(a.tr.setSelection(TextSelection.create(a.doc, a.selection.from, b.selection.from)));
+  };
+  const four = '| a | b | c |\n|:--|---|--:|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n| 7 | 8 | 9 |\n';
+
+  it('deletes every row a selection spans, the cursor in the row after them', () => {
+    const s = run(between(four, '2', '4'), deleteRow);
+    expect(out(s)).toBe('| a | b | c |\n|:---|---|---:|\n| 7 | 8 | 9 |\n');
+    expect(cellAt(s)).toMatchObject({ row: 1 });
+    expect(spanAt(between(four, '2', '8'))).toMatchObject({ rows: [1, 3], cols: [1, 1] });
+  });
+
+  it('deletes the columns a selection spans in one row, their alignments and widths with them', () => {
+    expect(out(run(between(four, 'a', 'b'), deleteColumn))).toBe('| c |\n|---:|\n| 3 |\n| 6 |\n| 9 |\n');
+    const grid = '+---+---+---+\n| a | b | c |\n+===+===+===+\n| 1 | 2 | 3 |\n+---+---+---+\n';
+    const s = run(between(grid, 'b', 'c'), deleteColumn);
+    expect(s.doc.firstChild!.attrs.widths.split(' ')).toHaveLength(1);
+  });
+
+  it('deletes the table when a selection spans all its rows, or all its columns', () => {
+    expect(out(run(between(four, 'a', '9'), deleteRow))).toBe('');
+    expect(out(run(between(four, '4', '6'), deleteColumn))).toBe('');
   });
 
   it('reads a typed header line', () => {

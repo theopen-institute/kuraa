@@ -32,9 +32,13 @@ const gh = /^github:([\w.-]+\/[\w.-]+)$/.exec(where);
 if (where && !gh) throw new Error(`KURAA_UPDATES should be github:<owner>/<repo> for the server, not "${where}"`);
 const key = process.env.SERVER_SIGNING_KEY ? createPrivateKey(process.env.SERVER_SIGNING_KEY) : null;
 if (key && key.asymmetricKeyType !== 'ed25519') throw new Error('SERVER_SIGNING_KEY should be an Ed25519 private key');
+// Or only its public key (SERVER_PUBLIC_KEY, PEM), the archive to be signed apart (0112: the release workflow signs it in
+// a job of its own, where no dependency's code runs beside the key).
+const given = process.env.SERVER_PUBLIC_KEY ? createPublicKey(process.env.SERVER_PUBLIC_KEY) : null;
+if (given && given.asymmetricKeyType !== 'ed25519') throw new Error('SERVER_PUBLIC_KEY should be an Ed25519 public key');
 // A release servers update to (KURAA_UPDATES) is signed, or not made: unsigned, a server would take any archive matching GitHub's checksum (0099).
-if (gh && !key) throw new Error('KURAA_UPDATES names where servers update from, so SERVER_SIGNING_KEY must sign the release');
-const publicKey = key ? createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() : null;
+if (gh && !key && !given) throw new Error('KURAA_UPDATES names where servers update from, so SERVER_SIGNING_KEY must sign the release (or SERVER_PUBLIC_KEY name the key that will)');
+const publicKey = key ? createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() : given ? given.export({ type: 'spki', format: 'pem' }).toString() : null;
 
 const web = join(ROOT, 'apps/web/dist');
 if (!existsSync(join(web, 'index.html'))) throw new Error('Build the web client first: pnpm web:build');
@@ -111,4 +115,4 @@ const archive = join(out, `${name}.tar.gz`);
 execFileSync('tar', ['-czf', archive, '-C', out, name]);
 const bytes = readFileSync(archive);
 if (key) writeFileSync(`${archive}.sig`, `${sign(null, bytes, key).toString('base64')}\n`);
-process.stdout.write(`server: ${archive}${key ? ' (signed)' : ' (not signed: no SERVER_SIGNING_KEY)'}${gh ? `, updating from ${gh[1]}` : ', not updating itself (no KURAA_UPDATES)'}\n`);
+process.stdout.write(`server: ${archive}${key ? ' (signed)' : given ? ' (not signed yet: to be signed with the key SERVER_PUBLIC_KEY names)' : ' (not signed: no SERVER_SIGNING_KEY)'}${gh ? `, updating from ${gh[1]}` : ', not updating itself (no KURAA_UPDATES)'}\n`);

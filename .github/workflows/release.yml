@@ -151,14 +151,34 @@ jobs:
         if: matrix.platform == 'linux'
         run: pnpm --filter @kuraa/desktop release:linux
 
-  server:
+  # The server's release key is used in jobs of its own (0112), with no checkout and nothing installed: no dependency's
+  # code runs where the key is. One says the public key, which the build (no secret) puts in the server; another
+  # signs the archive the build made.
+  server-key:
     needs: [tag, draft]
     environment: release
+    runs-on: ubuntu-latest
+    outputs:
+      public: ${{ steps.public.outputs.pem }}
+    steps:
+      - name: The release key's public half
+        id: public
+        env:
+          SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}
+        run: |
+          node -e '
+            const { createPrivateKey, createPublicKey } = require("node:crypto");
+            const pem = createPublicKey(createPrivateKey(process.env.SERVER_SIGNING_KEY)).export({ type: "spki", format: "pem" }).toString();
+            require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "pem<<EOF\n" + pem + "EOF\n");
+          '
+
+  server:
+    needs: [tag, draft, server-key]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,18 +190,50 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm web:build
-      - name: Build the server, signed with the release key
+      - name: Build the server, with the release key's public half in it (signed in the next job)
         env:
           KURAA_UPDATES: github:${{ github.repository }}
-          SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}
+          SERVER_PUBLIC_KEY: ${{ needs.server-key.outputs.public }}
         run: node scripts/build-server.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: server
+          path: dist/server/kuraa-server-*.tar.gz
+          if-no-files-found: error
+
+  server-sign:
+    needs: [tag, server]
+    environment: release
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: server
+          path: server
+      - name: Sign the server with the release key
+        env:
+          SERVER_SIGNING_KEY: ${{ secrets.SERVER_SIGNING_KEY }}
+        run: |
+          node -e '
+            const { createPrivateKey, sign } = require("node:crypto");
+            const fs = require("node:fs");
+            const key = createPrivateKey(process.env.SERVER_SIGNING_KEY);
+            const files = fs.readdirSync("server").filter((f) => f.endsWith(".tar.gz"));
+            if (files.length !== 1) throw new Error("expected one archive, found " + files.length);
+            const file = "server/" + files[0];
+            fs.writeFileSync(file + ".sig", sign(null, fs.readFileSync(file), key).toString("base64") + "\n");
+          '
       - name: Add it to the draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/server/kuraa-server-*.tar.gz*
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" server/kuraa-server-*.tar.gz*
 
   publish:
-    needs: [tag, build, server]
+    needs: [tag, build, server-sign]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}

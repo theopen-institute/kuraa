@@ -15,7 +15,8 @@
 //   log        a line from the shell, for the log
 //   quit       the hub stopped, and this process gone
 //
-// Unasked: `newer` (a device runs a newer kuraa: the shell looks for an update).
+// Unasked: `newer` (a device runs a newer kuraa: the shell looks for an update); `saved`
+// (quitting, every workspace's edits are written and committed: what is left may be cut short, 0131).
 // Its stdin closing (the shell gone) stops it as `quit` does.
 //
 // It takes the Electron app's flags (main.ts), which the shell passes on as it
@@ -29,7 +30,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { format, parseArgs } from 'node:util';
-import { defaultWorkspacesFolder, gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, useGitFolder, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { defaultWorkspacesFolder, gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, useGitFolder, type CloseOptions, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 
@@ -171,17 +172,18 @@ async function ensureHub(): Promise<RunningHub> {
   return hubStarting;
 }
 
-async function stopHub(): Promise<void> {
+async function stopHub(o: CloseOptions = {}): Promise<void> {
   // One still starting is stopped once it has.
   const h = hub ?? (await hubStarting?.catch(() => null)) ?? null;
   hub = null;
-  if (h) await h.close(); // flushes and commits open rooms
+  if (h) await h.close(o); // flushes and commits open rooms
+  else o.saved?.();
 }
 
 let quitting: Promise<never> | null = null;
-/** Stop the hub (writing and committing what is pending), and go. */
+/** Stop the hub (writing and committing what is pending), and go; the shell told once everything is saved (0131). */
 function quit(): Promise<never> {
-  quitting ??= stopHub()
+  quitting ??= stopHub({ saved: () => tell({ event: 'saved' }) })
     .catch((e: Error) => console.error(`[desktop] stopping the hub: ${e.message}`))
     .then(() => process.exit(0));
   return quitting;

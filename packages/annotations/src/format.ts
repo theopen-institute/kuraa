@@ -244,6 +244,21 @@ export function kindOf(item: Item): 'comment' | 'reply' | 'coding' | 'other' {
   return item.motivation === 'commenting' ? 'comment' : item.motivation === 'replying' ? 'reply' : item.motivation === 'classifying' ? 'coding' : 'other';
 }
 
+/**
+ * The class an inline comment's target carries (docs/decisions/0133-inline-comments.md): a comment whose
+ * thread is shown in the text, after its passage's block, rather than from a 💬 in the margin. A comment
+ * still (`commenting`): the W3C model's `styleClass`, which says how its target is to be shown, marks it,
+ * so other tools, and versions that do not know it, read it as the comment it is, replies and all.
+ */
+export const INLINE_CLASS = 'inline-comment';
+
+/** Whether a comment is an inline one: its thread shown in the text. */
+export function isInline(item: Item): boolean {
+  if (item.motivation !== 'commenting' || !isObject(item.target)) return false;
+  const c = item.target.styleClass;
+  return c === INLINE_CLASS || (Array.isArray(c) && c.includes(INLINE_CLASS));
+}
+
 /** The code a coding names (its body's source, purpose classifying); null if it names none. */
 export function codeOf(item: Item): string | null {
   const bodies = Array.isArray(item.body) ? item.body : [item.body];
@@ -262,6 +277,12 @@ export function textOf(item: Item): string {
 export function creatorOf(item: Item): string {
   const c = item.creator;
   return isObject(c) && typeof c.name === 'string' ? c.name : '';
+}
+
+/** Its maker's colour as it was when they made it (their cursor's, 0129), as #rrggbb; null where none was kept. */
+export function creatorColourOf(item: Item): string | null {
+  const c = item.creator;
+  return isObject(c) && typeof c.color === 'string' && /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : null;
 }
 
 /** What one change to a person's file did, in a few words: "2 comments added, 1 reply removed". */

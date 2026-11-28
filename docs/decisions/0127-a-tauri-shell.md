@@ -29,8 +29,8 @@ want full functionality before I merge to main."*
 - **The shell** (`src-tauri/`, Rust): the window, the Electron app's menus (Settings on ⌥⌘,, Open Folder
   on ⌘O, Reload, the developer tools on ⌥⌘J, zoom, Markdown and Shortcuts on ⌘/, Show Log File, Check for
   Updates…), the system's folder and question dialogs, the launcher, joining a host, saving downloads,
-  updating, quitting. The app's own pages (starting, launcher, updates) are the Electron app's
-  `static/`.
+  updating, quitting. The app's own pages (starting, launcher, closing, updates) are the Electron
+  app's `static/`.
 - **The page and the shell.** The page is the web client served by the hub, at the hub's own address,
   as a browser has it (0047). The ShellBridge (0009) is `window.kuraa` again, put in each page before its
   own scripts (`src/bridge.ts`). Tauri has no synchronous calls, so the connection the client reads at
@@ -56,6 +56,10 @@ want full functionality before I merge to main."*
   offer no suggestions.
 - **Saving.** A rendered file handed over by the page (`<a download>`) is saved where the person says,
   with the system's save dialog, as the Electron app (Chromium) asked. WKWebView would otherwise drop it.
+- **Quitting says so** ([0131](0131-closing-says-so.md)), as the Electron app does: Quit, closing the
+  window and Restart now show the Electron app's closing page while the hub stops (the window stays
+  until the app has quit); the hub tells the shell once every workspace is saved (`saved`), and the page
+  then offers Quit Now, which stops waiting for what is still being sent.
 - **Updating itself** with Tauri's updater, as 0051 had it: looked for a minute after starting, every
   four hours, when the menu asks, and when a device runs a newer kuraa (the hub says so); downloaded in
   the background, checked against the key built in, put in place when the app quits or at once

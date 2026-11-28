@@ -155,6 +155,21 @@ pub fn updates_size(app: AppHandle, webview: Webview, height: f64) -> Result<(),
     Ok(())
 }
 
+/// The closing page asks whether everything is saved yet (it may have been before the page listened).
+#[tauri::command]
+pub fn closing_saved(app: AppHandle, webview: Webview) -> Result<bool, String> {
+    only(&app, &webview, &[Page::App])?;
+    Ok(app.state::<Shared>().saved.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+/// Quit Now on the closing page: the app stops waiting (only once everything is saved).
+#[tauri::command]
+pub fn quit_now(app: AppHandle, webview: Webview) -> Result<(), String> {
+    only(&app, &webview, &[Page::App])?;
+    app.state::<Shared>().quit_now();
+    Ok(())
+}
+
 /// What a test asked the page to work out (testing.rs), answered.
 #[tauri::command]
 pub fn test_result(webview: Webview, id: u64, ok: Option<Value>, error: Option<String>) -> Result<(), String> {

@@ -12,8 +12,9 @@
 //
 // The window shows only the app's own pages, its hub's, and a joined host's:
 // other web addresses open in the default browser, and it opens no other windows.
-// Quitting asks the hub to stop, which writes and commits pending edits, and
-// waits for it; then puts a downloaded update in place.
+// Quitting (or closing the window) shows the closing page while the hub stops,
+// writing and committing pending edits, then offers Quit Now (0131); then puts a
+// downloaded update in place.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
@@ -59,7 +60,10 @@ fn start_host(app: &AppHandle) -> Result<(), String> {
     let on_event = {
         let app = app.clone();
         move |event: &str| {
-            if event == "newer" {
+            if event == "saved" {
+                let shell = app.state::<Shared>().inner().clone();
+                shell.closing_saved(&app);
+            } else if event == "newer" {
                 // A device of a workspace runs a newer kuraa: look for an update now.
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -182,6 +186,8 @@ fn main() {
             bridge::updates_ready,
             bridge::updates_choose,
             bridge::updates_size,
+            bridge::closing_saved,
+            bridge::quit_now,
             bridge::test_result,
         ])
         .menu(menu::build)
@@ -251,20 +257,35 @@ fn main() {
     app.run(|app, event| match event {
         // Quitting (the last window closed, Quit, the system logging out): the hub writes and commits what is
         // pending first, the windows gone meanwhile.
+        // Asked again meanwhile (Quit, the window closed): as Quit Now, once everything is saved; never sooner (0131).
         RunEvent::ExitRequested { api, code, .. } => {
             let shell = app.state::<Shared>().inner().clone();
             if shell.stopped.load(Ordering::SeqCst) {
                 return;
             }
             api.prevent_exit();
-            for w in app.webview_windows().values() {
-                let _ = w.hide();
+            if shell.quitting.load(Ordering::SeqCst) {
+                return shell.quit_now();
+            }
+            // The other windows (Check for Updates…) go; the main one stays, saying so, until the app has quit.
+            for (label, w) in app.webview_windows() {
+                if label != "main" {
+                    let _ = w.close();
+                }
             }
             let app = app.clone();
             std::thread::spawn(move || {
-                shell.stop_host();
+                shell.close_down(&app, false);
                 app.exit(code.unwrap_or(0));
             });
+        }
+        // Closing the window quits the app, the window staying, saying so, while the host stops (0131).
+        RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
+            let shell = app.state::<Shared>().inner().clone();
+            if !shell.stopped.load(Ordering::SeqCst) {
+                api.prevent_close();
+                app.exit(0);
+            }
         }
         RunEvent::Exit => {
             let shell = app.state::<Shared>().inner().clone();

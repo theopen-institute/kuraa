@@ -41,7 +41,7 @@ import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGitFolder, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
+import { gitIdentity, inspectFolder, lastResort, onNewerRelease, onNewerVersion, setKuraaVersion, SettingsStore, startHub, defaultWorkspacesFolder, useGitFolder, type CloseOptions, type HostTimings, type RunningHub, type Settings } from '@kuraa/host';
 import { standardRunComponents } from '@kuraa/run-components';
 import { standardFeatures } from '@kuraa/features';
 import type { ShellConfig } from '@kuraa/client';
@@ -54,8 +54,10 @@ const WEB_INDEX = join(__dirname, 'web', 'index.html');
 const LAUNCHER = join(__dirname, 'static', 'launcher.html');
 /** Shown at once while the hub starts, so the window is never blank. */
 const STARTING = join(__dirname, 'static', 'starting.html');
+/** Shown while the app quits and its hub stops: every workspace saved, then what is still to go sent (0131). */
+const CLOSING = join(__dirname, 'static', 'closing.html');
 /** The only pages the windows may show. */
-const OWN_PAGES = [WEB_INDEX, LAUNCHER, STARTING, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
+const OWN_PAGES = [WEB_INDEX, LAUNCHER, STARTING, CLOSING, UPDATES_PAGE].map((p) => pathToFileURL(p).href);
 const isOwnPage = (url: string) => OWN_PAGES.includes(url.split(/[?#]/)[0]!);
 
 const { values: flags } = parseArgs({
@@ -143,6 +145,8 @@ let hub: RunningHub | null = null;
 /** The hub while it starts: anything asking for it meanwhile waits for this one, never starting another. */
 let hubStarting: Promise<RunningHub> | null = null;
 let quitting = false;
+/** The hub stopped as the app quits (or Quit Now): it may go. */
+let closedDown = false;
 let updates: Updates | null = null;
 /** What the page gets from kuraa:config; null while the launcher shows. */
 let config: ShellConfig | null = null;
@@ -156,11 +160,40 @@ function testTimings(): Partial<HostTimings> {
   }
 }
 
-async function stopHub(): Promise<void> {
+async function stopHub(o?: CloseOptions): Promise<void> {
   // One still starting is stopped once it has.
   const h = hub ?? (await hubStarting?.catch(() => null)) ?? null;
   hub = null;
-  if (h) await h.close(); // flushes and commits open rooms
+  if (h) await h.close(o); // flushes and commits open rooms
+}
+
+/** Every workspace saved as the app quits: the closing page asks, and offers Quit Now from then on. */
+let closingSaved = false;
+/** Quit Now on the closing page: the quit stops waiting for the hub. Set once everything is saved. */
+let quitNow: (() => void) | null = null;
+
+/**
+ * Stop the hub as the app quits (or restarts to update), saying so in the window, never a page that has
+ * lost its host (0131): every workspace's edits saved, then what is still to go sent, a while at most.
+ * Done once the hub has stopped, or once Quit Now is pressed (only offered when everything is saved).
+ */
+async function closeDown(restart = false): Promise<void> {
+  quitting = true;
+  if (window && !window.isDestroyed()) {
+    // The page first, while the hub still listens: what the client had still to send goes. Not waited for long.
+    await Promise.race([loadPage(CLOSING, restart ? { restart: '1' } : undefined), new Promise((r) => setTimeout(r, 1000))]).catch(() => undefined);
+  }
+  const cut = new Promise<void>((resolveCut) => {
+    void stopHub({
+      saved: () => {
+        closingSaved = true;
+        quitNow = resolveCut;
+        if (window && !window.isDestroyed()) window.webContents.send('kuraa:closing-saved');
+      },
+    }).catch((e: Error) => console.error(`[desktop] stopping the hub: ${e.message}`)).finally(resolveCut);
+  });
+  await cut;
+  closedDown = true;
 }
 
 /** The window's page loads, one after another: a load started while another is under way would cut it short. */
@@ -170,11 +203,11 @@ let loads: Promise<void> = Promise.resolve();
  * Show one of the app's pages, once any load before it is done. One cut short
  * all the same (a reload while it loaded: ERR_ABORTED) is no error: the other shows.
  */
-function loadPage(file: string): Promise<void> {
+function loadPage(file: string, query?: Record<string, string>): Promise<void> {
   const next = loads.catch(() => undefined).then(async () => {
     if (!window) return;
     try {
-      await window.loadFile(file);
+      await window.loadFile(file, query ? { query } : undefined);
     } catch (e) {
       if ((e as { code?: string }).code !== 'ERR_ABORTED') throw e;
     }
@@ -314,10 +347,7 @@ const checkForUpdates = async (): Promise<void> => updatesWindow?.show();
 
 /** Save every workspace, quit, put the update in place, and start again. */
 async function restartToUpdate(): Promise<void> {
-  await updates?.restart(async () => {
-    quitting = true;
-    await stopHub();
-  });
+  await updates?.restart(() => closeDown(true));
 }
 
 function buildMenu(): void {
@@ -381,6 +411,14 @@ ipcMain.on('kuraa:update-ready?', (e) => {
 });
 ipcMain.on('kuraa:restart-to-update', (e) => {
   if (fromOwnPage(e)) void restartToUpdate().catch((err: Error) => dialog.showErrorBox(D.updates.title, err.message));
+});
+
+// The closing page (closeDown): whether everything is saved yet, and Quit Now.
+ipcMain.on('kuraa:closing-saved?', (e) => {
+  if (fromOwnPage(e) && closingSaved) e.sender.send('kuraa:closing-saved');
+});
+ipcMain.on('kuraa:quit-now', (e) => {
+  if (fromOwnPage(e)) quitNow?.();
 });
 
 ipcMain.on('kuraa:config', (e) => {
@@ -513,6 +551,12 @@ app.whenReady().then(async () => {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#171716' : '#fbfaf8',
     ...windowOptions(),
   });
+  // Closing the window quits the app: the window stays, saying so, while the hub stops (0131).
+  window.on('close', (event) => {
+    if (closedDown || (!quitting && !hub && !hubStarting)) return;
+    event.preventDefault();
+    app.quit();
+  });
   window.on('closed', () => (window = null));
   // At once, while this app's hub starts: never a blank window, however slow the network makes starting.
   void loadPage(STARTING).catch(() => undefined);
@@ -536,12 +580,13 @@ app.whenReady().then(async () => {
 // dialog, no quitting over one workspace's error); errors coming too fast quit, saving first.
 lastResort({ log: (m) => console.error(`[kuraa] ${m}`), save: async () => hub?.hub.saveAll(), stop: () => app.quit() });
 
-// Flush and commit before quitting.
+// Flush and commit before quitting, the window saying so (closeDown).
+// Asked again meanwhile (⌘Q, the window closed): as Quit Now, once everything is saved; never sooner.
 app.on('before-quit', (event) => {
-  if (quitting || (!hub && !hubStarting)) return;
+  if (closedDown || (!quitting && !hub && !hubStarting)) return;
   event.preventDefault();
-  quitting = true;
-  void stopHub().catch((e: Error) => console.error(`[desktop] stopping the hub: ${e.message}`)).finally(() => app.quit());
+  if (quitting) return void quitNow?.();
+  void closeDown().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => app.quit());

@@ -53,7 +53,9 @@ test('comments: on a passage and on the document, replied to, edited, kept besid
   await page.keyboard.press('Enter');
   await expect(box).toHaveCount(0);
   await expect(editor.locator('.kuraa-commented')).toHaveText('After the flood, I never trusted the council.');
-  await expect(page.getByTestId('feature-mark')).toHaveText('💬');
+  // Its mark: a speech bubble drawn as line art (0129), in the commenter's colour.
+  await expect(page.getByTestId('feature-mark').locator('svg path')).toHaveCount(1);
+  await expect(page.getByTestId('feature-mark')).toHaveText('');
   // Kept in the commenter's own file, as a W3C annotation; the document as it was.
   await expect.poll(() => annotations(path).map((a) => a.body.value)).toEqual(['Which council: the old one or the new?']);
   expect(annotations(path)[0]!.motivation).toBe('commenting');

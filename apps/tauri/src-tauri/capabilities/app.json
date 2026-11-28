@@ -11,6 +11,8 @@
     "allow-updates-ready",
     "allow-updates-choose",
     "allow-updates-size",
+    "allow-closing-saved",
+    "allow-quit-now",
     "allow-test-result"
   ]
 }

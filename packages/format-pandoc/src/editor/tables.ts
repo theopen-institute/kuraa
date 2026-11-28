@@ -7,6 +7,9 @@
 // Shift+Tab move between cells (Tab in the last makes a row), Enter moves down
 // (making a row at the bottom), and ⌘Enter leaves the table. Right-click a cell
 // (or Shift+F10) for rows and columns: add above, below, left or right, or delete;
+// with a selection over several rows (dragged, Shift+click, Shift+arrows) the
+// menu keeps it and deletes them all ("Delete 3 rows"), and over several cells
+// of one row, those columns;
 // right-clicking a misspelled word, its spelling suggestions first, where the
 // page can ask the spell checker (the desktop app), as the menu it takes the
 // place of would have had them. ⌥⌘T (or Insert table) makes an empty table.
@@ -14,7 +17,7 @@
 // Every change rebuilds the table, so the first row is always the header and the
 // alignment keeps one letter per column; each is an ordinary edit.
 import type { EditorContext, Spelling } from '@kuraa/editor-kit';
-import type { Fragment, Node as PMNode, NodeType, Schema } from 'prosemirror-model';
+import type { Fragment, Node as PMNode, NodeType, ResolvedPos, Schema } from 'prosemirror-model';
 import { Plugin, Selection, TextSelection, type Command, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 
@@ -36,6 +39,38 @@ export function cellAt(state: EditorState): CellAt | null {
   }
   return null;
 }
+
+/** Where a place is in the table at `tablePos`: its row and column; null if not in a cell of that table. */
+function cellIn($pos: ResolvedPos, tablePos: number): { row: number; col: number } | null {
+  for (let d = $pos.depth; d > 1; d--) {
+    if ($pos.node(d).type.name === 'table_cell' && $pos.node(d - 2).type.name === 'table' && $pos.before(d - 2) === tablePos) {
+      return { row: $pos.index(d - 2), col: $pos.index(d - 1) };
+    }
+  }
+  return null;
+}
+
+/** The cell the cursor is in, with the rows and the columns the selection spans (first and last of each). */
+export interface Span extends CellAt {
+  rows: [number, number];
+  cols: [number, number];
+}
+
+/**
+ * The rows the selection spans in its table, and the columns: those between its
+ * ends where both are in one row, else the column it starts in. Null unless
+ * it starts in a table; one row and column where it ends outside that table.
+ */
+export function spanAt(state: EditorState): Span | null {
+  const at = cellAt(state);
+  if (!at) return null;
+  const end = cellIn(state.selection.$to, at.pos);
+  if (!end) return { ...at, rows: [at.row, at.row], cols: [at.col, at.col] };
+  const cols: [number, number] = end.row === at.row ? [Math.min(at.col, end.col), Math.max(at.col, end.col)] : [at.col, at.col];
+  return { ...at, rows: [at.row, end.row], cols };
+}
+
+const count = ([a, b]: [number, number]) => b - a + 1;
 
 type Grid = Fragment[][];
 /** Rows of cell contents; null for an empty cell. */
@@ -90,12 +125,12 @@ const withTable = (fn: (state: EditorState, at: CellAt) => ReturnType<typeof rep
 
 const alignOf = (t: PMNode) => String(t.attrs.align ?? '');
 
-/** A grid table's columns' widths (0102) with a column put in at `at` (its width to be found from its text), or taken out; '' kept. */
-function widthsWith(t: PMNode, change: { add: number } | { remove: number }): string {
+/** A grid table's columns' widths (0102) with a column put in at `add` (its width to be found from its text), or columns `from`–`to` taken out; '' kept. */
+function widthsWith(t: PMNode, change: { add: number } | { from: number; to: number }): string {
   const widths = String(t.attrs.widths ?? '').split(' ').filter(Boolean);
   if (!widths.length) return '';
   if ('add' in change) widths.splice(change.add, 0, '3');
-  else widths.splice(change.remove, 1);
+  else widths.splice(change.from, change.to - change.from + 1);
   return widths.join(' ');
 }
 
@@ -118,24 +153,29 @@ export const deleteTable: Command = withTable((state, at) => {
   return tr.setSelection(Selection.near(tr.doc.resolve(Math.min(at.pos, tr.doc.content.size)))).scrollIntoView();
 });
 
+/** The row the cursor is in, or every row the selection spans; all of them, the table. */
 export const deleteRow: Command = (state, dispatch, view) => {
-  const at = cellAt(state);
+  const at = spanAt(state);
   if (!at) return false;
-  if (at.table.childCount === 1) return deleteTable(state, dispatch, view);
+  const [first, last] = at.rows;
+  if (count(at.rows) >= at.table.childCount) return deleteTable(state, dispatch, view);
   const grid = gridOf(at.table);
-  grid.splice(at.row, 1);
-  dispatch?.(replaceTable(state, at, buildTable(state.schema, grid, at.table.attrs), Math.min(at.row, grid.length - 1), at.col));
+  grid.splice(first, last - first + 1);
+  dispatch?.(replaceTable(state, at, buildTable(state.schema, grid, at.table.attrs), Math.min(first, grid.length - 1), at.col));
   return true;
 };
 
+/** The column the cursor is in, or the columns the selection spans in one row; all of them, the table. */
 export const deleteColumn: Command = (state, dispatch, view) => {
-  const at = cellAt(state);
+  const at = spanAt(state);
   if (!at) return false;
-  if (at.table.firstChild!.childCount === 1) return deleteTable(state, dispatch, view);
-  const grid = gridOf(at.table).map((cells) => cells.filter((_, c) => c !== at.col));
-  const align = alignOf(at.table);
-  const table = buildTable(state.schema, grid, { ...at.table.attrs, align: align.slice(0, at.col) + align.slice(at.col + 1), widths: widthsWith(at.table, { remove: at.col }) });
-  dispatch?.(replaceTable(state, at, table, at.row, Math.min(at.col, table.firstChild!.childCount - 1)));
+  const [first, last] = at.cols;
+  if (count(at.cols) >= at.table.firstChild!.childCount) return deleteTable(state, dispatch, view);
+  const kept = (_: unknown, c: number) => c < first || c > last;
+  const grid = gridOf(at.table).map((cells) => cells.filter(kept));
+  const align = [...alignOf(at.table)].filter(kept).join('');
+  const table = buildTable(state.schema, grid, { ...at.table.attrs, align, widths: widthsWith(at.table, { from: first, to: last }) });
+  dispatch?.(replaceTable(state, at, table, Math.min(at.row, grid.length - 1), Math.min(first, table.firstChild!.childCount - 1)));
   return true;
 };
 
@@ -273,13 +313,15 @@ export const tableEnter: Command[] = [tableOnEnter, cellBelow];
 // ---------------------------------------------------------------------------
 // The right-click menu
 
-const MENU: { label: string; testid: string; run: Command; danger?: boolean }[] = [
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
+
+const MENU: { label: string | ((span: Span) => string); testid: string; run: Command; danger?: boolean }[] = [
   { label: 'Add a row above', testid: 'table:row-above', run: addRow(false) },
   { label: 'Add a row below', testid: 'table:row-below', run: addRow(true) },
   { label: 'Add a column to the left', testid: 'table:column-left', run: addColumn(false) },
   { label: 'Add a column to the right', testid: 'table:column-right', run: addColumn(true) },
-  { label: 'Delete the row', testid: 'table:delete-row', run: deleteRow, danger: true },
-  { label: 'Delete the column', testid: 'table:delete-column', run: deleteColumn, danger: true },
+  { label: (s) => `Delete ${plural(count(s.rows), 'the row', 'rows')}`, testid: 'table:delete-row', run: deleteRow, danger: true },
+  { label: (s) => `Delete ${plural(count(s.cols), 'the column', 'columns')}`, testid: 'table:delete-column', run: deleteColumn, danger: true },
   { label: 'Delete the table', testid: 'table:delete', run: deleteTable, danger: true },
 ];
 
@@ -344,9 +386,15 @@ function openTableMenu(view: EditorView, x: number, y: number, before: MenuItem[
   const outside = (e: Event) => {
     if (!menu.contains(e.target as Node)) close();
   };
+  const span = spanAt(view.state);
   const items: MenuItem[] = [
     ...before,
-    ...MENU.map((item, i) => ({ ...item, divided: i === 0 && before.length > 0, run: () => item.run(view.state, view.dispatch, view) })),
+    ...MENU.map((item, i) => ({
+      ...item,
+      label: typeof item.label === 'string' ? item.label : item.label(span!),
+      divided: i === 0 && before.length > 0,
+      run: () => item.run(view.state, view.dispatch, view),
+    })),
   ];
   for (const item of items) {
     if (item.divided) {
@@ -391,7 +439,18 @@ function openTableMenu(view: EditorView, x: number, y: number, before: MenuItem[
   window.addEventListener('blur', close);
 }
 
-/** Right-click in a table: put the cursor there and offer its rows and columns (a misspelled word's suggestions first). */
+/** Whether the selection spans more than one cell of a table, every end in it. */
+function spansCells(state: EditorState): boolean {
+  const at = cellAt(state);
+  const end = at && cellIn(state.selection.$to, at.pos);
+  return !!end && (end.row !== at!.row || end.col !== at!.col);
+}
+
+/**
+ * Right-click in a table: put the cursor there and offer its rows and columns (a
+ * misspelled word's suggestions first); right-clicked inside a selection over
+ * several cells, the selection kept, the menu for its rows and columns.
+ */
 export function tablePlugins(ctx?: EditorContext): Plugin[] {
   return [
     new Plugin({
@@ -401,6 +460,12 @@ export function tablePlugins(ctx?: EditorContext): Plugin[] {
             if (!view.editable || !(e.target as HTMLElement).closest?.('td, th')) return false;
             const hit = view.posAtCoords({ left: e.clientX, top: e.clientY });
             if (!hit) return false;
+            const { from, to } = view.state.selection;
+            if (spansCells(view.state) && from <= hit.pos && hit.pos <= to) {
+              e.preventDefault();
+              openTableMenu(view, e.clientX, e.clientY);
+              return true;
+            }
             const sel = TextSelection.near(view.state.doc.resolve(hit.pos));
             const state = view.state.apply(view.state.tr.setSelection(sel));
             if (!cellAt(state)) return false;

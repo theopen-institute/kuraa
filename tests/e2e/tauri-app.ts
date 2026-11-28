@@ -49,7 +49,10 @@ export interface Launched {
   output(): string;
   /** Quit, as the menu's Quit does (the hub writes and commits first), and wait for it to go. */
   quit(): Promise<void>;
+  /** Close the window, as its close button does (the app quits), and wait for it to go. */
+  close(): Promise<void>;
   process: ChildProcess;
+  stop(op: string): Promise<void>;
 }
 
 export interface LaunchOptions {
@@ -118,6 +121,14 @@ export async function launchTauri(o: LaunchOptions = {}): Promise<Launched> {
   };
 
   const evaluate = <T>(js: string, window = 'main') => ask<T>({ op: 'eval', js, window });
+  /** Quit or close the window, unless it has gone already, and wait for it to go (killed after a minute). */
+  const stop = async (op: string) => {
+    if (child.exitCode === null && child.signalCode === null) await ask({ op }).catch(() => undefined);
+    const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    await gone;
+    clearTimeout(timer);
+    socket.destroy();
+  };
   return {
     evaluate,
     async waitFor<T>(js: string, w: { timeout?: number; window?: string } = {}): Promise<T> {
@@ -145,13 +156,9 @@ export async function launchTauri(o: LaunchOptions = {}): Promise<Launched> {
     asked: () => ask<string[]>({ op: 'asked' }),
     emit: (event, value = null) => ask({ op: 'emit', event, value }),
     output: () => said,
-    async quit() {
-      await ask({ op: 'quit' }).catch(() => undefined);
-      const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
-      await gone;
-      clearTimeout(timer);
-      socket.destroy();
-    },
+    quit: () => stop('quit'),
+    close: () => stop('close'),
+    stop,
     process: child,
   };
 }

@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { Host, type HostOptions } from './host.js';
+import { Host, type CloseOptions, type HostOptions } from './host.js';
 import { localUrl } from './http.js';
 
-export { Host, DEFAULT_TIMINGS, type HostOptions, type HostTimings, type TreeEntry } from './host.js';
+export { Host, DEFAULT_TIMINGS, type CloseOptions, type HostOptions, type HostTimings, type TreeEntry } from './host.js';
 export { HttpError } from './errors.js';
 export { useGit, useGitFolder } from './git.js';
 export { lastResort, type LastResortOptions } from './lastresort.js';
@@ -53,12 +53,12 @@ export interface RunningHost {
   host: Host;
   url: string;
   token: string;
-  close(): Promise<void>;
+  close(o?: CloseOptions): Promise<void>;
 }
 
 /** Start a host on a git working tree. */
 export async function startHost(options: Omit<HostOptions, 'token'> & { token?: string }): Promise<RunningHost> {
   const token = options.token ?? randomBytes(18).toString('base64url');
   const host = new Host({ ...options, token });
-  return { host, url: localUrl(await host.start()), token, close: () => host.close() };
+  return { host, url: localUrl(await host.start()), token, close: (o) => host.close(o) };
 }

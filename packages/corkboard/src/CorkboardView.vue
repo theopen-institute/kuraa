@@ -89,8 +89,11 @@ function openItem(i: Item) {
 // Editing in place: into the document's header, open or not.
 const editing = ref<{ path: string; field: string } | null>(null);
 const draft = ref('');
-function startEdit(i: Item, field: string, value: string | number | null) {
+/** The height of what was clicked: the field drawn in its place takes as much, so the card, and the row of cards, keep theirs. */
+const editHeight = ref(0);
+function startEdit(i: Item, field: string, value: string | number | null, from?: Event) {
   if (i.kind !== 'document') return;
+  editHeight.value = (from?.currentTarget as HTMLElement | null)?.getBoundingClientRect().height ?? 0;
   editing.value = { path: i.path, field };
   draft.value = value === null ? '' : String(value);
 }
@@ -211,14 +214,15 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
             v-if="editing?.path === i.path && editing.field === 'synopsis'"
             v-model="draft"
             class="cork-synopsis-edit"
-            rows="4"
+            rows="1"
+            :style="editHeight ? { minHeight: `${editHeight + 6}px` } : undefined"
             :placeholder="S.synopsisPlaceholder"
             :data-testid="`card-synopsis-edit:${i.path}`"
             @blur="save(i, 'synopsis', draft)"
             @keydown.enter.exact.prevent="($event.target as HTMLTextAreaElement).blur()"
             @keydown.esc="editing = null"
           />
-          <button v-else type="button" class="cork-synopsis" :data-testid="`card-synopsis:${i.path}`" @click="startEdit(i, 'synopsis', docCard(i)?.synopsis ?? null)">
+          <button v-else type="button" class="cork-synopsis" :data-testid="`card-synopsis:${i.path}`" @click="startEdit(i, 'synopsis', docCard(i)?.synopsis ?? null, $event)">
             <span v-if="docCard(i)?.synopsis">{{ docCard(i)!.synopsis }}</span>
             <span v-else class="cork-muted">{{ S.noSynopsis }}</span>
           </button>
@@ -317,7 +321,11 @@ const folderCard = (i: Item) => i.card as FolderCard | null;
 .cork-card-title { border: 0; background: none; padding: 0; text-align: left; font: inherit; font-weight: 600; cursor: pointer; color: var(--text); }
 .cork-card-title:hover { text-decoration: underline; }
 .cork-synopsis { flex: 1; border: 0; background: none; padding: 0; text-align: left; font: inherit; font-size: 13px; line-height: 1.4; color: var(--text); cursor: text; white-space: pre-wrap; overflow: hidden; }
-.cork-synopsis-edit { flex: 1; font: inherit; font-size: 13px; resize: none; }
+/* Its field: where the synopsis was, its text not moving (the field's padding and border taken back by its margin), the card no taller. */
+.cork-synopsis-edit {
+  flex: 1; box-sizing: border-box; min-height: 0; margin: -3px -5px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; line-height: 1.4; resize: none;
+}
 .cork-card-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: 11px; color: var(--muted); }
 .cork-label { color: var(--text); }
 .cork-words { margin-left: auto; font-variant-numeric: tabular-nums; }

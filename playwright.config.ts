@@ -9,7 +9,7 @@ process.env.KURAA_PERSON = join(mkdtempSync(join(tmpdir(), 'kuraa-test-keys-')),
 
 // The web client's tests, run in each engine people browse with: Chromium (Chrome, Edge, and Windows' WebView2),
 // WebKit (Safari, and the webview a Tauri app gets on macOS and Linux) and Firefox.
-const WEB = /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|render-builtin|export|search|versions|polish|tools|preferences|features|comments|coding|navigation|compile|composition|import|feature-contexts|feature-hooks|words|corkboard|motion)\.spec\.ts/;
+const WEB = /(app|collab|cues|text|run|click|newfile|notes|components|source|header|conflicts|devices|rules|spaces|hub|citations|images|tables|find|render|render-builtin|export|search|versions|polish|tools|preferences|features|comments|coding|navigation|compile|composition|import|feature-contexts|feature-hooks|words|corkboard|motion|image-layout)\.spec\.ts/;
 
 export default defineConfig({
   testDir: 'tests/e2e',

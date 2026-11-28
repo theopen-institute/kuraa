@@ -14,6 +14,8 @@ fn main() {
         "updates_ready",
         "updates_choose",
         "updates_size",
+        "closing_saved",
+        "quit_now",
         "test_result",
     ])))
     .expect("the app's build");

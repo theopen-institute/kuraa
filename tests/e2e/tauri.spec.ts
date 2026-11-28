@@ -162,6 +162,25 @@ test('opens a local folder, edits and commits; a reload keeps the connection; qu
   }
 });
 
+test('closing the window quits, saying so, with the last edits saved (0131)', async () => {
+  const dir = makeRepo();
+  // No commit before quitting: closing commits the last edits.
+  const app = await launchTauri({ args: ['--open', dir], timings: { flushMs: 300, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 } });
+  try {
+    await openNotes(app);
+    await typeAtEnd(app, 'Light rain', ' Typed just before closing.');
+    await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Typed just before closing.');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Initial');
+    // The window closed (its close button), not Quit: the app quits all the same, the window saying so meanwhile.
+    await app.close();
+  } finally {
+    await app.quit();
+  }
+  expect(app.output()).toContain('[tauri] closing: the window says so');
+  expect(git(dir, 'status', '--porcelain', '--', 'notes.md')).toBe('');
+  expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Typed just before closing.');
+});
+
 test('joins a shared host without starting one, showing its own pages', async () => {
   const dir = makeRepo();
   const host: RunningHost = await startHost({ features: standardFeatures, dir, port: 0, host: '127.0.0.1', staticDir: join(ROOT, 'apps/web/dist'), timings: TIMINGS });

@@ -26,6 +26,12 @@ pub struct Shell {
     pub updates: Updates,
     /// The host stopped, as quitting asks: the app may go.
     pub stopped: AtomicBool,
+    /// Quitting (or restarting to update): the closing page shows while the host stops (0131).
+    pub quitting: AtomicBool,
+    /// Every workspace saved, as the app quits: Quit Now may cut what is left short.
+    pub saved: AtomicBool,
+    /// Quit Now: the app stops waiting for the host.
+    cut: AtomicBool,
     /// Tests run the app out of sight (KURAA_HIDDEN_WINDOWS=1).
     pub hidden: bool,
     state: Mutex<State>,
@@ -111,6 +117,9 @@ impl Shell {
             host: OnceLock::new(),
             updates: Updates::default(),
             stopped: AtomicBool::new(false),
+            quitting: AtomicBool::new(false),
+            saved: AtomicBool::new(false),
+            cut: AtomicBool::new(false),
             hidden,
             state: Mutex::new(State { zoom: ZOOM_ACTUAL, ..State::default() }),
         })
@@ -343,7 +352,7 @@ impl Shell {
         }
     }
 
-    /// Save every workspace, quit, put the update in place, and start again.
+    /// Save every workspace, quit, put the update in place, and start again (the window saying so meanwhile).
     pub fn restart_to_update(self: &Arc<Self>, app: &AppHandle) {
         if self.updates.ready().is_none() {
             return;
@@ -351,12 +360,45 @@ impl Shell {
         let shell = self.clone();
         let app = app.clone();
         std::thread::spawn(move || {
-            shell.stop_host();
+            shell.close_down(&app, true);
             if let Err(e) = shell.updates.install(&app) {
                 log(&app, format!("[updates] could not put the update in place: {e}"));
             }
             app.restart();
         });
+    }
+
+    /// Stop the host as the app quits (or restarts to update), saying so in the window, never a page that has lost
+    /// its host (0131): every workspace's edits saved, then what is still to go sent, a while at most. Done once the
+    /// host has stopped, or once Quit Now is pressed (only offered when everything is saved). Blocks: on a thread of
+    /// its own.
+    pub fn close_down(&self, app: &AppHandle, restart: bool) {
+        if self.quitting.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // The page first, while the host still listens: what the client had still to send goes. Not waited for long.
+        if Self::window(app).is_some() {
+            self.show(app, app_url(if restart { "closing.html?restart=1" } else { "closing.html" }), None);
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            while !self.state.lock().unwrap().loaded && std::time::Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            log(app, format!("[tauri] {}: the window says so while every workspace is saved", if restart { "restarting" } else { "closing" }));
+        }
+        self.stop_host();
+    }
+
+    /// Everything saved, as the app quits (the host says so): the closing page offers Quit Now.
+    pub fn closing_saved(&self, app: &AppHandle) {
+        self.saved.store(true, Ordering::SeqCst);
+        self.emit(app, "closing-saved", Value::Null);
+    }
+
+    /// Quit Now (the closing page's, or asked to quit again): the app stops waiting for the host, once everything is saved; never sooner.
+    pub fn quit_now(&self) {
+        if self.saved.load(Ordering::SeqCst) {
+            self.cut.store(true, Ordering::SeqCst);
+        }
     }
 
     /// Stop the host (it writes and commits what is pending), once.
@@ -365,7 +407,7 @@ impl Shell {
             return;
         }
         if let Some(host) = self.host.get() {
-            host.quit(Duration::from_secs(60));
+            host.quit(Duration::from_secs(60), &self.cut);
         }
     }
 }

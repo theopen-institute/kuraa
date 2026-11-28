@@ -3,7 +3,7 @@
 //   build/bridge.js, build/updates-bridge.js   the pages' bridges (src/bridge.ts, src/updates-bridge.ts),
 //                                              which the shell puts in its windows (include_str!)
 //   build/pages/                               the app's own pages (the Electron app's static/: the
-//                                              starting page, the launcher, the updates window's)
+//                                              starting page, the launcher, the closing page, the updates window's)
 //   src-tauri/staged/host/                     the hub (src/host.ts, bundled as kuraa-desktop.mjs), the
 //                                              web client it serves, pandoc's and Typst's WebAssembly
 //                                              with Typst's fonts (render/), and this platform's native
@@ -42,7 +42,7 @@ const page = { bundle: true, platform: 'browser', format: 'iife', target: ['safa
 await build({ ...page, entryPoints: [join(APP, 'src/bridge.ts')], outfile: join(BUILD, 'bridge.js') });
 await build({ ...page, entryPoints: [join(APP, 'src/updates-bridge.ts')], outfile: join(BUILD, 'updates-bridge.js'), define: { __KURAA_VERSION__: JSON.stringify(version) } });
 mkdirSync(join(BUILD, 'pages'), { recursive: true });
-for (const p of ['starting.html', 'launcher.html', 'updates.html']) cpSync(join(ROOT, 'apps/desktop/static', p), join(BUILD, 'pages', p));
+for (const p of ['starting.html', 'launcher.html', 'closing.html', 'updates.html']) cpSync(join(ROOT, 'apps/desktop/static', p), join(BUILD, 'pages', p));
 if (onlyBridge) {
   stdout.write(`stage: the bridges and pages, in ${BUILD}\n`);
   exit(0);

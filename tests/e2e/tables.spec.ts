@@ -55,6 +55,26 @@ test('a typed table is edited with Tab and the right-click menu, and written as 
   await page.getByTestId('table:delete-row').click();
   await expect(editor.locator('table tr')).toHaveCount(3);
 
+  // Two rows more, selected from the first to the second (Shift+click) and deleted at once.
+  await editor.locator('table td', { hasText: 'South roof' }).click({ button: 'right' });
+  await page.getByTestId('table:row-below').click();
+  await type('East');
+  await page.keyboard.press('Enter');
+  await type('Peak');
+  await expect(editor.locator('table tr')).toHaveCount(5);
+  await editor.locator('table td', { hasText: 'East' }).click();
+  await page.keyboard.press(MAC ? 'Meta+ArrowLeft' : 'Home');
+  await editor.locator('table td', { hasText: 'Peak' }).click({ modifiers: ['Shift'] });
+  await editor.locator('table td', { hasText: 'East' }).click({ button: 'right' });
+  await expect(page.getByTestId('table:delete-row')).toHaveText('Delete 2 rows');
+  await page.getByTestId('table:delete-row').click();
+  await expect(editor.locator('table tr')).toHaveCount(3);
+  await editor.locator('table td', { hasText: 'South roof' }).click({ button: 'right' });
+  await expect(page.getByTestId('table:delete-row')).toHaveText('Delete the row');
+  await page.keyboard.press('Escape');
+  await editor.locator('table td', { hasText: 'South roof' }).click();
+  await page.keyboard.press(MAC ? 'Meta+ArrowRight' : 'End');
+
   // ⌘Enter leaves the table.
   await page.keyboard.press(MAC ? 'Meta+Enter' : 'Control+Enter');
   await type('After the table.');

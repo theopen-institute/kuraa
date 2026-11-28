@@ -315,6 +315,45 @@ test('the file list is a tree for the keyboard: arrows, Enter, F2 and Shift+F10'
   await page.keyboard.press('Escape');
 });
 
+test('folders stay open or closed as they were left, after the app is opened again (0128)', async ({ page }) => {
+  const dir = `fold-${Date.now().toString(36)}`;
+  await create(`${dir}/shut/a.md`, '---\ntitle: Alpha\n---\n\nAlpha body.\n');
+  await create(`${dir}/open/b.md`, '---\ntitle: Beta\n---\n\nBeta body.\n');
+  await create(`${dir}/held/c.md`, '---\ntitle: Gamma\n---\n\nGamma body.\n');
+  await openApp(page);
+  const tree = page.getByRole('tree');
+  const row = (p: string) => tree.locator(`[role="treeitem"][data-path="${p}"]`);
+  const close = async (p: string) => {
+    await row(p).focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(row(p)).toHaveAttribute('aria-expanded', 'false');
+  };
+  // The open document's folder, closed too: it stays closed.
+  await openFile(page, `${dir}/held/c.md`);
+  await close(`${dir}/shut`);
+  await close(`${dir}/held`);
+  await close(dir);
+
+  await page.reload();
+  await expect(page.getByTestId('editor')).toContainText('Gamma body.');
+  await expect(row(dir)).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(`${dir}/open`)).toHaveCount(0);
+  await row(dir).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(row(`${dir}/shut`)).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(`${dir}/held`)).toHaveAttribute('aria-expanded', 'false');
+  await expect(row(`${dir}/open`)).toHaveAttribute('aria-expanded', 'true');
+  await expect(row(`${dir}/open/b.md`)).toBeVisible();
+
+  // Opened again, it stays open.
+  await row(`${dir}/shut`).focus();
+  await page.keyboard.press('ArrowRight');
+  await page.reload();
+  await expect(row(`${dir}/shut`)).toHaveAttribute('aria-expanded', 'true');
+  await expect(row(`${dir}/shut/a.md`)).toBeVisible();
+  await expect(row(`${dir}/held`)).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('dialogs keep focus while open, close on Escape, and give focus back; the menu takes focus', async ({ page }) => {
   const path = `runs/dialogs-${Date.now().toString(36)}.md`;
   await create(path, '# Dialogs\n\nThe text behind.\n');

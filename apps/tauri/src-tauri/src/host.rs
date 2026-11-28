@@ -117,20 +117,23 @@ impl Host {
         self.send(&json!({ "op": "log", "text": text })).is_ok()
     }
 
-    /// Ask it to stop (it writes and commits what is pending), and wait for it to; after `wait`, stop it.
-    pub fn quit(&self, wait: Duration) {
+    /// Ask it to stop (it writes and commits what is pending), and wait for it to; after `wait`, or once `cut` is set
+    /// (Quit Now: everything saved, what is still being sent left for next time), stop it.
+    pub fn quit(&self, wait: Duration, cut: &AtomicBool) {
         self.quitting.store(true, Ordering::SeqCst);
         let Some(mut child) = self.child.lock().unwrap().take() else { return };
         let _ = self.send(&json!({ "op": "quit" }));
         let until = Instant::now() + wait;
-        while Instant::now() < until {
+        while Instant::now() < until && !cut.load(Ordering::SeqCst) {
             if let Ok(Some(_)) = child.try_wait() {
                 self.stdin.lock().unwrap().take();
                 return;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        eprintln!("[tauri] the host did not stop in time: stopping it");
+        if !cut.load(Ordering::SeqCst) {
+            eprintln!("[tauri] the host did not stop in time: stopping it");
+        }
         let _ = child.kill();
         let _ = child.wait();
         self.stdin.lock().unwrap().take();

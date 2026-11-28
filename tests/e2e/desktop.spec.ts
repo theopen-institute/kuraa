@@ -176,6 +176,31 @@ test('opens a local folder, edits and commits; outside changes reach the editor'
   expect(git(dir, 'status', '--porcelain', '--', 'notes.md')).toBe('');
 });
 
+test('closing the window quits, saying so, with the last edits saved (0131)', async () => {
+  const dir = makeRepo();
+  // No commit before quitting: closing commits the last edits.
+  const { app, page } = await launch(['--open', dir], { flushMs: 300, idleCommitMs: 60_000, maxCommitMs: 60_000, dropMs: 60_000 });
+  const shown: string[] = [];
+  page.on('framenavigated', (f) => {
+    if (f === page.mainFrame()) shown.push(f.url());
+  });
+  try {
+    await openNotes(page);
+    await typeAtEnd(page, 'Light rain', ' Typed just before closing.');
+    await expect.poll(() => read(dir), { timeout: 10_000 }).toContain('Typed just before closing.');
+    expect(git(dir, 'log', '-1', '--format=%s')).toBe('Initial');
+    const exited = new Promise((r) => app.process().once('exit', r));
+    // The window closed (its close button), not Quit: the app quits all the same, the window saying so meanwhile.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close()).catch(() => undefined);
+    await exited;
+  } finally {
+    await app.close().catch(() => undefined);
+  }
+  expect(shown.some((u) => u.includes('/static/closing.html'))).toBe(true);
+  expect(git(dir, 'status', '--porcelain', '--', 'notes.md')).toBe('');
+  expect(git(dir, 'show', 'HEAD:notes.md')).toContain('Typed just before closing.');
+});
+
 test('joins a shared host without starting one', async () => {
   const dir = makeRepo();
   const host: RunningHost = await startHost({ features: standardFeatures,

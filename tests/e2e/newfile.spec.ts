@@ -159,6 +159,9 @@ test('the sidebar shows the workspace name, makes folders, and opens the menu', 
   await plus.click({ button: 'right' });
   // With what features add for the top level (0116): Compile… of the whole workspace, Import….
   await expect(menu.getByRole('menuitem')).toHaveText(['New file…', 'New folder…', 'Compile…', 'Import…']);
+  // Each item spans the menu, so the pointer anywhere on its row takes it, not only on its words.
+  const widths = await menu.getByRole('menuitem').evaluateAll((items) => items.map((b) => b.getBoundingClientRect().width));
+  expect(new Set(widths).size).toBe(1);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   // The space below the files has the same menu, by right-click.

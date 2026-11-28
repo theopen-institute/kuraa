@@ -101,3 +101,16 @@ if (isAppPage || config) {
   };
   Object.defineProperty(window, 'kuraa', { value: Object.freeze(bridge), configurable: false, writable: false });
 }
+
+// The closing page's (static/closing.html, 0131): told once everything is saved as the app quits, and Quit Now.
+if (isAppPage) {
+  Object.defineProperty(window, 'kuraaClosing', {
+    value: Object.freeze({
+      onSaved: (show: () => void) => {
+        listen('closing-saved', () => show());
+        void invoke<boolean>('closing_saved').then((saved) => saved && show(), () => undefined);
+      },
+      quitNow: () => void invoke('quit_now').catch(() => undefined),
+    }),
+  });
+}

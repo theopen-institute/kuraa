@@ -138,6 +138,12 @@ mod control {
                 shell.emit(app, &s("event").unwrap_or_default(), r.get("value").cloned().unwrap_or(Value::Null));
                 Ok(Value::Null)
             }
+            Some("close") => {
+                // The window's close button, as the person would press it.
+                let w = app.get_webview_window("main").ok_or("no window")?;
+                let _ = w.close();
+                Ok(Value::Null)
+            }
             Some("quit") => {
                 let app = app.clone();
                 std::thread::spawn(move || {

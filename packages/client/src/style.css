@@ -163,6 +163,10 @@ kbd { font: 11.5px var(--mono); border: 1px solid var(--border); border-bottom-w
 /* What features put beside the text (0082): marks in the margin at their lines, and actions beside a selection. */
 .feature-mark { position: absolute; width: 22px; height: 20px; padding: 0; border: 0; background: none; font: 12px/20px var(--font); cursor: pointer; text-align: center; border-radius: 4px; }
 .feature-mark:hover, .feature-mark:focus-visible { background: var(--accent-soft); }
+/* A mark drawn as line art (0129: a comment's bubble): larger than a character, thin strokes in its colour, filled faintly while open. */
+.feature-mark.feature-icon { width: 26px; height: 22px; margin-top: -1px; color: var(--muted); }
+.feature-mark.feature-icon svg { display: block; width: 20px; height: 20px; margin: 1px auto; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+.feature-mark.feature-icon.active svg { fill: color-mix(in srgb, currentColor 18%, transparent); }
 /* A tag (a code, say): its name beside the line, in its colour, as wide as it needs; tinted while it, or what it is about, is pointed at. */
 .feature-mark.feature-tag {
   width: auto; height: 18px; margin-top: 1px; padding: 0 7px 0 6px; font: 12px/18px var(--font); text-align: left;
@@ -374,6 +378,8 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .context-menu button.danger { color: var(--warn); }
 .menu-actions button.danger { color: var(--warn); }
 .context-menu .context-divider { height: 1px; margin: 4px 6px; background: var(--border); }
+/* An item's button spans the menu's width, so the whole row takes the pointer, not only its words. */
+.context-menu .context-item { display: grid; }
 /* An item with icons at the right of its row (the open workspace's sync and ⚙). */
 .context-menu .context-row { display: flex; align-items: center; gap: 2px; }
 .context-menu .context-row > button:first-child { flex: 1; }
@@ -594,9 +600,39 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 .citation-option.active, .citation-option:hover { background: var(--selected); }
 .citation-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .citation-option-key { color: var(--muted); font-family: var(--mono); font-size: 12px; flex: none; }
-.image-node { display: inline-block; max-width: 100%; }
+.image-node { display: inline-block; max-width: 100%; position: relative; vertical-align: bottom; }
 .image-node img { max-width: 100%; vertical-align: bottom; }
+.image-node.image-sized img { width: 100%; }
 .image-node.ProseMirror-selectednode img { outline: 2px solid var(--accent); }
+/* An image alone on its line, placed as it says (0130): centred unless it says left or right. */
+.prose p.image-alone { text-align: center; }
+.prose p.image-alone[data-align="left"] { text-align: left; }
+.prose p.image-alone[data-align="right"] { text-align: right; }
+/* Its handles, at the middle of each side, and its bar above it: while it is selected. */
+.image-handle { display: none; position: absolute; top: 50%; width: 8px; height: 40px; max-height: 70%; transform: translateY(-50%); border-radius: 4px; background: var(--accent); border: 1px solid var(--surface); cursor: ew-resize; touch-action: none; z-index: 2; }
+.image-handle-left { left: -4px; }
+.image-handle-right { right: -4px; }
+.ProseMirror-focused .image-node.ProseMirror-selectednode .image-handle, .image-node.image-resizing .image-handle { display: block; }
+.image-bar { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 3; align-items: center; gap: 2px; padding: 3px; white-space: nowrap; text-indent: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.14); font: 12px var(--font); line-height: 1; }
+.ProseMirror-focused .image-node.ProseMirror-selectednode:not(.image-resizing) .image-bar { display: flex; }
+.image-bar-button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px; border: 0; border-radius: 5px; background: none; color: var(--text); font: inherit; cursor: pointer; }
+.image-bar-button:hover { background: var(--panel); }
+.image-bar-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.image-bar-button svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
+.image-bar-gap { width: 1px; height: 16px; margin: 0 3px; background: var(--border); }
+.image-badge { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); padding: 2px 6px; border-radius: 4px; background: rgb(0 0 0 / 0.65); color: #fff; font: 11px var(--font); font-variant-numeric: tabular-nums; pointer-events: none; }
+/* Columns (0130): side by side, each its share of the line; the gap between two dragged to share it otherwise. */
+.columns-block { display: flex; gap: 28px; align-items: flex-start; margin: 0 0 0.9em; }
+.column-block { position: relative; min-width: 0; }
+.column-body > :last-child { margin-bottom: 0; }
+.column-gutter { position: absolute; top: 0; bottom: 0; left: -22px; width: 16px; cursor: col-resize; touch-action: none; }
+.column-gutter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 7px; width: 2px; border-radius: 1px; background: var(--border); opacity: 0; transition: opacity 120ms; }
+.columns-block:hover > .column-block > .column-gutter::after { opacity: 1; }
+.column-gutter:hover::after, .columns-resizing .column-gutter::after { opacity: 1; background: var(--accent); }
+.column-block:first-child > .column-gutter { display: none; }
+.column-gutter[data-widths]::before { content: attr(data-widths); position: absolute; top: -22px; left: 50%; transform: translateX(-50%); padding: 2px 6px; border-radius: 4px; background: rgb(0 0 0 / 0.65); color: #fff; font: 11px var(--font); white-space: nowrap; }
+.column-drop { position: fixed; width: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 50; }
+@media (max-width: 600px) { .columns-block { gap: 16px; } .column-gutter { left: -14px; } .column-gutter::after { left: 7px; } }
 .image-node.image-missing::after { content: attr(data-missing); font: 12px var(--mono); color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 2px 6px; }
 .image-node.image-missing img { display: none; }
 .image-node.image-remote img { display: none; }

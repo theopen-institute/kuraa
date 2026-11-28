@@ -4,9 +4,13 @@
 // - Comments (where the workspace comments: so unless turned off), written and
 //   read where the text is (./commentbox): Comment beside a selection (⌥⌘M)
 //   opens a box just below it to write in, Enter saves; commented passages are
-//   tinted, with a 💬 in the margin at each, which opens its thread in a card
+//   tinted, with a speech bubble in the margin at each (0129), in its maker's
+//   colour, which opens its thread in a card
 //   below the passage (reply, edit or delete your own). In any document you
 //   read, whether or not you may change it.
+// - Inline comments (./inline; docs/decisions/0133-inline-comments.md): a
+//   comment whose thread is drawn in the text, after its passage's block, as a
+//   conversation (Inline comment, ⌥⇧⌘M, on a selection or the caret's block).
 // - The Comments panel (⌥⌘K): the document's threads in order, each comment
 //   with its replies; reply, and edit or delete your own; comment on the whole
 //   document; whose are shown (everyone's, or yours: your choice, in this
@@ -30,13 +34,15 @@ import { Plugin, PluginKey, TextSelection } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node, ResolvedPos } from 'prosemirror-model';
 import { defineClientFeature, type FeatureClientContext, type FeatureEditorContext, type FeaturePanelContext, type Json, type MarginItem } from '@kuraa/feature-kit/client';
-import { SUFFIX, aboutOf, codeOf, creatorOf, findPassage, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
+import { INLINE_CLASS, SUFFIX, aboutOf, codeOf, creatorColourOf, creatorOf, findPassage, isInline, isPoint, kindOf, readPage, textOf, type About, type Item } from './format.js';
 import { CODEBOOK, codeTree, resolveCode, type Code, type Codebook } from './codebook.js';
 import { openCodeBox, openMenu, type ScreenBox, type Suggestion } from './codebox.js';
 import { composer as cardComposer, openCard, type Card } from './commentbox.js';
+import { INLINE_CSS, threadView, type Thread, type ThreadView } from './inline.js';
 import type { RoomAnnotation } from './index.js';
 
 const COMMENT_KEYS = 'Mod-Alt-m';
+const INLINE_KEYS = 'Mod-Alt-Shift-m';
 const PANEL_KEYS = 'Mod-Alt-k';
 const CODE_KEYS = 'Mod-Alt-u';
 
@@ -86,6 +92,12 @@ interface Store {
   /** The codings pointed at: by their tag in the margin, or by their passage in the text (their groups' keys). */
   hoverTag: string | null;
   hoverText: Set<string>;
+  /** Inline comments' threads, drawn in the text (one element each, kept while the thread is), by comment id ('new': one begun). */
+  threads: Map<string, ThreadView>;
+  /** An inline comment begun: anchors at its passage's ends (one place, for an empty block), its quote, and whether it is its block as a whole. */
+  inlineNew: { from: Json; to: Json; quote: string; whole: boolean } | null;
+  /** The inline comment whose thread is pointed at or written in: its passage shown in the text. */
+  inlineHover: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +447,184 @@ function openThread(store: Store, view: EditorView, id: string, owner?: HTMLElem
   tell(store);
 }
 
+// ---------------------------------------------------------------------------
+// Inline comments (docs/decisions/0133-inline-comments.md): a comment's thread in the text, after its passage's block.
+
+/**
+ * Where a thread is drawn for a passage: just after the block its end is in (a paragraph, a heading, an item's
+ * paragraph), or after the table it is in (never in a cell). Null where it is not in a block.
+ */
+function afterBlock(doc: Node, from: number, to: number): number | null {
+  // A passage ending at the very start of a block (all of the one before selected, say) is the one before's.
+  const end = to > from && doc.resolve(to).parentOffset === 0 && to > 1 ? Math.max(from, to - 2) : to;
+  const $p = doc.resolve(Math.min(end, doc.content.size));
+  for (let d = 1; d <= $p.depth; d++) {
+    const n = $p.node(d);
+    if (n.type.spec.tableRole === 'table' || n.type.name === 'table') return $p.after(d);
+  }
+  let d = $p.depth;
+  while (d > 0 && !$p.node(d).isTextblock) d--;
+  return d > 0 ? $p.after(d) : null;
+}
+
+/** Whether a passage is its block as a whole (then not quoted: the block is just above its thread). */
+function wholeBlock(doc: Node, from: number, to: number): boolean {
+  if (to > doc.content.size) return false;
+  const $f = doc.resolve(from);
+  return $f.parent.isTextblock && from === $f.start() && to === $f.end();
+}
+
+/** An inline comment's thread as it is now: the comment, its replies in the order written, everyone's. */
+function inlineThread(store: Store, id: string): Thread | null {
+  const view = store.view;
+  if (!view || view.isDestroyed || !commenting(store.ctx)) return null;
+  const doc = view.state.doc;
+  if (id === 'new') {
+    const n = store.inlineNew;
+    return n ? { quote: n.whole || !n.quote ? null : n.quote, messages: [], canWrite: !!store.ctx.state } : null;
+  }
+  const all = collect(store, doc);
+  const c = all.find((a) => a.id === id && a.kind === 'comment' && isInline(a.item));
+  if (!c || c.from === null || c.to === null) return null;
+  const replies = all.filter((a) => a.kind === 'reply' && a.about?.kind === 'annotation' && a.about.id === id).sort((x, y) => String(x.item.created).localeCompare(String(y.item.created)));
+  const quote = c.about?.kind === 'passage' && c.about.exact && !wholeBlock(doc, c.from, c.to) ? c.about.exact : null;
+  return {
+    quote,
+    canWrite: !!store.ctx.state,
+    messages: [c, ...replies].map((a) => ({
+      id: a.id,
+      person: a.person,
+      who: a.mine ? 'You' : creatorOf(a.item) || 'Someone',
+      // Yours in your colour as it is now; others' in the colour their annotation kept (0129).
+      color: (a.mine && /^#[0-9a-f]{6}$/i.test(store.ctx.person().color) ? store.ctx.person().color : null) || creatorColourOf(a.item),
+      mine: a.mine,
+      when: when(String(a.item.created ?? '')),
+      edited: !!a.item.modified && a.item.modified !== a.item.created,
+      text: textOf(a.item),
+    })),
+  };
+}
+
+/** Back in the text, the caret after an inline comment's passage (or where one was begun). */
+function backToText(store: Store, view: EditorView, anchors: { from: Json; to: Json } | null, select = false) {
+  if (view.isDestroyed) return;
+  const room = store.ctx.state;
+  const a = anchors && room ? room.positionOf(anchors.from) : null;
+  const b = anchors && room ? room.positionOf(anchors.to) : null;
+  if (a !== null && b !== null && a <= b && b <= view.state.doc.content.size) {
+    try {
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, select ? a : b, b)));
+    } catch { /* not a place text can be selected at: as it was */ }
+  }
+  view.focus();
+}
+
+/** The element of an inline comment's thread (made once, kept while it is). */
+function threadFor(store: Store, view: EditorView, id: string): ThreadView {
+  let t = store.threads.get(id);
+  if (t) return t;
+  const { ctx } = store;
+  const anchorsOf = (): { from: Json; to: Json } | null => {
+    if (id === 'new') return store.inlineNew;
+    const e = ctx.state?.entries()[id] as unknown as RoomAnnotation | undefined;
+    if (e?.from !== undefined && e.to !== undefined) return { from: e.from, to: e.to };
+    // Someone else's: the caret after its passage, as it is now.
+    const s = collect(store, view.state.doc).find((a) => a.id === id);
+    return s && s.to !== null && ctx.state ? { from: ctx.state.anchorAt(s.to, -1), to: ctx.state.anchorAt(s.to, -1) } : null;
+  };
+  t = threadView({
+    id,
+    model: () => inlineThread(store, id),
+    drafts: store.drafts,
+    send: (text) => {
+      const state = ctx.state;
+      if (!state) return;
+      if (id === 'new') {
+        const n = store.inlineNew;
+        if (!n) return;
+        const name = ctx.path.slice(ctx.path.lastIndexOf('/') + 1);
+        const item = newItem(ctx, state.me, 'commenting', text, { source: `../${name}`, styleClass: INLINE_CLASS, selector: [{ type: 'TextQuoteSelector', exact: n.quote }] });
+        state.update({ set: { [String(item.id)]: { item, from: n.from, to: n.to } as unknown as Json } });
+        store.inlineNew = null;
+        store.inlineHover = null;
+        tell(store);
+        backToText(store, view, n);
+        return;
+      }
+      const item = newItem(ctx, state.me, 'replying', text, id);
+      state.update({ set: { [String(item.id)]: { item } as unknown as Json } });
+      tell(store);
+    },
+    edit: (cid, text) => {
+      if (ctx.state) editComment(ctx.state, cid, text);
+      tell(store);
+    },
+    remove: (cid) => {
+      ctx.state?.update({ remove: [cid] });
+      tell(store);
+    },
+    cancel: () => {
+      const n = store.inlineNew;
+      for (const k of [...store.drafts.keys()]) if (k.startsWith('inline:new:')) store.drafts.delete(k);
+      store.inlineNew = null;
+      store.inlineHover = null;
+      tell(store);
+      backToText(store, view, n, true);
+    },
+    hover: (on) => {
+      const now = on ? id : store.inlineHover === id ? null : store.inlineHover;
+      if (now === store.inlineHover) return;
+      store.inlineHover = now;
+      tell(store);
+    },
+    leave: () => backToText(store, view, anchorsOf()),
+  });
+  store.threads.set(id, t);
+  return t;
+}
+
+/**
+ * Begin an inline comment (Inline comment, ⌥⇧⌘M): on what is selected, or, with nothing selected, on the block the
+ * caret is in; its first message written in a box in the text, after that block, Enter saving it. False where there is
+ * nothing to comment on (no room, comments off, a selection of nothing but space, the caret not in a block of text).
+ */
+function openInline(store: Store, view: EditorView): boolean {
+  const { ctx } = store;
+  const room = ctx.state;
+  if (!room || !commenting(ctx) || view.isDestroyed) return false;
+  const sel = view.state.selection;
+  let { from, to } = sel;
+  if (from === to) {
+    if (!sel.$from.parent.isTextblock || sel.$from.parent.type.spec.code) return false;
+    from = sel.$from.start();
+    to = sel.$from.end();
+  }
+  const quote = from < to ? view.state.doc.textBetween(from, to, ' ') : '';
+  // A selection of nothing but space is nothing to comment on; an empty block is a place (a point) to.
+  if (from < to && !quote.trim()) return false;
+  closeOpen(store);
+  for (const k of [...store.drafts.keys()]) if (k.startsWith('inline:new:')) store.drafts.delete(k);
+  store.threads.delete('new');
+  const point = from === to;
+  store.inlineNew = {
+    from: point ? room.anchorAt(from, -1) : room.anchorAt(from, 1),
+    to: point ? room.anchorAt(from, -1) : room.anchorAt(to, -1),
+    quote,
+    whole: wholeBlock(view.state.doc, from, to),
+  };
+  store.inlineHover = 'new';
+  tell(store);
+  // Drawn now, not when the editor is next told, and the box to write in focused at once: what is typed next is
+  // the comment's, never the document's (a moment later, it would replace what was selected).
+  view.dispatch(view.state.tr.setMeta(key, true));
+  const t = store.threads.get('new');
+  if (t) {
+    t.element.scrollIntoView({ block: 'nearest' });
+    t.focus();
+  }
+  return true;
+}
+
 /** The codes to suggest, in the codebook's order, each with its parents' names. */
 function suggestions(book: Codebook): Suggestion[] {
   const byId = new Map(book.codes.map((c) => [c.id, c]));
@@ -594,7 +784,7 @@ function tagMenu(store: Store, g: Group, at: HTMLElement) {
 
 function editor(ctx: FeatureEditorContext) {
   injectStyle();
-  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, card: null, cardFor: null, coding: null, closeBox: null, typing: false, hoverTag: null, hoverText: new Set() };
+  const store: Store = { ctx, view: null, files: [], pending: null, onDocument: false, replyTo: null, editing: null, drafts: new Map(), focus: null, listeners: new Set(), cached: { doc: null, shown: [] }, card: null, cardFor: null, coding: null, closeBox: null, typing: false, hoverTag: null, hoverText: new Set(), threads: new Map(), inlineNew: null, inlineHover: null };
   const codes = codesOf(ctx);
   /** The passages pointed at in the text: drawn again only where that changed. */
   const hoverText = (keys: Set<string>) => {
@@ -618,8 +808,37 @@ function editor(ctx: FeatureEditorContext) {
       decorations: (state) => {
         const size = state.doc.content.size;
         const shown = collect(store, state.doc).filter((s) => s.from !== null && s.to !== null && s.to <= size);
-        const decos = commenting(ctx) ? shown.filter((s) => s.kind === 'comment').map((s) =>
+        const decos = commenting(ctx) ? shown.filter((s) => s.kind === 'comment' && !isInline(s.item)).map((s) =>
           Decoration.inline(s.from!, s.to!, { class: s.id === store.focus ? 'kuraa-commented kuraa-commented-focus' : 'kuraa-commented', 'data-annotation': s.id })) : [];
+        // Inline comments: each thread after its passage's block, in the order of the text; its passage shown while it is pointed at.
+        const kept = new Set<string>();
+        if (commenting(ctx) && store.view) {
+          const view = store.view;
+          const threads: { id: string; at: number; from: number; to: number; created: string }[] = [];
+          for (const s of shown) {
+            if (s.kind !== 'comment' || !isInline(s.item)) continue;
+            const at = afterBlock(state.doc, s.from!, s.to!);
+            if (at !== null) threads.push({ id: s.id, at, from: s.from!, to: s.to!, created: String(s.item.created ?? '') });
+          }
+          const n = store.inlineNew;
+          const room = ctx.state;
+          if (n && room) {
+            const from = room.positionOf(n.from);
+            const to = room.positionOf(n.to);
+            const at = from !== null && to !== null && from <= to && to <= size ? afterBlock(state.doc, from, to) : null;
+            // Begun: after the others at its block, the passage shown meanwhile.
+            if (at !== null) threads.push({ id: 'new', at, from: from!, to: to!, created: '\uffff' });
+            else store.inlineNew = null;
+          }
+          threads.sort((a, b) => a.at - b.at || a.from - b.from || a.created.localeCompare(b.created));
+          for (const t of threads) {
+            kept.add(t.id);
+            decos.push(Decoration.widget(t.at, () => threadFor(store, view, t.id).element, { side: 1, key: `inline:${t.id}`, ignoreSelection: true, stopEvent: () => true }));
+            if (store.inlineHover === t.id && t.to > t.from) decos.push(Decoration.inline(t.from, t.to, { class: 'kuraa-inline-passage' }));
+          }
+        }
+        // Threads no longer shown let go (what was typed in them is kept in the drafts).
+        for (const id of [...store.threads.keys()]) if (!kept.has(id)) store.threads.delete(id);
         // What is being commented on, while its box is open (the selection is not shown while the box has the focus).
         if (store.pending && ctx.state) {
           const from = ctx.state.positionOf(store.pending.from);
@@ -679,6 +898,8 @@ function editor(ctx: FeatureEditorContext) {
         queueMicrotask(() => {
           queued = false;
           if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(key, true));
+          // Inline threads drawn again where what they show changed (a reply, an edit, anyone's).
+          for (const t of store.threads.values()) t.update();
           ctx.redraw();
         });
       };
@@ -710,7 +931,7 @@ function editor(ctx: FeatureEditorContext) {
   return {
     plugins: () => [plugin],
     // Its commands (0091): their keys are bound by the core, in the editor.
-    commands: { comment: (view: EditorView) => openCommentBox(store, view), code: (view: EditorView) => openCoding(store, view) },
+    commands: { comment: (view: EditorView) => openCommentBox(store, view), inline: (view: EditorView) => openInline(store, view), code: (view: EditorView) => openCoding(store, view) },
     margin: (view: EditorView) => {
       // Comments or coding turned on or off (the margin is drawn again then): the text's highlights drawn again too.
       const now = switches();
@@ -722,11 +943,14 @@ function editor(ctx: FeatureEditorContext) {
         });
       }
       const shown = collect(store, view.state.doc).filter((s) => s.from !== null);
-      // A 💬 at each comment, opening its thread below its passage.
-      const items: MarginItem[] = commenting(ctx) ? shown.filter((s) => s.kind === 'comment').map((s) => ({
+      // A speech bubble at each comment, in its maker's colour (yours as it is now, for your own), opening its thread below its passage.
+      // Not an inline comment's: its thread is in the text (0133).
+      const items: MarginItem[] = commenting(ctx) ? shown.filter((s) => s.kind === 'comment' && !isInline(s.item)).map((s) => ({
         key: s.id,
         pos: s.from!,
         label: '💬',
+        icon: BUBBLE,
+        color: (s.mine ? ctx.person().color : null) || creatorColourOf(s.item) || undefined,
         title: `${creatorOf(s.item) || 'Someone'}: ${textOf(s.item)}`,
         active: store.cardFor === s.id,
         run: (at: HTMLElement) => openThread(store, view, s.id, at),
@@ -754,11 +978,12 @@ function editor(ctx: FeatureEditorContext) {
       return [...items, ...tags];
     },
     selectionActions: () => (ctx.state ? [
-      ...(commenting(ctx) ? [{ command: 'comment', testid: 'annotations-comment' }] : []),
+      ...(commenting(ctx) ? [{ command: 'comment', testid: 'annotations-comment' }, { command: 'inline', label: 'Inline', testid: 'annotations-inline' }] : []),
       ...(coding(ctx) ? [{ command: 'code', testid: 'annotations-code' }] : []),
     ] : []),
     destroy: () => {
       closeOpen(store);
+      store.threads.clear();
       if (stores.get(ctx.path) === store) stores.delete(ctx.path);
     },
   };
@@ -775,6 +1000,15 @@ function pin(style: string) {
 // ---------------------------------------------------------------------------
 // The Comments panel
 
+/** This person, as their annotations name them: their identity, name and cursor colour (0129) as they are now. */
+function creator(ctx: FeatureClientContext, me: string): Json {
+  const { name, color } = ctx.person();
+  return { id: `urn:kuraa:person:${me}`, type: 'Person', name, ...(/^#[0-9a-f]{6}$/i.test(color) ? { color } : {}) };
+}
+
+/** A comment in the margin (0129): a speech bubble, as line art in a 16×16 box. */
+const BUBBLE = { paths: ['M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H7.5l-3.25 2.75v-2.75H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z'] };
+
 /** A new annotation of this person's. */
 function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting' | 'replying', value: string, target: Json): Item {
   const now = new Date().toISOString();
@@ -784,7 +1018,7 @@ function newItem(ctx: FeatureClientContext, me: string, motivation: 'commenting'
     motivation,
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'TextualBody', value, format: 'text/markdown', purpose: motivation },
     target,
   };
@@ -986,6 +1220,7 @@ function mountComments(root: HTMLElement, pctx: FeaturePanelContext): () => void
         q.title = 'Show it in the document';
         thread.append(q);
       } else thread.append(el('p', { cls: 'kuraa-note', text: 'On the document' }));
+      if (isInline(c.item)) thread.append(el('p', { cls: 'kuraa-note', text: 'Inline: shown in the text', testid: 'annotations-inline-note' }));
       thread.append(entry(c, false));
       for (const r of (replies.get(c.id) ?? []).sort((x, y) => String(x.item.created).localeCompare(String(y.item.created)))) thread.append(entry(r, true));
       if (s.replyTo === c.id && state) {
@@ -1083,7 +1318,7 @@ function newCoding(ctx: FeatureClientContext, me: string, code: string, quote: s
     motivation: 'classifying',
     created: now,
     modified: now,
-    creator: { id: `urn:kuraa:person:${me}`, type: 'Person', name: ctx.person().name },
+    creator: creator(ctx, me),
     body: { type: 'SpecificResource', source: code, purpose: 'classifying' },
     target: { source, selector: [{ type: 'TextQuoteSelector', exact: quote }] },
   };
@@ -1482,7 +1717,7 @@ function injectStyle() {
 `;
   const style = document.createElement('style');
   style.dataset.feature = 'annotations';
-  style.textContent = css;
+  style.textContent = css + INLINE_CSS;
   document.head.append(style);
 }
 
@@ -1493,6 +1728,7 @@ export const annotationsClient = defineClientFeature({
   // Done in the open document, by its editor (commands, in editor()), with the focus there.
   commands: [
     { id: 'comment', label: 'Comment', keys: COMMENT_KEYS, about: 'editor', help: 'Comment on the selected text, in a box beside it (↵ saves)' },
+    { id: 'inline', label: 'Inline comment', keys: INLINE_KEYS, about: 'editor', help: 'Comment on the selected text, or the paragraph the caret is in, as a discussion shown in the text after it (↵ saves)' },
     { id: 'code', label: 'Code #', keys: CODE_KEYS, about: 'editor', help: 'Code the selected text, or the point at the caret, as typing # does (where the workspace codes)' },
   ],
   panels: [
@@ -1503,6 +1739,7 @@ export const annotationsClient = defineClientFeature({
   ],
   documentMenu: (ctx) => [
     ...(commenting(ctx) ? [
+      { command: 'inline', testid: 'menu-inline' },
       { command: 'panel:comments', testid: 'menu-comments' },
     ] : []),
     ...(coding(ctx) ? [

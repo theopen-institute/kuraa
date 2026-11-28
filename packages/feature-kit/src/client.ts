@@ -581,6 +581,11 @@ export interface MarginItem {
   pos: number;
   /** What it says: a few characters, or for a tag a short name. */
   label: string;
+  /**
+   * A mark drawn as line art in place of its label (0129): strokes in a 16×16
+   * box, as a file's icon is, in its `color` (the text's where it has none).
+   */
+  icon?: FileIcon;
   /** What it says when pointed at. */
   title?: string;
   color?: string;

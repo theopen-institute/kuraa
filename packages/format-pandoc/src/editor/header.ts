@@ -247,8 +247,9 @@ const titleKey = new PluginKey('doc-title');
 
 /**
  * The title for a document with no header yet (an empty heading to type it in),
- * ↑ at the start of the text going up into the title, and ⌘↑ (Ctrl+Home) going
- * to the start of the text, not into the title.
+ * ↑ at the start of the text going up into the title, and ⌘↑ (Ctrl+Home), and a
+ * paragraph up (Ctrl+↑, ⌥↑) from the first block, going to the start of the text,
+ * not into the title.
  */
 function titlePlugin(type: NodeType): Plugin {
   return new Plugin({
@@ -271,6 +272,21 @@ function titlePlugin(type: NodeType): Plugin {
           e.preventDefault();
           const to = e.shiftKey ? TextSelection.between(doc.resolve(selection.anchor), start.$from) : start;
           view.dispatch(view.state.tr.setSelection(to).scrollIntoView());
+          return true;
+        }
+        // A paragraph up (Ctrl+↑ off the Mac, ⌥↑ on it) from the text's first block: to its start, and from
+        // there, as ↑, into the title. Left to the browser, it puts the caret in the title above, where
+        // ProseMirror does not follow it: what is typed next goes to the start of the title (0134).
+        const paragraphUp = e.key === 'ArrowUp' && !e.metaKey && e.ctrlKey !== e.altKey;
+        if (paragraphUp && start && selection.$head.sameParent(start.$from)) {
+          e.preventDefault();
+          if (selection.head !== start.from) {
+            const to = e.shiftKey ? TextSelection.between(doc.resolve(selection.anchor), start.$from) : start;
+            view.dispatch(view.state.tr.setSelection(to).scrollIntoView());
+          } else if (!e.shiftKey && selection.empty) {
+            const h1 = titleIn(view);
+            if (h1) focusEnd(h1);
+          }
           return true;
         }
         if (e.key !== 'ArrowUp' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;

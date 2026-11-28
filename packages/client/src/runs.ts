@@ -102,11 +102,25 @@ export class ChunkRunner {
   constructor(
     private readonly api: HostApi,
     readonly path: string,
-    /** What the host runs, and where. */
-    readonly info: RunInfo,
+    private current: RunInfo,
     private readonly user: () => { name: string; email: string; color: string },
   ) {
     this.session = { path, engine: null, environment: null, state: 'none', message: null, id: null, steps: [] };
+  }
+
+  /** What the host runs, and where. */
+  get info(): RunInfo {
+    return this.current;
+  }
+
+  /**
+   * What the host runs changed (learnt after the document opened, or where it
+   * runs became available or not): its chunks shown as they now stand, without
+   * opening the document again.
+   */
+  setInfo(info: RunInfo): void {
+    this.current = info;
+    this.emit();
   }
 
   /** Whether chunks of `engine` are run here at all (an engine handles them), available now or not. */

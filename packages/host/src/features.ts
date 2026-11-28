@@ -16,14 +16,14 @@
 // - tells features what happened, after it happened (they cannot refuse it);
 // - routes /api/features/<id>/… to them, and lets them write only their own files.
 import { constants } from 'node:fs';
-import { open, readdir, rm, rmdir } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { isUtf8 } from 'node:buffer';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { documentOfFiles, HookBus, sourceMapOf, type DocumentType, type HookEvent, type ParsedDocument } from '@kuraa/kernel';
 import {
-  COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, companionFolder, documentOf, ownFile, ownerOf,
+  COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, STORE_NAME, companionFolder, documentOf, ownFile, ownerOf,
   type FeatureContext, type FeatureEvent, type FeatureEvents, type FeatureRequest, type FeatureResponse, type FeatureSession,
-  type ConvertedFile, type FeatureSettings, type FeatureStatus, type HostFeature, type Json, type NewFile, type Person,
+  type ConvertedFile, type EditedDocument, type FeatureHistory, type FeatureSettings, type FeatureStatus, type FeatureStore, type HostFeature, type Json, type NewFile, type Person,
 } from '@kuraa/feature-kit/host';
 import type { FeatureSeed, FeatureView } from '@kuraa/session/server';
 import type { Node } from 'prosemirror-model';
@@ -47,6 +47,12 @@ export interface FeaturePort {
   typeFor(path: string): DocumentType | undefined;
   /** A document's text as its open room has it now (on the branch checked out), if it has one here (0120). */
   liveText(path: string): Promise<string | undefined>;
+  /** The workspace's history, read only (0121). */
+  history: FeatureHistory;
+  /** Documents changed in their rooms here since their last commit, and by whom (0121). */
+  edited(): Promise<EditedDocument[]>;
+  /** The repository's own folder (.git), where what features keep on this device is kept (0121). */
+  gitDir(): Promise<string>;
   /** Tell the clients of rooms: those of `path`, or every one. */
   tell(feature: string, message: Json, path: string | null): void;
   /** Whether a document's room is open here (its companions are then the room's to write). */
@@ -132,6 +138,33 @@ async function readPlain(abs: string, maxBytes = Infinity): Promise<string | nul
   } finally {
     await fh.close();
   }
+}
+
+/** What a feature keeps on this device (0121): JSON files in .git/kuraa/features/<id>/, never synced or committed. */
+export function featureStore(id: string, gitDir: () => Promise<string>): FeatureStore {
+  const fileOf = async (name: string) => {
+    if (!STORE_NAME.test(name)) throw new Error(`${name} is not a name to keep something under (${STORE_NAME})`);
+    return join(await gitDir(), 'kuraa', 'features', id, `${name}.json`);
+  };
+  return {
+    async get(name) {
+      const text = await readFile(await fileOf(name), 'utf8').catch(() => null);
+      if (text === null) return null;
+      try {
+        return JSON.parse(text) as Json;
+      } catch {
+        return null;
+      }
+    },
+    async set(name, value) {
+      const file = await fileOf(name);
+      if (value === null) return void (await rm(file, { force: true }));
+      await mkdir(dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(tmp, JSON.stringify(value));
+      await rename(tmp, file);
+    },
+  };
 }
 
 export class HostFeatures {
@@ -577,6 +610,9 @@ export class HostFeatures {
       list: () => this.port.list(),
       typeOf: (path) => this.port.typeFor(path),
       belongsTo: (path) => this.documentOf(path) ?? documentOfFiles(path),
+      history: this.port.history,
+      edited: () => this.port.edited(),
+      store: featureStore(f.id, () => this.port.gitDir()),
       convert: (name, bytes) => this.port.convert(name, bytes),
       // New files only, never one it would overwrite; checked, cleaned and committed by the host (0116).
       create: (files, o) => this.port.create(files, { message: o.message, by: o.by ?? null }),

@@ -810,6 +810,9 @@ importers:
       '@kuraa/sync-git':
         specifier: workspace:*
         version: link:../sync-git
+      '@kuraa/words':
+        specifier: workspace:*
+        version: link:../words
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2

@@ -116,7 +116,6 @@ export function useFeatureHost(o: FeatureHostOptions) {
       madeFrom: (p, format) => api.value.renderMadeFrom(p, format),
       bookContents: (folder) => api.value.bookContents(folder),
     },
-    history: { wordsByDay: (since) => api.value.wordsByDay(since) },
     documents: {
       setHeader: async (p, fields) => {
         await api.value.setHeader(p, fields, o.person());

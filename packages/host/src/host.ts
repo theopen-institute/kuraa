@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { cleanImage, documentOfFiles, filesFolderOf, movedBy, proseWords, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
-import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type HostFeature } from '@kuraa/feature-kit/host';
+import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type EditedDocument, type HostFeature } from '@kuraa/feature-kit/host';
 import { HostFeatures } from './features.js';
 import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
@@ -29,7 +29,7 @@ import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
 import { bookItems, joinBook, type BookPart, type CompileEntry } from './compile.js';
 import { readOrders } from './order.js';
-import { WordLog, type DayWords, type Uncommitted } from './wordlog.js';
+import { gitHistory } from './history.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
 /** How long stopping waits for the last saves to reach the online copies (the rest go at the next start). */
@@ -308,8 +308,6 @@ export class Host {
   runner!: Runner;
   /** Documents rendered to HTML, Word, PDF and EPUB (renders.ts). */
   renders!: Renders;
-  /** Words written by day and person, from the history (wordlog.ts, 0094). */
-  private wordLog: WordLog | null = null;
   private watcher: FSWatcher | null = null;
   private cacheDir = '';
   private watchTimers = new Map<string, NodeJS.Timeout>();
@@ -2896,32 +2894,25 @@ export class Host {
   }
 
   /**
-   * Words written each day from `since` (YYYY-MM-DD), by person (0094): the
-   * branch's history, and what is typed in documents open here and not
-   * committed yet, credited to whoever typed it.
+   * The documents open in rooms here, on the branch checked out, that people
+   * have changed since their last commit (0121: FeatureContext.edited): as
+   * they were at the branch's head and as their rooms have them now, and who
+   * changed them.
    */
-  async wordsByDay(since: string): Promise<DayWords[]> {
-    this.wordLog ??= new WordLog({
-      git: this.git,
-      proseOf: (p) => {
-        const type = this.belongsTo(p) === null ? this.typeFor(p) : undefined;
-        return type?.prose ? (text) => type.prose!(text) : null;
-      },
-    });
+  private async editedDocuments(): Promise<EditedDocument[]> {
     const branch = await this.git.branch();
-    const uncommitted: Uncommitted[] = [];
+    const out: EditedDocument[] = [];
     for (const rec of this.records.values()) {
-      const type = rec.type;
-      if (rec.branch !== branch || !rec.contributors.size || !type.prose) continue;
-      const prose = (text: string) => type.prose!(text);
+      if (rec.branch !== branch || !rec.contributors.size) continue;
       const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
-      uncommitted.push({
-        before: before.code === 0 ? prose(before.stdout) : null,
-        after: prose(rec.type.serialize(this.current(rec), rec.previous)),
+      out.push({
+        path: rec.path,
+        before: before.code === 0 ? before.stdout : null,
+        after: rec.type.serialize(this.current(rec), rec.previous),
         people: [...rec.contributors.values()].map((u) => ({ name: u.name, email: u.email })),
       });
     }
-    return this.wordLog.days(since, uncommitted);
+    return out;
   }
 
   /** A document's open room, if it has one, written to its file and committed, to be rendered as it is now. */
@@ -3166,6 +3157,9 @@ export class Host {
       canWrite: async (p) => (this.peers ? (await this.peers.access(p)).canWrite : true),
       list: () => this.listFiles(),
       typeFor: (p) => this.typeFor(p),
+      history: gitHistory(this.git),
+      edited: () => this.editedDocuments(),
+      gitDir: () => this.git.gitDir(),
       liveText: async (p) => {
         // Most files have no room: answered without asking git which branch is checked out.
         if (![...this.records.values()].some((r) => r.path === p)) return undefined;

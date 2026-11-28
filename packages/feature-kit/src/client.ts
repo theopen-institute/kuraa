@@ -302,13 +302,6 @@ export interface DocumentHeader {
   set(fields: { [key: string]: unknown }): void;
 }
 
-/** A day's words, by person (0094): net (how many more) and added (written, a rewrite counting too). */
-export interface WordsDay {
-  /** YYYY-MM-DD. */
-  date: string;
-  people: { name: string; email: string; net: number; added: number }[];
-}
-
 /** A view of a folder in the main area (0096). */
 export interface FolderView {
   id: string;
@@ -422,7 +415,6 @@ export interface CoreHost {
   renders: RenderService;
   tools: ToolService;
   code: CodeService;
-  history: HistoryService;
   documents: DocumentService;
 }
 
@@ -437,17 +429,6 @@ export interface DocumentService {
    * it is. Where it is open, everyone in it sees the change at once.
    */
   setHeader(path: string, fields: { [key: string]: unknown }): Promise<void>;
-}
-
-/** The workspace's history, read (0094). */
-export interface HistoryService {
-  /**
-   * Words written each day from `since` (YYYY-MM-DD), by person, newest day
-   * first: every commit on the branch but merges, each credited in full to
-   * everyone credited on it, on its own day; and what is typed here and not
-   * committed yet, today.
-   */
-  wordsByDay(since: string): Promise<WordsDay[]>;
 }
 
 

@@ -15,7 +15,7 @@ import { defineFeature, type FeatureEvents, type HostFeature } from '@kuraa/feat
 import { marksFeature, readMarks } from '@kuraa/feature-example';
 import { searchFeature } from '@kuraa/search';
 import { startHost, type RunningHost } from '../src/index.js';
-import { checkFeatures } from '../src/features.js';
+import { checkFeatures, featureStore } from '../src/features.js';
 import { createPerson } from '../src/peers/person.js';
 
 const NOTES = `---
@@ -428,5 +428,25 @@ describe('features', () => {
     expect(ws.types.map((t) => t.id)).toContain('marks');
     const host = running as unknown as { host: { mergeSignature: string } };
     expect(host.host?.mergeSignature ?? '').toContain('marks@1');
+  });
+});
+
+describe('what a feature keeps on this device (0121)', () => {
+  it('keeps JSON by name, its own apart from others’, forgets on null, and refuses a name that is not one', async () => {
+    const git = mkdtempSync(join(tmpdir(), 'kuraa-store-'));
+    try {
+      const mine = featureStore('words', async () => git);
+      const theirs = featureStore('other', async () => git);
+      expect(await mine.get('commits')).toBeNull();
+      await mine.set('commits', { version: 1, n: [1, 2] });
+      expect(await mine.get('commits')).toEqual({ version: 1, n: [1, 2] });
+      expect(await theirs.get('commits')).toBeNull();
+      expect(existsSync(join(git, 'kuraa/features/words/commits.json'))).toBe(true);
+      await mine.set('commits', null);
+      expect(await mine.get('commits')).toBeNull();
+      for (const bad of ['../x', 'A', '', 'a/b', '.hidden']) await expect(mine.set(bad, 1)).rejects.toThrow(/not a name/);
+    } finally {
+      rmSync(git, { recursive: true, force: true });
+    }
   });
 });

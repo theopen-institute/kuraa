@@ -40,6 +40,7 @@
     "@kuraa/render-pandoc": "workspace:*",
     "@kuraa/search": "workspace:*",
     "@kuraa/sync-git": "workspace:*",
+    "@kuraa/words": "workspace:*",
     "@types/ws": "^8.18.2",
     "prosemirror-transform": "^1.12.5",
     "yaml": "^2.9.1"

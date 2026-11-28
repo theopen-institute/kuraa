@@ -142,6 +142,69 @@ export interface FeatureEvents {
 
 export type FeatureEvent = keyof FeatureEvents;
 
+/** Someone named on a commit: as git names them. */
+export interface CommitPerson {
+  name: string;
+  email: string;
+}
+
+/** A commit of the workspace's history (FeatureHistory.log). */
+export interface HistoryCommit {
+  id: string;
+  /** When its author made it, where they made it: ISO 8601 with its offset (2026-01-10T10:00:00+02:00). */
+  date: string;
+  author: CommitPerson;
+  /** Those it names as co-authors (`Co-authored-by:`): an automatic save names whoever changed its documents since the last. */
+  coAuthors: CommitPerson[];
+  /** It brought two lines of work together. */
+  merge: boolean;
+}
+
+/** A file a commit changed, against its first parent: where it was (null: added) and where it is (null: deleted); a rename has both. */
+export interface FileChange {
+  from: string | null;
+  to: string | null;
+}
+
+/** A file at a commit, for FeatureHistory.read: `before`, in the commit's first parent instead. */
+export interface FileAt {
+  commit: string;
+  path: string;
+  before?: boolean;
+}
+
+/** The workspace's history, read only (FeatureContext.history, 0121). */
+export interface FeatureHistory {
+  /** The commits on the branch checked out, newest first: from a moment on (ISO 8601), merges left out where `merges` is false. */
+  log(o?: { since?: string; merges?: boolean }): Promise<HistoryCommit[]>;
+  /** What each commit changed against its first parent, renames followed, by commit id. */
+  changes(commits: string[]): Promise<{ [commit: string]: FileChange[] }>;
+  /** Files as they were, all asked at once, in the order asked: their text, or null where there was none or it was not text. */
+  read(files: FileAt[]): Promise<(string | null)[]>;
+}
+
+/** A document changed in its room here since its last commit (FeatureContext.edited). */
+export interface EditedDocument {
+  path: string;
+  /** Its text at its last commit; null where it was not there. */
+  before: string | null;
+  /** Its text as its room has it now. */
+  after: string;
+  /** Who changed it since. */
+  people: CommitPerson[];
+}
+
+/** What a feature keeps on this device (FeatureContext.store): JSON by name. */
+export interface FeatureStore {
+  /** What it kept under a name (STORE_NAME), or null. */
+  get(name: string): Promise<Json | null>;
+  /** Keep a value under a name, or forget it (null). */
+  set(name: string, value: Json | null): Promise<void>;
+}
+
+/** A name a feature keeps something under in its store. */
+export const STORE_NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
+
 /** How FeatureContext.read reads a file. */
 export interface ReadOptions {
   /** Not read where larger than this many bytes (null is returned). */
@@ -217,6 +280,24 @@ export interface FeatureContext {
    * it may not add.
    */
   create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
+  /**
+   * The workspace's history as this device holds it, read only (0121): its
+   * commits on the branch checked out, what each changed, and files as they
+   * were. The spaces' histories are not in it.
+   */
+  history: FeatureHistory;
+  /**
+   * The documents open in rooms here, on the branch checked out, that people
+   * have changed since their last commit (0121): each as it was at that commit
+   * (null: not there) and as its room has it now, and who changed it.
+   */
+  edited(): Promise<EditedDocument[]>;
+  /**
+   * What it keeps on this device for this workspace (0121): a cache, say, of
+   * what it worked out from the history. Never synced, never committed; gone
+   * when the workspace's folder goes. Its own, apart from every other feature's.
+   */
+  store: FeatureStore;
   /** You: this host's person's identity ID; null until there is one (then nothing of yours can be written). */
   me(): string | null;
   /** A person's own file beside a document (by default yours, by this feature's first suffix and its room's extension, or `.json`). */

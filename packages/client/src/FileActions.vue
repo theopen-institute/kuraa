@@ -292,9 +292,16 @@ function menuItems(path: string, plus = false): ContextItem[] {
 
 /** The menu for a file, a folder (ending in `/`) or the top level (''), at a point. */
 function fileMenu(path: string, at: { x: number; y: number }) {
-  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once).
-  const extra = path === '' ? (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 })) : [];
+  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once), and what features add for it (as the folder `/`: 0114).
+  const extra = path === '' ? topItems() : [];
   menu.value = { x: at.x, y: at.y, items: [...menuItems(path), ...extra] };
+}
+
+/** What views add to ＋ and features add for the top level (as the folder `/`: Import…, Compile…), after the core's. */
+function topItems(): ContextItem[] {
+  const views = (props.newItems?.() ?? []).map((i): ContextItem => ({ label: i.label, run: i.run, testid: i.testid }));
+  const features = (props.featureItems?.('/') ?? []).map((i) => ({ ...i }));
+  return [...views, ...features].map((i, n) => ({ ...i, divided: n === 0 }));
 }
 
 /** ＋ (decision 0086): the top level's menu, a new file or folder, and what the views add, under the button. */
@@ -308,8 +315,7 @@ function newMenu(at: HTMLElement) {
   }
   plusAt = at;
   const box = at.getBoundingClientRect();
-  const extra = (props.newItems?.() ?? []).map((i, n): ContextItem => ({ label: i.label, run: i.run, testid: i.testid, divided: n === 0 }));
-  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems('', true), ...extra], plus: true };
+  menu.value = { x: box.left, y: box.bottom + 2, items: [...menuItems('', true), ...topItems()], plus: true };
 }
 function menuClosed(outside?: Event) {
   closedByPlus = !!menu.value?.plus && !!outside && !!plusAt?.contains(outside.target as Node);

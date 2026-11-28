@@ -2,22 +2,22 @@
 import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat, writeFile as writeFileAsync } from 'node:fs/promises';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { documentOfFiles, filesFolderOf, markdownWords, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { cleanImage, documentOfFiles, filesFolderOf, markdownWords, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
-import { COMPANIONS_FILE, FEATURES_FILE, type HostFeature } from '@kuraa/feature-kit/host';
+import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type HostFeature } from '@kuraa/feature-kit/host';
 import { HostFeatures } from './features.js';
 import { Git, NON_INTERACTIVE } from './git.js';
 import { HttpError } from './errors.js';
-import { renameOver } from './files.js';
+import { renameOver, unportablePath } from './files.js';
 import { commitSigned, signCommitObject } from './signing.js';
 import { serialQueue } from './serial.js';
 import { NAME_FILE, cleanName, initWorkspace, readWorkspaceName, writeWorkspaceName } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { Renders, type CompiledBook, type CompileOptions, type RenderFormat } from './renders.js';
+import { readOutput, Renders, type CompiledBook, type CompileOptions, type RenderFormat } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
 import { gateFor, upgradeAllowed, type RequestGate } from './origins.js';
@@ -3035,9 +3035,105 @@ export class Host {
     return !!me && !!this.peers && this.peers.node.personOfDevice(origin || via || '') === me;
   }
 
+  /**
+   * A file converted into Markdown (0114: importing) by a renderer that
+   * converts its kind (pandoc.wasm: Word, RTF, …), in a scratch folder of its
+   * own, given nothing of the workspace: the Markdown, and the media it held,
+   * by the names the Markdown gives them. A refusal, in words, where nothing
+   * here converts it or it could not be read.
+   */
+  async convertFile(name: string, bytes: Uint8Array): Promise<ConvertedFile> {
+    const ext = extname(name).toLowerCase();
+    const renderer = this.runner.converterFor(ext);
+    if (!renderer?.convert) return { ok: false, message: `${basename(name)}: nothing here converts ${ext || 'files of this kind'}.` };
+    const scratch = join(await this.git.gitDir(), 'kuraa', 'run', 'convert', randomBytes(8).toString('hex'));
+    await mkdir(scratch, { recursive: true });
+    try {
+      const input = join(scratch, `in${ext}`);
+      await writeFileAsync(input, bytes);
+      const r = await renderer.convert({
+        scratch, workspace: this.dir, read: async () => null, timeLimitMs: this.runner.renderTimeLimitMs, signal: new AbortController().signal,
+        log: (m) => this.log(`${renderer.id} convert: ${m}`), status: () => {},
+      }, { input });
+      if (!r.ok || r.markdown === undefined) return { ok: false, message: `${basename(name)}: ${r.message}` };
+      const media: { name: string; bytes: Buffer }[] = [];
+      for (const m of r.media ?? []) {
+        const got = await readOutput(scratch, m.file);
+        if (got) media.push({ name: m.name, bytes: got });
+      }
+      return { ok: true, markdown: r.markdown, media };
+    } finally {
+      await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * New files, all or none, in one commit for each space they go into (0114:
+   * importing): documents, folders' orders, images and other files. Each must
+   * be new (nothing overwritten), portable, and somewhere this host's person
+   * may write; an image is kept without its details (0108: cleanImage), and
+   * one whose details could not be found is left out, said in `skipped`.
+   */
+  async createFiles(files: { path: string; text?: string; bytes?: Uint8Array }[], o: { message: string; by?: PresenceUser | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }> {
+    if (!files.length) return { created: [], skipped: [] };
+    const seen = new Set<string>();
+    const ready: { path: string; abs: string; data: string | Uint8Array }[] = [];
+    const skipped: { path: string; why: string }[] = [];
+    for (const f of files) {
+      const path = this.relPath(f.path);
+      const why = unportablePath(path);
+      if (why) throw new HttpError(400, why);
+      if (seen.has(path.toLowerCase())) throw new HttpError(400, `${path} is named twice`);
+      seen.add(path.toLowerCase());
+      const abs = this.resolvePath(path);
+      if (existsSync(abs)) throw new HttpError(409, `${path} is there already: nothing was added`);
+      if (this.peers && !(await this.peers.access(path)).canWrite) throw new HttpError(403, `You may not add files to ${dirname(path) === '.' ? 'the top of the workspace' : dirname(path)}`);
+      let data: string | Uint8Array = f.text ?? f.bytes ?? '';
+      if (f.bytes && /\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
+        const clean = cleanImage(f.bytes);
+        if (!clean) {
+          skipped.push({ path, why: 'an image whose details could not be found (it may be damaged)' });
+          continue;
+        }
+        data = clean.bytes;
+      }
+      ready.push({ path, abs, data });
+    }
+    // Made in a folder fewer read: into their space, never onto the workspace's own branch (0069).
+    const bySpace = new Map<string | null, string[]>();
+    for (const f of ready) {
+      const space = this.peers ? await this.peers.spaceForNew(f.path) : null;
+      bySpace.set(space, [...(bySpace.get(space) ?? []), f.path]);
+    }
+    const by = o.by && o.by.email ? [o.by] : [];
+    await this.serial(async () => {
+      await this.requireWritable();
+      const written: string[] = [];
+      try {
+        for (const f of ready) {
+          await mkdir(dirname(f.abs), { recursive: true });
+          await writeFileAsync(f.abs, f.data, { flag: 'wx' });
+          written.push(f.abs);
+        }
+      } catch (e) {
+        for (const abs of written) await rm(abs, { force: true }).catch(() => undefined);
+        throw e;
+      }
+      for (const [space, paths] of bySpace) {
+        if (space) await this.commitIntoSpace(space, paths, o.message, by);
+        else await this.commitPaths(paths, o.message, by);
+      }
+    });
+    const at = new Date().toISOString();
+    for (const rec of this.records.values()) this.broadcast(rec, { type: 'files-changed', at });
+    return { created: ready.map((f) => f.path), skipped };
+  }
+
   /** What features (features.ts) are given of the host: as little as they need. */
   private featurePort(): import('./features.js').FeaturePort {
     return {
+      convert: (name, bytes) => this.convertFile(name, bytes),
+      create: (files, o) => this.createFiles(files, o),
       log: (m) => this.log(m),
       serial: (fn) => this.serial(fn),
       requireWritable: () => this.requireWritable(),

@@ -1,0 +1,19 @@
+{
+  "name": "@kuraa/import",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@kuraa/compile": "workspace:*",
+    "@kuraa/feature-kit": "workspace:*",
+    "@kuraa/kernel": "workspace:*",
+    "@xmldom/xmldom": "^0.9.12",
+    "fflate": "^0.8.3",
+    "vue": "^3.5.45",
+    "yaml": "^2.9.1"
+  }
+}

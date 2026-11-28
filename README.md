@@ -158,6 +158,13 @@ where code runs): folders' names and documents' titles become headings, one leve
 down. The Compile panel lists the folder's contents in that order, each at its heading's level: untick a document or folder to leave it out (it shows faded in the file tree), or untick a folder's **Heading** when it only organises. Untick a folder's **Titles** for scenes that run on under its heading, with what you put **Between documents without titles** (`#`, or `* * *` for a line) between them. The book has a subtitle and author for its title page, a table of contents, **Numbering** (*Chapter 1: …*, or every heading 1, 1.1, …), a Word template for a Word book and a cover for an EPUB (files in the workspace). These choices and the book's title are kept in
 a `.kuraa-compile.yml` in each folder ([0093](docs/decisions/0093-order-and-compile-over-folders.md), [0106](docs/decisions/0106-a-books-own-settings-and-epub.md)).
 
+**Import…** on a folder's menu (or the top level's: ＋, right-clicked) makes a Word document (or
+OpenDocument, RTF, EPUB, HTML) or a Scrivener project (2 or 3, its folder or a .zip of it) a folder
+of documents, converted by the built-in pandoc. A Word document gets a document for each chapter (or
+section); a Scrivener project its binder's folders and documents in order, with each one's synopsis,
+label, status and keywords, what goes in its book and its title, author and target for Compile, its
+research files, and its notes in a Notes folder ([0114](docs/decisions/0114-importing.md)).
+
 The open document's **words** are at the foot of its ⋯ menu, below when it was saved: `Word count: 1,234 (Total today: +312)`, the total your net words today in every document; clicking it
 opens a panel to set a target for the document (kept in its header as
 `target-words`) and one for a day (yours, in this browser), and to see everyone's words today and

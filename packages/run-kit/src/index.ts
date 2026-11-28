@@ -386,6 +386,34 @@ export interface Renderer {
   /** Why this render is better made where code runs (a PDF asking for LaTeX), or null. */
   prefersEngine?(req: RenderRequest): Promise<string | null>;
   render(ctx: RendererContext, req: RenderRequest): Promise<RenderResult>;
+  /**
+   * File extensions it converts into Markdown, lower case, with the dot
+   * (['.docx', '.rtf']): an import (0114). With `convert`.
+   */
+  convertsFrom?: string[];
+  /**
+   * A file of one of those types (`input`, in scratch, put there by the host)
+   * as Markdown, with the media it held (images) written under scratch, where
+   * the Markdown names them by `media` paths. Given nothing of the workspace.
+   */
+  convert?(ctx: RendererContext, req: ConvertRequest): Promise<ConvertResult>;
+}
+
+/** A file to convert into Markdown (0114). */
+export interface ConvertRequest {
+  /** The file, in the render's scratch folder. */
+  input: string;
+}
+
+export interface ConvertResult {
+  ok: boolean;
+  /** The Markdown (pandoc's), its images named by the paths in `media`. */
+  markdown?: string;
+  /** Media it held: each one's path as the Markdown names it, and where it is, relative to scratch. */
+  media?: { name: string; file: string }[];
+  /** In plain words: what was made, or why not. */
+  message: string;
+  log: string;
 }
 
 /** What the host gives a renderer for one render. */

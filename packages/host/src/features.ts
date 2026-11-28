@@ -23,7 +23,7 @@ import { HookBus, sourceMapOf, type DocumentType, type HookEvent, type ParsedDoc
 import {
   COMPANION_SUFFIX, COMPANIONS_FILE, FEATURE_API_VERSION, FEATURE_ID, FEATURES_FILE, OWN_NAME, companionFolder, documentOf, ownFile, ownerOf,
   type FeatureContext, type FeatureEvent, type FeatureEvents, type FeatureRequest, type FeatureResponse, type FeatureSession,
-  type FeatureSettings, type FeatureStatus, type HostFeature, type Json, type Person,
+  type ConvertedFile, type FeatureSettings, type FeatureStatus, type HostFeature, type Json, type NewFile, type Person,
 } from '@kuraa/feature-kit/host';
 import type { FeatureSeed, FeatureView } from '@kuraa/session/server';
 import type { Node } from 'prosemirror-model';
@@ -49,6 +49,10 @@ export interface FeaturePort {
   roomOpen(path: string): boolean;
   /** This host's person: their identity ID, whose own files it writes; null until there is one. */
   person(): Promise<string | null>;
+  /** A file converted into Markdown by a renderer that converts its kind (0114). */
+  convert(name: string, bytes: Uint8Array): Promise<ConvertedFile>;
+  /** New files, all or none, committed together (0114). */
+  create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
 }
 
 /** A file's name against a name a feature writes, where `*` is any characters but `/` (0090). */
@@ -558,6 +562,9 @@ export class HostFeatures {
         });
       },
       list: () => this.port.list(),
+      convert: (name, bytes) => this.port.convert(name, bytes),
+      // New files only, never one it would overwrite; checked, cleaned and committed by the host (0114).
+      create: (files, o) => this.port.create(files, { message: o.message, by: o.by ?? null }),
       me: () => this.me,
       companionOf: (doc, o) => ownFile(doc, o?.suffix ?? f.room?.companion ?? f.companions?.[0] ?? `.${f.id}`, o?.person ?? this.me ?? '', o?.extension ?? f.room?.extension ?? '.json'),
       companions: async (doc, suffix) => {

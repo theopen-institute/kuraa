@@ -10,15 +10,16 @@
   "dependencies": {
     "@kuraa/annotations": "workspace:*",
     "@kuraa/code": "workspace:*",
+    "@kuraa/compile": "workspace:*",
+    "@kuraa/corkboard": "workspace:*",
+    "@kuraa/details": "workspace:*",
     "@kuraa/feature-kit": "workspace:*",
     "@kuraa/files": "workspace:*",
-    "@kuraa/compile": "workspace:*",
+    "@kuraa/import": "workspace:*",
     "@kuraa/outline": "workspace:*",
     "@kuraa/preview": "workspace:*",
     "@kuraa/search": "workspace:*",
     "@kuraa/sidebar": "workspace:*",
-    "@kuraa/words": "workspace:*",
-    "@kuraa/details": "workspace:*",
-    "@kuraa/corkboard": "workspace:*"
+    "@kuraa/words": "workspace:*"
   }
 }

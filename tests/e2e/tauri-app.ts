@@ -104,14 +104,25 @@ export async function launchTauri(o: LaunchOptions = {}): Promise<Launched> {
   });
   socket.write(`${code}\n`);
   const replies: ((v: { ok?: unknown; error?: string }) => void)[] = [];
-  createInterface({ input: socket }).on('line', (line) => replies.shift()?.(JSON.parse(line) as { ok?: unknown; error?: string }));
+  // readline passes on the socket's errors (a reset, the app gone): heard below, as the socket closing.
+  createInterface({ input: socket })
+    .on('line', (line) => replies.shift()?.(JSON.parse(line) as { ok?: unknown; error?: string }))
+    .on('error', () => undefined);
   socket.on('error', () => undefined);
+  // The app gone (it stopped, or stopped answering): whatever waits hears so, with what it said last, to tell why.
+  let ended = false;
+  const lastWords = () => `The app went away${child.exitCode !== null ? ` (exit code ${child.exitCode})` : ''}. What it said last:\n${said.slice(-6000)}`;
+  socket.on('close', () => {
+    ended = true;
+    for (const reply of replies.splice(0)) reply({ error: lastWords() });
+  });
   // One request at a time, in order.
   let queue: Promise<unknown> = Promise.resolve();
   const ask = <T>(r: object): Promise<T> => {
     const next = queue.then(
       () =>
         new Promise<T>((done, fail) => {
+          if (ended) return fail(new Error(lastWords()));
           replies.push((v) => (v.error !== undefined ? fail(new Error(v.error)) : done(v.ok as T)));
           socket.write(`${JSON.stringify(r)}\n`);
         }),

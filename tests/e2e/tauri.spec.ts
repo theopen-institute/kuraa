@@ -356,7 +356,7 @@ test('preferences, from the menu, apply at once and are kept where the Electron 
     await app.menu('preferences');
     await click(app, 'settings-tab-components');
     await click(app, 'kind:engines');
-    await app.evaluate(inPage(`const c = $t('pref-run'); if (c.checked) c.click(); return true;`));
+    await app.waitFor(inPage(`const c = $t('pref-run'); if (!c) return false; if (c.checked) c.click(); return true;`));
     // The hub opens the workspaces again with them (writing and committing first), and the page reloads.
     await click(app, 'settings-close');
     await expect.poll(() => (existsSync(join(data, 'preferences.json')) ? JSON.parse(readFileSync(join(data, 'preferences.json'), 'utf8')).runCode : undefined), { timeout: 15_000 }).toBe(false);

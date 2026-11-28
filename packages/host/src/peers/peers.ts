@@ -19,7 +19,7 @@ import { clashWords } from './clashes.js';
 import { isAncestor, mergeTrailerValue } from '../merging.js';
 import { PEER_SPACES } from './node.js';
 import { spaceRef } from '../spaces.js';
-import { PROTOCOL, type PeerLink } from './link.js';
+import { PROTOCOL, type PeerLink, type ServerHealth } from './link.js';
 import { PeerNode, type NodeEvents, type Via } from './node.js';
 import { Rooms } from './rooms.js';
 import { SharedOutputs, liveRun, outputRefs } from './outputs.js';
@@ -146,6 +146,8 @@ export interface DeviceInfo {
    */
   holdsMine?: boolean;
   behindSince?: number | null;
+  /** A server's, connected (0115): how it says it stands (room on its disk, when it last took in work). */
+  health?: ServerHealth | null;
   /** How it is connected here (0053): on the local network, over TCP to a server, through another device, or over the internet (the DHT, directly or by a relay). */
   via: Via | null;
   /** When it was last connected here (ms since 1970), if ever. */
@@ -359,7 +361,7 @@ export class Peers {
     // Operations its commits name that it does not hold: not waited for (knownFrom). Not a server's word (0115): it could
     // so have work judged by less of the policy than there is, its makers' joins left out.
     unheld: (link, ids) => {
-      if (this.node.isServerDevice(link.key)) return;
+      if (this.node.can(link.key, 'relay')) return;
       const had = this.unheld.get(link.key) ?? new Set<string>();
       for (const id of ids) had.add(id);
       this.unheld.set(link.key, had);
@@ -403,7 +405,7 @@ export class Peers {
     host.gate = (x, y, space, o) => this.gate(x, y, space ?? null, o?.ours ?? false);
     // Whether each server connected holds this device's work (0112), looked at each minute, window open or not.
     this.holdingTimer = setInterval(() => {
-      for (const l of this.node.links.values()) if (l.accepted && !l.closed && this.node.isServerDevice(l.key)) void this.serverHolding(l).catch(() => undefined);
+      for (const l of this.node.links.values()) if (l.accepted && !l.closed && this.node.can(l.key, 'relay')) void this.serverHolding(l).catch(() => undefined);
     }, 60_000);
     this.holdingTimer.unref();
   }
@@ -635,14 +637,14 @@ export class Peers {
    */
   private syncsThroughServer(link: PeerLink): boolean {
     const n = this.node;
-    if (n.isServerDevice(n.myKey) || n.isServerDevice(link.key) || n.via(link.key) !== 'tunnel') return false;
+    if (n.can(n.myKey, 'relay') || n.can(link.key, 'relay') || n.via(link.key) !== 'tunnel') return false;
     // Not a server that has kept not taking this device's work in (0112): it may be broken, or withholding it.
     const now = Date.now();
     const relied = (key: string) => {
       const since = this.behind.get(key);
       return since === undefined || now - since < SERVER_BEHIND_MS;
     };
-    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.isServerDevice(l.key) && relied(l.key)).map((l) => l.key));
+    const servers = new Set([...n.links.values()].filter((l) => l.accepted && !l.closed && n.can(l.key, 'relay') && relied(l.key)).map((l) => l.key));
     // The member is connected to one of them, as that server says (it told this device whom it is connected to).
     return [...n.links.values()].some((l) => servers.has(l.key) && l.present.has(link.key));
   }
@@ -659,7 +661,7 @@ export class Peers {
     const theirs = branch ? link.heads?.[branch] : undefined;
     if (!branch || !theirs) return true;
     for (const l of n.links.values()) {
-      if (!l.accepted || l.closed || !n.isServerDevice(l.key) || !l.present.has(link.key)) continue;
+      if (!l.accepted || l.closed || !n.can(l.key, 'relay') || !l.present.has(link.key)) continue;
       const held = l.heads?.[branch];
       if (held && (held === theirs || (await this.host.git.run(['merge-base', '--is-ancestor', theirs, held], { allowFail: true })).code === 0)) return true;
     }
@@ -790,8 +792,8 @@ export class Peers {
     // A server makes the merges (0099: it brings together work made apart, members never online at once), and a member
     // takes its merges; between two others, people or servers, the lower key, as ever. Still one merger for each pair.
     // Between two servers (0112), as between two people: the lower key, else both would merge each other's merges for ever.
-    const meServer = this.node.isServerDevice(this.node.myKey);
-    const themServer = this.node.isServerDevice(link.key);
+    const meServer = this.node.can(this.node.myKey, 'merge');
+    const themServer = this.node.can(link.key, 'merge');
     const forwardOnly = meServer === themServer ? link.key < this.node.myKey : themServer;
     let retry = false;
     // Each on its own (0071): one that fails (a file in the way, the policy not here yet) holds up none of the others.
@@ -1516,7 +1518,7 @@ export class Peers {
         kuraa: versionOf(this.node.versions.get(m.key)),
         via: this.node.via(m.key),
         lastSeen: this.node.lastSeen(m.key),
-        ...(link?.accepted && this.node.isServerDevice(m.key) ? await this.serverHolding(link) : {}),
+        ...(link?.accepted && this.node.isServerDevice(m.key) ? { ...(await this.serverHolding(link)), health: link.health } : {}),
       });
     }
     const connected = devices.some((d) => d.online);

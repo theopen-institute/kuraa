@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { writeAllowedSigners } from '../signing.js';
-import type { Policy } from './policy.js';
+import type { Capability, Policy } from './policy.js';
 import { SPACES } from '../spaces.js';
 import crypto from 'hypercore-crypto';
 import { createPerson, personFile, readPerson, revokedFile, revokedKeys, signingKey, type Person } from './person.js';
@@ -1216,6 +1216,12 @@ export class PeerNode {
     return !!a?.policy.isServer(a.personOf.get(device) ?? null);
   }
 
+  /** What a device does by its kind (0115: Policy.can), as the records said when the members last changed. */
+  can(device: string, cap: Capability): boolean {
+    const a = this.access;
+    return !!a?.policy.can(a.personOf.get(device) ?? null, cap);
+  }
+
   /** Whose a device is (its person's identity ID; a server's key, for a server's: 0099), as the records said when the members last changed; null if no one's known. */
   personOfDevice(device: string): string | null {
     return this.access?.personOf.get(device) ?? null;
@@ -1227,7 +1233,10 @@ export class PeerNode {
       const id = await this.identity.whoIs(d);
       if (id) personOf.set(d, id);
     }
+    const wasExposed = this.can(this.myKey, 'exposed');
     this.access = { policy: await this.identity.policy(), personOf };
+    // Taken in as a server just now (0115): how it stands said to the members connected, and every few minutes after.
+    if (!wasExposed && this.can(this.myKey, 'exposed') && !this.closing) void this.sayHealth().catch(() => undefined);
   }
 
   /** Read the removed devices again (after a change), and tell git which keys sign for which devices. */
@@ -1308,7 +1317,7 @@ export class PeerNode {
     const remote = await this.identity.addRemote(key, name);
     if (remote) this.letIn.set(key, { name: remote, until: Date.now() + LET_IN_MS });
     // A server lets go of the remote of one whose join never came (0112), once the time to come is over.
-    if (remote && this.isServerDevice(this.myKey)) {
+    if (remote && this.can(this.myKey, 'exposed')) {
       setTimeout(() => {
         if (this.closing) return;
         const now = Date.now();
@@ -1350,7 +1359,7 @@ export class PeerNode {
     // on a server, sooner.
     const helloTimer = setTimeout(() => {
       if (!link.accepted && !link.closed && !this.o.joining) link.close();
-    }, this.isServerDevice(this.myKey) ? SERVER_HELLO_MS : HELLO_MS);
+    }, this.can(this.myKey, 'exposed') ? SERVER_HELLO_MS : HELLO_MS);
     helloTimer.unref();
     const link: PeerLink = new PeerLink(conn, () => {
       clearTimeout(helloTimer);
@@ -1509,6 +1518,11 @@ export class PeerNode {
     else if (m.type === 'also') {
       if (Array.isArray(m.entries)) this.heardAlso(link, m.entries);
     }
+    else if (m.type === 'health') {
+      // Only a server's word (0115), and only numbers: shown in its view, nothing done by it.
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+      if (this.can(link.key, 'exposed')) link.health = { freeBytes: num(m.freeBytes), lastFetch: num(m.lastFetch), lowOnSpace: m.lowOnSpace === true };
+    }
     else if (m.type === 'present') {
       link.present = new Set((Array.isArray(m.keys) ? m.keys : []).filter((k): k is string => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k)));
       await this.reach();
@@ -1612,11 +1626,11 @@ export class PeerNode {
         const l = decodeLink(code);
         // A server lets people in by a link for one person only (0112): its admit counts for no other (policy.ts), and
         // by a link for anyone, a stranger with fresh keys could be let in, and fetch everything, over and over.
-        if (this.isServerDevice(this.myKey) && !l.once) return { why: 'a server lets people in only by a link for one person' };
+        if (this.can(this.myKey, 'exposed') && !l.once) return { why: 'a server lets people in only by a link for one person' };
         // Its holder, not a device it was shown to (0115): the link's key signed the device's signing key. A server lets
         // no one in by a link from before, which has no key: whoever saw one could be let in by it.
         if (!linkProven(l, h.signer, h.linkProof)) return { why: 'the device did not show it holds the link (it may have been shown it by another)' };
-        if (this.isServerDevice(this.myKey) && l.grant && !l.grant.linkKey) return { why: 'the link was made by an older kuraa, and a server lets no one in by one: ask for a new link' };
+        if (this.can(this.myKey, 'exposed') && l.grant && !l.grant.linkKey) return { why: 'the link was made by an older kuraa, and a server lets no one in by one: ask for a new link' };
         const name = await this.admit(link.key, h.name);
         if (!name) return { why: 'this device was removed from the workspace' };
         // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.
@@ -1651,6 +1665,8 @@ export class PeerNode {
     // server's (0099), not from one let in by a link a moment ago.
     if (same && this.hintsFrom(link.key)) this.noteHints(link.key, h);
     this.hints.seen[link.key] = Date.now();
+    // A server says how it stands to each member let in, and every few minutes after (0115).
+    if (this.can(this.myKey, 'exposed')) void this.sayHealth(link).catch(() => undefined);
     this.events.accepted?.(link);
     this.tellPresence();
     this.sayAlso(link);
@@ -1949,6 +1965,27 @@ export class PeerNode {
   private readonly fetches = new Map<string, Promise<boolean>>();
   /** The disk was found all but full at the last fetch: said once, until there is room again. */
   private lowOnSpace = false;
+
+  /** When this device last took in work (a fetch that went through, ms since 1970). */
+  private lastFetch: number | null = null;
+
+  private healthTimer: NodeJS.Timeout | undefined;
+
+  /**
+   * How this server stands, said to a member (0115), or to all it is connected
+   * to; and every five minutes after, once begun.
+   */
+  private async sayHealth(to?: PeerLink): Promise<void> {
+    if (!this.healthTimer) {
+      this.healthTimer = setInterval(() => {
+        if (!this.closing && this.can(this.myKey, 'exposed')) void this.sayHealth().catch(() => undefined);
+      }, 5 * 60_000);
+      this.healthTimer.unref();
+    }
+    const free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => null);
+    const m: ControlMessage = { type: 'health', ...(free !== null ? { freeBytes: free } : {}), ...(this.lastFetch ? { lastFetch: this.lastFetch } : {}), lowOnSpace: this.lowOnSpace };
+    for (const l of to ? [to] : this.links.values()) if (l.accepted && !l.closed && this.hintsFrom(l.key)) l.send(m);
+  }
   /** Room on the disk, as last looked at before a fetch (0115). */
   private freeBytes = Infinity;
   /** The most one fetch may bring (a server's first copy of a workspace more; each after, the usual). */
@@ -2035,6 +2072,7 @@ export class PeerNode {
         : { timeoutMs: 10 * 60_000 }),
     });
     if (r.code !== 0 && !this.closing) this.o.log(`peers: fetching from ${remote} failed: ${(r.stderr || r.stdout).trim()}`);
+    if (r.code === 0) this.lastFetch = Date.now();
     return r.code === 0;
   }
 
@@ -2061,6 +2099,7 @@ export class PeerNode {
     clearTimeout(this.lookupTimer);
     clearTimeout(this.presenceTimer);
     clearTimeout(this.topicTimer);
+    clearInterval(this.healthTimer);
     for (const t of this.tunnelTimers.values()) clearTimeout(t);
     for (const t of this.lanLater.values()) clearTimeout(t);
     if (this.key && localNodes(this.computer).get(this.myKey) === this) localNodes(this.computer).delete(this.myKey);

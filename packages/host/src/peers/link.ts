@@ -120,6 +120,13 @@ const roomFrame: Encoding<RoomFrame> = {
 
 export type RoomMessage = Extract<ControlMessage, { type: 'room' }>;
 
+/** How a server stands, as it says (0115): bytes free on its disk, when it last took in work (ms since 1970), whether it stopped fetching for want of room. */
+export interface ServerHealth {
+  freeBytes: number | null;
+  lastFetch: number | null;
+  lowOnSpace: boolean;
+}
+
 /** Messages on the control channel. */
 export type ControlMessage =
   | {
@@ -194,6 +201,8 @@ export type ControlMessage =
   | { type: 'also'; entries: { t: string; k: string }[] }
   /** The devices of the workspace this one is connected to now: sent whenever that changes (node.ts, reach). */
   | { type: 'present'; keys: string[] }
+  /** How a server stands (0115), to the members it is connected to, now and then: the room left on its disk, when it last took in work. */
+  | { type: 'health'; freeBytes?: number; lastFetch?: number; lowOnSpace?: boolean }
   | { type: 'bye'; reason: string }
   /** Rooms: what this device has open, and changes to them (see rooms.ts). */
   | { type: 'room'; [k: string]: unknown }
@@ -255,6 +264,8 @@ export class PeerLink {
   spaces: Record<string, string> | null = null;
   /** The run outputs it has, as it last said (device key → commit); null: not said. */
   outputs: Record<string, string> | null = null;
+  /** How it stands, a server, as it last said (0115); null: not said. */
+  health: ServerHealth | null = null;
   /** When the link was made: one never let in is closed after a while (node.ts). */
   readonly opened = Date.now();
   /** Streams the other end has open on this link now (git, tunnels): at most MAX_STREAMS. */

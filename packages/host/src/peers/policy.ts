@@ -236,6 +236,16 @@ export const linkProofMessage = (workspace: string, link: string, signer: string
 /** A space's ID, its maker's (0115): no one else can make a space of the same ID. */
 export const spaceIdFor = (workspace: string, maker: string, nonce: string) => sha256(['kuraa-space', workspace, maker, nonce].join('\0')).slice(0, 32);
 
+/**
+ * What a kind of member does (0115; Policy.can):
+ * - `change`: changes files, as the rules let it (people; a server changes none: 0099)
+ * - `readAll`: reads every space (the owner, and servers: 0110)
+ * - `merge`: makes the merges, brings together work made apart (servers: 0099)
+ * - `relay`: passes members' work on to each other; its word that it lacks operations not taken (servers: 0115)
+ * - `exposed`: always on and open to all: lets in only by bound one-person links, waits less for hellos (servers: 0112)
+ */
+export type Capability = 'change' | 'readAll' | 'merge' | 'relay' | 'exposed';
+
 /** The rules this build judges by (0115): `rules` operations up to this version. */
 export const KNOWN_RULES = 13;
 
@@ -535,6 +545,22 @@ export class Policy {
     return this.rulesVersion > KNOWN_RULES;
   }
 
+  /**
+   * What a key in the workspace does by its kind (0115): the one place that says
+   * what a server does that others do not, so the code asks what may be done,
+   * not who is a server, and a kind to come says its own. Who may read a space
+   * or change a file is still mayRead's and mayWrite's.
+   */
+  can(id: string | null, cap: Capability): boolean {
+    if (!id) return false;
+    const server = this.isServer(id);
+    switch (cap) {
+      case 'change': return !server;
+      case 'readAll': return server || this.isOwner(id);
+      case 'merge': case 'relay': case 'exposed': return server;
+    }
+  }
+
   /** Whether a key is a server's in the workspace (0099): in as itself, no person's. */
   isServer(id: string | null): boolean {
     return !!id && this.servers.has(id);
@@ -646,7 +672,7 @@ export class Policy {
    */
   mayWrite(id: string | null, path: string, space: string | null = null, beside?: boolean): boolean {
     // A server changes nothing (0099), whatever the rules say, or where they say nothing.
-    if (this.isServer(id)) return false;
+    if (id && !this.can(id, 'change')) return false;
     const owner = ownerOf(path);
     if (owner && (beside ?? companionShaped(path))) return !this.founded || (id === owner && this.mayRead(id, space));
     const rule = this.ruleFor(path);

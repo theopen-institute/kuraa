@@ -502,6 +502,9 @@ export const S = {
     removeFromWorkspace: 'Remove from workspace…',
     removeAbout: 'It stops syncing here and deletes its copy; you can invite it back later.',
     holdsMine: 'Holds your latest work.',
+    /** How it says it stands (0115): room on its disk, when it last took in work. */
+    health: (free: string | null, last: string | null) => [free ? `${free} free on its disk` : null, last ? `last took in work at ${last}` : null].filter(Boolean).join('; ').replace(/^./, (c) => c.toUpperCase()) + '.',
+    lowOnSpace: 'It has stopped taking in work: less than 1 GB is free on its disk. Make room there, or move it to a larger disk.',
     behind: (since: string) => `Has not taken in your latest work since ${since}. Your work reaches others directly where it can; if this goes on, see that the server runs, and is up to date.`,
     behindTag: 'behind',
     behindTitle: 'It has not taken in your latest work for a while: see its view',
@@ -625,7 +628,11 @@ export const S = {
     owner: 'owner',
     ownerTitle: 'The owner is an admin who also makes and unmakes admins, and can give the role to someone else.',
     makeOwner: 'Transfer ownership',
-    makeOwnerAsk: (name: string) => `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins.`,
+    /** Handing over the workspace (0115): what goes with it, the servers named. */
+    makeOwnerAsk: (name: string, servers: string[]) =>
+      `Make ${name} the workspace’s owner? You give up the role: you stay an admin, but only ${name} will make and unmake admins` +
+      (servers.length ? `, and add, remove and block its servers (${servers.join(', ')}), which keep running where they are` : ', and add and remove servers') +
+      `. ${name} will read every space; you, only those whose readers include you.`,
     removeAsk: (who: string) => `Remove ${who} from this workspace? Their computers stop syncing with everyone here; they keep their copy of everything up to now. You can invite them back later.`,
     removals: 'Recent removals',
     removalsAbout: 'A removal counts at once on each device that has it. Until the others have it too, a device that has not heard of it may still sync with whoever was removed.',

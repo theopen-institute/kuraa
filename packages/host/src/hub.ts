@@ -31,7 +31,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { cp, lstat, mkdir, open as openFile, readdir, readFile, rename, rm } from 'node:fs/promises';
+import { cp, lstat, mkdir, open as openFile, readdir, readFile, rename, rm, statfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
@@ -895,6 +895,11 @@ export class Hub {
     if (route === 'POST /hub/api/server/retire-key') return send(res, 200, { workspaces: await this.retireKey() });
     // How it stands (kuraa-host server status, 0112): since when it runs, and each workspace's members, latest work and size.
     if (route === 'GET /hub/api/server/status') return send(res, 200, { started: this.started, workspaces: await this.serverStatus() });
+    // The same, as metrics a monitor reads (0115: Prometheus's text format), with the access code as a bearer token.
+    if (route === 'GET /hub/api/server/metrics') {
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' });
+      return void res.end(await this.serverMetrics());
+    }
     if (route === 'POST /hub/api/workspaces') {
       const b = await readBody(req);
       if (b.kind !== 'join') throw new HttpError(403, 'A server holds workspaces shared with it: it makes none of its own');
@@ -976,6 +981,36 @@ export class Hub {
       const members = (status?.devices ?? []).filter((d) => !d.server && !d.related);
       return { id: w.id, name: w.name, in: w.in, ...(w.out ? { out: w.out } : {}), online: members.filter((d) => d.online).length, devices: members.length, lastBrought: peers?.lastBrought ?? null, bytes: await this.sizeOf(w.path) };
     }));
+  }
+
+  /**
+   * How the server stands, as metrics (0115): since when it runs, the room on
+   * its disk, and for each workspace (by its ID, never its name) whether it is
+   * in, its members' devices connected and known, and when work last came in.
+   * No folder sizes: a monitor asks often, and those are worked out on disk.
+   */
+  private async serverMetrics(): Promise<string> {
+    const listed = await this.serverListing();
+    const free = await statfs(this.root).then((f) => f.bavail * f.bsize, () => null);
+    const lines: string[] = [];
+    const metric = (name: string, help: string, type: 'gauge' | 'counter', rows: [string, number][]) => {
+      lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} ${type}`);
+      for (const [labels, v] of rows) lines.push(`${name}${labels} ${v}`);
+    };
+    const label = (id: string) => `{workspace="${id.replace(/[\\"\n]/g, '')}"}`;
+    const rows = await Promise.all(listed.map(async (w) => {
+      const peers = this.hosts.get(w.id)?.host.peers;
+      const status = peers ? await peers.status().catch(() => null) : null;
+      const members = (status?.devices ?? []).filter((d) => !d.server && !d.related);
+      return { w, online: members.filter((d) => d.online).length, devices: members.length, brought: peers?.lastBrought ?? null };
+    }));
+    metric('kuraa_server_start_time_seconds', 'When the server started.', 'gauge', [['', Math.floor(this.started / 1000)]]);
+    if (free !== null) metric('kuraa_server_disk_free_bytes', 'Bytes free on the disk its workspaces are on.', 'gauge', [['', free]]);
+    metric('kuraa_server_workspace_in', 'Whether the server is in the workspace (1), or out of it (0).', 'gauge', rows.map((r) => [label(r.w.id), r.w.in ? 1 : 0]));
+    metric('kuraa_server_members_online', 'Members\' devices connected to the server.', 'gauge', rows.map((r) => [label(r.w.id), r.online]));
+    metric('kuraa_server_member_devices', 'Members\' devices the server knows.', 'gauge', rows.map((r) => [label(r.w.id), r.devices]));
+    metric('kuraa_server_last_brought_time_seconds', 'When work last came in from a member.', 'gauge', rows.filter((r) => r.brought).map((r) => [label(r.w.id), Math.floor(r.brought! / 1000)]));
+    return lines.join('\n') + '\n';
   }
 
   /** Folders' sizes, worked out two at a time (0115: a status asked of a server with many workspaces is no burst on its disk). */

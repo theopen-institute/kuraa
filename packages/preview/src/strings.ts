@@ -8,7 +8,7 @@ export const KEYS = {
 } as const;
 
 export const S = {
-  title: 'Preview',
+  title: 'Export',
   render: 'Render',
   renderTitle: (key: string) => `Render the document as it is now (${key})`,
   saveAs: 'Export as',

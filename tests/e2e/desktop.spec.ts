@@ -241,7 +241,7 @@ test('renders Markdown with the pandoc and Typst it ships, no code running (0107
   try {
     await openNotes(page);
     await page.getByTestId('document-menu-button').click();
-    await page.getByTestId('menu-preview').click();
+    await page.getByTestId('menu-export').click();
     const panel = page.getByTestId('preview-panel');
     await expect(panel.getByTestId('render-status')).toContainText('Rendered to HTML.', { timeout: 60_000 });
     await expect(page.frameLocator('[data-testid="render-frame"]').locator('body')).toContainText('Field notes');

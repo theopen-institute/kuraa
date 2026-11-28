@@ -1,5 +1,7 @@
 # 0100 · Export…
 
+*Since [0114](0114-export-is-the-one-item.md): **Export…** is the menu's only item for Preview, and it renders the page too; the panel is headed **Export**.*
+
 **Status: built.** The open document's ⋯ menu has **Export…**, in Preview's group under
 **Preview**.
 

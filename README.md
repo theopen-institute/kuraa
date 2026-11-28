@@ -199,7 +199,7 @@ or as YAML; the Source view shows it as text ([decision 0021](docs/decisions/002
 The open document's **⋯** (its top-right corner) is a menu of what to do with it
 ([0074](docs/decisions/0074-the-document-menu-is-a-menu.md)): **Source** (the markdown, which you
 can edit there too, alongside others editing the rich view: [decision 0015](docs/decisions/0015-editable-source.md))
-and **History**, ticked when shown; **Preview** (below); **Find and replace…**, **Outline**, **Insert
+and **History**, ticked when shown; **Export…** (below); **Find and replace…**, **Outline**, **Insert
 table**; **Save version…**; its code session (**Run all**, **Restart**, **Packages…**); and
 **Permissions…**, **Document settings…** and **Markdown and shortcuts**, each with its keys; below
 them, when it was last saved and kept in the history. **Search** (⇧⌘F: every text file, and open documents as they are being
@@ -233,10 +233,10 @@ document now (**Compare with now**: changed paragraphs, the words in them marked
 
 ## Rendering: HTML, Word, PDF and EPUB
 
-**Preview** in the menu, or ⇧⌘R, renders the document as it is now (R Markdown knitted by
+**Export…** in the menu, or ⇧⌘R, renders the document as it is now (R Markdown knitted by
 rmarkdown, Markdown by pandoc) and shows the page beside it, in a frame where nothing in the document
 runs; **Update when saved** renders it again each time it is saved. **Export as** PDF, Word, HTML or EPUB
-renders that format and saves the file. The header's `output:` (or `format:`) settings apply, as do
+renders that format and saves the file (Export… puts the focus on these; [0114](docs/decisions/0114-export-is-the-one-item.md)). The header's `output:` (or `format:`) settings apply, as do
 `toc`, `number-sections`, `reference-doc` and `cover-image` at its top level.
 
 **Markdown needs no Podman** ([decision 0107](docs/decisions/0107-rendering-without-podman.md)): the

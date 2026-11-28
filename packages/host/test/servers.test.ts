@@ -284,6 +284,48 @@ describe('servers in the policy (0099)', () => {
   });
 });
 
+describe('a server blocking its own key (0112)', () => {
+  it('counts a server’s drop of its own key, for good; not of another’s, nor by a key never a server', () => {
+    const h = history();
+    const s = server();
+    const t = server();
+    h.join(s, ada);
+    h.join(t, ada);
+    // Of another server's key: nothing.
+    h.add({ t: 'drop', key: t.id }, s);
+    expect(h.now().isServer(t.id)).toBe(true);
+    // Of its own: out, for good.
+    h.add({ t: 'drop', key: s.id }, s);
+    expect(h.now().isServer(s.id)).toBe(false);
+    expect(h.now().dropped.has(s.id)).toBe(true);
+    h.join(s, ada);
+    expect(h.now().isServer(s.id)).toBe(false);
+    // A key never a server's: its drop of itself counts for nothing.
+    const stranger = server();
+    h.add({ t: 'drop', key: stranger.id }, stranger);
+    expect(h.now().dropped.has(stranger.id)).toBe(false);
+  });
+});
+
+describe('a server letting people in (0112)', () => {
+  it('counts its admit only for a link for one person: by a link for anyone, only where a person let them in', () => {
+    const h = history();
+    const s = server();
+    h.join(s, ada);
+    // Bo, by a link for one person, let in by the server: in.
+    h.join(bo, ada, { role: 'member', once: true, admitter: s });
+    expect(h.now().role(bo.id)).toBe('member');
+    // Cy, by a link for anyone (whose grant every join by it carries), let in by the server alone: not in.
+    const anyone = 'ab'.repeat(8);
+    h.join(cy, ada, { role: 'member', once: false, link: anyone, admitter: s });
+    expect(h.now().role(cy.id)).toBeNull();
+    // Let in by a person, by the same link: in.
+    h.add({ t: 'admit', link: anyone, key: hexOf(cy) }, bo);
+    h.join(cy, ada, { role: 'member', once: false, link: anyone, admitter: null });
+    expect(h.now().role(cy.id)).toBe('member');
+  });
+});
+
 describe('the owner, in control of the workspace (0110)', () => {
   it('reads every space, and stops when no longer the owner', () => {
     const h = history();
@@ -300,6 +342,32 @@ describe('the owner, in control of the workspace (0110)', () => {
     p = h.now();
     expect(p.mayRead(bo.id, cys)).toBe(true);
     expect(p.mayRead(ada.id, cys)).toBe(false);
+  });
+
+  it('gives no one a space by making it again at the same time: readers said together are those both name, else the owner alone (0112)', () => {
+    const h = history();
+    h.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    h.add({ t: 'grant', group: 'workspace', who: cy.id, role: 'member' }, ada);
+    const before = h.now().heads;
+    const cys = 'a1'.repeat(16);
+    h.add({ t: 'space', id: cys, audience: [cy.id] }, cy);
+    // Bo, an admin, "makes" Cy's space too, as if at the same time (his operation not after hers), naming the admins.
+    h.add({ t: 'space', id: cys, audience: ['admins'] }, bo, before);
+    const p = h.now();
+    // He reads nothing of it, nor does anyone but the owner; no one made it, so only the owner changes it.
+    expect(p.mayRead(bo.id, cys)).toBe(false);
+    expect(p.mayRead(cy.id, cys)).toBe(false);
+    expect(p.mayRead(ada.id, cys)).toBe(true);
+    expect(p.mayChangeSpace(bo.id, cys)).toBe(false);
+    expect(p.mayChangeSpace(ada.id, cys)).toBe(true);
+    // Naming Cy and himself, the same: only what both name, Cy.
+    const h2 = history();
+    h2.add({ t: 'grant', group: 'workspace', who: bo.id, role: 'admin' }, ada);
+    h2.add({ t: 'grant', group: 'workspace', who: cy.id, role: 'member' }, ada);
+    const before2 = h2.now().heads;
+    h2.add({ t: 'space', id: cys, audience: [cy.id] }, cy);
+    h2.add({ t: 'space', id: cys, audience: [bo.id, cy.id].sort() }, bo, before2);
+    expect(h2.now().spaces.get(cys)!.audience).toEqual([cy.id]);
   });
 
   it('lets only whoever made a space, or the owner, change who reads it: not another admin', () => {

@@ -164,16 +164,17 @@ both on this computer only).
 
 ## In the app
 
-*(Since [0111](0111-people-first.md): servers are listed with the people; a server's own view has
-**Remove from workspace…**, and **Block this server's access…**, for a key someone else may have.)*
-Workspace settings' **People and computers** has **Servers**, beneath the people: each server by its
-devices' name (one online first, of several), how it is connected, and, for the owner, **Remove…**
-(taken out; invited back with **Add a server…**) and **Key lost or stolen…** (for good, asking first).
-A server's devices are not listed among other computers, so none is removed by "Lost or no longer
-used…", which would drop the whole server's key. The owner's **Add a server…** makes an invite link
-for one server, for a week, and says to give it to `kuraa-host server join` on the server (`pnpm
-server join` from the repository). The sidebar says *Syncing with the server* where it is the only
-other device. Removals list *The server … taken out*, or *The server …'s key removed for good*.
+*(As it is now: 0111, 0112. The first version had a Servers list with **Remove…** and **Key lost or
+stolen…**; both are gone.)* Workspace settings' **People** lists servers after the people, each by
+its devices' name, online or not, marked *behind* where it has not taken in this device's latest work
+for a while (0112). Its own view says what a server is, whether it holds your latest work, its
+device here, and, for the owner, **Remove from workspace…** (taken out; invited back with **Add a
+server…**) and **Block this server's access…** (its key shut out for good, asking first). A server's
+devices are never among other computers, so none is blocked as a computer, which would drop the
+whole server's key. The owner's **Add a server…** makes an invite link for one server, for a week,
+and says to give it to `kuraa-host server join` on the server (`pnpm server join` from the
+repository). The sidebar says *Syncing with the server* where it is the only other device. Removals
+list *The server … removed*, or *The server …'s access blocked*.
 
 ## Joining, as it goes
 
@@ -300,11 +301,6 @@ Asked three things the audit left open, the owner chose:
 - **One presence on the network for the whole server** (above).
 - **Each operation's past held whole** (the policy's): fine at hundreds of operations, heavy at many
   thousands.
-
-## Not yet (in the app)
-
-- **Naming a server among a folder's readers** in Permissions: the policy takes it (an audience
-  naming its key), the dialog does not offer it yet.
 
 ## Not yet
 

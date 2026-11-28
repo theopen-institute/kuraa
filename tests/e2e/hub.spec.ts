@@ -180,7 +180,9 @@ test('people are invited from the app: a link for anyone, joined elsewhere, then
     await expect(dialog).toContainText('they can read and change everything');
     await dialog.getByTestId('invite-admin').check();
     await expect(dialog).toContainText('the same say as you');
+    // A link for anyone makes no admins (0112): the choice goes, and the link is for members.
     await dialog.getByTestId('invite-anyone').click();
+    await expect(dialog.getByTestId('invite-admin')).toHaveCount(0);
     await dialog.getByTestId('invite-expiry').selectOption({ label: 'in a day' });
     await dialog.getByTestId('invite-create').click();
     const code = await dialog.getByTestId('invite-code').inputValue();

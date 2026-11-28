@@ -11,22 +11,32 @@
 //                                      (open TCP and UDP 5872 in the firewall; 0 for either: any free port)
 //   [--bootstrap host:port]... [--relay <key>]...   a private network's DHT nodes; relays
 //   [--port 4322] [--host 127.0.0.1] [--token T]   its own API, for join and list: it serves no app (headless, for now)
-//   [--auto-update]                    a release, installed, updates itself (0052)
+//   [--auto-update]                    a release, installed, updates itself (0052); a release that
+//                                      changes how devices sync, once one of its devices runs it (0112)
+//   [--auto-update-all]                and such a release at once
 // server join <invite link | -> [--data <folder>]   bring a workspace onto the running server, by a link for a server
 //                                      (-: read from standard input, so it is not on the command line)
-//                                      (its owner makes one: People and computers › Add a server…)
+//                                      (its owner makes one: People › Add a server…)
 // server list [--data <folder>]        the workspaces it holds, and whether each has taken it in
+// server status [--data <folder>]      how it stands: its release, since when, how it updates; each
+//                                      workspace's members online, latest work brought in, size (0112)
 // server remove <id> [--data <folder>] let go of a workspace (its copy here taken away; still in it until its owner takes it out)
 // server key [--data <folder>]         its key: what workspaces know it by
+// server new-key [--force]             a new key (0112): run while it runs, it blocks its own key in every
+//                                      workspace it holds; run again once stopped, it puts the old key aside
+//                                      and deletes every copy, to be invited again with the new one
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { lastResort, onNewerRelease, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
-import { defaultServerData, joinServer, listServer, removeFromServer, serverKey, startServer, PEER_PORT, SERVER_PORT } from './index.js';
+import { defaultServerData, joinServer, listServer, readAddress, removeFromServer, retireServerKey, serverKey, startAfresh, startServer, statusServer, PEER_PORT, SERVER_PORT } from './index.js';
 
 export interface ServerCliOptions {
   /** How it is called, in what it says: `kuraa-server` (default), or `kuraa-host server` released. */
   name?: string;
   /** Update itself (a release, installed, run by its service with --auto-update). */
   autoUpdate?: boolean;
+  /** And take releases that change the protocol at once (--auto-update-all, 0112). */
+  autoUpdateAll?: boolean;
   /** What this release is, and where it was unpacked: none, run from the repository. */
   released?: { here: string; build: ServerBuild };
 }
@@ -65,7 +75,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     if (command === 'join') {
       // `-`: the link from standard input, so it is not on the command line, where others on this computer see it.
       const link = rest[0] === '-' ? (await readStdin()).trim() : rest[0];
-      if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (People and computers › Add a server…)`, 2);
+      if (!link) fail(`${name} join <invite link>: the workspace’s owner makes one (Workspace settings › People › Add a server…)`, 2);
       say('joining…');
       // How it is going, as it changes: each step; while copying, each tenth of each of git's stages.
       let last = '';
@@ -89,21 +99,51 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     if (command === 'list') {
       const list = await listServer(data);
       if (!list.length) say(`no workspaces yet: ${name} join <invite link>`);
-      for (const w of list) console.log(`${w.id}  ${w.name}  ${w.error ? `(not open: ${w.error})` : w.opening ? 'opening…' : w.in ? 'in' : 'not taken in yet'}`);
+      const state = (w: (typeof list)[number]) => (w.error ? `(not open: ${w.error})` : w.opening ? 'opening…' : w.out === 'blocked' ? 'blocked by its owner: deleting its copy' : w.out === 'removed' ? 'taken out by its owner: deleting its copy' : w.in ? 'in' : 'not taken in yet');
+      for (const w of list) console.log(`${w.id}  ${w.name}  ${state(w)}`);
       process.exit(0);
     }
     if (command === 'remove') {
       const id = rest[0];
       if (!id) fail(`${name} remove <id>: the workspace's id, as ${name} list says it`, 2);
       await removeFromServer(id, data);
-      say(`let go of ${id}: its copy here is gone. The server is still in the workspace until its owner takes it out (People and computers › Servers › Remove…).`);
+      say(`let go of ${id}: its copy here is gone. The server is still in the workspace until its owner takes it out (Workspace settings › People › the server › Remove from workspace…).`);
       process.exit(0);
     }
     if (command === 'key') {
       console.log((await serverKey(data)).publicKey.toString('hex'));
       process.exit(0);
     }
-    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, remove <id>, key`, 2);
+    if (command === 'status') {
+      // How it stands (0112): what it runs, since when, how it updates; each workspace's members, latest work and size.
+      const st = await statusServer(data);
+      const ago = (ms: number) => { const m = Math.round((Date.now() - ms) / 60_000); return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+      const size = (b: number | null) => (b === null ? '?' : b < 1024 ** 3 ? `${Math.round(b / 1024 ** 2)} MB` : `${(b / 1024 ** 3).toFixed(1)} GB`);
+      console.log(`kuraa ${st.version ?? '(from the repository)'}, process ${st.pid}, running since ${new Date(st.started).toISOString()} (${ago(st.started)})`);
+      console.log(`updates: ${st.updates === 'off' ? 'not updating itself (kuraa-host update)' : st.updates === 'all' ? 'updating itself, a protocol change at once' : 'updating itself, a protocol change once a device runs it'}`);
+      console.log(`key: ${st.key}`);
+      if (!st.workspaces.length) console.log(`no workspaces yet: ${name} join <invite link>`);
+      for (const w of st.workspaces) {
+        const state = w.out ? `${w.out === 'blocked' ? 'blocked' : 'taken out'} by its owner: deleting its copy` : w.in ? 'in' : 'not taken in yet';
+        console.log(`${w.id}  ${w.name}  ${state}; members' devices online ${w.online} of ${w.devices}; work last brought in ${w.lastBrought ? ago(w.lastBrought) : 'not since it started'}; ${size(w.bytes)}`);
+      }
+      process.exit(0);
+    }
+    if (command === 'new-key') {
+      // A new key (0112): its key given up first, while it runs, in every workspace it holds; then, stopped, started afresh.
+      const running = await readAddress(data).then(() => true, () => false);
+      if (running) {
+        const done = await retireServerKey(data);
+        for (const w of done) say(`${w.name}: ${w.dropped ? `its key blocked here${w.heardBy ? `, heard by ${w.heardBy} member device${w.heardBy === 1 ? '' : 's'} at once` : ', heard by the members as they connect'}` : `not blocked (${w.error ?? 'not open'}): ask its owner to block this server`}`);
+        say(`now stop the server (as a service: systemctl --user stop kuraa), and run ${name} new-key again`);
+        process.exit(0);
+      }
+      const held = await startAfresh(data, { force: values.force });
+      say(`the old key is put aside in ${join(data, 'keys-retired')}, and every workspace's copy deleted: the server makes a new key when it starts`);
+      if (held.length) say(`ask each workspace's owner for a new link for a server (People › Add a server…), then ${name} join it: ${held.join(', ')}`);
+      process.exit(0);
+    }
+    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, status, remove <id>, key, new-key`, 2);
   } catch (e) {
     fail((e as Error).message);
   }
@@ -151,6 +191,8 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
     bootstrap: values.bootstrap,
     relays: values.relay,
     log: say,
+    version: o.released?.build.version ?? null,
+    updates: !(o.autoUpdate || values['auto-update'] || values['auto-update-all']) || !o.released ? 'off' : o.autoUpdateAll || values['auto-update-all'] ? 'all' : 'compatible',
   });
   starting = started;
   server = await started.catch((e: Error) => fail(e.message));
@@ -166,7 +208,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
 
   // Save everything, then exit (for its service to start it again, after an update). A signal often comes twice
   // at once (the terminal and a supervisor): repeats are let go; a second a moment later exits at once.
-  if (o.autoUpdate || values['auto-update']) {
+  if (o.autoUpdate || values['auto-update'] || values['auto-update-all']) {
     if (!o.released) say('--auto-update: this server runs from the repository; update it with git pull');
     else {
       // Restarting to update waits for a join under way (an hour at most): else it would be cut off, half done (0099).
@@ -175,7 +217,7 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
         if (!running.hub.hub.joinsUnderWay || Date.now() - since > 3600_000) return fn();
         setTimeout(() => whenIdle(fn, since), 5000).unref();
       };
-      autoUpdate({ ...o.released, log: say, restart: () => whenIdle(() => stop('update')), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
+      autoUpdate({ ...o.released, all: !!(o.autoUpdateAll || values['auto-update-all']), log: say, restart: () => whenIdle(() => stop('update')), newer: (fn) => void onNewerVersion(fn), newerRelease: (fn) => void onNewerRelease(fn) });
     }
   }
 }
@@ -204,6 +246,8 @@ function parse(argv: string[]) {
       host: { type: 'string' },
       token: { type: 'string' },
       'auto-update': { type: 'boolean' },
+      'auto-update-all': { type: 'boolean' },
+      force: { type: 'boolean' },
     },
   });
 }

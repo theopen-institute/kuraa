@@ -32,9 +32,13 @@ const gh = /^github:([\w.-]+\/[\w.-]+)$/.exec(where);
 if (where && !gh) throw new Error(`KURAA_UPDATES should be github:<owner>/<repo> for the server, not "${where}"`);
 const key = process.env.SERVER_SIGNING_KEY ? createPrivateKey(process.env.SERVER_SIGNING_KEY) : null;
 if (key && key.asymmetricKeyType !== 'ed25519') throw new Error('SERVER_SIGNING_KEY should be an Ed25519 private key');
+// Or only its public key (SERVER_PUBLIC_KEY, PEM), the archive to be signed apart (0112: the release workflow signs it in
+// a job of its own, where no dependency's code runs beside the key).
+const given = process.env.SERVER_PUBLIC_KEY ? createPublicKey(process.env.SERVER_PUBLIC_KEY) : null;
+if (given && given.asymmetricKeyType !== 'ed25519') throw new Error('SERVER_PUBLIC_KEY should be an Ed25519 public key');
 // A release servers update to (KURAA_UPDATES) is signed, or not made: unsigned, a server would take any archive matching GitHub's checksum (0099).
-if (gh && !key) throw new Error('KURAA_UPDATES names where servers update from, so SERVER_SIGNING_KEY must sign the release');
-const publicKey = key ? createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() : null;
+if (gh && !key && !given) throw new Error('KURAA_UPDATES names where servers update from, so SERVER_SIGNING_KEY must sign the release (or SERVER_PUBLIC_KEY name the key that will)');
+const publicKey = key ? createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() : given ? given.export({ type: 'spki', format: 'pem' }).toString() : null;
 
 const web = join(ROOT, 'apps/web/dist');
 if (!existsSync(join(web, 'index.html'))) throw new Error('Build the web client first: pnpm web:build');
@@ -101,6 +105,11 @@ cpSync(await fetchPandoc(), join(dir, 'render', 'pandoc'), { recursive: true, fi
 cpSync(await fetchFonts(), join(dir, 'render', 'typst-fonts'), { recursive: true, filter: fetched });
 cpSync(typstCompiler(), join(dir, 'render', 'typst'), { recursive: true, filter: (p) => !/\.d\.ts$|wasm-pack-shim/.test(p) });
 writeFileSync(join(dir, 'VERSION'), `${version}\n`);
+// How its devices speak to each other (link.ts, PROTOCOL): a server waits to take a release that changes it until a
+// device of its workspaces runs it (selfupdate.ts, 0112), as one that changes it no longer syncs with older devices.
+const protocol = /export const PROTOCOL = (\d+);/.exec(readFileSync(join(ROOT, 'packages/host/src/peers/link.ts'), 'utf8'))?.[1];
+if (!protocol) throw new Error('No PROTOCOL in packages/host/src/peers/link.ts');
+writeFileSync(join(dir, 'PROTOCOL'), `${protocol}\n`);
 // The Node it needs: a server does not switch to a release its Node cannot run (selfupdate.ts).
 writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'kuraa-server', version, type: 'module', private: true, engines: { node: '>=24' } }, null, 2)}\n`);
 
@@ -108,4 +117,4 @@ const archive = join(out, `${name}.tar.gz`);
 execFileSync('tar', ['-czf', archive, '-C', out, name]);
 const bytes = readFileSync(archive);
 if (key) writeFileSync(`${archive}.sig`, `${sign(null, bytes, key).toString('base64')}\n`);
-process.stdout.write(`server: ${archive}${key ? ' (signed)' : ' (not signed: no SERVER_SIGNING_KEY)'}${gh ? `, updating from ${gh[1]}` : ', not updating itself (no KURAA_UPDATES)'}\n`);
+process.stdout.write(`server: ${archive}${key ? ' (signed)' : given ? ' (not signed yet: to be signed with the key SERVER_PUBLIC_KEY names)' : ' (not signed: no SERVER_SIGNING_KEY)'}${gh ? `, updating from ${gh[1]}` : ', not updating itself (no KURAA_UPDATES)'}\n`);

@@ -3,13 +3,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { connect, createServer } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
 import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { personKeys, startHost, type RunningHost } from '@kuraa/host';
-import { joinServer, listServer, readAddress, serverKey, startServer, type RunningServer } from '../src/index.js';
+import { joinServer, listServer, readAddress, retireServerKey, serverKey, startAfresh, startServer, statusServer, type RunningServer } from '../src/index.js';
 
 const SLOW = Number(process.env.KURAA_TEST_SLOW ?? 1) || 1;
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -96,6 +96,65 @@ describe('a server, run from its folder (0099)', () => {
     const personLink = await a.host.peers!.inviteLink({ hours: 24, once: true });
     await expect(joinServer(personLink, data)).rejects.toThrow('A server joins by an invite link for a server');
     expect((await listServer(data)).length).toBe(1);
+  });
+
+  it('says how it stands: since when it runs, how it updates, each workspace’s members, latest work and size (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await statusServer(data)).workspaces.some((x) => x.id === w.id && x.in && x.online === 1), 20_000, 'the server in, its owner online');
+    const st = await statusServer(data);
+    expect(st).toMatchObject({ key: s.key, pid: process.pid, version: null, updates: 'off' });
+    expect(Date.now() - st.started).toBeLessThan(120_000);
+    expect(st.workspaces).toMatchObject([{ id: w.id, in: true, online: 1, devices: 1 }]);
+    expect(st.workspaces[0]!.bytes).toBeGreaterThan(0);
+    // Work brought in from a member, said when.
+    writeFileSync(join(a.host.dir, 'more.md'), '# More\n');
+    await a.host.serial(() => a.host.commitPaths(['more.md'], 'More'));
+    await until(async () => !!(await statusServer(data)).workspaces[0]!.lastBrought, 20_000, 'work brought in, on record');
+  });
+
+  it('gives up its key for a new one: blocked by itself in every workspace, then started afresh, holding nothing (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    // Not before it has given up its key, while it runs (unless forced).
+    await s.close();
+    running.splice(running.indexOf(s), 1);
+    await expect(startAfresh(data)).rejects.toThrow('has not given up its key');
+    const again = await server(data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server in again after its restart');
+    // Running: its own key blocked in the workspace, as its owner's device hears.
+    const done = await retireServerKey(data);
+    expect(done).toMatchObject([{ id: w.id, dropped: true }]);
+    await until(async () => !(await a.host.peers!.people()).servers.length, 20_000, 'the server out on its owner’s device');
+    expect((await a.host.peers!.people()).removals[0]).toMatchObject({ kind: 'server' });
+    // Stopped: the old key put aside, every copy gone; the next start, a new key.
+    await again.close();
+    running.splice(running.indexOf(again), 1);
+    expect(await startAfresh(data)).toEqual([w.name]);
+    expect(readdirSync(join(data, 'keys-retired'))).toHaveLength(1);
+    expect(existsSync(w.path)).toBe(false);
+    const fresh = await server(data);
+    expect(fresh.key).not.toBe(s.key);
+    expect(await listServer(data)).toEqual([]);
+  });
+
+  it('deletes its copy of a workspace once its owner takes it out, as it holds every space (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    await a.host.peers!.removeServer(s.key);
+    // Listed as out, once it hears; then let go of (looked at each minute; here, at once).
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.out === 'removed'), 20_000, 'the server hearing it is out');
+    await s.hub.hub.sweepRemoved();
+    expect(await listServer(data)).toEqual([]);
+    expect(existsSync(w.path)).toBe(false);
   });
 
   it('takes members’ connections on its port from the first workspace it joins, not only after a restart (its own process)', async () => {

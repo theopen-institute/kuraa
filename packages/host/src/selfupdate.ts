@@ -30,6 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, closeSync, cpSync, existsSync, openSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { PROTOCOL } from './peers/link.js';
 
 /** What a server build knows of itself (scripts/build-server.mjs). */
 export interface ServerBuild {
@@ -90,10 +91,38 @@ export async function latestRelease(repo: string): Promise<Release | null> {
   return { version, archive: archive.browser_download_url, signature: asset(`${archiveName(version)}.sig`)?.browser_download_url ?? null, checksum: digest ? digest[1]! : null };
 }
 
-async function download(url: string): Promise<Buffer> {
+/** The most an archive, and a signature, may be (0112): checked before the signature is, so read with a limit. */
+export const MAX_ARCHIVE_BYTES = 1024 ** 3;
+export const MAX_SIGNATURE_BYTES = 4096;
+
+/**
+ * Download a release's file, at most `max` bytes (0112: whoever could change
+ * what is published could else make every server read without end before the
+ * signature is checked), from where it was asked for, or GitHub's own hosts for
+ * its downloads, where GitHub sends them.
+ */
+export async function download(url: string, max: number): Promise<Buffer> {
+  const name = basename(new URL(url).pathname);
   const r = await fetch(url, { headers: { 'user-agent': 'kuraa-server' }, redirect: 'follow' });
-  if (!r.ok) throw new Error(`Downloading ${basename(new URL(url).pathname)} failed (${r.status})`);
-  return Buffer.from(await r.arrayBuffer());
+  if (!r.ok) throw new Error(`Downloading ${name} failed (${r.status})`);
+  const to = new URL(r.url || url).hostname;
+  if (to !== new URL(url).hostname && to !== 'github.com' && !to.endsWith('.githubusercontent.com')) throw new Error(`Downloading ${name}: sent to ${to}, which is not GitHub`);
+  if (Number(r.headers.get('content-length') ?? 0) > max) throw new Error(`Downloading ${name}: larger than ${max} bytes`);
+  const parts: Buffer[] = [];
+  let size = 0;
+  const reader = r.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`Downloading ${name}: larger than ${max} bytes`);
+    }
+    parts.push(Buffer.from(value));
+  }
+  return Buffer.concat(parts);
 }
 
 /**
@@ -182,7 +211,29 @@ function nodeNeeded(dir: string): number | null {
  * `current`. The archive holds one folder, kuraa-server-<version>, with
  * kuraa-host.mjs and VERSION in it.
  */
-export function installArchive(root: string, archive: Buffer, version: string): void {
+/** How a release's devices speak to each other (its PROTOCOL file, 0112); null for one from before that says none. */
+export function protocolOf(dir: string): number | null {
+  try {
+    const n = Number(readFileSync(join(dir, 'PROTOCOL'), 'utf8').trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Name an installed version as the one to run from the next start, its tries counted afresh, the old ones let go of. */
+export function placeVersion(root: string, version: string): void {
+  const before = existsSync(join(root, 'current')) ? currentVersion(root) : null;
+  setCurrent(root, version);
+  writeMark(root, 'tries', '0');
+  prune(root, [version, ...(before && before !== version ? [before] : [])]);
+}
+
+/**
+ * Unpack a release beside the others and (`place`) name it as the one to run.
+ * Not placed: held there, to be placed later (placeVersion).
+ */
+export function installArchive(root: string, archive: Buffer, version: string, place = true): void {
   const tmp = mkdtempSync(join(root, 'versions', '.incoming-'));
   try {
     const file = join(tmp, archiveName(version));
@@ -200,10 +251,7 @@ export function installArchive(root: string, archive: Buffer, version: string): 
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
-  const before = existsSync(join(root, 'current')) ? currentVersion(root) : null;
-  setCurrent(root, version);
-  writeMark(root, 'tries', '0');
-  prune(root, [version, ...(before && before !== version ? [before] : [])]);
+  if (place) placeVersion(root, version);
 }
 
 /**
@@ -214,7 +262,15 @@ export async function updateFrom(o: {
   root: string;
   build: ServerBuild;
   latest?: () => Promise<Release | null>;
-  fetch?: (url: string) => Promise<Buffer>;
+  fetch?: (url: string, max: number) => Promise<Buffer>;
+  /**
+   * A release that changes how devices speak to each other (its PROTOCOL, 0112)
+   * is unpacked but not placed, and this told of it; null is returned. None: placed
+   * as any other (an operator's update).
+   */
+  hold?: (version: string, protocol: number | null) => void;
+  /** A version held already: not downloaded again. */
+  held?: string | null;
 }): Promise<string | null> {
   const get = o.fetch ?? download;
   const r = await (o.latest ?? (() => latestRelease(o.build.repo!)))();
@@ -223,14 +279,23 @@ export async function updateFrom(o: {
   if (compareVersions(r.version, running) <= 0) return null;
   // One that did not start here (the launcher went back from it): not again; a later one, yes.
   if (r.version === readMark(o.root, 'failed')) return null;
-  const archive = await get(r.archive);
+  if (o.held && r.version === o.held) return null;
+  const archive = await get(r.archive, MAX_ARCHIVE_BYTES);
   const why = checkArchive(archive, {
     publicKey: o.build.publicKey,
-    signature: r.signature ? await get(r.signature) : null,
+    signature: r.signature ? await get(r.signature, MAX_SIGNATURE_BYTES) : null,
     checksum: r.checksum,
   });
   if (why) throw new Error(`Not updating to ${r.version}: ${why}`);
-  installArchive(o.root, archive, r.version);
+  installArchive(o.root, archive, r.version, !o.hold);
+  if (o.hold) {
+    const protocol = protocolOf(join(o.root, 'versions', r.version));
+    if (protocol !== PROTOCOL) {
+      o.hold(r.version, protocol);
+      return null;
+    }
+    placeVersion(o.root, r.version);
+  }
   return r.version;
 }
 
@@ -280,10 +345,12 @@ export const defaultServerRoot = () => join(homedir(), '.kuraa', 'server');
  * Install this server (an unpacked release, at `here`) in a folder of its own,
  * as the version to run, with its launchers. With `service`, write a service
  * that runs it with `--auto-update` and `args`, with an access code of its own
- * (kept in the service, so it stays the same across restarts). Returns what to
- * tell the person.
+ * (kept in the service, so it stays the same across restarts). `updates`
+ * (0112): `off`, not updating itself (--no-auto-update: whoever runs it updates
+ * it, with kuraa-host update); `all`, taking releases that change the protocol
+ * at once (--auto-update-all). Returns what to tell the person.
  */
-export function installServer(o: { here: string; version: string; root: string; service: boolean; args: string[]; platform?: NodeJS.Platform; home?: string; node?: string }): string[] {
+export function installServer(o: { here: string; version: string; root: string; service: boolean; args: string[]; updates?: 'compatible' | 'all' | 'off'; platform?: NodeJS.Platform; home?: string; node?: string }): string[] {
   const root = resolve(o.root);
   const to = join(root, 'versions', o.version);
   mkdirSync(join(root, 'versions'), { recursive: true });
@@ -302,7 +369,8 @@ export function installServer(o: { here: string; version: string; root: string; 
   const platform = o.platform ?? process.platform;
   const home = o.home ?? homedir();
   const token = randomBytes(18).toString('base64url');
-  const argv = [node, join(root, 'kuraa-host.mjs'), '--auto-update', ...o.args];
+  const updating = o.updates === 'off' ? [] : o.updates === 'all' ? ['--auto-update', '--auto-update-all'] : ['--auto-update'];
+  const argv = [node, join(root, 'kuraa-host.mjs'), ...updating, ...o.args];
   if (platform === 'linux') {
     const file = join(home, '.config', 'systemd', 'user', 'kuraa.service');
     mkdirSync(dirname(file), { recursive: true });
@@ -324,6 +392,9 @@ export function installServer(o: { here: string; version: string; root: string; 
       // otherwise cut off mid-write, leaving locks behind (0099).
       'KillMode=mixed',
       'TimeoutStopSec=90',
+      // A connection and git processes for each member of each workspace (0112): more than a user session's defaults.
+      'LimitNOFILE=65536',
+      'TasksMax=4096',
       '',
       '[Install]',
       'WantedBy=default.target',
@@ -387,18 +458,28 @@ export function untilNight(now = new Date()): number {
  * starting and every six hours; once an update is in place, `restart` (the
  * server stops, saving everything, for its service manager to start it again),
  * at night, or at once when a device runs a newer kuraa (`newer`).
+ *
+ * A release that changes how devices speak to each other (its PROTOCOL, 0112)
+ * no longer syncs with devices still on an older one: held, not placed, until a
+ * device of its workspaces runs it (`newer`), so a server does not leave all its
+ * members behind overnight; then placed, and restarted at once. `all`: placed
+ * as any other (--auto-update-all).
  */
 export function autoUpdate(o: {
   here: string;
   build: ServerBuild;
   log(m: string): void;
   restart(): void;
+  /** Take releases that change the protocol at once, not when a device runs them (--auto-update-all). */
+  all?: boolean;
   /** A device speaks a newer protocol: not syncing until updated, so at once. */
   newer(fn: () => void): void;
   /** A device runs a newer release, speaking the same protocol (0099): looked for now, restarting at night. */
   newerRelease?(fn: (version: string) => void): void;
   /** Where the latest release is found (tests); default: the build's repository. */
   latest?: () => Promise<Release | null>;
+  /** How its files are fetched (tests); default: downloaded. */
+  fetch?: (url: string, max: number) => Promise<Buffer>;
   /** How long it must run before it is the one to go back to (tests); default two minutes. */
   goodAfterMs?: number;
 }): void {
@@ -429,8 +510,20 @@ export function autoUpdate(o: {
     }, ms);
     restartTimer.unref();
   };
+  // A release held for its protocol (0112): placed once a device runs the protocol it speaks.
+  let held: string | null = null;
   o.newer(() => {
     outdated = true;
+    if (held && !ready) {
+      try {
+        placeVersion(root, held);
+        o.log(`a device runs a newer kuraa: kuraa ${held}, which syncs with it, is in place`);
+        ready = held;
+        held = null;
+      } catch (e) {
+        o.log(`could not put kuraa ${held} in place: ${(e as Error).message}`);
+      }
+    }
     restartSoon();
     void look();
   });
@@ -446,8 +539,14 @@ export function autoUpdate(o: {
     looking = true;
     lookedAt = Date.now();
     try {
-      const v = await updateFrom({ root, build: o.build, ...(o.latest ? { latest: o.latest } : {}) });
+      const hold = (version: string, protocol: number | null) => {
+        if (held !== version) o.log(`kuraa ${version} changes how devices sync (${protocol === null ? 'it does not say how' : `protocol ${PROTOCOL} → ${protocol}`}): held until a device of its workspaces runs it, as devices on this one would not sync with it (--auto-update-all takes such a release at once; kuraa-host update puts it in place now)`);
+        held = version;
+      };
+      const v = await updateFrom({ root, build: o.build, ...(o.latest ? { latest: o.latest } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.all ? {} : { hold, held }) });
       if (v) {
+        // One placed lets go of any held before it (placeVersion keeps only the versions it needs).
+        held = null;
         ready = v;
         restartSoon();
       }

@@ -61,8 +61,8 @@
 //
 // - servers (0099): a key no person vouched for, in the workspace as itself,
 //   by its own `join` with an owner's invite link for a server (role `server`,
-//   for one). Of a key that is no one's, only that counts, and a server's
-//   `admit` (it lets people in by their links). A
+//   for one). Of a key that is no one's, only that counts, a server's `admit`
+//   (it lets people in by their links), and its `drop` of its own key (0112). A
 //   server reads everything in the workspace, every space too (0110), changes
 //   nothing, and is in no group. The owner takes it out as a person
 //   is taken out (`revoke`, of the workspace): it may be invited back, by a new
@@ -378,6 +378,11 @@ export function narrower(lists: (string[] | undefined)[]): string[] | undefined 
   if (!said.length) return undefined;
   const all = said[0]!.filter((w) => said.every((l) => l.includes(w)));
   return all.length ? [...new Set(all)].sort() : ['admins'];
+}
+
+/** What several audiences of one space said at the same time name together (0112): those all of them name, if any. */
+function together(lists: string[][]): string[] {
+  return [...new Set(lists[0]!.filter((w) => lists.every((l) => l.includes(w))))].sort();
 }
 
 export interface PolicyContext {
@@ -717,6 +722,8 @@ interface State {
   unlinked: Set<string>;
   /** Whom a device in the workspace let in by a link, as `<link> <signing key>`. */
   admitted: Set<string>;
+  /** Of those, the ones a person let in (0112): a server's admit counts only for a link for one person. */
+  admittedByPerson: Set<string>;
   /** A path's permissions made at the same time, none after another, that count together (narrower): each with its operation. */
   permFront: Map<string, { id: string; perm: Perm }[]>;
   /** Likewise a space's audiences; and who made it, by which operation. */
@@ -741,6 +748,7 @@ function cloneState(s: State): State {
     dropped: new Map(s.dropped),
     unlinked: new Set(s.unlinked),
     admitted: new Set(s.admitted),
+    admittedByPerson: new Set(s.admittedByPerson),
     permFront: new Map(s.permFront),
     spaceFront: new Map(s.spaceFront),
     spaceMade: new Map(s.spaceMade),
@@ -760,7 +768,7 @@ function freshState(genesis: PolicyEntry): State {
   // The genesis names its first admin, the owner (0070).
   return {
     groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(),
-    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(), wasServer: new Set(),
+    unlinked: new Set(), admitted: new Set(), admittedByPerson: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(), wasServer: new Set(),
   };
 }
 
@@ -832,6 +840,9 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       const grant = grantOf(e, env);
       // A grant since links are let in by: only for whom a device in the workspace let in by it, in its past.
       if (grant.admitted && !s.admitted.has(`${op.link} ${e.signer}`)) return false;
+      // By a link for anyone (0112), only where a person let them in: a server lets in by a link for one person alone,
+      // as its admit would otherwise let anyone in by any such link's grant, which every join by it carries, expired or not.
+      if (grant.admitted && !op.once && op.role !== 'server' && !s.admittedByPerson.has(`${op.link} ${e.signer}`)) return false;
       const granter = grant.ok ? env.ctx.personOf(op.granter) : null;
       // A server (0099): by the owner's link for one server, let in by a device in the workspace, signed by a key no
       // one's (made by the key itself: by), not one already.
@@ -846,6 +857,8 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       // The owner gives the role to someone in the workspace.
       return by === s.owner && op.who !== by && ws.has(op.who);
     case 'drop': {
+      // A server blocking its own key (0112: given a new one, kuraa-host server new-key), in every workspace at once.
+      if (op.key === by && by === e.signer && (s.servers.has(by) || s.wasServer.has(by))) return !s.dropped.has(op.key);
       // One's own computer; or an admin, a member's (the owner, anyone's: 0070).
       if (s.dropped.has(op.key) || !now.role(by)) return false;
       // A server's key, now or once (0099): the owner's to drop, taken out or not.
@@ -967,12 +980,15 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
     }
     case 'space': {
       const made = s.spaceMade.get(op.id);
-      // Made by two at once (only by a stranger's design, IDs being random): by no one, its audience the admins' to change.
+      // Made by two at once (only by someone's design, IDs being random): by no one, its audience the owner's to change (0110).
       if (!made) s.spaceMade.set(op.id, { by, op: e.id });
       else if (made.by !== by && !past.has(made.op) && !env.before.get(e.id)?.spaces.has(op.id)) s.spaceMade.set(op.id, { by: '', op: made.op });
       const front = [...(s.spaceFront.get(op.id) ?? []).filter((f) => !past.has(f.id)), { id: e.id, audience: op.audience }];
       s.spaceFront.set(op.id, front);
-      s.spaces.set(op.id, { audience: narrower(front.map((f) => f.audience))!, by: s.spaceMade.get(op.id)!.by });
+      // Readers said at the same time count together: those all name (0078). Where they name none in common, no one but
+      // the owner (and servers) reads it (0112), not the admins: else anyone could make a space again at the same time as
+      // its maker, naming only themselves, and so give it to the admins (an admin, to themselves).
+      s.spaces.set(op.id, { audience: together(front.map((f) => f.audience)), by: s.spaceMade.get(op.id)!.by });
       return true;
     }
     case 'drop':
@@ -984,6 +1000,7 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
       return true;
     case 'admit':
       s.admitted.add(`${op.link} ${op.key}`);
+      if (!s.servers.has(by)) s.admittedByPerson.add(`${op.link} ${op.key}`);
       return true;
     case 'genesis':
     case 'seal':
@@ -1253,7 +1270,8 @@ function apply(order: PolicyEntry[], genesis: PolicyEntry, ctx: PolicyContext): 
   for (const e of ops) {
     // A key that is no one's: its word counts for nothing, but a server's own join, made by the key itself, and a
     // server's word that it let someone in by a link (0099: allowed() asks that it is one).
-    const who = ctx.personOf(e.signer) ?? ((e.op.t === 'join' && e.op.role === 'server') || e.op.t === 'admit' ? e.signer : null);
+    // Of a key no one's, only a server's own join, its admits, and (0112) its drop of its own key count, as its own.
+    const who = ctx.personOf(e.signer) ?? ((e.op.t === 'join' && e.op.role === 'server') || e.op.t === 'admit' || (e.op.t === 'drop' && e.op.key === e.signer) ? e.signer : null);
     if (!who) continue;
     // A key its person revoked: only what its revoker had seen of what it signed (0072).
     const cut = ctx.cutKey?.(e.signer);

@@ -27,6 +27,9 @@ import HyperDHT, { type DhtServer, type KeyPair } from 'hyperdht';
 /** A relay key as members tell it: 32 bytes, hex. */
 export const isRelayKey = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
 
+/** Connections through a relay at once (0112): two for each pair of devices relayed. */
+const MAX_RELAYED = 128;
+
 export class Relay {
   private server: DhtServer | null = null;
   private relay: BlindRelay | null = null;
@@ -44,8 +47,14 @@ export class Relay {
     this.relay = relay;
     // Anyone who knows the key may pair through it (both ends need the same token, made by
     // the two devices); members learn it only from each other, and it changes at each start.
+    // Those connecting come by their DHT node's key, not a device's, so who they are is not
+    // known here: so many at once (0112), so a key that reaches a stranger is no open relay.
+    let open = 0;
     this.server = dht.createServer(undefined, (socket) => {
       socket.on('error', () => undefined);
+      if (open >= MAX_RELAYED) return void socket.destroy();
+      open++;
+      socket.once('close', () => void open--);
       relay.accept(socket, { id: socket.remotePublicKey }).on('error', () => socket.destroy());
     });
     await this.server.listen(this.keyPair);

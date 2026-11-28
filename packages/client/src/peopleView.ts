@@ -68,6 +68,23 @@ export function deviceState(i: Info, d: Device): { text: string; title?: string 
   return { text: d.lastSeen ? S.devices.lastSeen(time(new Date(d.lastSeen).toISOString())) : S.devices.isOffline };
 }
 
+/** Behind for this long, a server is said to be (0112): a moment's delay is only work on its way. */
+const SAY_BEHIND_MS = 2 * 60_000;
+/** Behind for this long, members no longer rely on it to pass work on (peers.ts, SERVER_BEHIND_MS). */
+export const LONG_BEHIND_MS = 10 * 60_000;
+/**
+ * Whether a server holds this device's latest work (0112), from its devices
+ * connected here: 'holds', 'behind' (since when) once for more than a moment, or
+ * null where none of its devices is connected.
+ */
+export function serverHolds(ds: Device[], now = Date.now()): { state: 'holds' } | { state: 'behind'; since: number; long: boolean } | null {
+  const on = ds.filter((d) => d.online && d.holdsMine !== undefined);
+  if (!on.length) return null;
+  if (on.some((d) => d.holdsMine)) return { state: 'holds' };
+  const since = Math.min(...on.map((d) => d.behindSince ?? now));
+  return now - since < SAY_BEHIND_MS ? { state: 'holds' } : { state: 'behind', since, long: now - since >= LONG_BEHIND_MS };
+}
+
 /** Whether you may invite here: an admin, or anyone where there is no policy yet. */
 export const isAdmin = (i: Info) => i.people?.admin ?? true;
 /** Whether you may change this person's role, or take them out: admins are the owner's to make and unmake (0070); the owner is no one's. */

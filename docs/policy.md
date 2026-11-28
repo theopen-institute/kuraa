@@ -11,8 +11,10 @@ checks what *What always holds* says, over histories made at random, honest and 
 
 Each operation is signed by a person's signing key, and names the operations its maker had seen
 (its *parents*). Its ID is the hash of what it says, its parents and its signer, in this workspace.
-The exceptions are a server's own join, and a server's `admit` ([0099](decisions/0099-servers.md)),
-signed by the server's own key, which no person vouched for.
+The exceptions are a server's own join, a server's `admit` ([0099](decisions/0099-servers.md)), and
+a server's `drop` of its own key ([0112](decisions/0112-server-hardening.md)), signed by the
+server's own key, which no person vouched for (a key that signed a server's join is never a
+person's, whatever vouches for it).
 
 | Operation | Says | Who may make it, in the policy its past makes |
 | --- | --- | --- |
@@ -20,12 +22,12 @@ signed by the server's own key, which no person vouched for.
 | `grant` | someone is in a group, as admin or member | an admin of the group, or of the workspace (a new group: the workspace's admins). Making or unmaking a workspace admin, only the owner. Into a group other than the workspace, only someone in it. Never the owner made a member |
 | `revoke` | someone is out of a group (`cutoff`: the commits the remover had); or a server out of the workspace | an admin of the group, or the person themselves (leaving). A workspace admin, only the owner (or themselves). Never the owner. A server, only the owner |
 | `join` | its signer comes in by an invite link's grant | the person let in, with a grant signed by an admin of the group (making workspace admins: the owner's). A link for one person, once. Not by a link unlinked in its past. A grant signed since links are let in by (`kuraa-grant/3`): only with an `admit` of its signing key by that link in its past. With role `server`: the server let in, by its own key (no one's), for the workspace, with the owner's grant for one, let in by (`admit`); a key not a server already (one taken out may come back so, by a new link) |
-| `admit` | a device let the holder of a signing key in by an invite link (it checked, by its own clock, that the link had not expired nor been revoked) | anyone in the workspace; or a server (0099) |
+| `admit` | a device let the holder of a signing key in by an invite link (it checked, by its own clock, that the link had not expired nor been revoked) | anyone in the workspace; or a server (0099), whose admit counts only for a link for one person (0112) |
 | `unlink` | an invite link lets no one into its group any more | an admin of the group |
 | `owner` | someone in the workspace is the owner now | the owner |
 | `rule`, `perm` | who may change a path; who reads what is made in a folder | the workspace's admins |
 | `space` | a space's audience | anyone in the workspace who is in that audience (to make it); whoever made it, or the owner (to change it; [0110](decisions/0110-the-owner-reads-everything.md)) |
-| `drop` | a signing key (one computer, or a server) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer; for a server's key, the owner alone). For good |
+| `drop` | a signing key (one computer, or a server) no longer counts here (`cutoff`: the commits the dropper had) | its own person; or an admin (the owner, for an admin's or the owner's computer; for a server's key, the owner alone, or the server itself: 0112). For good |
 
 Made before [0078](decisions/0078-restrictive-wins.md) and read only so a history that has them stays
 whole (what came after names them as parents), counting for nothing: `seal`, `verifier`, `witness`
@@ -76,7 +78,10 @@ the policy and are no longer taken: attestations (`attest`) and trustee rotation
      away at the same time as one made: the one made);
    - who reads a folder, likewise; its space is the one of the narrowest whose readers are the
      result, if any (lowest ID first), else none (its readers then are the list itself);
-   - a space's audience, likewise. A space made by two at once has no maker: only the owner changes it.
+   - a space's audience: the entries all of them name; where they name none in common, no one but
+     the owner (and servers) reads it, not the admins (0112: else anyone could "make" a space again at
+     the same time, naming the admins). A space made by two at once has no maker: only the owner
+     changes it.
 6. **Founded on what counts.** Each operation that counts must still be allowed by what counts of
    its past (applied in the one order). One whose maker had their say only through an operation
    that does not count (a grant beaten by a removal, a handover that lost) does not count either,
@@ -110,8 +115,8 @@ holds, and on all of them together:
   owner reads every space ([0110](decisions/0110-the-owner-reads-everything.md)).
 - **Groups inside the workspace.** No one outside the workspace is in any group; no one never let in
   is in any.
-- **Only people's word.** No operation by a key that is no one's counts, but a server's own join and
-  a server's admit;
+- **Only people's word.** No operation by a key that is no one's counts, but a server's own join, a
+  server's admit, and a server's drop of its own key;
   nor one by someone never let in, nor one naming a parent no one holds; nor a server's join signed
   by a person's key.
 - **Servers.** Each server has a join of its own counting, by a link for one server, for the
@@ -143,7 +148,7 @@ or where they say nothing, not even a file named for it; it is in no group (a gr
 for nothing, and its join takes it out of any a grant made at the same time put it in). Nothing else
 its key signs counts, but its `admit`: it lets people in by their links while every member is away
 (the link's grant, an admin's, is what lets them in; the admit says only that the link held when it
-did). The owner takes it out as a person is taken out, a `revoke` of the workspace
+did), by a link for one person only (0112); and its `drop` of its own key, given up (0112). The owner takes it out as a person is taken out, a `revoke` of the workspace
 naming its key: it is out, with its cutoff on record, and may be invited back, its join by a new link
 counting again. A `drop` of its key (lost or stolen), the owner's too, is for good: no join by it
 counts again. Restrictive wins as for anyone: a taking out or a drop beats what its key did at the same

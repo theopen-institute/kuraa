@@ -149,6 +149,8 @@ describe('a server in a workspace (0099)', () => {
     await stop(b);
     await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-ada.md', content: '# From Ada\n' }) });
     await until(() => read(dirS, 'from-ada.md') === '# From Ada\n', 20_000, 'Ada’s file on the server');
+    // Ada's device sees the server holds her latest work (0112).
+    await until(async () => (await a.host.peers!.status()).devices.some((d) => d.server && d.holdsMine === true && d.behindSince === null), 20_000, 'the server holding Ada’s latest work, as her device sees it');
     // Ada goes away; Bo comes back, and has it from the server alone.
     await stop(a);
     b = await start(dirB, bo, boKey);
@@ -188,6 +190,30 @@ describe('a server in a workspace (0099)', () => {
     await stop(b);
     await start(dirC, cy, cyKey);
     await until(() => !!read(dirC, 'plan.md')?.includes('cake'), 30_000, 'Bo’s change on Cy’s device, from the server');
+  });
+
+  it('with two servers, makes one history: between them only the lower key merges, so they never merge each other’s merges for ever (0112)', async () => {
+    const { a, dirA, dirS } = await withServer();
+    const key2 = crypto.keyPair();
+    const dirS2 = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), null, key2, 'srv2');
+    await start(dirS2, null, key2);
+    const bo = await person('Bo');
+    const boKey = crypto.keyPair();
+    const dirB = await join_(await a.host.peers!.inviteLink({ hours: 24, once: true }), bo, boKey, 'bee');
+    const b = await start(dirB, bo, boKey);
+    await until(async () => (await a.host.peers!.people()).servers.length === 2, 20_000, 'both servers in');
+    // Ada and Bo each write at once: work made apart, which the servers bring together.
+    await Promise.all([
+      api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-ada.md', content: '# From Ada\n' }) }),
+      api(b, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'from-bo.md', content: '# From Bo\n' }) }),
+    ]);
+    const dirs4 = [dirA, dirB, dirS, dirS2];
+    const head = (d: string) => git(d, 'rev-parse', 'HEAD');
+    await until(() => dirs4.every((d) => read(d, 'from-ada.md') && read(d, 'from-bo.md')) && new Set(dirs4.map(head)).size === 1, 40_000, 'one history everywhere');
+    // And it stays so: no merge of merges going on.
+    const settled = head(dirA);
+    await new Promise((r) => setTimeout(r, 4000 * SLOW));
+    expect(dirs4.map(head)).toEqual(dirs4.map(() => settled));
   });
 
   it('merges work done apart, so each member takes one history from it', async () => {

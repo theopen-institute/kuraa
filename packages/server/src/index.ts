@@ -57,6 +57,9 @@ export interface ServerOptions {
   bootstrap?: PeerOptions['bootstrap'];
   relays?: string[];
   log?: (m: string) => void;
+  /** The release it runs, and how it updates itself: said in server.json, for `server status` (0112). */
+  version?: string | null;
+  updates?: 'off' | 'compatible' | 'all';
 }
 
 export interface RunningServer {
@@ -69,7 +72,15 @@ export interface RunningServer {
 }
 
 /** How a running server is reached, as it wrote it in its folder. */
-export interface ServerAddress { url: string; token: string; key: string; pid: number }
+export interface ServerAddress {
+  url: string;
+  token: string;
+  key: string;
+  pid: number;
+  /** The release it runs (none: from the repository), and how it updates itself (0112). */
+  version?: string | null;
+  updates?: 'off' | 'compatible' | 'all';
+}
 
 /** A server's signing key: made the first time, in its folder, and kept (0099: one for all its workspaces). */
 export function serverKey(data = defaultServerData()): Promise<KeyPair> {
@@ -94,6 +105,8 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     lan: false,
     // A workspace's whole history, copied as it joins, may be large: not cut off at a desktop's 2 GiB.
     maxFetchBytes: 64 * 1024 ** 3,
+    // Every member of every workspace, and strangers: more than a device's 64 (0112).
+    maxPeers: 1024,
     publicAddress: o.publicAddress,
     peerPort: o.peerPort ?? PEER_PORT,
     dhtPort: o.dhtPort ?? PEER_PORT,
@@ -124,7 +137,7 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
     await unlock();
     throw e;
   }
-  const address: ServerAddress = { url: hub.url, token: hub.token, key, pid: process.pid };
+  const address: ServerAddress = { url: hub.url, token: hub.token, key, pid: process.pid, version: o.version ?? null, updates: o.updates ?? 'off' };
   const file = join(data, 'server.json');
   // Readable only by whoever runs it: it holds the access code. Written whole (a command reading it meanwhile finds
   // the old or the new), and as soon as the API listens. Not written (a full disk): the server goes on, and says so.
@@ -259,7 +272,16 @@ function ask<T>(a: ServerAddress, path: string, o: { method?: string; body?: unk
 }
 
 /** A workspace the server holds, and whether the workspace has taken it in yet (its join reached the policy there). */
-export interface ServerWorkspace { id: string; name: string; path: string; in: boolean; opening?: boolean; error?: string }
+export interface ServerWorkspace {
+  id: string;
+  name: string;
+  path: string;
+  in: boolean;
+  /** Out (0112): taken out by its owner, or its key blocked; its copy here goes within the minute. */
+  out?: 'removed' | 'blocked';
+  opening?: boolean;
+  error?: string;
+}
 
 /** How a join is going, as the server says it (its steps, and how far a copy is). */
 export interface JoinStep { step: 'waiting' | 'looking' | 'letting-in' | 'copying' | 'opening'; slowNetwork: boolean; from?: string; copied?: string }
@@ -305,6 +327,63 @@ const listing = async (a: ServerAddress) => (await ask<{ workspaces: ServerWorks
 export async function removeFromServer(id: string, data = defaultServerData()): Promise<void> {
   const a = await readAddress(data, { waitMs: STARTING_MS });
   await ask(a, `/hub/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** How the running server stands (0112): its release, since when it runs, and each workspace's members, latest work and size. */
+export interface ServerStatus {
+  key: string;
+  pid: number;
+  version: string | null;
+  updates: 'off' | 'compatible' | 'all';
+  started: number;
+  workspaces: { id: string; name: string; in: boolean; out?: string; online: number; devices: number; lastBrought: number | null; bytes: number | null }[];
+}
+
+export async function statusServer(data = defaultServerData()): Promise<ServerStatus> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  const s = await ask<{ started: number; workspaces: ServerStatus['workspaces'] }>(a, '/hub/api/server/status');
+  return { key: a.key, pid: a.pid, version: a.version ?? null, updates: a.updates ?? 'off', started: s.started, workspaces: s.workspaces };
+}
+
+/**
+ * Give up the running server's key (0112), its first step: in every workspace it
+ * holds, it blocks its own key, so no owner need. Noted in its folder, for the
+ * second step (startAfresh) to know it was.
+ */
+export async function retireServerKey(data = defaultServerData()): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  const { workspaces } = await ask<{ workspaces: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] }>(a, '/hub/api/server/retire-key', { method: 'POST', body: {} });
+  await writeFile(join(resolve(data), 'retired-key'), `${a.key}\n`, { mode: 0o600 });
+  return workspaces;
+}
+
+/**
+ * Its second step, the server stopped (0112): the old key put aside
+ * (keys-retired/), and every workspace's copy and device key deleted, so the
+ * next start makes a new key and holds nothing; each workspace's owner then
+ * invites it again. `force`: though its key was not given up first (the old
+ * key is then blocked only where an owner blocks it). Returns the workspaces it
+ * held, by name.
+ */
+export async function startAfresh(data = defaultServerData(), o: { force?: boolean } = {}): Promise<string[]> {
+  const dir = resolve(data);
+  const unlock = await lockFolder(dir);
+  try {
+    const key = (await serverKey(dir)).publicKey.toString('hex');
+    const retired = (await readFile(join(dir, 'retired-key'), 'utf8').catch(() => '')).trim();
+    if (retired !== key && !o.force) throw new Error('This server has not given up its key in its workspaces: start it, run new-key while it runs, then again once it is stopped (or --force, and ask each owner to block it)');
+    const registry = join(dir, 'workspaces', '.kuraa-workspaces.json');
+    const held = await readFile(registry, 'utf8').then((t) => (JSON.parse(t) as { name?: string }[]).map((w) => String(w.name ?? '')), () => [] as string[]);
+    const aside = join(dir, 'keys-retired');
+    await mkdir(aside, { recursive: true, mode: 0o700 });
+    await rename(join(dir, 'signing.json'), join(aside, `signing-${key.slice(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    await rm(join(dir, 'devices'), { recursive: true, force: true });
+    await rm(join(dir, 'workspaces'), { recursive: true, force: true });
+    await rm(join(dir, 'retired-key'), { force: true });
+    return held;
+  } finally {
+    await unlock();
+  }
 }
 
 /** The workspaces the running server holds. */

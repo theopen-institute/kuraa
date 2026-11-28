@@ -28,6 +28,7 @@
 // on its own (0103): one slow to open (its folder kept by a cloud service, say)
 // holds up only itself. The list says which are still opening, and a request to
 // one waits for it.
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { cp, lstat, mkdir, open as openFile, readdir, readFile, rename, rm } from 'node:fs/promises';
@@ -296,6 +297,12 @@ export class Hub {
       // its policy, its connections) is a storm each night it restarts to update.
       if (this.o.server) void this.openInTurn(this.entries, 3);
       else this.entries.map((e) => this.open(e));
+      // A server taken out of a workspace, or blocked, lets its copy go (0112), as it holds every space; invited back, it
+      // copies the workspace afresh in any case (join). Looked at once a minute.
+      if (this.o.server) {
+        this.sweepTimer = setInterval(() => void this.sweepRemoved().catch((e: Error) => this.log(`could not let go of a workspace taken out: ${e.message}`)), 60_000);
+        this.sweepTimer.unref();
+      }
     }
     this.server = createServer((req, res) => void this.handle(req, res));
     this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket as import('node:net').Socket, head));
@@ -552,7 +559,7 @@ export class Hub {
           throw new HttpError(400, (e as Error).message);
         }
         // A server joins by a link for a server, as no person (0099).
-        if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Add a server…, in People and computers)');
+        if (this.o.server && link.grant?.role !== 'server') throw new HttpError(400, 'A server joins by an invite link for a server: ask the workspace’s owner for one (Workspace settings › People › Add a server…)');
         const workspace = link.workspace.id;
         if (this.joiningWorkspaces.has(workspace)) throw new HttpError(409, 'This workspace is being joined already: wait for that join to finish');
         // A server holding the workspace already (0099): in it, that one; taken out since, the old copy let go of, and
@@ -875,6 +882,10 @@ export class Hub {
   private async serverApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const route = `${req.method} ${url.pathname}`;
     if (route === 'GET /hub/api/server') return send(res, 200, { workspaces: await this.serverListing() });
+    // Its key given up (kuraa-host server new-key, 0112): blocked by itself in every workspace it is in, so no owner need.
+    if (route === 'POST /hub/api/server/retire-key') return send(res, 200, { workspaces: await this.retireKey() });
+    // How it stands (kuraa-host server status, 0112): since when it runs, and each workspace's members, latest work and size.
+    if (route === 'GET /hub/api/server/status') return send(res, 200, { started: this.started, workspaces: await this.serverStatus() });
     if (route === 'POST /hub/api/workspaces') {
       const b = await readBody(req);
       if (b.kind !== 'join') throw new HttpError(403, 'A server holds workspaces shared with it: it makes none of its own');
@@ -899,13 +910,101 @@ export class Hub {
     throw new HttpError(404, HEADLESS);
   }
 
-  /** The workspaces a server holds, and whether each has taken it in: its own policy names this computer's key as a server. */
-  private async serverListing(): Promise<{ id: string; name: string; path: string; in: boolean; opening?: boolean; error?: string }[]> {
+  /**
+   * The workspaces a server holds, and how each stands: taken in (its own policy
+   * names this computer's key as a server), or out (0112): taken out by its
+   * owner, or blocked; its copy goes within the minute (sweepRemoved).
+   */
+  private async serverListing(): Promise<{ id: string; name: string; path: string; in: boolean; out?: 'removed' | 'blocked'; opening?: boolean; error?: string }[]> {
     return Promise.all(this.listing().workspaces.map(async (w) => {
-      const peers = this.hosts.get(w.id)?.host.peers;
-      const { policy, me } = peers ? await peers.node.policy() : { policy: null, me: null };
-      return { id: w.id, name: w.name, path: w.path, in: !!policy?.isServer(me), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
+      const out = await this.outOf(w.id);
+      return { id: w.id, name: w.name, path: w.path, in: !out && (await this.isIn(w.id)), ...(out ? { out } : {}), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
     }));
+  }
+
+  /**
+   * A server giving up its key (0112): in each workspace it is in, a drop of its
+   * own key, told to the members' devices connected. Said for each: whether it
+   * was, and how many members' devices were connected to hear it at once (the
+   * others hear it from them).
+   */
+  private async retireKey(): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
+    const out: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] = [];
+    for (const e of this.entries) {
+      const peers = this.hosts.get(e.id)?.host.peers;
+      if (!peers) {
+        out.push({ id: e.id, name: e.name, dropped: false, heardBy: 0, error: 'not open' });
+        continue;
+      }
+      try {
+        const key = await peers.node.signingKeyNow();
+        const { policy } = await peers.node.policy();
+        const mine = key.publicKey.toString('hex');
+        if (!policy.dropped.has(mine)) await peers.node.identity.dropKey(mine, await peers.node.branchTips(), key);
+        await peers.node.membersChanged();
+        const status = await peers.status();
+        out.push({ id: e.id, name: e.name, dropped: true, heardBy: status.devices.filter((d) => d.online && !d.server).length });
+      } catch (err) {
+        out.push({ id: e.id, name: e.name, dropped: false, heardBy: 0, error: (err as Error).message });
+      }
+    }
+    return out;
+  }
+
+  /** When this hub started (ms since 1970). */
+  private readonly started = Date.now();
+
+  /**
+   * Each workspace a server holds, with how it stands (0112): its listing, and
+   * the members' devices connected of those it knows, when work last came in
+   * from one, and how much room its folder takes.
+   */
+  private async serverStatus(): Promise<{ id: string; name: string; in: boolean; out?: string; online: number; devices: number; lastBrought: number | null; bytes: number | null }[]> {
+    const listed = await this.serverListing();
+    return Promise.all(listed.map(async (w) => {
+      const peers = this.hosts.get(w.id)?.host.peers;
+      const status = peers ? await peers.status().catch(() => null) : null;
+      const members = (status?.devices ?? []).filter((d) => !d.server && !d.related);
+      return { id: w.id, name: w.name, in: w.in, ...(w.out ? { out: w.out } : {}), online: members.filter((d) => d.online).length, devices: members.length, lastBrought: peers?.lastBrought ?? null, bytes: await folderBytes(w.path) };
+    }));
+  }
+
+  /** Whether a workspace's policy names this server as one of its servers. */
+  private async isIn(id: string): Promise<boolean> {
+    const peers = this.hosts.get(id)?.host.peers;
+    if (!peers) return false;
+    const { policy, me } = await peers.node.policy();
+    return policy.isServer(me);
+  }
+
+  /** How a server is out of a workspace, if it is (0112): its key blocked (dropped), or taken out by its owner (revoked). */
+  private async outOf(id: string): Promise<'removed' | 'blocked' | null> {
+    const peers = this.hosts.get(id)?.host.peers;
+    if (!peers) return null;
+    const { policy } = await peers.node.policy();
+    if (!policy.founded) return null;
+    // By its own key: out, the policy no longer says it is the server's (node.policy's `me`).
+    const me = (await peers.node.signingKeyNow()).publicKey.toString('hex');
+    if (policy.dropped.has(me)) return 'blocked';
+    return !policy.isServer(me) && policy.cutoffs.has(me) ? 'removed' : null;
+  }
+
+  private sweepTimer: NodeJS.Timeout | undefined;
+
+  /**
+   * A server's copies of workspaces it is out of (0112), let go of: taken out by
+   * its owner, or its key blocked. It holds every space; invited back, it copies
+   * the workspace afresh (join), so keeping a copy would gain nothing.
+   */
+  async sweepRemoved(): Promise<void> {
+    for (const e of [...this.entries]) {
+      if (this.opening.has(e.id)) continue;
+      const out = await this.outOf(e.id);
+      if (!out) continue;
+      await this.remove(e.id);
+      await rm(e.dir, { recursive: true, force: true, maxRetries: 5 });
+      this.log(`[${e.id}] ${out === 'blocked' ? 'its key blocked in' : 'taken out of'} ${e.name} by its owner: its copy here deleted`);
+    }
   }
 
   /** Open workspaces, `at` at a time (a server's start: 0099); each listed as opening until it has. */
@@ -1072,6 +1171,7 @@ export class Hub {
   }
 
   async close(): Promise<void> {
+    clearInterval(this.sweepTimer);
     const closed = new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));
     this.server?.closeAllConnections();
     for (const s of this.tunnels) s.destroy();
@@ -1082,6 +1182,16 @@ export class Hub {
     await Promise.all([...this.hosts.entries()].map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
     this.hosts.clear();
   }
+}
+
+/** How much room a folder takes on the disk, in bytes (du); null if it cannot be said. */
+async function folderBytes(dir: string): Promise<number | null> {
+  return new Promise((resolveBytes) => {
+    execFile('du', ['-sk', dir], { timeout: 30_000 }, (err, out) => {
+      const kb = err ? NaN : Number(String(out).split(/\s/)[0]);
+      resolveBytes(Number.isFinite(kb) ? kb * 1024 : null);
+    });
+  });
 }
 
 export interface RunningHub {

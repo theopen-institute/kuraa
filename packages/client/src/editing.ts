@@ -18,10 +18,10 @@ const nothing = () => false;
 /** The context for a live document (its room's undo and remote check), or a read-only one for a past version. */
 export function editorContext(
   type: DocumentType,
-  live?: { history: History; isRemote: EditorContext['isRemote']; path?: string; files?: EditorContext['files']; notify?: EditorUi['notify']; spelling?: EditorUi['spelling'] },
+  live?: { history: History; isRemote: EditorContext['isRemote']; path?: string; files?: EditorContext['files']; notify?: EditorUi['notify']; spelling?: EditorUi['spelling']; chooseImages?: EditorUi['chooseImages'] },
 ): EditorContext {
   return live
-    ? { schema: type.schema, readOnly: false, history: live.history, isRemote: live.isRemote, ui: { ...ui, notify: live.notify, ...(live.spelling ? { spelling: live.spelling } : {}) }, path: live.path, files: live.files }
+    ? { schema: type.schema, readOnly: false, history: live.history, isRemote: live.isRemote, ui: { ...ui, notify: live.notify, ...(live.spelling ? { spelling: live.spelling } : {}), ...(live.chooseImages ? { chooseImages: live.chooseImages } : {}) }, path: live.path, files: live.files }
     : { schema: type.schema, readOnly: true, history: { undo: nothing, redo: nothing }, isRemote: () => false, ui };
 }
 

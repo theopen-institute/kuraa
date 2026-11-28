@@ -286,8 +286,10 @@ export class HostApi {
   /** Keep an image beside a document (in images/ next to it); its path, and its address relative to the document. */
   uploadImage(doc: string, name: string, image: Blob, by: { name: string; email: string }) {
     const q = new URLSearchParams({ doc, name, by: by.name, email: by.email });
-    return this.json<{ path: string; src: string }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
+    return this.json<{ path: string; src: string; size: number; removed: string[] }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
   }
+  /** How much the workspace's history takes on the host's computer, in bytes (0106). */
+  storage() { return this.json<{ history: number }>('/api/storage'); }
   /** Who made a commit, and when (ISO). */
   commitInfo(hash: string) { return this.json<{ author: string; date: string }>(`/api/commits/${encodeURIComponent(hash)}`); }
   createFolder(path: string) { return this.json('/api/folders', { method: 'POST', body: JSON.stringify({ path }) }); }

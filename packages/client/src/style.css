@@ -457,6 +457,27 @@ button.primary.danger { background: var(--warn); border-color: var(--warn); }
 
 /* New file and Rename: the title, and the filename made from it. */
 .modal.naming { width: min(460px, 92vw); }
+.modal.add-images { width: min(560px, 94vw); max-height: min(720px, 90vh); grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.add-images-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; overflow: auto; min-height: 0; }
+.add-image { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; }
+.add-image-preview { width: 96px; height: 96px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); display: grid; place-items: center; overflow: hidden; }
+.add-image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.add-image-body { display: grid; gap: 8px; min-width: 0; }
+.add-image-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.add-image-name { flex: 1; min-width: 0; font: 13px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-image-size { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.add-image-meta, .add-image-note, .add-image-removed { margin: 0; font-size: 12.5px; color: var(--muted); }
+.add-image-meta { margin-top: -6px; }
+.add-image-removed { color: var(--text); }
+.add-images-total { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+.add-images-total p { margin: 0; }
+.add-images-adds { display: flex; flex-wrap: wrap; column-gap: 6px; align-items: baseline; }
+.add-images-adds span { color: var(--muted); font-size: 12.5px; }
+.add-images-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg); }
+.add-images-bar-now { background: var(--border); }
+.add-images-bar-added { background: var(--accent); }
+.add-images-total.large .add-images-bar-added { background: var(--warn); }
+.add-images-large { color: var(--warn); font-size: 12.5px; }
 .naming-filename { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
 .naming-filename-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .naming-filename-row input { flex: 1; min-width: 0; font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }

@@ -317,6 +317,48 @@ export const S = {
     exists: (p: string) => `${p} already exists.`,
   },
 
+  images: {
+    title: (n: number) => (n === 1 ? 'Add an image' : `Add ${n} images`),
+    add: (n: number) => (n === 1 ? 'Add image' : `Add ${n} images`),
+    size: 'Size',
+    full: (w: number, h: number) => (w && h ? `Full size, ${w} × ${h}` : 'Full size'),
+    smaller: (w: number, h: number) => `${w} × ${h}`,
+    choiceSize: (bytes: string | null) => (bytes === null ? '…' : bytes),
+    alt: 'Description, for people who cannot see it (alt text)',
+    working: 'Getting it ready…',
+    removed: (details: string[]) => `Removed from the file: ${listOf(details)}.`,
+    nothingHidden: 'Nothing else is stored in the file: only the picture.',
+    detail: {
+      location: 'where it was taken',
+      camera: 'the camera and its settings',
+      date: 'when it was taken',
+      author: 'who made it',
+      description: 'descriptions and comments',
+      thumbnail: 'a small copy of the original (which can show what was cropped out)',
+      appended: 'more pictures or video stored after it',
+      software: 'the software that made it',
+      other: 'other hidden details',
+    } as Record<string, string>,
+    resaved: 'Its file could not be read as it is, so it is saved again from its picture.',
+    keptAsIs: 'Kept at its own size: GIFs and SVGs are not made smaller.',
+    notImage: 'Not an image that can be added: PNG, JPEG, GIF, WebP or SVG.',
+    unreadable: 'This image could not be read: its file may be damaged.',
+    tooLarge: 'Larger than 20 MB, the most an image may be, at every size.',
+    sourceTooLarge: (max: string) => `Larger than ${max}: too large to add, or to make smaller here.`,
+    adds: (bytes: string) => `Adds ${bytes} to the workspace.`,
+    history: (bytes: string) => `Its history is ${bytes} on this computer now.`,
+    forGood: 'Everyone in the workspace downloads what is added, and it stays in the workspace’s history even if it is taken out of the document later.',
+    large: 'That is large for a document: a smaller size is usually plenty.',
+    sizes: (before: string, after: string) => `${before} → ${after}`,
+    /** A number of bytes, as people read them. */
+    bytes: (n: number): string => {
+      if (n < 1024) return `${n} bytes`;
+      if (n < 1024 * 1024) return `${n < 10 * 1024 ? (n / 1024).toFixed(1) : Math.round(n / 1024)} KB`;
+      if (n < 1024 * 1024 * 1024) return `${n < 10 * 1024 * 1024 ? (n / 1048576).toFixed(1) : Math.round(n / 1048576)} MB`;
+      return `${(n / 1073741824).toFixed(1)} GB`;
+    },
+  },
+
   addWorkspace: {
     title: 'Add a workspace',
     how: 'How',

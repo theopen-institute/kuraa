@@ -6,10 +6,20 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32 } from 'node:zlib';
 import { startHost, type RunningHost } from '../src/index.js';
 import { safeImageName, sniffImage } from '../src/writing.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082', 'hex');
+/** The PNG with a chunk added after its header. */
+const withChunk = (type: string, data: string) => {
+  const body = Buffer.from(type + data, 'latin1');
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(body.length - 4);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([PNG.subarray(0, 33), len, body, crc, PNG.subarray(33)]);
+};
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4"/></svg>');
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 
@@ -69,7 +79,7 @@ describe('writing: images and files', () => {
     const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}&by=Ada&email=ada@example.org`, { method: 'POST', body: new Uint8Array(body) });
     const first = await add('My Plot (final).PNG', PNG);
     expect(first.status).toBe(201);
-    expect(await first.json()).toEqual({ path: 'chapters/images/my-plot-final.png', src: 'images/my-plot-final.png' });
+    expect(await first.json()).toEqual({ path: 'chapters/images/my-plot-final.png', src: 'images/my-plot-final.png', size: PNG.length, removed: [] });
     expect(readFileSync(join(dir, 'chapters/images/my-plot-final.png')).equals(PNG)).toBe(true);
     expect(git(dir, 'log', '-1', '--format=%s%n%b')).toContain('Add image chapters/images/my-plot-final.png');
     expect(git(dir, 'log', '-1', '--format=%b')).toContain('Co-authored-by: Ada <ada@example.org>');
@@ -77,8 +87,29 @@ describe('writing: images and files', () => {
     // The same image again is the same file; another under that name gets a new one.
     expect(await (await add('My Plot (final).png', PNG)).json()).toMatchObject({ src: 'images/my-plot-final.png' });
     expect(await (await add('my-plot-final.svg', SVG)).json()).toMatchObject({ src: 'images/my-plot-final.svg' });
-    const png2 = Buffer.concat([PNG, Buffer.from([0])]);
+    const png2 = withChunk('pHYs', '\0\0\x0b\x13\0\0\x0b\x13\x01');
     expect(await (await add('my plot final.png', png2)).json()).toMatchObject({ src: 'images/my-plot-final-2.png' });
+  });
+
+  it('keeps an image without its details (0106): the same picture with them is the same file', async () => {
+    const add = (name: string, body: Buffer) => call(`/api/images?doc=chapters/one.md&name=${encodeURIComponent(name)}`, { method: 'POST', body: new Uint8Array(body) });
+    const signed = withChunk('tEXt', 'Author\0Ada Lovelace');
+    const res = await add('portrait.png', Buffer.concat([signed, Buffer.from('appended')]));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ path: 'chapters/images/portrait.png', src: 'images/portrait.png', size: PNG.length, removed: ['author', 'appended'] });
+    expect(readFileSync(join(dir, 'chapters/images/portrait.png')).equals(PNG)).toBe(true);
+    expect(await (await add('portrait.png', PNG)).json()).toMatchObject({ src: 'images/portrait.png', removed: [] });
+    // One that cannot be read (cut short) is refused: what it carries could not be found.
+    const cut = await add('cut.png', PNG.subarray(0, 40));
+    expect(cut.status).toBe(415);
+    expect(await cut.text()).toContain('damaged');
+  });
+
+  it('says how much the workspace\'s history takes', async () => {
+    const res = await call('/api/storage');
+    expect(res.status).toBe(200);
+    const { history } = (await res.json()) as { history: number };
+    expect(history).toBeGreaterThan(0);
   });
 
   it('refuses what is not an image, too large, or for a document outside the workspace', async () => {

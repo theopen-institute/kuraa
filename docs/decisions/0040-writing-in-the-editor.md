@@ -1,5 +1,9 @@
 # 0040 · Writing in the editor: citations, images, math, tables, find, the outline
 
+*Since [0106](0106-images-in-git.md): images pasted or dropped are shown in a dialog first (their size
+as kept, smaller sizes, their description), and every image is kept with its details removed (where it
+was taken, the camera, when, who, thumbnails, what is appended); the 20 MB limit is on the image as kept.*
+
 The editor had the schema for citations, images, tables and display math, but nothing to make
 them with, and typing `[@smith2020]` saved `\[\@smith2020\]`. This adds what a researcher writing
 a paper reaches for, keeping [0008](0008-markdown-cues.md): no toolbar, everything from typing,

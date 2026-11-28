@@ -22,11 +22,26 @@ export interface EditorUi {
   /** Say something in passing (an image that could not be added), as the client shows its notices. */
   notify?(text: string, kind?: 'info' | 'warn'): void;
   /**
+   * Ask how to add images pasted or dropped into a document (0106): each shown
+   * with how large it is as kept, the details it carries that are removed, a
+   * smaller size to choose, and its description. Resolves to the images to add
+   * as chosen (perhaps fewer, perhaps made smaller), or null if cancelled.
+   * Absent: each is added as it is.
+   */
+  chooseImages?(images: ImageToAdd[]): Promise<ImageToAdd[] | null>;
+  /**
    * The spell checker, where the page can ask it (the desktop app's): for a
    * menu of the format's own, which takes the place of the one with spelling
    * suggestions (a table's). Absent in a browser, which does not say.
    */
   spelling?: Spelling;
+}
+
+/** An image to add to the workspace: its file, the name to keep it under, and its description (alt text). */
+export interface ImageToAdd {
+  file: Blob;
+  name: string;
+  alt: string;
 }
 
 /** A spell checker the page can ask. */

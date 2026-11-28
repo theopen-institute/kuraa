@@ -345,6 +345,47 @@ export async function statusServer(data = defaultServerData()): Promise<ServerSt
   return { key: a.key, pid: a.pid, version: a.version ?? null, updates: a.updates ?? 'off', started: s.started, workspaces: s.workspaces };
 }
 
+/**
+ * Give up the running server's key (0112), its first step: in every workspace it
+ * holds, it blocks its own key, so no owner need. Noted in its folder, for the
+ * second step (startAfresh) to know it was.
+ */
+export async function retireServerKey(data = defaultServerData()): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
+  const a = await readAddress(data, { waitMs: STARTING_MS });
+  const { workspaces } = await ask<{ workspaces: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] }>(a, '/hub/api/server/retire-key', { method: 'POST', body: {} });
+  await writeFile(join(resolve(data), 'retired-key'), `${a.key}\n`, { mode: 0o600 });
+  return workspaces;
+}
+
+/**
+ * Its second step, the server stopped (0112): the old key put aside
+ * (keys-retired/), and every workspace's copy and device key deleted, so the
+ * next start makes a new key and holds nothing; each workspace's owner then
+ * invites it again. `force`: though its key was not given up first (the old
+ * key is then blocked only where an owner blocks it). Returns the workspaces it
+ * held, by name.
+ */
+export async function startAfresh(data = defaultServerData(), o: { force?: boolean } = {}): Promise<string[]> {
+  const dir = resolve(data);
+  const unlock = await lockFolder(dir);
+  try {
+    const key = (await serverKey(dir)).publicKey.toString('hex');
+    const retired = (await readFile(join(dir, 'retired-key'), 'utf8').catch(() => '')).trim();
+    if (retired !== key && !o.force) throw new Error('This server has not given up its key in its workspaces: start it, run new-key while it runs, then again once it is stopped (or --force, and ask each owner to block it)');
+    const registry = join(dir, 'workspaces', '.kuraa-workspaces.json');
+    const held = await readFile(registry, 'utf8').then((t) => (JSON.parse(t) as { name?: string }[]).map((w) => String(w.name ?? '')), () => [] as string[]);
+    const aside = join(dir, 'keys-retired');
+    await mkdir(aside, { recursive: true, mode: 0o700 });
+    await rename(join(dir, 'signing.json'), join(aside, `signing-${key.slice(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    await rm(join(dir, 'devices'), { recursive: true, force: true });
+    await rm(join(dir, 'workspaces'), { recursive: true, force: true });
+    await rm(join(dir, 'retired-key'), { force: true });
+    return held;
+  } finally {
+    await unlock();
+  }
+}
+
 /** The workspaces the running server holds. */
 export async function listServer(data = defaultServerData()): Promise<ServerWorkspace[]> {
   return listing(await readAddress(data, { waitMs: STARTING_MS }));

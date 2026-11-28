@@ -3,13 +3,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { connect, createServer } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'hypercore-crypto';
 import createTestnet, { type Testnet } from 'hyperdht/testnet.js';
 import { personKeys, startHost, type RunningHost } from '@kuraa/host';
-import { joinServer, listServer, readAddress, serverKey, startServer, statusServer, type RunningServer } from '../src/index.js';
+import { joinServer, listServer, readAddress, retireServerKey, serverKey, startAfresh, startServer, statusServer, type RunningServer } from '../src/index.js';
 
 const SLOW = Number(process.env.KURAA_TEST_SLOW ?? 1) || 1;
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
@@ -113,6 +113,34 @@ describe('a server, run from its folder (0099)', () => {
     writeFileSync(join(a.host.dir, 'more.md'), '# More\n');
     await a.host.serial(() => a.host.commitPaths(['more.md'], 'More'));
     await until(async () => !!(await statusServer(data)).workspaces[0]!.lastBrought, 20_000, 'work brought in, on record');
+  });
+
+  it('gives up its key for a new one: blocked by itself in every workspace, then started afresh, holding nothing (0112)', async () => {
+    const a = await owner();
+    const data = tmp('data');
+    const s = await server(data);
+    const w = await joinServer(await a.host.peers!.inviteLink({ hours: 24, once: true, role: 'server' }), data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server taken in');
+    // Not before it has given up its key, while it runs (unless forced).
+    await s.close();
+    running.splice(running.indexOf(s), 1);
+    await expect(startAfresh(data)).rejects.toThrow('has not given up its key');
+    const again = await server(data);
+    await until(async () => (await listServer(data)).some((x) => x.id === w.id && x.in), 20_000, 'the server in again after its restart');
+    // Running: its own key blocked in the workspace, as its owner's device hears.
+    const done = await retireServerKey(data);
+    expect(done).toMatchObject([{ id: w.id, dropped: true }]);
+    await until(async () => !(await a.host.peers!.people()).servers.length, 20_000, 'the server out on its owner’s device');
+    expect((await a.host.peers!.people()).removals[0]).toMatchObject({ kind: 'server' });
+    // Stopped: the old key put aside, every copy gone; the next start, a new key.
+    await again.close();
+    running.splice(running.indexOf(again), 1);
+    expect(await startAfresh(data)).toEqual([w.name]);
+    expect(readdirSync(join(data, 'keys-retired'))).toHaveLength(1);
+    expect(existsSync(w.path)).toBe(false);
+    const fresh = await server(data);
+    expect(fresh.key).not.toBe(s.key);
+    expect(await listServer(data)).toEqual([]);
   });
 
   it('deletes its copy of a workspace once its owner takes it out, as it holds every space (0112)', async () => {

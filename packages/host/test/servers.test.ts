@@ -284,6 +284,29 @@ describe('servers in the policy (0099)', () => {
   });
 });
 
+describe('a server blocking its own key (0112)', () => {
+  it('counts a server’s drop of its own key, for good; not of another’s, nor by a key never a server', () => {
+    const h = history();
+    const s = server();
+    const t = server();
+    h.join(s, ada);
+    h.join(t, ada);
+    // Of another server's key: nothing.
+    h.add({ t: 'drop', key: t.id }, s);
+    expect(h.now().isServer(t.id)).toBe(true);
+    // Of its own: out, for good.
+    h.add({ t: 'drop', key: s.id }, s);
+    expect(h.now().isServer(s.id)).toBe(false);
+    expect(h.now().dropped.has(s.id)).toBe(true);
+    h.join(s, ada);
+    expect(h.now().isServer(s.id)).toBe(false);
+    // A key never a server's: its drop of itself counts for nothing.
+    const stranger = server();
+    h.add({ t: 'drop', key: stranger.id }, stranger);
+    expect(h.now().dropped.has(stranger.id)).toBe(false);
+  });
+});
+
 describe('a server letting people in (0112)', () => {
   it('counts its admit only for a link for one person: by a link for anyone, only where a person let them in', () => {
     const h = history();

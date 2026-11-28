@@ -325,7 +325,9 @@ function broken(p: Policy, entries: PolicyEntry[], forged: Set<string>): string[
     // A key that is no one's: only a server's own join counts, and a server's admit (0099).
     const serverJoin = e.op.t === 'join' && e.op.role === 'server';
     const serverAdmit = e.op.t === 'admit' && serverIds.includes(e.signer);
-    if (!personOf(e.signer) && !serverJoin && !serverAdmit) out.push('an operation signed by no one counted');
+    // And a server's drop of its own key (0112).
+    const serverSelfDrop = e.op.t === 'drop' && e.op.key === e.signer && serverIds.includes(e.signer);
+    if (!personOf(e.signer) && !serverJoin && !serverAdmit && !serverSelfDrop) out.push('an operation signed by no one counted');
     if (strangerKeys.has(e.signer)) out.push('a stranger’s operation counted');
     if (personOf(e.signer) && serverJoin) out.push('a server’s join signed by a person’s key counted');
     if (forged.has(e.id)) out.push('an operation naming a parent no one holds counted');

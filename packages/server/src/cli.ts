@@ -16,13 +16,19 @@
 //   [--auto-update-all]                and such a release at once
 // server join <invite link | -> [--data <folder>]   bring a workspace onto the running server, by a link for a server
 //                                      (-: read from standard input, so it is not on the command line)
-//                                      (its owner makes one: People and computers › Add a server…)
+//                                      (its owner makes one: People › Add a server…)
 // server list [--data <folder>]        the workspaces it holds, and whether each has taken it in
+// server status [--data <folder>]      how it stands: its release, since when, how it updates; each
+//                                      workspace's members online, latest work brought in, size (0112)
 // server remove <id> [--data <folder>] let go of a workspace (its copy here taken away; still in it until its owner takes it out)
 // server key [--data <folder>]         its key: what workspaces know it by
+// server new-key [--force]             a new key (0112): run while it runs, it blocks its own key in every
+//                                      workspace it holds; run again once stopped, it puts the old key aside
+//                                      and deletes every copy, to be invited again with the new one
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { lastResort, onNewerRelease, onNewerVersion, autoUpdate, runsAsService, type ServerBuild } from '@kuraa/host';
-import { defaultServerData, joinServer, listServer, removeFromServer, serverKey, startServer, statusServer, PEER_PORT, SERVER_PORT } from './index.js';
+import { defaultServerData, joinServer, listServer, readAddress, removeFromServer, retireServerKey, serverKey, startAfresh, startServer, statusServer, PEER_PORT, SERVER_PORT } from './index.js';
 
 export interface ServerCliOptions {
   /** How it is called, in what it says: `kuraa-server` (default), or `kuraa-host server` released. */
@@ -123,7 +129,21 @@ export async function runServerCli(argv: string[], o: ServerCliOptions = {}): Pr
       }
       process.exit(0);
     }
-    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, status, remove <id>, key`, 2);
+    if (command === 'new-key') {
+      // A new key (0112): its key given up first, while it runs, in every workspace it holds; then, stopped, started afresh.
+      const running = await readAddress(data).then(() => true, () => false);
+      if (running) {
+        const done = await retireServerKey(data);
+        for (const w of done) say(`${w.name}: ${w.dropped ? `its key blocked here${w.heardBy ? `, heard by ${w.heardBy} member device${w.heardBy === 1 ? '' : 's'} at once` : ', heard by the members as they connect'}` : `not blocked (${w.error ?? 'not open'}): ask its owner to block this server`}`);
+        say(`now stop the server (as a service: systemctl --user stop kuraa), and run ${name} new-key again`);
+        process.exit(0);
+      }
+      const held = await startAfresh(data, { force: values.force });
+      say(`the old key is put aside in ${join(data, 'keys-retired')}, and every workspace's copy deleted: the server makes a new key when it starts`);
+      if (held.length) say(`ask each workspace's owner for a new link for a server (People › Add a server…), then ${name} join it: ${held.join(', ')}`);
+      process.exit(0);
+    }
+    if (command !== undefined) fail(`No command ${command}: ${name}, ${name} join <link>, list, status, remove <id>, key, new-key`, 2);
   } catch (e) {
     fail((e as Error).message);
   }
@@ -227,6 +247,7 @@ function parse(argv: string[]) {
       token: { type: 'string' },
       'auto-update': { type: 'boolean' },
       'auto-update-all': { type: 'boolean' },
+      force: { type: 'boolean' },
     },
   });
 }

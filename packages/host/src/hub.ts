@@ -882,6 +882,8 @@ export class Hub {
   private async serverApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const route = `${req.method} ${url.pathname}`;
     if (route === 'GET /hub/api/server') return send(res, 200, { workspaces: await this.serverListing() });
+    // Its key given up (kuraa-host server new-key, 0112): blocked by itself in every workspace it is in, so no owner need.
+    if (route === 'POST /hub/api/server/retire-key') return send(res, 200, { workspaces: await this.retireKey() });
     // How it stands (kuraa-host server status, 0112): since when it runs, and each workspace's members, latest work and size.
     if (route === 'GET /hub/api/server/status') return send(res, 200, { started: this.started, workspaces: await this.serverStatus() });
     if (route === 'POST /hub/api/workspaces') {
@@ -918,6 +920,35 @@ export class Hub {
       const out = await this.outOf(w.id);
       return { id: w.id, name: w.name, path: w.path, in: !out && (await this.isIn(w.id)), ...(out ? { out } : {}), ...(this.opening.has(w.id) ? { opening: true } : {}), ...(w.error ? { error: w.error } : {}) };
     }));
+  }
+
+  /**
+   * A server giving up its key (0112): in each workspace it is in, a drop of its
+   * own key, told to the members' devices connected. Said for each: whether it
+   * was, and how many members' devices were connected to hear it at once (the
+   * others hear it from them).
+   */
+  private async retireKey(): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
+    const out: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] = [];
+    for (const e of this.entries) {
+      const peers = this.hosts.get(e.id)?.host.peers;
+      if (!peers) {
+        out.push({ id: e.id, name: e.name, dropped: false, heardBy: 0, error: 'not open' });
+        continue;
+      }
+      try {
+        const key = await peers.node.signingKeyNow();
+        const { policy } = await peers.node.policy();
+        const mine = key.publicKey.toString('hex');
+        if (!policy.dropped.has(mine)) await peers.node.identity.dropKey(mine, await peers.node.branchTips(), key);
+        await peers.node.membersChanged();
+        const status = await peers.status();
+        out.push({ id: e.id, name: e.name, dropped: true, heardBy: status.devices.filter((d) => d.online && !d.server).length });
+      } catch (err) {
+        out.push({ id: e.id, name: e.name, dropped: false, heardBy: 0, error: (err as Error).message });
+      }
+    }
+    return out;
   }
 
   /** When this hub started (ms since 1970). */

@@ -380,6 +380,11 @@ export function narrower(lists: (string[] | undefined)[]): string[] | undefined 
   return all.length ? [...new Set(all)].sort() : ['admins'];
 }
 
+/** What several audiences of one space said at the same time name together (0112): those all of them name, if any. */
+function together(lists: string[][]): string[] {
+  return [...new Set(lists[0]!.filter((w) => lists.every((l) => l.includes(w))))].sort();
+}
+
 export interface PolicyContext {
   workspace: string;
   /** The genesis this workspace is pinned to; null: none (a workspace from before 0066, until founded again: legacy.ts). */
@@ -717,6 +722,8 @@ interface State {
   unlinked: Set<string>;
   /** Whom a device in the workspace let in by a link, as `<link> <signing key>`. */
   admitted: Set<string>;
+  /** Of those, the ones a person let in (0112): a server's admit counts only for a link for one person. */
+  admittedByPerson: Set<string>;
   /** A path's permissions made at the same time, none after another, that count together (narrower): each with its operation. */
   permFront: Map<string, { id: string; perm: Perm }[]>;
   /** Likewise a space's audiences; and who made it, by which operation. */
@@ -741,6 +748,7 @@ function cloneState(s: State): State {
     dropped: new Map(s.dropped),
     unlinked: new Set(s.unlinked),
     admitted: new Set(s.admitted),
+    admittedByPerson: new Set(s.admittedByPerson),
     permFront: new Map(s.permFront),
     spaceFront: new Map(s.spaceFront),
     spaceMade: new Map(s.spaceMade),
@@ -760,7 +768,7 @@ function freshState(genesis: PolicyEntry): State {
   // The genesis names its first admin, the owner (0070).
   return {
     groups, perms: new Map(), spaces: new Map(), owner: admins[0] ?? '', usedLinks: new Map(), applied: [genesis.id], dropped: new Map(),
-    unlinked: new Set(), admitted: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(), wasServer: new Set(),
+    unlinked: new Set(), admitted: new Set(), admittedByPerson: new Set(), permFront: new Map(), spaceFront: new Map(), spaceMade: new Map(), once: [], servers: new Set(), wasServer: new Set(),
   };
 }
 
@@ -832,6 +840,9 @@ function allowed(e: PolicyEntry, by: string, s: State, env: Pick<Env, 'grants' |
       const grant = grantOf(e, env);
       // A grant since links are let in by: only for whom a device in the workspace let in by it, in its past.
       if (grant.admitted && !s.admitted.has(`${op.link} ${e.signer}`)) return false;
+      // By a link for anyone (0112), only where a person let them in: a server lets in by a link for one person alone,
+      // as its admit would otherwise let anyone in by any such link's grant, which every join by it carries, expired or not.
+      if (grant.admitted && !op.once && op.role !== 'server' && !s.admittedByPerson.has(`${op.link} ${e.signer}`)) return false;
       const granter = grant.ok ? env.ctx.personOf(op.granter) : null;
       // A server (0099): by the owner's link for one server, let in by a device in the workspace, signed by a key no
       // one's (made by the key itself: by), not one already.
@@ -967,12 +978,15 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
     }
     case 'space': {
       const made = s.spaceMade.get(op.id);
-      // Made by two at once (only by a stranger's design, IDs being random): by no one, its audience the admins' to change.
+      // Made by two at once (only by someone's design, IDs being random): by no one, its audience the owner's to change (0110).
       if (!made) s.spaceMade.set(op.id, { by, op: e.id });
       else if (made.by !== by && !past.has(made.op) && !env.before.get(e.id)?.spaces.has(op.id)) s.spaceMade.set(op.id, { by: '', op: made.op });
       const front = [...(s.spaceFront.get(op.id) ?? []).filter((f) => !past.has(f.id)), { id: e.id, audience: op.audience }];
       s.spaceFront.set(op.id, front);
-      s.spaces.set(op.id, { audience: narrower(front.map((f) => f.audience))!, by: s.spaceMade.get(op.id)!.by });
+      // Readers said at the same time count together: those all name (0078). Where they name none in common, no one but
+      // the owner (and servers) reads it (0112), not the admins: else anyone could make a space again at the same time as
+      // its maker, naming only themselves, and so give it to the admins (an admin, to themselves).
+      s.spaces.set(op.id, { audience: together(front.map((f) => f.audience)), by: s.spaceMade.get(op.id)!.by });
       return true;
     }
     case 'drop':
@@ -984,6 +998,7 @@ function effect(e: PolicyEntry, by: string, s: State, env: Env): boolean {
       return true;
     case 'admit':
       s.admitted.add(`${op.link} ${op.key}`);
+      if (!s.servers.has(by)) s.admittedByPerson.add(`${op.link} ${op.key}`);
       return true;
     case 'genesis':
     case 'seal':

@@ -49,7 +49,7 @@ async function create() {
   error.value = null;
   copied.value = false;
   try {
-    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one', role: asAdmin.value ? 'admin' : 'member' });
+    const r = await props.api.createLink({ hours: EXPIRY[expiry.value]!.hours, once: forWhom.value === 'one', role: asAdmin.value && forWhom.value === 'one' ? 'admin' : 'member' });
     made.value = { code: r.link, once: r.once, expires: r.expires };
     await loadLinks();
   } catch (e) {
@@ -104,11 +104,12 @@ const stateOf = (l: InviteLinkInfo) => (l.state === 'used' ? S.invite.used : l.s
             <option v-for="(e, i) in EXPIRY" :key="e.label" :value="i">{{ e.label }}</option>
           </select>
         </label>
-        <label v-if="assignsAdmins" class="check">
+        <!-- An admin by a link for one person only (0112). -->
+        <label v-if="assignsAdmins && forWhom === 'one'" class="check">
           <input v-model="asAdmin" type="checkbox" data-testid="invite-admin">
           <span>{{ S.invite.asAdmin }}</span>
         </label>
-        <p v-if="asAdmin" class="naming-hint">{{ S.invite.adminAbout }}</p>
+        <p v-if="asAdmin && forWhom === 'one'" class="naming-hint">{{ S.invite.adminAbout }}</p>
         <p class="naming-hint">
           <template v-if="forWhom === 'one'">{{ S.invite.oneAbout }}</template>
           <template v-else>{{ S.invite.anyoneAbout }}</template>

@@ -29,12 +29,20 @@
 // other) is refused the same way. What a device judges by is the commit
 // itself, and the rules: every device judges it alike.
 //
+// Whose a commit is (0112): a key is someone's only if the policy has them in
+// the workspace, or had them (their cutoff). A key an identity no one let in
+// vouched for is no one's, its commits the bringing device's (refused from a
+// server, or from a device no one in): else anyone could sign as a person of
+// their own making, who may change anything no rule names.
+//
 // Merge commits are made again (step 4): what one holds beyond the merge of its
 // parents as this device makes it is its own change, by whoever signed it (a
 // merge is no one's: since 0077 none carries a live room's text), judged as any
 // change is. A file it kept as one
 // side had it, saying so, is no change of its own. A merge made by another
-// version of merging is checked only for what it holds that neither parent did.
+// version of merging is checked for what it holds that neither parent did, and
+// for any change a side made that it does not hold (0112); one of more than two
+// parents, which Kuraa never makes, for whatever differs from any of them.
 import type { Git } from '../git.js';
 import { commitSigner } from '../signing.js';
 import { documentsBeside, type Policy } from './policy.js';
@@ -111,8 +119,66 @@ export async function policyWaits(git: Git, ours: string | null, theirs: string,
   return [...out].sort();
 }
 
+/**
+ * The context as the gate judges by (0112): a signing key is someone's, and a
+ * device's person someone, only where the policy has them in the workspace or
+ * had them (their cutoff); else no one, as a key no identity vouched for.
+ */
+function membersOnly(ctx: GateContext): GateContext {
+  if (!ctx.policy.founded) return ctx;
+  const counts = (p: string) => ctx.policy.role(p) !== null || ctx.policy.cutoffs.has(p);
+  const from = ctx.from === undefined || ctx.from === null || ctx.servers?.has(ctx.from) || counts(ctx.from) ? ctx.from : null;
+  const cutKeys = ctx.cutKeys && new Map([...ctx.cutKeys].filter(([, g]) => counts(g.person)));
+  return {
+    ...ctx,
+    from,
+    ...(cutKeys ? { cutKeys } : {}),
+    personOf: (k) => {
+      const p = ctx.personOf(k);
+      return p && counts(p) ? p : null;
+    },
+  };
+}
+
+/** Whether a commit is one of `heads` or in their history. */
+async function among(git: Git, c: string, heads: string[]): Promise<boolean> {
+  for (const h of heads) if (h === c || (await git.run(['merge-base', '--is-ancestor', c, h], { allowFail: true })).code === 0) return true;
+  return false;
+}
+
+/**
+ * Whose a commit is, and whether it is refused whatever the rules (`cut`): by
+ * its signer's person; past their cutoff, or a server's (now or before), cut;
+ * signed by no one known, the device it came from's (0099), cut where that is a
+ * server or no one in the workspace. The same for every commit judged, and for
+ * the changes a merge says it kept out (mergeChanges).
+ */
+async function attribute(git: Git, c: string, ctx: GateContext): Promise<{ by: string | null; cut: boolean }> {
+  const signer = await commitSigner(git, c);
+  let by = signer ? ctx.personOf(signer) : null;
+  let cut = false;
+  const gone = signer ? ctx.cutKeys?.get(signer) : undefined;
+  if (gone) {
+    if (await among(git, c, gone.heads)) by = gone.person;
+    else cut = true;
+  } else if (by && ctx.policy.cutoffs.has(by) && !(await among(git, c, ctx.policy.cutoffs.get(by)!))) cut = true;
+  // A server's (0099): no change of its counts, whatever the rules.
+  if (signer && ctx.servers?.has(signer)) {
+    cut = true;
+    by = signer;
+  }
+  // Signed by no one known here: as the device it came from made it (0099). From a server, or from a device that is no
+  // one in the workspace, refused, whatever the rules; from a person's, judged as theirs.
+  if (!cut && !by && !gone && ctx.from !== undefined) {
+    if (ctx.from === null || ctx.servers?.has(ctx.from)) cut = true;
+    if (ctx.from !== null) by = ctx.from;
+  }
+  return { by, cut };
+}
+
 /** Judge the commits in `theirs` that `ours` does not hold (null: none, a history arriving for the first time). */
-export async function gate(git: Git, ours: string | null, theirs: string, ctx: GateContext): Promise<GateResult> {
+export async function gate(git: Git, ours: string | null, theirs: string, given: GateContext): Promise<GateResult> {
+  const ctx = membersOnly(given);
   const none: GateResult = { keeps: new Map(), refused: [], waitFor: [] };
   const range = ours ? [`${ours}..${theirs}`] : [theirs];
   // The policy operations they name, all at once first (0071): if one has not come, nothing else is judged yet.
@@ -131,10 +197,6 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
   const cutKeys = ctx.cutKeys ?? new Map<string, { person: string; heads: string[] }>();
   // Last refused change of each file (null once someone who may change it has), and the commit that proposes its text.
   const tainted = new Map<string, { commit: string; by: string | null } | null>();
-  const among = async (c: string, heads: string[]) => {
-    for (const h of heads) if (h === c || (await git.run(['merge-base', '--is-ancestor', c, h], { allowFail: true })).code === 0) return true;
-    return false;
-  };
   // Write rules, or cutoffs, to judge by; else only what no one brings in this way (unsafePaths).
   // From a server or a device no one in (0099), every commit is looked at: one no one known signed is refused.
   const judging = ctx.policy.rules.size > 0 || cutKeys.size > 0 || ctx.policy.cutoffs.size > 0 || !!ctx.servers?.size || ctx.from === null;
@@ -175,26 +237,7 @@ export async function gate(git: Git, ours: string | null, theirs: string, ctx: G
       return;
     }
     const message = messages.get(c) ?? await git.out(['show', '-s', '--format=%B', c]);
-    const signer = await commitSigner(git, c);
-    let by = signer ? ctx.personOf(signer) : null;
-    // Past a cutoff: refused, whatever the rules.
-    let cut = false;
-    const gone = signer ? cutKeys.get(signer) : undefined;
-    if (gone) {
-      if (await among(c, gone.heads)) by = gone.person;
-      else cut = true;
-    } else if (by && ctx.policy.cutoffs.has(by) && !(await among(c, ctx.policy.cutoffs.get(by)!))) cut = true;
-    // A server's (0099): no change of its counts, whatever the rules.
-    if (signer && ctx.servers?.has(signer)) {
-      cut = true;
-      by = signer;
-    }
-    // Signed by no one known here: as the device it came from made it (0099). From a server, or from a device that
-    // is no one in the workspace, refused, whatever the rules; from a person's, judged as theirs.
-    if (!cut && !by && !gone && ctx.from !== undefined) {
-      if (ctx.from === null || ctx.servers?.has(ctx.from)) cut = true;
-      if (ctx.from !== null) by = ctx.from;
-    }
+    const { by, cut } = await attribute(git, c, ctx);
     // A merge a server made (0099) is made again here whatever version of merging it names: else, naming another, it
     // could take one side's version of a file and so undo the other side's change unseen.
     const serverMade = !!by && !!ctx.servers?.has(by);
@@ -339,22 +382,41 @@ async function blobAt(git: Git, commit: string, path: string): Promise<string | 
  */
 async function mergeChanges(git: Git, merge: string, parents: string[], message: string, ctx: GateContext, strict = false): Promise<string[]> {
   const files = async (a: string, b: string) => (await git.run(['diff-tree', '-r', '--name-only', '-z', '--no-renames', a, b])).stdout.split('\0').filter(Boolean);
-  let differs: string[];
-  const version = trailers(message, MERGE_TRAILER)[0];
-  if (parents.length === 2 && ctx.remake && (strict || version === ctx.mergeTrailer)) {
-    differs = await files(await ctx.remake(parents[0]!, parents[1]!), `${merge}^{tree}`);
-  } else {
-    const sets = await Promise.all(parents.map((p) => files(p, merge)));
-    differs = sets[0]!.filter((p) => sets.every((s) => s.includes(p)));
-  }
-  const kept = new Set(message.split('\n').map((l) => /^Kept (.+) as it was: not .+ to change$/.exec(l)?.[1]).filter((x): x is string => !!x));
-  const out: string[] = [];
-  // Where both sides' changes were kept out, the merge keeps the file as it was where they parted (host.ts, judgeBoth).
+  // Where the two sides parted (null: no common history, or not two sides).
   let base: string | null | undefined;
   const mergeBase = async () => {
     if (base === undefined) base = parents.length === 2 ? ((await git.run(['merge-base', parents[0]!, parents[1]!], { allowFail: true })).stdout.trim() || null) : null;
     return base;
   };
+  let differs: string[];
+  const version = trailers(message, MERGE_TRAILER)[0];
+  if (parents.length === 2 && ctx.remake && (strict || version === ctx.mergeTrailer)) {
+    differs = await files(await ctx.remake(parents[0]!, parents[1]!), `${merge}^{tree}`);
+  } else if (parents.length > 2) {
+    // Kuraa makes no merge of more than two (0112): what one holds differing from any parent is its maker's own change,
+    // else it could take the history's oldest version of a file, which no one parent differs from, unseen.
+    const sets = await Promise.all(parents.map((p) => files(p, merge)));
+    differs = [...new Set(sets.flat())].sort();
+  } else {
+    const sets = await Promise.all(parents.map((p) => files(p, merge)));
+    differs = sets[0]!.filter((p) => sets.every((s) => s.includes(p)));
+    // Made by another version of merging, so not made again (0112): a change one side made since they parted that the
+    // merge does not hold is its maker's own change too, else a merge could undo it by taking the other side's file.
+    const parted = await mergeBase();
+    if (parted && parents.length === 2) {
+      const mine = new Set(differs);
+      for (const p of parents) {
+        for (const path of await files(parted, p)) {
+          if (mine.has(path)) continue;
+          if ((await blobAt(git, merge, path)) !== (await blobAt(git, p, path))) mine.add(path);
+        }
+      }
+      differs = [...mine].sort();
+    }
+  }
+  const kept = new Set(message.split('\n').map((l) => /^Kept (.+) as it was: not .+ to change$/.exec(l)?.[1]).filter((x): x is string => !!x));
+  const out: string[] = [];
+  // Where both sides' changes were kept out, the merge keeps the file as it was where they parted (host.ts, judgeBoth).
   /**
    * Whether this device would itself keep out the change a merge says it kept out
    * (0099): the last change to the path on each side whose version the merge does
@@ -367,13 +429,9 @@ async function mergeChanges(git: Git, merge: string, parents: string[], message:
       if ((await blobAt(git, p, path)) === mine) continue;
       const last = (await git.run(['log', '-1', '--format=%H', ...(parted ? [`${parted}..${p}`] : [p]), '--', path], { allowFail: true })).stdout.trim();
       if (!last) continue;
-      const signer = await commitSigner(git, last);
-      if (!signer || ctx.servers?.has(signer)) continue;
-      const gone = ctx.cutKeys?.get(signer);
-      const who = gone ? gone.person : ctx.personOf(signer);
-      if (!who) continue;
-      if (gone && !gone.heads.length) continue;
-      if (ctx.policy.cutoffs.has(who)) continue;
+      // Whose it is as the gate would judge it (attribute): a change this device would take, not kept out.
+      const { by: who, cut } = await attribute(git, last, ctx);
+      if (cut || !who) continue;
       if (ctx.policy.mayWrite(who, path, ctx.space ?? null)) return false;
     }
     return true;

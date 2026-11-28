@@ -1249,6 +1249,15 @@ export class PeerNode {
     if ((await this.identity.removed()).includes(key)) return null;
     const remote = await this.identity.addRemote(key, name);
     if (remote) this.letIn.set(key, { name: remote, until: Date.now() + LET_IN_MS });
+    // A server lets go of the remote of one whose join never came (0112), once the time to come is over.
+    if (remote && this.isServerDevice(this.myKey)) {
+      setTimeout(() => {
+        if (this.closing) return;
+        const now = Date.now();
+        for (const [k, v] of this.letIn) if (v.until <= now) this.letIn.delete(k);
+        void this.identity.pruneRemotes(new Set(this.letIn.keys())).catch((e: Error) => this.logUnlessClosing(e));
+      }, LET_IN_MS + 5000).unref();
+    }
     return remote;
   }
 
@@ -1513,6 +1522,9 @@ export class PeerNode {
         const why = await this.refuseLink(code);
         if (why) return { why: `not paired with this device, and ${why}` };
         const l = decodeLink(code);
+        // A server lets people in by a link for one person only (0112): its admit counts for no other (policy.ts), and
+        // by a link for anyone, a stranger with fresh keys could be let in, and fetch everything, over and over.
+        if (this.isServerDevice(this.myKey) && !l.once) return { why: 'a server lets people in only by a link for one person' };
         const name = await this.admit(link.key, h.name);
         if (!name) return { why: 'this device was removed from the workspace' };
         // A link for one person lets one device in: used up, on record, so no other device lets anyone else in by it.

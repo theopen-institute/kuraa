@@ -113,6 +113,24 @@ describe('records a device makes about itself', () => {
     expect(await id.personOf(hex(key))).toBeNull();
   });
 
+  it('a key that signed a server’s join is no person’s, whatever vouches for it (0112)', async () => {
+    const { id } = repo();
+    const ws = await id.found();
+    await id.addRemote(hex(bo), 'bo');
+    const serverKey = crypto.keyPair();
+    // Its join as a server, as the server signs it (whether it counts is the policy's to say).
+    const join = makeOp(ws.id, { t: 'join', group: 'workspace', role: 'server', link: '0123456789abcdef', once: true, granter: hex(ada), grant: 'cd'.repeat(64), expires: 0, issuer: 'ee'.repeat(32) }, [], serverKey);
+    await id.takeRecords([signRecord({ kind: 'policy', workspace: ws.id, subject: join.id, op: join.op, parents: join.parents, signer: join.signer, proof: join.proof }, bo)]);
+    // An identity of the server's own making vouches for its key: still no one's.
+    const made = identity();
+    await id.takeRecords([...eventRecords(ws.id, made), vouchFor(ws.id, serverKey, made, 'Ana')]);
+    expect(await id.personOf(hex(serverKey))).toBeNull();
+    // A key that signed no such join, vouched for in the same way: that identity's.
+    const other = crypto.keyPair();
+    await id.takeRecords([vouchFor(ws.id, other, made, 'Ana')]);
+    expect((await id.personOf(hex(other)))?.name).toBe('Ana');
+  });
+
   it('an identity recovered: its old key’s word counts only for the keys the recovery kept, on every device alike', async () => {
     const { id } = repo();
     const ws = await id.found();

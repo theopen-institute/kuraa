@@ -83,6 +83,25 @@ describe('the gate, step 4', () => {
     void unsigned;
   });
 
+  it('counts a key as someone’s only where the workspace has or had them: an identity no one let in is no one (0112)', async () => {
+    const r = repo();
+    // Sam: an identity of someone's own making, its key vouched for (personOf knows it), never let in.
+    const sam = person();
+    const samsCommit = await commit(r, 'free.md', 'Sam was here.\n', sam.key);
+    const server = hex(crypto.keyPair());
+    const p = policy();
+    const personOf = (k: string) => (k === hex(sam.key) ? sam.id : p.personOf(k));
+    // Even a revocation with a cutoff naming the commit, as its own identity could say, makes it no one's still.
+    const cutKeys = new Map([[hex(sam.key), { person: sam.id, heads: [samsCommit] }]]);
+    const judged = (from: string | null) => gate(r.git, r.base, samsCommit, { ...p, personOf, cutKeys, servers: new Set([server]), from });
+    // Brought by a server: no one known signed it, so refused, though no rule names free.md.
+    expect((await judged(server)).refused.map((x) => [x.commit, x.path])).toEqual([[samsCommit, 'free.md']]);
+    // By a device let in by a link whose person is not in yet: refused too.
+    expect((await judged(sam.id)).refused.map((x) => x.path)).toEqual(['free.md']);
+    // By Bo's device: as Bo's, who may change free.md.
+    expect((await judged(bo.id)).refused).toEqual([]);
+  });
+
   it('keeps each commit’s verdict, and gives the same from it as judging afresh; not across other records (0099)', async () => {
     const r = repo();
     const left = await commit(r, 'notes.md', '# Notes\n\nBo’s.\n', bo.key);
@@ -181,12 +200,34 @@ describe('the gate, step 4', () => {
     // Naming another version of merging does not help a server's merge: it is made again here all the same.
     const elsewhere = await signedMerge(`Merge\n\nKuraa-Merge: ${mergeTrailerValue('merge@5 git@1.0 pandoc@3')}`, ada.key);
     expect([...(await gate(r.git, r.base, elsewhere, { ...ctx, from: hex(server) })).keeps.keys()]).toEqual(['free.md']);
-    // A person's merge from another version is still checked only for what neither side held (0025).
+    // A person's merge from another version is not made again (0025): dropping Bo's change to free.md is Ada's own
+    // change (0112), which she may make, as anyone may change free.md.
     expect((await gate(r.git, r.base, elsewhere, { ...ctx, from: ada.id })).keeps.size).toBe(0);
     // Where only Bo may change free.md, Ada's merge saying it kept his change out is not believed (this device would
     // take his change): dropping it is her change, which she may not make.
     const bosOnly: GateContext = { ...policy({ t: 'rule', path: 'free.md', by: [bo.id] }), servers: new Set(), remake, mergeTrailer: String(MERGE_VERSION) };
     expect([...(await gate(r.git, r.base, claimed, { ...bosOnly, from: ada.id })).keeps.keys()]).toEqual(['free.md']);
+  });
+
+  it('takes no merge’s dropping of someone’s change unseen: of more than two parents, or by another version of merging (0112)', async () => {
+    const r = repo();
+    const remake = async (a: string, b: string) => run(r.dir, 'rev-parse', `${(await mergeCommits(r.git, a, b, { typeFor: (p, h) => registry.resolve(p, h), tmpDir: join(r.dir, '.git', 'tmp') })).commit}^{tree}`);
+    // Only Ada changes notes.md. She does; Bo changes free.md on another side, as he may.
+    const ctx: GateContext = { ...policy({ t: 'rule', path: 'notes.md', by: [ada.id] }), servers: new Set(), remake, mergeTrailer: String(MERGE_VERSION) };
+    const adas = await commit(r, 'notes.md', '# Notes\n\nAda’s, as only she may.\n', ada.key);
+    run(r.dir, 'checkout', '-q', '-b', 'side', r.base);
+    const bos = await commit(r, 'free.md', 'Bo’s, as he may.\n', bo.key);
+    run(r.dir, 'checkout', '-q', 'main');
+    // A merge of three, Ada's, the base and Bo's, holding Bo's side's files: notes.md as it was before Ada changed it,
+    // which no parent but hers differs from. Brought by Bo: undoing her change is his, and refused.
+    const octopus = run(r.dir, 'commit-tree', `${bos}^{tree}`, '-p', adas, '-p', r.base, '-p', bos, '-m', `Merge\n\nKuraa-Merge: ${MERGE_VERSION}`);
+    expect([...(await gate(r.git, adas, octopus, { ...ctx, from: bo.id })).keeps.keys()]).toEqual(['notes.md']);
+    // A merge of two naming another version of merging (not made again here), taking Bo's side whole: the same.
+    const elsewhere = run(r.dir, 'commit-tree', `${bos}^{tree}`, '-p', adas, '-p', bos, '-m', `Merge\n\nKuraa-Merge: ${mergeTrailerValue('merge@5 git@1.0 pandoc@3')}`);
+    expect([...(await gate(r.git, adas, elsewhere, { ...ctx, from: bo.id })).keeps.keys()]).toEqual(['notes.md']);
+    // The honest merge, from any version, holds both changes: nothing of its own.
+    const honest = (await mergeCommits(r.git, adas, bos, { typeFor: (p, h) => registry.resolve(p, h), tmpDir: join(r.dir, '.git', 'tmp') })).commit;
+    expect((await gate(r.git, adas, honest, { ...ctx, from: bo.id })).keeps.size).toBe(0);
   });
 
   it('keeps out the same changes whichever side of a merge a device is on, so both make the same merge (0025)', async () => {

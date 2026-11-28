@@ -426,6 +426,27 @@ export class Identity {
     return new Set(this.devicesBy(records, policy, workspace, new Set(await this.getAll('kuraa.removed'))).in.keys());
   }
 
+  /**
+   * Let go of the remotes of devices that are not in (0112): one let in by a link
+   * whose join never came. `keep`: devices let in a moment ago, whose join may
+   * still come. Only for a server, which forks nothing (a fork keeps the remotes
+   * of the workspace it came from).
+   */
+  pruneRemotes(keep: Set<string>): Promise<number> {
+    return this.serial(async () => {
+      if (!(await this.workspace())) return 0;
+      const self = (await this.deviceKey()).publicKey.toString('hex');
+      const { in: inside } = await this.devices();
+      let n = 0;
+      for (const r of await this.remotes()) {
+        if (r.key === self || inside.has(r.key) || keep.has(r.key)) continue;
+        await this.write(['remote', 'remove', r.name]);
+        n++;
+      }
+      return n;
+    });
+  }
+
   /** Make the remotes what the records say (0072): one for each device in, none for a device out. */
   private async syncRemotesNow(): Promise<void> {
     if (!(await this.workspace())) return;
@@ -609,7 +630,8 @@ export class Identity {
    * with, and the person whose each signing key is: the one identity that
    * vouched for it (with a key that counts for it, by its log), with the key's
    * own signature too. A key more than one identity vouched for (only whoever
-   * holds it could make that so) is no one's, as is one its person revoked.
+   * holds it could make that so) is no one's, as is one its person revoked; a
+   * key that signed a server's join, no person's at all (0112).
    */
   private who(list: MemberRecord[]): ReturnType<Identity['whoOf']> {
     // Worked out once for the same records (0072): asked for at every turn, and each identity's log is checked by its signatures.
@@ -653,8 +675,11 @@ export class Identity {
     };
     const vouches = new Map<string, MemberRecord[]>();
     const once = new Map<string, MemberRecord[]>();
+    // A key that signed a server's join is a server's, never a person's (0112): a vouch for it, which only whoever holds
+    // it could make, would make its join and every admit it made count for nothing, and so take out everyone it let in.
+    const serverKeys = new Set(list.filter((r) => r.kind === 'policy' && r.op?.t === 'join' && r.op.role === 'server').map((r) => r.signer));
     for (const r of list) {
-      if (r.kind !== 'vouch') continue;
+      if (r.kind !== 'vouch' || serverKeys.has(r.subject)) continue;
       if (counts(r, vouchCounts)) vouches.set(r.subject, [...(vouches.get(r.subject) ?? []), r]);
       if (ever(r)) once.set(r.subject, [...(once.get(r.subject) ?? []), r]);
     }
@@ -1458,6 +1483,9 @@ export class Identity {
       const who = this.who(await this.records()).personOf.get(signer)?.key ?? null;
       if (!policy.isAdmin(who, group)) throw new Error(group === WORKSPACE ? 'Only an admin of this workspace can invite people to it' : `Only an admin of ${group} can invite people to it`);
       if (group === WORKSPACE && role === 'admin' && !policy.mayAssignAdmins(who)) throw new Error('Only the workspace’s owner invites people as admins');
+      // An admin by a link for one person only (0112): a link for anyone that makes admins is one any holder, or anyone
+      // who has seen a join by it, could make admins with for as long as it lasts.
+      if (role === 'admin' && !once) throw new Error('A link that makes admins lets one person in: make one for each');
       // A server (0099): the owner's to invite, to the workspace, one by each link.
       if (role === 'server' && (!policy.isOwner(who) || group !== WORKSPACE || !once)) throw new Error('Only the workspace’s owner invites a server, one by each link');
       const genesis = await this.pin();
@@ -1569,9 +1597,12 @@ export class Identity {
 
   /**
    * Unlink in the policy what no longer lets anyone in but its join could still
-   * count by (policy.ts: a grant from before links were let in by): links this
-   * device revoked on record, and links it made that have expired. Their
-   * grants then let no one in, whoever holds them.
+   * count by: links this device revoked on record, links it made that have
+   * expired, and (0112) any link for anyone that the joins by it say has expired,
+   * whoever made it. A link's expiry is checked only by the clock of the device
+   * letting someone in (admit), and every join by a link carries its grant, so
+   * anyone in the workspace could let someone in by an old one: unlinked, its
+   * grant lets no one in, whoever holds it. Only an admin's device may (unlink).
    */
   async unlinkStale(key: KeyPair, now = Date.now()): Promise<void> {
     if (!(await this.workspace()) || !(await this.pin()) || !(await this.policy()).founded) return;
@@ -1579,7 +1610,11 @@ export class Identity {
     const self = (await this.deviceKey()).publicKey.toString('hex');
     const used = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name === 'used').map((r) => r.subject));
     const stale = new Set(records.filter((r) => r.kind === 'revoke-link' && r.name !== 'used' && r.by === self).map((r) => r.subject));
-    for (const l of await this.links()) if (!l.admitted && l.expires && l.expires <= now && !used.has(l.id)) stale.add(l.id);
+    for (const l of await this.links()) if (l.expires && l.expires <= now && !used.has(l.id)) stale.add(l.id);
+    for (const r of records) {
+      const op = r.kind === 'policy' ? r.op : undefined;
+      if (op?.t === 'join' && !op.once && op.role !== 'server' && op.expires && op.expires <= now) stale.add(op.link);
+    }
     for (const id of stale) await this.unlink(id, key);
   }
 

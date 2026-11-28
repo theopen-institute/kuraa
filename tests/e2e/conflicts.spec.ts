@@ -1,6 +1,6 @@
 // Conflicts a merge kept: both versions in the page, who wrote each, and a way
 // to choose; the sidebar counts them until they are settled.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
 import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,6 +9,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startHost } from '../../packages/host/src/index.js';
 import { standardFeatures } from '../../packages/features/src/index.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const version = (by: string, commit: string, text: string) => `::: {.version by="${by}" commit="${commit}"}\n${text}\n:::`;
 const conflict = (a: string, b: string) => `:::: {.conflict}\n${version('Ada', '3f2c1e0', a)}\n\n${version('Bo', '9a41d7b', b)}\n::::`;
@@ -31,7 +42,7 @@ test('a conflict block shows both versions, and choosing settles it for everyone
   const onDisk = () => readFileSync(join(dir, 'notes.md'), 'utf8');
   try {
     const open = async (name: string) => {
-      const page = await (await browser.newContext()).newPage();
+      const page = await (await ownContext(browser)).newPage();
       await page.goto(`${host.url}/?token=${host.token}&name=${name}`);
       await page.getByTestId('file:notes.md').click();
       return page;

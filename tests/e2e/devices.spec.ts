@@ -3,7 +3,7 @@
 // devices and the people, and the person who joined last, a member, may not
 // remove anyone until the first makes them an admin (0066); then they rename
 // their device and remove the first. On a local DHT, so nothing leaves this machine.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
 import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,6 +17,17 @@ import { keptKey } from '../../packages/host/src/keys.js';
 import { sign, signRecord, signsMessage, vouchMessage } from '../../packages/host/src/peers/records.js';
 import { openSettings } from './settings.js';
 import { standardFeatures } from '../../packages/features/src/index.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -48,7 +59,7 @@ test('people on two devices edit one document; a member made owner renames their
   const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
-      const page = await (await browser.newContext()).newPage();
+      const page = await (await ownContext(browser)).newPage();
       await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
       await page.getByTestId('file:notes.md').click();
       await expect(page.getByTestId('editor')).toContainText('The tide was out.');
@@ -188,7 +199,7 @@ test('a member leaves the workspace from its settings: taken out, everyone told;
   const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
-      const page = await (await browser.newContext()).newPage();
+      const page = await (await ownContext(browser)).newPage();
       await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
       await openSettings(page);
       await page.getByTestId('settings-tab-workspace').click();

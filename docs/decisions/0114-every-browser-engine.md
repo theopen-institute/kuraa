@@ -52,14 +52,17 @@ text still goes up into the title.
   `#`, the example feature), and the tests after it then fail too (menus with *Say hello (example)*,
   `#` opening the code box). Most of the first runs' failures in WebKit and Firefox were that, behind
   one test stopped by `End`.
-- Six specs (collab, find, notes, run, source, versions) opened browser contexts of their own and
-  never closed them, so each left a page connected to the host for the rest of the run. Late in a
-  WebKit run, pages stopped answering (a click waiting for ever). Each now closes its contexts after
-  each test (`ownContext`).
+- Ten specs opened browser contexts of their own and never closed them: six against the shared host
+  (collab, find, notes, run, source, versions), four against hosts of their own, which they stopped
+  (conflicts, devices, rules, spaces), leaving pages trying to reach them again for the rest of the
+  run. Each now closes its contexts after each test (`ownContext`). With them all left open, late in
+  a WebKit run pages stopped answering (a click waiting until the test's time was up, in tests that
+  passed on their own), and its run took 12 to 15 minutes; with them closed, nothing stops, and it
+  takes about 5, as Chromium's and Firefox's do.
 
 ## Not yet
 
 - The browser tests are not in CI (`check.yml` runs lint, typecheck and the unit tests): a run of the
-  three takes about 25 minutes on a laptop, WebKit's being the slowest.
+  three takes about 15 minutes on a laptop.
 - Spell-checking's own dictionary (*Add to dictionary*) is Chromium's (the desktop app's); a webview
   has the system's.

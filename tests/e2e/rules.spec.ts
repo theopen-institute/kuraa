@@ -1,7 +1,7 @@
 // Who can change what (0066): an admin says who may change a document, in
 // Workspace settings; on another person's device it opens read only, saying
 // who may, with nothing to edit it by; the admin's edits reach it. On a local DHT.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
 import { KEYS } from './env.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -14,6 +14,17 @@ import { createPerson } from '../../packages/host/src/peers/person.js';
 import { keptKey } from '../../packages/host/src/keys.js';
 import { openSettings } from './settings.js';
 import { standardFeatures } from '../../packages/features/src/index.js';
+
+// Contexts a test opens are closed when it ends: left open, each keeps a page connected to the host for the rest of the run.
+const contexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  for (const c of contexts.splice(0)) await c.close().catch(() => undefined);
+});
+async function ownContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  contexts.push(context);
+  return context;
+}
 
 const STATIC = fileURLToPath(new URL('../../apps/web/dist', import.meta.url));
 const TIMINGS = { flushMs: 200, idleCommitMs: 800, maxCommitMs: 10_000, dropMs: 1000 };
@@ -42,7 +53,7 @@ test('an admin says who can change a document; to someone else it is read only, 
   const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
-      const page = await (await browser.newContext()).newPage();
+      const page = await (await ownContext(browser)).newPage();
       await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
       await page.getByTestId('file:notes.md').click();
       await expect(page.getByTestId('editor')).toContainText('The tide was out.');
@@ -114,7 +125,7 @@ test('from a document’s ⋯ menu: an admin says only she can change it; then b
   const b = await startHost({ features: standardFeatures, dir: dirB, staticDir: STATIC, timings: TIMINGS, peers: asBo, invites: { peers: asBo } });
   try {
     const open = async (h: typeof a, name: string) => {
-      const page = await (await browser.newContext()).newPage();
+      const page = await (await ownContext(browser)).newPage();
       await page.goto(`${h.url}/?token=${h.token}&name=${name}`);
       await page.getByTestId('file:notes.md').click();
       await expect(page.getByTestId('editor')).toContainText('The tide was out.');

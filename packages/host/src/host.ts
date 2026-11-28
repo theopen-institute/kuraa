@@ -56,6 +56,12 @@ export interface HostTimings {
   gitPollMs: number;
 }
 
+/** How stopping goes, for whoever waits for it (the desktop app's closing page, 0129). */
+export interface CloseOptions {
+  /** Everything is written and committed on this computer: what is left (pushing, letting go of devices) may be cut short. */
+  saved?: () => void;
+}
+
 export interface HostOptions {
   dir: string;
   /** What the workspace is called to people where it names itself nowhere (default: its folder's name). Its own name wins (0061). */
@@ -145,7 +151,7 @@ const MAX_IDLE_ROOMS = 24;
 /** How long a device that is to lead a room's session waits for the last commit of the one before (Host.takeOver). */
 const LEAD_WAIT_MS = 10_000;
 
-export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 15 * 60_000, rejoinMs: 5000, onlineMs: 30_000, onlineSyncMs: 5 * 60_000, gitPollMs: 1000 };
+export const DEFAULT_TIMINGS: HostTimings = { flushMs: 2000, idleCommitMs: 30_000, maxCommitMs: 300_000, dropMs: 15 * 60_000, rejoinMs: 5000, onlineMs: 5_000, onlineSyncMs: 5 * 60_000, gitPollMs: 1000 };
 
 interface RoomRecord {
   key: string;
@@ -490,9 +496,15 @@ export class Host {
     return this.address;
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  /**
+   * Stop: every open room written and committed, then what the online copies lack pushed while the
+   * other devices are let go of (both a while at most), then the rest. `saved` is called once
+   * everything is on this computer's disk: what is still to go then goes at the next start (0129).
+   */
+  async close(o: CloseOptions = {}): Promise<void> {
+    if (this.closed) return void o.saved?.();
     this.closed = true;
+    const began = Date.now();
     this.renders?.close();
     this.watcher?.close();
     clearInterval(this.gitPoll);
@@ -514,13 +526,22 @@ export class Host {
         if (this.leads(rec)) await this.saveUnsaved(rec).catch(() => undefined);
       }
     });
-    // The saves just made, and any still waiting to be pushed, go to the online copies before they stop (a while at most).
-    await Promise.all([...this.syncs.values()].map(({ session }) => session.pushPending?.(FINAL_PUSH_MS).catch(() => undefined)));
-    for (const { session } of this.syncs.values()) session.close();
-    await this.features.close();
-    await this.peers?.close();
+    const savedIn = Date.now() - began;
+    o.saved?.();
+    // The saves just made, and any still waiting to be pushed, go to the online copies before they stop (a while at
+    // most), while the other devices are let go of: neither waits for the other (0129). The write rules still judge
+    // what a push brings in (another device pushed first) until it is done: Peers lets go of them only then.
+    const pushed = Promise.all([...this.syncs.values()].map(({ session }) => session.pushPending?.(FINAL_PUSH_MS).catch(() => undefined)));
+    await Promise.all([
+      pushed.then(async () => {
+        for (const { session } of this.syncs.values()) session.close();
+        await this.features.close();
+      }),
+      this.peers?.close(pushed),
+    ]);
     await this.runner.close();
     await this.relay.close();
+    this.log(`stopped in ${Date.now() - began} ms (saved in ${savedIn} ms)`);
   }
 
   private async ensureIdentity(): Promise<void> {

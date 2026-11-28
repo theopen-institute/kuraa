@@ -39,7 +39,7 @@ import type { AddressInfo } from 'node:net';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { standardTypes } from '@kuraa/formats';
 import { DEFAULT_POLICY } from '@kuraa/run-kit';
-import { DEFAULT_TIMINGS, type HostOptions } from './host.js';
+import { DEFAULT_TIMINGS, type CloseOptions, type HostOptions } from './host.js';
 import { HttpError } from './errors.js';
 import { Git } from './git.js';
 import { renameOver, reservedName } from './files.js';
@@ -1253,7 +1253,8 @@ export class Hub {
     socket.on('close', end);
   }
 
-  async close(): Promise<void> {
+  /** Stop every workspace; `saved` once all of them have written and committed their open edits (0129). */
+  async close(o: CloseOptions = {}): Promise<void> {
     clearInterval(this.sweepTimer);
     const closed = new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));
     this.server?.closeAllConnections();
@@ -1262,7 +1263,14 @@ export class Hub {
     await closed;
     // A workspace still opening is let finish, and closed with the others.
     await this.opened();
-    await Promise.all([...this.hosts.entries()].map(([id, h]) => h.close().catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`))));
+    const saves: Promise<void>[] = [];
+    const stops = [...this.hosts.entries()].map(([id, h]) => {
+      let saved!: () => void;
+      saves.push(new Promise<void>((r) => (saved = r)));
+      return h.close({ saved }).catch((e: Error) => this.log(`[${id}] stopping failed: ${e.message}`)).finally(saved);
+    });
+    void Promise.all(saves).then(() => o.saved?.());
+    await Promise.all(stops);
     this.hosts.clear();
   }
 }
@@ -1281,7 +1289,7 @@ export interface RunningHub {
   hub: Hub;
   url: string;
   token: string;
-  close(): Promise<void>;
+  close(o?: CloseOptions): Promise<void>;
 }
 
 export { isLoopback };
@@ -1289,7 +1297,7 @@ export { isLoopback };
 /** Start a hub on a folder of workspaces. */
 export async function startHub(options: HubOptions): Promise<RunningHub> {
   const hub = new Hub(options);
-  return { hub, url: localUrl(await hub.start()), token: hub.token, close: () => hub.close() };
+  return { hub, url: localUrl(await hub.start()), token: hub.token, close: (o) => hub.close(o) };
 }
 
 /** A folder in `parent` called `name`, or `name 2`, `name 3`… if there is one already. */

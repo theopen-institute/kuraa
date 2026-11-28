@@ -2,7 +2,7 @@
 import type { ChunkRef, MadeFrom, RunRecord, RunSessionInfo } from '@kuraa/session/model';
 import type { PersonInfo } from './shell.js';
 import type { FeatureSettings, FeatureStatus, Json } from '@kuraa/feature-kit';
-import type { BookContent, WordsDay } from '@kuraa/feature-kit/client';
+import type { BookContent, CompileRequest, WordsDay } from '@kuraa/feature-kit/client';
 
 export interface WorkspaceInfo {
   /** What the workspace is called: its own name, the same on every device (0061), else what this device calls it. */
@@ -198,7 +198,7 @@ export interface CommitInfo {
   kind: 'autosave' | 'merge' | 'commit' | 'not-kept';
 }
 
-export type RenderFormat = 'html' | 'docx' | 'pdf';
+export type RenderFormat = 'html' | 'docx' | 'pdf' | 'epub';
 /** A document's latest render in one format (the host's renders.ts). */
 export interface RenderState {
   path: string;
@@ -288,8 +288,10 @@ export class HostApi {
   /** Keep an image beside a document (in images/ next to it); its path, and its address relative to the document. */
   uploadImage(doc: string, name: string, image: Blob, by: { name: string; email: string }) {
     const q = new URLSearchParams({ doc, name, by: by.name, email: by.email });
-    return this.json<{ path: string; src: string }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
+    return this.json<{ path: string; src: string; size: number; removed: string[] }>(`/api/images?${q}`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'application/octet-stream' } });
   }
+  /** How much the workspace's history takes on the host's computer, in bytes (0108). */
+  storage() { return this.json<{ history: number }>('/api/storage'); }
   /** Who made a commit, and when (ISO). */
   commitInfo(hash: string) { return this.json<{ author: string; date: string }>(`/api/commits/${encodeURIComponent(hash)}`); }
   createFolder(path: string) { return this.json('/api/folders', { method: 'POST', body: JSON.stringify({ path }) }); }
@@ -362,7 +364,7 @@ export class HostApi {
   /** What a document can be rendered to here, and its latest renders. */
   renders(path: string) { return this.json<RenderInfo>(`/api/renders?path=${encodeURIComponent(path)}`); }
   /** Render a document (or join its render under way); a failure to start comes back as a failed state. */
-  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: { exclude?: string[]; noHeading?: string[]; title?: string }): Promise<RenderState> {
+  async render(path: string, format: RenderFormat, by: { name: string; email: string; color: string }, compile?: CompileRequest): Promise<RenderState> {
     try {
       return await this.json<RenderState>('/api/renders', { method: 'POST', body: JSON.stringify({ path, format, by, ...compile }) });
     } catch (e) {
@@ -465,6 +467,7 @@ export interface HubSettings {
   allowWrite: boolean;
   allowNetwork: boolean;
   allowInstalls: boolean;
+  renderWhereCodeRuns: boolean;
   dataDir: string | null;
   formats: string[] | null;
   /** Features on, by id (0082); null for all. */

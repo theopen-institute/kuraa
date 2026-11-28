@@ -29,6 +29,7 @@ import { findPlugin } from './find.js';
 import { dialogOpen } from './focus.js';
 import type { FormatCommands } from '@kuraa/editor-kit';
 import { workspaceFiles } from './workspaceFiles.js';
+import { chooseImages } from './chooseImages.js';
 import { placeholderPlugin } from './placeholder.js';
 import { APP_KEYS, isMac, keyMatches } from './keys.js';
 import { S } from './strings.js';
@@ -363,7 +364,9 @@ function open(carried: Carried | null = null): () => void {
     const files = workspaceFiles(api, path, () => user.value);
     disposeFiles = () => files.dispose();
     const notify = (text: string, kind: 'info' | 'warn' = 'info') => report({ notice: { kind, text } });
-    const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify, spelling: props.spelling });
+    // Images pasted or dropped are added through the dialog (0108), told how large the workspace's history is.
+    const storage = () => api.storage().then((r) => r.history, () => null);
+    const ctx = editorContext(type, { history, isRemote: conn.isRemote, path, files, notify, spelling: props.spelling, chooseImages: (images) => chooseImages(images, storage) });
     commands = formatEditor?.commands?.(ctx) ?? {};
     // Features (0082): each given the room's state for it, where the room was started with it (else nothing it does here would be kept).
     const stops: (() => void)[] = [];

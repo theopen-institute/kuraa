@@ -1,4 +1,4 @@
-// Paths a document writes (its bibliography, its images) are relative to the
-// document. The workspace's files are named from the workspace's top. The
-// client resolves links the same way, so the helper is editor-kit's.
-export { workspacePath } from '@kuraa/editor-kit';
+// Paths a document writes (its bibliography, its images, its links) are relative to the
+// document. The workspace's files are named from the workspace's top. The kernel resolves
+// them, for the host (which writes them again when files move, 0109) as for the page.
+export { workspacePath } from '@kuraa/kernel';

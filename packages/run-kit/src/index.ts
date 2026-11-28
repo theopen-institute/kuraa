@@ -276,7 +276,7 @@ export interface Engine {
 // Like a run, a render's processes start through the environment, with the
 // workspace read-only and no network, whatever the workspace asks for.
 
-export type RenderFormat = 'html' | 'docx' | 'pdf';
+export type RenderFormat = 'html' | 'docx' | 'pdf' | 'epub';
 
 export interface RenderContext extends ComponentContext {
   /**
@@ -332,7 +332,11 @@ export type ToolUse =
   };
 
 export interface RenderRequest {
-  /** The document, on the host (inside the workspace, or, joined from several, inside scratch). */
+  /**
+   * The document, on the host: inside the workspace, or, joined from several
+   * (0093), a file the host made, with the files it names beside it (a Word
+   * template, a cover: 0106), which a renderer reads as they are.
+   */
   input: string;
   format: RenderFormat;
   /**
@@ -360,6 +364,48 @@ export interface RenderResult {
    * here may download: the app offers to, and renders again when it is there.
    */
   needs?: { tool: string };
+}
+
+/**
+ * A renderer (decision 0107): renders documents without an environment, so
+ * without Podman, running no code of theirs. It is given what it reads: the
+ * document, and the files of the workspace it refers to only as the host lets
+ * it have them (`RendererContext.read`). Where both a renderer and an engine
+ * render a file type, the renderer does, unless it says the engine should
+ * (`prefersEngine`: a PDF asking for LaTeX) and one is there.
+ */
+export interface Renderer {
+  /** Lower-case letters, digits and dashes. */
+  id: string;
+  label: string;
+  /** File extensions it renders, lower case, with the dot: ['.md']. */
+  extensions: string[];
+  formats: RenderFormat[];
+  /** Why it cannot render to a format here (a program it needs is not on this computer), or null. */
+  unavailable(format: RenderFormat): Promise<string | null>;
+  /** Why this render is better made where code runs (a PDF asking for LaTeX), or null. */
+  prefersEngine?(req: RenderRequest): Promise<string | null>;
+  render(ctx: RendererContext, req: RenderRequest): Promise<RenderResult>;
+}
+
+/** What the host gives a renderer for one render. */
+export interface RendererContext {
+  /** An empty folder for this render: the output goes here (`RenderResult.output`, relative to it). */
+  scratch: string;
+  /** The workspace's folder: what the document refers to is relative to it, or to `RenderRequest.resources`. */
+  workspace: string;
+  /**
+   * A file of the workspace (a path relative to it) as this render may have
+   * it: inside the workspace, not in .git, through no link, not hidden from
+   * the document's readers (0066); null if not, or not there.
+   */
+  read(path: string): Promise<Buffer | null>;
+  /** The longest the render may take, in ms: past it, the renderer stops and says so. */
+  timeLimitMs: number;
+  signal: AbortSignal;
+  log(message: string): void;
+  /** What is happening now, for people waiting. */
+  status(message: string): void;
 }
 
 /** Renders documents of some file types to some formats, through the engine's environment. */
@@ -584,6 +630,8 @@ export interface RunComponent {
   tools?: Tool[];
   /** Places the workspace keeps a copy and syncs with: the online copy (decision 0059). */
   syncs?: Sync[];
+  /** Renderers of documents that need no environment (decision 0107). */
+  renderers?: Renderer[];
 }
 
 export function defineRunComponent(component: Omit<RunComponent, 'apiVersion'>): RunComponent {

@@ -114,6 +114,7 @@ component may want it.
 
 A folder's top level as real parts in a LaTeX PDF (`--top-level-division=part`); a heading other than
 the folder's name; R Markdown's chunks run when compiled; a book's other
-settings (author, a table of contents, numbered chapters, a Word template); a Quarto book or bookdown
+settings (*later*: author, a table of contents, numbered chapters, a Word template, in
+[0106](0106-a-books-own-settings-and-epub.md)); a Quarto book or bookdown
 export made from the same order; a corkboard or outliner over the same order; a document in more than
 one book, as a reference.

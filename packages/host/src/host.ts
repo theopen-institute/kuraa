@@ -2,10 +2,10 @@
 import { isUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { markdownWords, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { documentOfFiles, filesFolderOf, markdownWords, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { COMPANIONS_FILE, FEATURES_FILE, type HostFeature } from '@kuraa/feature-kit/host';
@@ -17,7 +17,7 @@ import { commitSigned, signCommitObject } from './signing.js';
 import { serialQueue } from './serial.js';
 import { NAME_FILE, cleanName, initWorkspace, readWorkspaceName, writeWorkspaceName } from './workspace.js';
 import { Runner, type RunOptions } from './runner.js';
-import { Renders } from './renders.js';
+import { Renders, type CompiledBook, type CompileOptions, type RenderFormat } from './renders.js';
 import { loadRunComponents } from './components.js';
 import { createRequestHandler, sameToken } from './http.js';
 import { gateFor, upgradeAllowed, type RequestGate } from './origins.js';
@@ -307,7 +307,7 @@ export class Host {
   private readonly opening = new Map<string, Promise<RoomRecord>>();
   private relay!: Relay;
   runner!: Runner;
-  /** Documents rendered to HTML, Word and PDF (renders.ts). */
+  /** Documents rendered to HTML, Word, PDF and EPUB (renders.ts). */
   renders!: Renders;
   /** Words written by day and person, from the history (wordlog.ts, 0094). */
   private wordLog: WordLog | null = null;
@@ -432,7 +432,8 @@ export class Host {
       runner: this.runner,
       flush: (path) => this.writeForRender(path),
       madeFrom: (path) => this.madeFrom(path),
-      compile: (folder, o) => this.compileFolder(folder, o),
+      compile: (folder, o, format) => this.compileFolder(folder, o, format),
+      read: (path, file) => this.readForRender(path, file),
       log: (m) => this.log(m),
     });
     if (this.runner.enabled) {
@@ -1401,6 +1402,27 @@ export class Host {
    * whose readers are not everyone who reads the document. Data flows from
    * wider to narrower audiences, never back.
    */
+  /**
+   * A workspace file a renderer with no environment reads for a document
+   * (0107: an image, a bibliography), as a render in Podman would see it: inside
+   * the workspace, not .git, through no link, not in a space hidden from the
+   * document's readers (0066), a plain file of a sensible size; null if not.
+   */
+  async readForRender(path: string, file: string): Promise<Buffer | null> {
+    let abs: string;
+    try {
+      abs = this.resolvePath(file);
+    } catch {
+      return null;
+    }
+    const rel = relative(this.dir, abs).split(sep).join('/');
+    const hidden = (await this.hiddenFrom(path)).map((h) => h.replace(/\/+$/, ''));
+    if (!rel || hidden.some((h) => rel === h || rel.startsWith(`${h}/`))) return null;
+    const st = await lstat(abs).catch(() => null);
+    if (!st?.isFile() || st.size > 256 * 1024 * 1024) return null;
+    return readFile(abs).catch(() => null);
+  }
+
   async hiddenFrom(path: string): Promise<string[]> {
     const entries = this.spaces?.entries() ?? [];
     if (!entries.length || !this.peers) return [];
@@ -2512,7 +2534,8 @@ export class Host {
     if (!this.peers) throw new Error('Spaces are for a workspace shared with other devices');
     // What is kept beside a document goes where it goes (0082).
     // Only this person's own: others' are theirs to move (0082), and stay where those who read the document could read them.
-    for (const p of [path, ...(await this.features.ownFilesOf(path))]) await this.moveOneToSpace(p, target);
+    // Its own files (0109: `report.md.files/`) all go: they are the document's, read by whoever reads it.
+    for (const p of [path, ...(await this.features.ownFilesOf(path)), ...(await this.filesOfDocument(path))]) await this.moveOneToSpace(p, target);
   }
 
   private async moveOneToSpace(path: string, target: string | null): Promise<void> {
@@ -2559,11 +2582,11 @@ export class Host {
   }
 
   /** Commit new files into a space (0069: made in a folder fewer read), never onto the workspace's own branch. Call inside serial(). */
-  async commitIntoSpace(id: string, paths: string[], message: string): Promise<string | null> {
+  async commitIntoSpace(id: string, paths: string[], message: string, coAuthors: PresenceUser[] = []): Promise<string | null> {
     await this.requireWritable();
     const branch = await this.git.branch();
     if (!branch) throw new Error('No branch is checked out');
-    const commit = await this.spaces.commit(id, branch, paths.map((path) => ({ path })), withTrailers(message, [], await this.policyTrailer()), (raw) => this.signRaw(raw));
+    const commit = await this.spaces.commit(id, branch, paths.map((path) => ({ path })), withTrailers(message, coAuthors, await this.policyTrailer()), (raw) => this.signRaw(raw));
     await this.spaces.refresh(branch);
     this.refsChanged();
     if (commit) this.log(`committed ${commit.slice(0, 7)} ${message} (in a space)`);
@@ -2746,6 +2769,68 @@ export class Host {
     return true;
   }
 
+  /**
+   * The document a path belongs to, if it does: a feature's companion (0082,
+   * `p01.md.annotations/@…`) or one of the document's own files (0109,
+   * `p01.md.files/…`). Such files are shown, counted and compiled as part of
+   * their document, not on their own.
+   */
+  belongsTo(path: string): string | null {
+    return this.features.documentOf(path) ?? documentOfFiles(path);
+  }
+
+  /** A document's own files (0109): those in its `.files` folder this device holds. */
+  async filesOfDocument(doc: string): Promise<string[]> {
+    const folder = `${filesFolderOf(doc)}/`;
+    return (await this.listFiles()).filter((p) => p.startsWith(folder) && present(this.resolvePath(p, { link: 'self' })));
+  }
+
+  /**
+   * References written again after files moved (0109): in each document that
+   * names a file or folder that moved (`moves`, as moved already), and in each
+   * document that moved itself, whose relative references are written from its
+   * new place. A document open in a room takes the change there too (everyone
+   * sees it at once); a document this person may not change (`mayChange`, asked of
+   * where it was) is left as it is. Not committed here: the caller commits the documents
+   * changed with the move. Call inside serial().
+   */
+  async rewriteReferences(moves: readonly (readonly [string, string])[], mayChange: (path: string) => Promise<boolean> = async () => true): Promise<{ changed: string[]; left: string[] }> {
+    const moved = movedBy(moves);
+    // Where a document was before the move, if it moved itself.
+    const before = (path: string) => movedBy(moves.map(([from, to]) => [to, from] as const))(path) ?? path;
+    const names = moves.map(([from]) => from.slice(from.lastIndexOf('/') + 1));
+    const branch = await this.git.branch();
+    const changed: string[] = [];
+    const left: string[] = [];
+    for (const path of await this.listFiles()) {
+      const type = this.typeFor(path);
+      if (!type?.references || this.belongsTo(path)) continue;
+      const abs = this.resolvePath(path, { link: 'self' });
+      if (!present(abs) || lstatSync(abs).isSymbolicLink()) continue;
+      const was = before(path);
+      const rec = this.records.get(`${branch}:${path}`);
+      let text: string;
+      try {
+        if (rec) await this.flushNow(rec);
+        text = await this.readText(abs, path);
+      } catch {
+        continue;
+      }
+      // Only documents that moved, or whose text names something that did, are read through.
+      if (was === path && !names.some((n) => text.includes(n) || text.includes(encodeURI(n)))) continue;
+      const next = rewriteReferences(text, type.references(text), was, path, moved);
+      if (next === null) continue;
+      if (!(await mayChange(was))) {
+        left.push(path);
+        continue;
+      }
+      await this.writeAtomic(abs, next);
+      if (rec) await this.applyOutside(rec, next, true);
+      changed.push(path);
+    }
+    return { changed, left };
+  }
+
   async setTitle(path: string, title: string): Promise<void> {
     const type = this.typeFor(path);
     if (!type?.title) throw new HttpError(400, `${path} is not a document with a title`);
@@ -2811,7 +2896,7 @@ export class Host {
    * committed yet, credited to whoever typed it.
    */
   async wordsByDay(since: string): Promise<DayWords[]> {
-    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.features.documentOf(p) !== null });
+    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.belongsTo(p) !== null });
     const branch = await this.git.branch();
     const uncommitted: Uncommitted[] = [];
     for (const rec of this.records.values()) {
@@ -2848,7 +2933,7 @@ export class Host {
    */
   async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number; words?: number }[]> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
     const out = [];
     for (const i of bookItems(folder, entries, await readOrders(this, paths), [])) {
@@ -2865,14 +2950,28 @@ export class Host {
    * first), joined into one Markdown document; with the folders they are in,
    * where what they refer to is found. A string says why there is nothing.
    */
-  async compileFolder(folder: string, o: { exclude: string[]; noHeading: string[]; title: string }): Promise<{ text: string; resources: string[] } | string> {
+  async compileFolder(folder: string, o: CompileOptions, format: RenderFormat = 'html'): Promise<CompiledBook | string> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.features.documentOf(e.path));
+    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
     const orders = await readOrders(this, paths);
     const items = bookItems(folder, entries, orders, o.exclude, o.noHeading);
     const docs = items.flatMap((i) => (i.kind === 'document' ? [i.path] : []));
     if (!docs.length) return `${folder ? `${folder}/` : 'The workspace'} has no documents to compile${o.exclude.length ? ' that are not left out' : ''}.`;
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
+    // A Word template for a Word book, a cover for an EPUB (0106): files in the workspace, put beside the book.
+    const files: { name: string; from: string }[] = [];
+    const beside = async (path: string | null | undefined, kinds: RegExp, what: string, name: (ext: string) => string): Promise<string | null> => {
+      if (!path) return null;
+      const ext = kinds.exec(path)?.[1]?.toLowerCase();
+      const from = ext ? this.resolvePath(path) : null;
+      if (!ext || !from || !(await stat(from).then((s) => s.isFile(), () => false))) return `${what} ${path} is not there${ext ? '' : ', or is not one'}.`;
+      files.push({ name: name(ext), from });
+      return null;
+    };
+    const missing = (format === 'docx' ? await beside(o.referenceDoc, /\.(docx)$/i, 'The Word template', () => 'reference.docx') : null)
+      ?? (format === 'epub' ? await beside(o.cover, /\.(png|jpe?g|gif|svg|webp)$/i, 'The cover image', (ext) => `cover.${ext}`) : null);
+    if (missing) return missing;
+    const noTitles = new Set(o.noTitles ?? []);
     const parts: BookPart[] = [];
     for (const i of items) {
       if (i.kind === 'folder') {
@@ -2880,10 +2979,13 @@ export class Host {
         continue;
       }
       await this.writeForRender(i.path);
-      parts.push({ kind: 'document', level: i.level, title: titles.get(i.path) ?? null, text: await readFile(this.resolvePath(i.path), 'utf8') });
+      const untitled = noTitles.has(i.path.includes('/') ? i.path.slice(0, i.path.lastIndexOf('/')) : '');
+      parts.push({ kind: 'document', level: i.level, title: untitled ? null : titles.get(i.path) ?? null, text: await readFile(this.resolvePath(i.path), 'utf8') });
     }
     const resources = [...new Set(docs.map((p) => resolve(this.dir, p, '..')))];
-    return { text: joinBook(o.title, parts), resources };
+    const named = (n: string) => files.find((f) => f.name.startsWith(n))?.name ?? null;
+    const text = joinBook({ title: o.title, subtitle: o.subtitle, author: o.author, toc: o.toc, numbering: o.numbering, separator: o.separator, referenceDoc: named('reference.'), cover: named('cover.') }, parts);
+    return { text, resources, files };
   }
 
   /** The workspace's files this device holds: git's, untracked ones as .gitignore leaves them, and those of the spaces it holds. */
@@ -2904,7 +3006,8 @@ export class Host {
     for (const p of changed) {
       if (this.features.documentOf(p) || existsSync(this.resolvePath(p, { link: 'self' }))) continue;
       // Everyone's files go: moved, unchanged, which anyone may (the gate takes a move of someone's own file).
-      const left = await this.features.filesOf(p);
+      // And the document's own files (0109) added meanwhile at its old name, which its references then follow.
+      const left = [...(await this.features.filesOf(p)), ...(await this.filesOfDocument(p))];
       if (!left.length) continue;
       const to = await this.takenByCommit(p);
       if (!to) continue;
@@ -2919,7 +3022,10 @@ export class Host {
       await renameOver(this.resolvePath(from), this.resolvePath(to));
       await this.carrySpaces(from, to, false);
     }
-    await this.commitPaths(moves.flat(), moves.length === 1 ? `Move ${moves[0]![0]} with its document` : `Move ${moves.length} files with their documents`);
+    // The folders they left, where now empty (git keeps no folders: nothing to commit).
+    for (const dir of new Set(moves.map(([from]) => dirname(this.resolvePath(from))))) await rmdir(dir).catch(() => undefined);
+    const { changed: rewritten } = await this.rewriteReferences(moves);
+    await this.commitPaths([...moves.flat(), ...rewritten], moves.length === 1 ? `Move ${moves[0]![0]} with its document` : `Move ${moves.length} files with their documents`);
   }
 
   /** Whether an edit from another device (`via>origin`, or the device itself) was made on one of this host's person's devices. */
@@ -3069,4 +3175,14 @@ function caseRename(paths: string[]): boolean {
     seen.add(p.toLowerCase());
   }
   return false;
+}
+
+/** Whether something is at a path, not following a link there (a link to nothing is something). */
+function present(abs: string): boolean {
+  try {
+    lstatSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
 }

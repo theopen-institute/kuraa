@@ -70,7 +70,8 @@ describe.skipIf(!PODMAN_OK)('rendering in Podman', () => {
     writeFileSync(join(dir, 'paper/dot.png'), DOT);
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'Initial');
-    running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents } });
+    // Markdown here too, as Settings › Host's Render Markdown where code runs has it (0107): the R image's pandoc.
+    running = await startHost({ dir, port: 0, run: { engines: ['r'], components: standardRunComponents, renderWhereCodeRuns: true } });
   });
 
   afterAll(async () => {

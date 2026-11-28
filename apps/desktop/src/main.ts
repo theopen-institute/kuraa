@@ -97,6 +97,18 @@ function useBundledGit(): void {
 }
 useBundledGit();
 
+/** The pandoc and Typst this app ships, for rendering Markdown without Podman (0107); in development, the checkout's (@kuraa/render-pandoc finds them). */
+function useBundledRenderTools(): void {
+  if (!app.isPackaged) return;
+  const pandoc = join(process.resourcesPath, 'render', 'pandoc', 'pandoc.wasm');
+  const typst = join(process.resourcesPath, 'render', 'typst', process.platform === 'win32' ? 'typst.exe' : 'typst');
+  if (existsSync(pandoc)) process.env.KURAA_PANDOC_WASM = pandoc;
+  else console.error(`[desktop] no pandoc at ${pandoc}; Markdown renders only where code runs`);
+  if (existsSync(typst)) process.env.KURAA_TYPST = typst;
+  else console.error(`[desktop] no Typst at ${typst}; PDFs only where code runs`);
+}
+useBundledRenderTools();
+
 // Tests keep the app's own data (preferences, the list of workspaces) apart from the person's. A release keeps
 // it in the folder it always had, named in lowercase: the app is called Kuraa now, and on Linux (whose file
 // names keep their case) another folder would leave everything there behind.

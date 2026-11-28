@@ -149,6 +149,16 @@ counting again. A `drop` of its key (lost or stolen), the owner's too, is for go
 counts again. Restrictive wins as for anyone: a taking out or a drop beats what its key did at the same
 time, its join included, as does an unlink of the link.
 
+## A document's own files
+
+A path in a folder named as a file with an extension, then `.files` (`ch/report.md.files/bay.jpg`), is
+one of that document's own files ([0109](decisions/0109-a-documents-own-files.md)). Who may change it is
+worked out up the tree as for any path, with the document counted between its files' folder and the
+folder the two are in (`permissionPaths`: itself, `ch/report.md.files/`, `ch/report.md`, `ch/`, `''`).
+So whoever may change a document may change its files, and a document's own permission is theirs. It
+is known by name alone, whether or not the document is there, so every device works it out the same.
+Who reads one is its space's, as for any file: the host keeps a document's own files in its space.
+
 ## A person's own files
 
 A file whose name is `@` and an identity ID, with any extension (`@7f3a…e1.jsonld`), in a folder

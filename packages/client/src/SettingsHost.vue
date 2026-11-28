@@ -87,6 +87,10 @@ defineExpose({ picking });
               <span class="pref-hint">{{ S.preferences.installsHint }}</span>
               <span v-if="flagged('allowInstalls')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.allowInstalls!) }}</span>
             </label>
+            <label class="pref-check"><input v-model="f.renderWhereCodeRuns" type="checkbox" data-testid="pref-render-where-code-runs"> {{ S.preferences.renderWhereCodeRuns }}
+              <span class="pref-hint">{{ S.preferences.renderWhereCodeRunsHint }}</span>
+              <span v-if="flagged('renderWhereCodeRuns')" class="pref-hint flag">{{ S.preferences.fromFlag(FLAGS.renderWhereCodeRuns!) }}</span>
+            </label>
             <details data-testid="pref-run-advanced">
               <summary>{{ S.preferences.advanced }}</summary>
               <div>

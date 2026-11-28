@@ -1,7 +1,12 @@
 // What the editor needs while people write (decision 0040): a workspace file as
 // it is, to show an image the document points at; images pasted or dropped into
-// a document, kept in the workspace beside it; and who made a commit and when,
-// for the labels on a conflict's versions.
+// a document, kept as its own files (0109) with their details removed (0108);
+// how much the workspace's history takes; and who made a commit and when, for
+// the labels on a conflict's versions.
+//
+// Every binary file the page shows is read through /api/raw (0108): the one
+// place a file not yet fetched would be fetched, were devices one day to fetch
+// large files only when needed.
 //
 // Files are read and written only inside the workspace, never through a
 // symbolic link, and never in .git (host.resolvePath).
@@ -14,9 +19,9 @@ import type { Host } from './host.js';
 import type { Context, Route } from './http.js';
 import { HttpError } from './errors.js';
 import { unportablePath } from './files.js';
+import { cleanImage, filesFolderOf, MAX_IMAGE_BYTES, relativeTarget, sniffImage as sniff, type ImageDetail } from '@kuraa/kernel';
 
-/** The largest image that may be added. */
-export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+export { MAX_IMAGE_BYTES };
 
 /** Types a workspace file is served as, by extension. Anything else is a download, never shown. */
 const TYPES: Record<string, string> = {
@@ -49,14 +54,7 @@ export function workspaceFile(host: Host, path: string): { abs: string; rel: str
 
 /** The image type its bytes say it is (by extension), or null. SVG must at least look like SVG. */
 export function sniffImage(bytes: Buffer): string | null {
-  const hex = bytes.subarray(0, 12).toString('hex');
-  if (hex.startsWith('89504e470d0a1a0a')) return 'png';
-  if (hex.startsWith('ffd8ff')) return 'jpg';
-  if (hex.startsWith('474946383761') || hex.startsWith('474946383961')) return 'gif';
-  if (hex.startsWith('52494646') && bytes.subarray(8, 12).toString('latin1') === 'WEBP') return 'webp';
-  const head = bytes.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '').trimStart();
-  if ((head.startsWith('<?xml') || head.startsWith('<svg') || head.startsWith('<!--') || head.startsWith('<!DOCTYPE svg')) && /<svg[\s>]/.test(head)) return 'svg';
-  return null;
+  return sniff(bytes);
 }
 
 /** A filename safe on every computer the workspace goes to: lowercase words joined by dashes, with the image's extension. */
@@ -87,13 +85,32 @@ async function readBytes(req: IncomingMessage, max: number): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/** Keep an image next to a document: in its folder's `images/`, under a name not yet taken (or the same image's). */
-export async function addImage(host: Host, doc: string, name: string, bytes: Buffer, by?: { name: string; email: string; color: string } | null): Promise<{ path: string; src: string }> {
-  if (!bytes.length) throw new HttpError(400, 'The image is empty.');
-  const ext = sniffImage(bytes);
-  if (!ext) throw new HttpError(415, 'Only PNG, JPEG, GIF, WebP and SVG images can be added.');
+/** An image added: where it is, its address from the document, how large it is as kept, and what was removed from it. */
+export interface AddedImage {
+  path: string;
+  src: string;
+  size: number;
+  removed: ImageDetail[];
+}
+
+/**
+ * Keep an image as one of a document's own files (0109): in `report.md.files/`
+ * beside it, under a name not yet taken (or the same image's), with its details
+ * removed (0108). Whatever the page did already, the host cleans it: what it
+ * keeps is clean. Only someone who may change the document adds to its files,
+ * and they are read by whoever reads it: in its space, where it is in one.
+ */
+export async function addImage(host: Host, doc: string, name: string, given: Buffer, by?: { name: string; email: string; color: string } | null): Promise<AddedImage> {
+  if (!given.length) throw new HttpError(400, 'The image is empty.');
+  if (!sniffImage(given)) throw new HttpError(415, 'Only PNG, JPEG, GIF, WebP and SVG images can be added.');
+  const clean = cleanImage(given);
+  if (!clean) throw new HttpError(415, 'The image could not be read: its file may be damaged.');
+  const ext = clean.type;
+  const bytes = Buffer.from(clean.bytes.buffer, clean.bytes.byteOffset, clean.bytes.byteLength);
+  if (bytes.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'The image is larger than 20 MB, the most an image may be.');
   const docPath = host.relPath(doc);
-  const folder = docPath.includes('/') ? `${docPath.slice(0, docPath.lastIndexOf('/'))}/images` : 'images';
+  if (host.peers && !(await host.peers.access(docPath)).canWrite) throw new HttpError(403, `You may not change ${docPath}, so you cannot add to its files.`);
+  const folder = filesFolderOf(docPath);
   const base = safeImageName(name, ext);
   const stem = base.slice(0, -(ext.length + 1));
   const hash = createHash('sha256').update(bytes).digest('hex');
@@ -112,15 +129,31 @@ export async function addImage(host: Host, doc: string, name: string, bytes: Buf
       if (existing === null) {
         await mkdir(host.resolvePath(folder), { recursive: true });
         await writeFile(abs, bytes, { flag: 'wx' });
-        await host.commitPaths([path], `Add image ${path}`, by && by.email ? [by] : []);
+        // In the document's space (a document of its own audience), else where a file made there goes (0069).
+        const space = host.spaceOf(docPath) ?? (host.peers ? await host.peers.spaceForNew(path) : null);
+        const coAuthors = by && by.email ? [by] : [];
+        if (space) await host.commitIntoSpace(space, [path], `Add image ${path}`, coAuthors);
+        else await host.commitPaths([path], `Add image ${path}`, coAuthors);
         break;
       }
       // The same image already there: use it.
       if (createHash('sha256').update(existing).digest('hex') === hash) break;
     }
-    const src = path.slice(folder.length - 'images'.length);
-    return { path, src };
+    // As the document writes it: relative to its folder (spaces and the like made safe).
+    const src = encodeURI(relativeTarget(docPath, path));
+    return { path, src, size: bytes.length, removed: clean.removed };
   });
+}
+
+/**
+ * How much the workspace's git objects take on this computer, in bytes: its
+ * history (every version of every file, run outputs, spaces), loose and packed.
+ */
+export async function historySize(host: Host): Promise<number> {
+  const r = await host.git.run(['count-objects', '-v'], { allowFail: true });
+  if (r.code !== 0) return 0;
+  const kib = (key: string) => Number(new RegExp(`^${key}: (\\d+)$`, 'm').exec(r.stdout)?.[1] ?? 0);
+  return (kib('size') + kib('size-pack')) * 1024;
 }
 
 export const writingRoutes: Route[] = [
@@ -153,6 +186,11 @@ export const writingRoutes: Route[] = [
       const by = c.q.get('by') ? { name: c.q.get('by')!, email: c.q.get('email') ?? '', color: '#888888' } : null;
       send(c, 201, await addImage(c.host, doc, name, bytes, by));
     },
+  },
+  {
+    method: 'GET',
+    path: '/api/storage',
+    handle: async (c) => send(c, 200, { history: await historySize(c.host) }),
   },
   {
     method: 'GET',

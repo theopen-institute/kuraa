@@ -91,7 +91,7 @@ the model does not give them.
   readers that are not this person's to change, refused (`NotAllowed`); `PermissionsInfo.readersLocked`.
 - `readersWords` (host): an audience in words, with the owner where it does not hold them (servers
   not named); `Policy.audienceHolds`.
-- Every device must evaluate the policy alike, so this is a compatibility break: `PROTOCOL` 11 (a device
+- Every device must evaluate the policy alike, so this is a compatibility break: `PROTOCOL` 12 (after 0109's 11; a device
   still on 0.11 would count an admin's change of someone else's space, send them the space, and send
   neither the owner nor a server the spaces they now read), and the next release is 0.12.0.
 

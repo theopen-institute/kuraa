@@ -93,6 +93,8 @@ export async function searchWorkspace(host: Host, query: string, caseSensitive: 
     ...(caseSensitive ? [] : ['-i']), '-e', query, '--', ...scope, ...large.map((p) => `:(exclude,literal)${p}`),
     // What features keep beside documents (0082) is theirs to search, not the workspace's.
     ...companions.map((s) => `:(exclude,glob)**/*${s}/**`),
+    // A document's own files (0109: `report.md.files/`) are shown with it, not found on their own.
+    ':(exclude,glob)**/*.*.files/**',
     // The app's own files in folders (0093: a folder's order, a manuscript's), about the folder, not in it.
     ':(exclude,glob)**/.kuraa-*',
   ];

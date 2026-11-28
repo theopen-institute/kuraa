@@ -31,6 +31,8 @@ import type { JoinProgress } from '../src/peers/join.js';
 import type { HostFeature } from '@kuraa/feature-kit/host';
 import { marksFeature, readMarks } from '@kuraa/feature-example';
 
+/** A 1×1 PNG: an image to add (0109). */
+const PIXEL = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1d5e5a90000000049454e44ae426082', 'hex');
 const NOTES = '---\ntitle: Field notes\n---\n\n# Day one\n\nThe tide was out.\n\nWe counted crabs.\n\n# Day two\n\nIt rained.\n';
 const FAST = { flushMs: 100, idleCommitMs: 400, maxCommitMs: 3000, dropMs: 300 };
 const ADA = { name: 'Ada', email: 'ada@example.org', color: '#d33' };
@@ -677,6 +679,9 @@ describe('equal members, and forks', () => {
 
     // Ada writes a plan, and gives it to herself and Bo alone.
     expect((await api(a, '/api/files', { method: 'POST', body: JSON.stringify({ path: 'plan.md', content: '# Plan\n\nThe surprise party is on Friday.\n' }) })).status).toBe(201);
+    // With an image of its own (0109), everyone's while the plan is.
+    const addImage = (name: string) => api(a, `/api/images?doc=plan.md&name=${name}`, { method: 'POST', body: new Uint8Array(PIXEL) });
+    expect(await (await addImage('venue.png')).json()).toMatchObject({ path: 'plan.md.files/venue.png' });
     await until(() => existsSync(join(dirC, 'plan.md')), 20_000, 'the plan, first everyone’s, on Cy’s device');
     const res = await api(a, '/api/audience', { method: 'POST', body: JSON.stringify({ path: 'plan.md', audience: [ada.id, bo.id] }) });
     expect(res.status).toBe(200);
@@ -685,11 +690,18 @@ describe('equal members, and forks', () => {
     expect(git(dirA, 'ls-tree', '--name-only', 'HEAD')).not.toContain('plan.md');
     expect(git(dirA, 'status', '--porcelain')).toBe('');
     expect(git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/')).toMatch(/^refs\/spaces\/[0-9a-f]{32}\/heads\/main$/);
+    // Its own files went with it (0109); one added now goes straight there, never on the workspace's own branch.
+    expect(await (await addImage('cake.png')).json()).toMatchObject({ path: 'plan.md.files/cake.png' });
+    const space = git(dirA, 'for-each-ref', '--format=%(refname)', 'refs/spaces/');
+    expect(git(dirA, 'ls-tree', '-r', '--name-only', 'HEAD')).not.toContain('plan.md.files');
+    expect(git(dirA, 'ls-tree', '-r', '--name-only', space).split('\n').sort()).toEqual(['plan.md', 'plan.md.files/cake.png', 'plan.md.files/venue.png']);
+    expect(git(dirA, 'status', '--porcelain')).toBe('');
 
     // Bo's device has it, read from the space; the file list says who reads it.
     const treeOf = async (h: RunningHost) => ((await (await api(h, '/api/tree')).json()) as { files: { path: string; readers?: string }[] }).files;
     await until(async () => (await treeOf(b)).some((f) => f.path === 'plan.md' && f.readers), 20_000, 'the plan in a space on Bo’s device');
     expect(readFileSync(join(dirB, 'plan.md'), 'utf8')).toContain('Friday');
+    await until(() => existsSync(join(dirB, 'plan.md.files/cake.png')), 20_000, 'the plan’s image on Bo’s device');
     const treeB = { files: await treeOf(b) };
     expect(treeB.files.find((f) => f.path === 'plan.md')?.readers).toBe('You and Ada');
     expect(((await (await api(b, '/api/search?q=surprise')).json()) as { files: { path: string }[] }).files.map((f) => f.path)).toContain('plan.md');
@@ -700,7 +712,7 @@ describe('equal members, and forks', () => {
     expect(git(dirA, 'status', '--porcelain')).toBe('');
 
     // Code run for a document everyone reads does not see the plan; code run for the plan sees everything.
-    expect(await a.host.hiddenFrom('notes.md')).toEqual(['plan.md']);
+    expect(await a.host.hiddenFrom('notes.md')).toEqual(['plan.md', 'plan.md.files/cake.png', 'plan.md.files/venue.png']);
     expect(await a.host.hiddenFrom('plan.md')).toEqual([]);
 
     // Cy's device: the old version, from when everyone read it, is still in the history it has; the space, nothing of it.
@@ -714,8 +726,10 @@ describe('equal members, and forks', () => {
     const treeC = (await (await api(c, '/api/tree')).json()) as { files: { path: string }[] };
     expect(treeC.files.map((f) => f.path)).not.toContain('plan.md');
     expect(((await (await api(c, '/api/search?q=cake')).json()) as { files: { path: string }[] }).files).toEqual([]);
-    // Its file went from Cy's working tree with the workspace's branch.
+    // Its file went from Cy's working tree with the workspace's branch, and its own files with it; the later image never came.
     await until(() => !existsSync(join(dirC, 'plan.md')), 20_000, 'the plan gone from Cy’s copy');
+    await until(() => !existsSync(join(dirC, 'plan.md.files/venue.png')), 20_000, 'the plan’s first image gone from Cy’s copy');
+    expect(existsSync(join(dirC, 'plan.md.files/cake.png'))).toBe(false);
   });
 
   it('let a person remove their own computer, admin or not; no one else’s (0068)', async () => {

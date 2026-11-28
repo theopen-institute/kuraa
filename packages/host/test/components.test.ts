@@ -211,7 +211,7 @@ describe('sessions', () => {
     const messages: RoomMessage[] = [];
     const runner = new Runner({
       root, stateDir: join(root, 'state'),
-      components: { engines: new Map([['slow', engine]]), environments: new Map([['here', environment]]), tools: new Map(), syncs: new Map() },
+      components: { engines: new Map([['slow', engine]]), environments: new Map([['here', environment]]), tools: new Map(), syncs: new Map(), renderers: new Map() },
       options: { engines: ['slow'], allowInstalls: true },
       broadcast: (_path, m) => messages.push(m), broadcastAll: () => undefined, commit: async () => undefined, log: () => undefined, idleMs,
     });

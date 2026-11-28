@@ -288,6 +288,7 @@ export const S = {
     label: 'Files',
     newFile: 'New file',
     newFileIn: (name: string) => `New file in ${name}`,
+    referencesLeft: (paths: string[]) => `Moved. ${listOf(paths)} ${paths.length === 1 ? 'still points' : 'still point'} to the old place: ${paths.length === 1 ? 'it is' : 'they are'} not yours to change.`,
     newFolderIn: (name: string) => `New folder in ${name}`,
     newFileMenu: (where: string) => `New file${where}`,
     /** The space below the files, with none yet: its menu has a new file or folder. */
@@ -323,6 +324,48 @@ export const S = {
     noSlash: 'A filename cannot contain “/”. Drag the file onto a folder to put it there.',
     needsName: 'The file needs a name.',
     exists: (p: string) => `${p} already exists.`,
+  },
+
+  images: {
+    title: (n: number) => (n === 1 ? 'Add an image' : `Add ${n} images`),
+    add: (n: number) => (n === 1 ? 'Add image' : `Add ${n} images`),
+    size: 'Size',
+    full: (w: number, h: number) => (w && h ? `Full size, ${w} × ${h}` : 'Full size'),
+    smaller: (w: number, h: number) => `${w} × ${h}`,
+    choiceSize: (bytes: string | null) => (bytes === null ? '…' : bytes),
+    alt: 'Description, for people who cannot see it (alt text)',
+    working: 'Getting it ready…',
+    removed: (details: string[]) => `Removed from the file: ${listOf(details)}.`,
+    nothingHidden: 'Nothing else is stored in the file: only the picture.',
+    detail: {
+      location: 'where it was taken',
+      camera: 'the camera and its settings',
+      date: 'when it was taken',
+      author: 'who made it',
+      description: 'descriptions and comments',
+      thumbnail: 'a small copy of the original (which can show what was cropped out)',
+      appended: 'more pictures or video stored after it',
+      software: 'the software that made it',
+      other: 'other hidden details',
+    } as Record<string, string>,
+    resaved: 'Its file could not be read as it is, so it is saved again from its picture.',
+    keptAsIs: 'Kept at its own size: GIFs and SVGs are not made smaller.',
+    notImage: 'Not an image that can be added: PNG, JPEG, GIF, WebP or SVG.',
+    unreadable: 'This image could not be read: its file may be damaged.',
+    tooLarge: 'Larger than 20 MB, the most an image may be, at every size.',
+    sourceTooLarge: (max: string) => `Larger than ${max}: too large to add, or to make smaller here.`,
+    adds: (bytes: string) => `Adds ${bytes} to the workspace.`,
+    history: (bytes: string) => `Its history is ${bytes} on this computer now.`,
+    forGood: 'Everyone in the workspace downloads what is added, and it stays in the workspace’s history even if it is taken out of the document later.',
+    large: 'That is large for a document: a smaller size is usually plenty.',
+    sizes: (before: string, after: string) => `${before} → ${after}`,
+    /** A number of bytes, as people read them. */
+    bytes: (n: number): string => {
+      if (n < 1024) return `${n} bytes`;
+      if (n < 1024 * 1024) return `${n < 10 * 1024 ? (n / 1024).toFixed(1) : Math.round(n / 1024)} KB`;
+      if (n < 1024 * 1024 * 1024) return `${n < 10 * 1024 * 1024 ? (n / 1048576).toFixed(1) : Math.round(n / 1048576)} MB`;
+      return `${(n / 1073741824).toFixed(1)} GB`;
+    },
   },
 
   addWorkspace: {
@@ -919,6 +962,8 @@ export const S = {
     runsIn: (label: string) => `Code runs ${label}.`,
     installs: 'Let documents install packages and download tools',
     installsHint: 'Installs use the network, apart from your documents; the code in them never gets it this way.',
+    renderWhereCodeRuns: 'Render Markdown where code runs',
+    renderWhereCodeRunsHint: 'With the pandoc in Podman, as R Markdown is, rather than the one built in: slower to start, the same as R Markdown’s, and LaTeX for every PDF a header asks it for.',
     limits: 'Limits for each document’s code',
     memory: 'Memory',
     cpus: 'CPUs',

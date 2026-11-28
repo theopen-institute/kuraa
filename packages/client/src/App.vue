@@ -2,8 +2,7 @@
 // The client: a file tree, one live editor, and a history sidebar that starts
 // closed. Everything else is in the menu, so the page is mostly the document.
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch, watchEffect } from 'vue';
-import { TypeRegistry } from '@kuraa/kernel';
-import { workspacePath } from '@kuraa/editor-kit';
+import { TypeRegistry, workspacePath } from '@kuraa/kernel';
 import { ApiError, type CommitInfo, type FileAccess, type HubWorkspace, type NotRepository, type TreeFile, type WorkspaceInfo } from './api.js';
 import { askConfirm, askText } from './ask.js';
 import { documentHeader } from './header.js';
@@ -123,7 +122,7 @@ const inviting = shallowRef<{ syncing: boolean } | null>(null);
 const liveTitle = shallowRef<{ path: string; title: string | null } | null>(null);
 /** The open document's conflicts as it is being edited, likewise. */
 const liveConflicts = shallowRef<{ path: string; count: number } | null>(null);
-/** The files, with the open document's live title and conflicts; what features keep beside a document is shown with it, not apart (0082). */
+/** The files, with the open document's live title and conflicts; what features keep beside a document (0082), and its own files (0109), are shown with it, not apart. */
 const shownFiles = computed(() => {
   const live = liveTitle.value;
   const c = liveConflicts.value;
@@ -1205,6 +1204,7 @@ watch([shownFiles, folderMarks, orders, marksAsked, features, path, mainView], (
       @draft="openDraft"
       @permissions="openPermissions"
       @changed="refreshTree"
+      @notice="(text) => (notice = { kind: 'warn', text })"
       @error="fail"
       @reveal="(p, from) => navEvents.reveal.tell(p, from)"
     />

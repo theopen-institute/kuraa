@@ -66,7 +66,12 @@ module.exports = {
   files: ['package.json', 'build/**', '!build/native/**'],
   // Native addons are loaded from files, not from inside the archive.
   asarUnpack: ['build/native/**'],
-  extraResources: [{ from: 'vendor/git/${os}-${arch}', to: 'git', filter: ['**/*', '!.kuraa-git'] }],
+  extraResources: [
+    { from: 'vendor/git/${os}-${arch}', to: 'git', filter: ['**/*', '!.kuraa-git'] },
+    // Markdown rendered without Podman (decision 0107): pandoc.wasm for every platform, Typst for this one, with their licences.
+    { from: 'vendor/render/pandoc', to: 'render/pandoc' },
+    { from: 'vendor/render/${os}-${arch}', to: 'render/typst' },
+  ],
   electronFuses: {
     // git-remote-kuraa runs the app as Node (ELECTRON_RUN_AS_NODE): devices fetch from each other through it.
     runAsNode: true,

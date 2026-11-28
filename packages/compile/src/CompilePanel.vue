@@ -5,10 +5,14 @@
 // all in it) and, for a folder, whether its name is a heading. Compile renders
 // it through the host, follows it, and saves what it made. The title and
 // format are kept for the folder, for next time; what is in and what has a
-// heading, as Compile keeps them (each folder's .kuraa-compile.yml).
+// heading, as Compile keeps them (each folder's .kuraa-compile.yml). The
+// book's own settings (0106: subtitle, author, a table of contents, numbering,
+// a separator, a Word template, a cover; whether a folder's documents' titles
+// are headings) are kept as each is changed.
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import type { Json } from '@kuraa/feature-kit';
 import type { BookContent, FeaturePanelContext, RenderInfo, RenderState } from '@kuraa/feature-kit/client';
-import { excludedBy, excludedPaths, FORMATS, noHeadingPaths, type CompileFormat } from './settings.js';
+import { excludedBy, excludedPaths, FORMATS, NUMBERINGS, noHeadingPaths, noTitlesPaths, type CompileFormat, type Numbering } from './settings.js';
 import { known, load, settingsOf, target } from './store.js';
 import { S } from './strings.js';
 
@@ -36,12 +40,14 @@ async function loadContents() {
 /** Each row of the outline: in the book or not (and why not), its heading's level (none for a folder with no heading). */
 const outline = computed(() => {
   const noHeading = new Set(noHeadingPaths(known.value));
+  const noTitles = new Set(noTitlesPaths(known.value));
   return contents.value.map((c) => {
     const by = excludedBy(known.value, c.path);
     // Each folder above it with no heading takes a level away.
     const above = [...noHeading].filter((f) => c.path.startsWith(`${f}/`)).length;
-    const headed = c.kind === 'document' || !noHeading.has(c.path);
-    return { ...c, included: !by, byParent: !!by && by !== c.path, headed, level: c.depth - above };
+    // A document whose folder gives its documents no titles has no heading of its own (0106).
+    const headed = c.kind === 'document' ? !noTitles.has(c.path.includes('/') ? c.path.slice(0, c.path.lastIndexOf('/')) : '') : !noHeading.has(c.path);
+    return { ...c, included: !by, byParent: !!by && by !== c.path, headed, titles: c.kind === 'folder' && !noTitles.has(c.path), level: c.depth - above };
   });
 });
 
@@ -65,8 +71,21 @@ async function setHeading(path: string, heading: boolean) {
   await load(ctx);
 }
 
+/** A folder's documents' titles headings, or not (0106). */
+async function setTitles(path: string, titles: boolean) {
+  try {
+    await ctx.request('POST', 'titles', { folder: path, titles });
+  } catch (e) {
+    error.value = ctx.explain(e).text;
+  }
+  await load(ctx);
+}
+
 // Asked for again (Compile… once more): the outline as the files are now.
-const stopAsk = ctx.onAsk(() => void loadContents());
+const stopAsk = ctx.onAsk(() => {
+  void loadContents();
+  void loadChoices();
+});
 onBeforeUnmount(stopAsk);
 
 const folder = computed(() => target.value);
@@ -81,6 +100,39 @@ const error = ref<string | null>(null);
 const saved = ref<string | null>(null);
 let timer: ReturnType<typeof setTimeout> | undefined;
 let asked = 0;
+
+/** The book's settings (0106), as kept for the folder; each kept as it is changed. */
+const subtitle = ref('');
+const author = ref('');
+const toc = ref(false);
+const numbering = ref<Numbering | 'none'>('none');
+const separator = ref('');
+const referenceDoc = ref('');
+const cover = ref('');
+/** Whether the documents directly in the folder compiled have their titles as headings. */
+const topTitles = computed(() => (folder.value === null ? true : settingsOf(folder.value)?.titles ?? true));
+async function keep(fields: Record<string, Json>) {
+  const f = folder.value;
+  if (f === null) return;
+  try {
+    await ctx.request('POST', 'settings', { folder: f, ...fields });
+  } catch (e) {
+    error.value = ctx.explain(e).text;
+  }
+  await load(ctx);
+}
+
+/** What the book may take as its Word template or cover: the workspace's Word documents and images. */
+const choices = shallowRef<{ templates: string[]; images: string[] }>({ templates: [], images: [] });
+async function loadChoices() {
+  try {
+    choices.value = (await ctx.request('GET', 'files')) as unknown as { templates: string[]; images: string[] };
+  } catch {
+    // Off, or the host away: none to choose.
+  }
+}
+/** The choices, with the one kept even where it is not (yet) among them. */
+const withKept = (list: string[], kept: string) => (kept && !list.includes(kept) ? [kept, ...list] : list);
 
 /** What is left out of it: every path left out under it. */
 const leftOut = computed(() => {
@@ -109,6 +161,8 @@ async function saveTarget() {
   await load(ctx);
 }
 
+const NUMBERING_CHOICES = ['none', ...NUMBERINGS] as const;
+
 const outputName = (f: CompileFormat) => `${(folder.value ? folder.value.split('/').pop() : 'book') || 'book'}.${f}`;
 
 // Another folder chosen: its title and format as last compiled, and how its renders stand.
@@ -123,8 +177,16 @@ watch(folder, (f) => {
   const s = settingsOf(f);
   title.value = s?.title ?? shownName.value;
   format.value = s?.format ?? 'docx';
+  subtitle.value = s?.subtitle ?? '';
+  author.value = s?.author ?? '';
+  toc.value = s?.toc ?? false;
+  numbering.value = s?.numbering ?? 'none';
+  separator.value = s?.separator ?? '';
+  referenceDoc.value = s?.referenceDoc ?? '';
+  cover.value = s?.cover ?? '';
   void follow(false);
   void loadContents();
+  void loadChoices();
 }, { immediate: true });
 
 /** How the folder's render in the chosen format stands; followed while it runs, and saved once it is done if `save`. */
@@ -182,7 +244,20 @@ async function compile() {
     console.warn('[kuraa] Compile could not keep its settings', e);
   }
   try {
-    state.value = await ctx.host.renders.render(p, format.value, { exclude: leftOut.value, noHeading: noHeadingPaths(known.value).filter((x) => !f || x.startsWith(`${f}/`)), title: t });
+    const under = (x: string) => !f || x === f || x.startsWith(`${f}/`);
+    state.value = await ctx.host.renders.render(p, format.value, {
+      exclude: leftOut.value,
+      noHeading: noHeadingPaths(known.value).filter((x) => x !== f && under(x)),
+      noTitles: noTitlesPaths(known.value).filter(under),
+      title: t,
+      ...(subtitle.value.trim() ? { subtitle: subtitle.value.trim() } : {}),
+      ...(author.value.trim() ? { author: author.value.trim() } : {}),
+      toc: toc.value,
+      ...(numbering.value !== 'none' ? { numbering: numbering.value } : {}),
+      ...(separator.value.trim() ? { separator: separator.value.trim() } : {}),
+      ...(referenceDoc.value ? { referenceDoc: referenceDoc.value } : {}),
+      ...(cover.value ? { cover: cover.value } : {}),
+    });
     if (state.value.state !== 'failed') await follow(true);
   } catch (e) {
     error.value = ctx.explain(e).text;
@@ -197,17 +272,39 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="compile-panel" data-testid="compile-panel">
-    <p v-if="folder === null" class="compile-about">{{ S.none }}</p>
+    <p v-if="folder === null" class="compile-about">{{ S.nothingChosen }}</p>
     <template v-else>
       <h3 class="compile-folder" data-testid="compile-folder">{{ S.compileVerb }} <strong v-if="folder" class="compile-folder-name">“{{ shownName }}”</strong><template v-else>{{ shownName }}</template></h3>
       <label class="compile-field">
         <span>{{ S.bookTitle }}</span>
         <input v-model="title" type="text" data-testid="compile-title" :disabled="busy" />
       </label>
+      <label class="compile-field">
+        <span>{{ S.subtitle }}</span>
+        <input v-model="subtitle" type="text" data-testid="compile-subtitle" :disabled="busy" @change="keep({ subtitle })" />
+      </label>
+      <label class="compile-field">
+        <span>{{ S.author }}</span>
+        <input v-model="author" type="text" data-testid="compile-author" :disabled="busy" @change="keep({ author })" />
+      </label>
       <fieldset class="compile-formats" :disabled="busy">
         <legend>{{ S.format }}</legend>
         <label v-for="f in FORMATS" :key="f"><input v-model="format" type="radio" name="compile-format" :value="f" :data-testid="`compile-format:${f}`" /> {{ S.formats[f] }}</label>
       </fieldset>
+      <label v-if="format === 'docx'" class="compile-field" :title="S.templateTitle">
+        <span>{{ S.template }}</span>
+        <select v-model="referenceDoc" data-testid="compile-template" :disabled="busy" @change="keep({ referenceDoc: referenceDoc || null })">
+          <option value="">{{ choices.templates.length || referenceDoc ? S.none : S.noTemplates }}</option>
+          <option v-for="t in withKept(choices.templates, referenceDoc)" :key="t" :value="t">{{ t }}</option>
+        </select>
+      </label>
+      <label v-if="format === 'epub'" class="compile-field">
+        <span>{{ S.cover }}</span>
+        <select v-model="cover" data-testid="compile-cover" :disabled="busy" @change="keep({ cover: cover || null })">
+          <option value="">{{ choices.images.length || cover ? S.none : S.noImages }}</option>
+          <option v-for="i in withKept(choices.images, cover)" :key="i" :value="i">{{ i }}</option>
+        </select>
+      </label>
       <div class="compile-contents">
         <div class="compile-contents-head">
           <span>{{ S.contents }}</span>
@@ -244,9 +341,36 @@ onBeforeUnmount(() => {
                 @change="setHeading(r.path, ($event.target as HTMLInputElement).checked)"
               />{{ S.heading }}
             </label>
+            <label v-if="r.kind === 'folder'" class="compile-heading" :title="S.titlesTitle">
+              <input
+                type="checkbox"
+                :checked="r.titles"
+                :disabled="busy || !r.included"
+                :data-testid="`compile-titles:${r.path}`"
+                @change="setTitles(r.path, ($event.target as HTMLInputElement).checked)"
+              />{{ S.titles }}
+            </label>
           </li>
         </ul>
       </div>
+      <label v-if="outline.some((r) => r.kind === 'document' && r.depth === 1)" class="compile-check" :title="S.titlesTitle">
+        <input type="checkbox" :checked="topTitles" :disabled="busy" data-testid="compile-top-titles" @change="setTitles(folder ?? '', ($event.target as HTMLInputElement).checked)" />
+        {{ S.topTitles }}
+      </label>
+      <label class="compile-check">
+        <input v-model="toc" type="checkbox" :disabled="busy" data-testid="compile-toc" @change="keep({ toc })" />
+        {{ S.toc }}
+      </label>
+      <label class="compile-field" :title="S.numberingTitle">
+        <span>{{ S.numbering }}</span>
+        <select v-model="numbering" data-testid="compile-numbering" :disabled="busy" @change="keep({ numbering: numbering === 'none' ? null : numbering })">
+          <option v-for="n in NUMBERING_CHOICES" :key="n" :value="n">{{ S.numberings[n] }}</option>
+        </select>
+      </label>
+      <label class="compile-field" :title="S.separatorTitle">
+        <span>{{ S.separator }}</span>
+        <input v-model="separator" type="text" :placeholder="S.separatorPlaceholder" data-testid="compile-separator" :disabled="busy" @change="keep({ separator })" />
+      </label>
       <label class="compile-field compile-target">
         <span>{{ S.target }}</span>
         <input v-model="targetField" type="text" inputmode="numeric" :placeholder="S.noTarget" :disabled="busy" data-testid="compile-target" @change="saveTarget" @keydown.enter="saveTarget" />
@@ -285,6 +409,9 @@ onBeforeUnmount(() => {
 .compile-words { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .compile-row.out > .compile-words { opacity: 0.5; }
 .compile-target > input { max-width: 10em; }
+.compile-check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.compile-check > input { margin: 0; }
+.compile-field > select { max-width: 100%; }
 .compile-outline { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
 .compile-row { display: flex; align-items: center; gap: 6px; padding-top: 2px; padding-bottom: 2px; padding-right: 6px; font-size: 13px; }
 .compile-row > input { margin: 0 0 0 6px; flex: none; }

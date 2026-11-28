@@ -40,6 +40,8 @@ export interface Settings {
   allowNetwork: boolean;
   /** Let people install packages and download tools (--allow-installs). */
   allowInstalls: boolean;
+  /** Render Markdown where code runs (Podman) rather than with the built-in pandoc (--render-where-code-runs: 0107). */
+  renderWhereCodeRuns: boolean;
   /** Where package versions and tools are kept (--data-dir); null for the app's data folder. */
   dataDir: string | null;
   /** Document types that are on, by id (--format); null for all. */
@@ -79,7 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bootstrap: [],
   relays: [],
   runCode: true, environment: null, rImages: [], memory: null, cpus: null, disk: null,
-  allowWrite: false, allowNetwork: false, allowInstalls: true, dataDir: null,
+  allowWrite: false, allowNetwork: false, allowInstalls: true, renderWhereCodeRuns: false, dataDir: null,
   formats: null, features: null, saveSeconds: null, versionSeconds: null, workspaces: null,
 };
 
@@ -164,6 +166,7 @@ export function settingsFrom(v: unknown, strict = false): Settings {
     allowWrite: flag('allowWrite'),
     allowNetwork: flag('allowNetwork'),
     allowInstalls: flag('allowInstalls'),
+    renderWhereCodeRuns: flag('renderWhereCodeRuns'),
     dataDir: folder('dataDir', 'The folder for packages and tools'),
     formats,
     // None on is a choice (unlike formats: a document always opens as something).
@@ -291,6 +294,7 @@ export function fromSettings(
       engines: (r.engines ?? (s.runCode ? ['r'] : []).filter((e) => !fixed.engines || fixed.engines.includes(e))).filter((e) => e !== 'none'),
       environment,
       allowInstalls: s.allowInstalls,
+      renderWhereCodeRuns: s.renderWhereCodeRuns,
       allowWorkspaceWrite: s.allowWrite,
       allowNetwork: s.allowNetwork,
       dataDir: s.dataDir ?? r.dataDir,

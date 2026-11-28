@@ -1,11 +1,14 @@
-// Images in the editor. `![alt](src)` typed becomes an image. An image file
-// pasted or dropped is kept in the workspace (in `images/` next to the
-// document, under a safe name not yet taken) and an image pointing at it goes
-// where it was put. Images show by loading the workspace's file from the host;
+// Images in the editor. `![alt](src)` typed becomes an image. Image files
+// pasted or dropped are shown in the client's dialog first (0108: how large
+// each is as kept, the details removed from it, a smaller size, its
+// description), then kept in the workspace (in `images/` next to the document,
+// under a safe name not yet taken), and images pointing at them go where they
+// were put, in order. Images show by loading the workspace's file from the host;
 // an image at a web address shows only once the person asks (its server would
 // otherwise learn who opened the document, and when: anyone editing it could
 // put one there to find out), and anything else (file:, javascript:) does not.
-import type { EditorContext } from '@kuraa/editor-kit';
+import type { EditorContext, ImageToAdd } from '@kuraa/editor-kit';
+import { IMAGE_MIME, MAX_IMAGE_BYTES } from '@kuraa/kernel';
 import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { Plugin, PluginKey } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView, type NodeView, type NodeViewConstructor } from 'prosemirror-view';
@@ -13,12 +16,10 @@ import { InputRule } from 'prosemirror-inputrules';
 import { safeUrl } from '../schema.js';
 import { workspacePath } from './paths.js';
 
-/** What can be added: the image types every browser shows, and SVG (only ever shown as an image). */
-export const IMAGE_TYPES: Record<string, string> = {
-  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg',
-};
-/** The largest image that can be added. */
-export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** What can be added, by type: the image types every browser shows, and SVG (only ever shown as an image). */
+export const IMAGE_TYPES: Record<string, string> = Object.fromEntries(Object.entries(IMAGE_MIME).map(([ext, mime]) => [mime, ext]));
+/** The largest image that can be kept. */
+export { MAX_IMAGE_BYTES };
 
 export function imageRules(schema: Schema): InputRule[] {
   const image = schema.nodes.image;
@@ -156,31 +157,62 @@ function imagesIn(files: FileList | null | undefined): File[] {
   return [...(files ?? [])].filter((f) => f.type in IMAGE_TYPES || /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name));
 }
 
-/** Upload each image, showing where it will go meanwhile, then put an image there (where that place has moved to). */
-function addImages(view: EditorView, ctx: EditorContext, files: File[], pos: number): void {
+/** Whether a file has a name of its own (one pasted from a screenshot has none, or the browser's `image.png`). */
+const named = (file: File) => !!file.name && file.name !== 'image.png';
+
+/** The name an image is kept under: its file's, or (pasted, with none of its own) the day's. */
+function nameOf(file: File): string {
+  return named(file) ? file.name : `pasted-${new Date().toISOString().slice(0, 10)}.${IMAGE_TYPES[file.type] ?? 'png'}`;
+}
+
+/** Its description to begin with: its file's name in words; none for one with no name of its own. */
+function altOf(file: File, name: string): string {
+  return named(file) ? name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ') : '';
+}
+
+/**
+ * Add image files where they were put: a place held for them (it moves with
+ * edits around it) while the client's dialog asks how to add them, then each
+ * kept in the workspace in turn and put there, in order.
+ */
+async function addImages(view: EditorView, ctx: EditorContext, files: File[], pos: number): Promise<void> {
   const files$ = ctx.files;
   const image = view.state.schema.nodes.image;
   if (!files$ || !image) return;
-  for (const file of files) {
-    if (file.size > MAX_IMAGE_BYTES) {
-      ctx.ui.notify?.(`${file.name || 'The image'} is larger than 20 MB, the most an image may be.`, 'warn');
-      continue;
-    }
-    const id = {};
-    view.dispatch(view.state.tr.setMeta(uploadsKey, { add: { id, pos } }));
-    const name = file.name && file.name !== 'image.png' ? file.name : `pasted-${new Date().toISOString().slice(0, 10)}.${IMAGE_TYPES[file.type] ?? 'png'}`;
-    files$.uploadImage(file, name).then((src) => {
-      if (view.isDestroyed) return;
-      const at = placeOf(view, id);
-      if (at === null) return;
-      const alt = name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
-      view.dispatch(view.state.tr.replaceWith(at, at, image.create({ src, alt })).setMeta(uploadsKey, { remove: { id } }));
-    }, (e: Error) => {
-      if (view.isDestroyed) return;
-      view.dispatch(view.state.tr.setMeta(uploadsKey, { remove: { id } }));
-      ctx.ui.notify?.(`Could not add ${file.name || 'the image'}: ${e.message}`, 'warn');
+  const id = {};
+  view.dispatch(view.state.tr.setMeta(uploadsKey, { add: { id, pos } }));
+  const done = () => {
+    if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(uploadsKey, { remove: { id } }));
+  };
+  let chosen: ImageToAdd[] | null = files.map((file) => {
+    const name = nameOf(file);
+    return { file, name, alt: altOf(file, name) };
+  });
+  if (ctx.ui.chooseImages) {
+    chosen = await ctx.ui.chooseImages(chosen).catch((e: Error) => {
+      ctx.ui.notify?.(`Could not add the images: ${e.message}`, 'warn');
+      return null;
+    });
+  } else {
+    chosen = chosen.filter(({ file, name }) => {
+      if (file.size <= MAX_IMAGE_BYTES) return true;
+      ctx.ui.notify?.(`${name} is larger than 20 MB, the most an image may be.`, 'warn');
+      return false;
     });
   }
+  for (const { file, name, alt } of chosen ?? []) {
+    if (view.isDestroyed) return;
+    try {
+      const src = await files$.uploadImage(file, name);
+      if (view.isDestroyed) return;
+      const at = placeOf(view, id);
+      if (at === null) break;
+      view.dispatch(view.state.tr.replaceWith(at, at, image.create({ src, alt })));
+    } catch (e) {
+      ctx.ui.notify?.(`Could not add ${name}: ${(e as Error).message}`, 'warn');
+    }
+  }
+  done();
 }
 
 function placeOf(view: EditorView, id: object): number | null {
@@ -202,7 +234,8 @@ export function imagePlugins(ctx: EditorContext): Plugin[] {
             const widget = document.createElement('span');
             widget.className = 'image-uploading';
             widget.textContent = 'Adding image…';
-            set = set.add(tr.doc, [Decoration.widget(meta.add.pos, widget, { id: meta.add.id })]);
+            // Its side: images put at its place go before it, so the next goes after them.
+            set = set.add(tr.doc, [Decoration.widget(meta.add.pos, widget, { id: meta.add.id, side: 1 })]);
           }
           if (meta?.remove) set = set.remove(set.find(undefined, undefined, (spec) => spec.id === meta.remove!.id));
           return set;
@@ -216,7 +249,7 @@ export function imagePlugins(ctx: EditorContext): Plugin[] {
           event.preventDefault();
           const { from, to } = view.state.selection;
           if (from !== to) view.dispatch(view.state.tr.deleteSelection());
-          addImages(view, ctx, files, view.state.selection.from);
+          void addImages(view, ctx, files, view.state.selection.from);
           return true;
         },
         handleDrop(view, event) {
@@ -224,7 +257,7 @@ export function imagePlugins(ctx: EditorContext): Plugin[] {
           if (!files.length || !view.editable) return false;
           event.preventDefault();
           const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
-          addImages(view, ctx, files, at ? at.pos : view.state.selection.from);
+          void addImages(view, ctx, files, at ? at.pos : view.state.selection.from);
           return true;
         },
       },

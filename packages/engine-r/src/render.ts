@@ -1,6 +1,6 @@
 // Rendering documents with the R engine: R Markdown through rmarkdown::render,
-// Markdown through pandoc, to HTML, Word or PDF (Typst, or LaTeX where the
-// header asks for it and the environment has it). One process per render, in
+// Markdown through pandoc, to HTML, Word, PDF (Typst, or LaTeX where the
+// header asks for it and the environment has it) or EPUB. One process per render, in
 // the environment the host chose, from the same image as R sessions (which has
 // pandoc, rmarkdown and Typst: recipe.ts). The R side is render-script.ts.
 //
@@ -20,7 +20,7 @@ import { Capped, writeIfChanged } from './lines.js';
 
 /** What a render's log keeps. */
 const MAX_LOG = 400_000;
-const NAMES: Record<RenderFormat, string> = { html: 'HTML', docx: 'Word', pdf: 'PDF' };
+const NAMES: Record<RenderFormat, string> = { html: 'HTML', docx: 'Word', pdf: 'PDF', epub: 'EPUB' };
 /** The tool that brings LaTeX, and the engines it has. */
 export const LATEX_TOOL = 'tinytex';
 const LATEX = ['pdflatex', 'xelatex', 'lualatex', 'latexmk'];
@@ -136,6 +136,6 @@ async function render(ctx: RenderContext, req: RenderRequest): Promise<RenderRes
 
 export const rRenderer: DocumentRenderer = {
   extensions: ['.rmd', '.md', '.markdown'],
-  formats: ['html', 'docx', 'pdf'],
+  formats: ['html', 'docx', 'pdf', 'epub'],
   render,
 };

@@ -7,7 +7,10 @@ import type { MergeResult, MergeSide } from './merge.js';
 export { countMarkers, diff3, matches, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
 export { alignedSourceMap, sourceMapOf, type SourceMap } from './sourcemap.js';
 export { countWords, markdownWords, wordChange } from './words.js';
+export { documentOfFiles, filesFolderOf, FILES_SUFFIX, movedBy, relativeTarget, rewriteReferences, workspacePath, type Reference } from './references.js';
+export { cleanImage, sniffImage, IMAGE_DETAILS, IMAGE_MIME, LARGE_FILE_BYTES, MAX_IMAGE_BYTES, type CleanedImage, type ImageDetail, type ImageType } from './images.js';
 import type { SourceMap } from './sourcemap.js';
+import type { Reference } from './references.js';
 
 export interface ParsedDocument {
   text: string;
@@ -118,6 +121,13 @@ export interface DocumentType {
    * block's text in its source.
    */
   sourceMap?(doc: Node, parsed: ParsedDocument): SourceMap;
+  /**
+   * The workspace files a document's text names (0109): its images, links and
+   * link definitions, each with where its target is written, so the host can
+   * write them again when files move. Must not throw. Without it, a file of
+   * this type names nothing, and nothing in it is rewritten.
+   */
+  references?(text: string): Reference[];
   /** Client only. */
   editor?: EditorContribution;
 }

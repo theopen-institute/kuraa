@@ -19,7 +19,9 @@
     "web:dev": "pnpm --filter @kuraa/web dev",
     "web:build": "pnpm --filter @kuraa/web build",
     "desktop": "pnpm --filter @kuraa/desktop start",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "render-tools": "node scripts/fetch-render-tools.mjs",
+    "postinstall": "node scripts/fetch-render-tools.mjs --quiet-fail"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

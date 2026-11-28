@@ -78,6 +78,7 @@ import { createHash } from 'node:crypto';
 import crypto from 'hypercore-crypto';
 import type { KeyPair } from '../keys.js';
 import { ownerOf } from '@kuraa/feature-kit';
+import { documentOfFiles, filesFolderOf } from '@kuraa/kernel';
 
 export type Role = 'admin' | 'member';
 
@@ -264,6 +265,21 @@ export function pathsAbove(path: string): string[] {
   for (let i = parts.length - 1; i > 0; i--) out.push(`${parts.slice(0, i).join('/')}/`);
   if (path !== '') out.push('');
   return [...new Set(out)];
+}
+
+/**
+ * The paths whose permissions count for a path, nearest first (0109): those
+ * above it (pathsAbove), with a document's own files (`report.md.files/…`)
+ * under their document: after their folder, before the folder the two are in.
+ * So whoever may change a document may change its files, and a document's own
+ * permission is theirs. Known by name alone, so every device works it out the same.
+ */
+export function permissionPaths(path: string): string[] {
+  const above = pathsAbove(path);
+  const doc = documentOfFiles(path);
+  if (!doc) return above;
+  const at = above.indexOf(`${filesFolderOf(doc)}/`);
+  return at < 0 ? above : [...above.slice(0, at + 1), doc, ...above.slice(at + 1)];
 }
 
 /** Whether a path is one a rule can name: `''` (everything), `dir/` (a folder), or a file; relative, with no `.` or `..` parts. */
@@ -522,7 +538,7 @@ export class Policy {
 
   /** The nearest permission up the tree that says something of a kind: its path (in the clear, as the caller knows it), its key, and what it says. */
   private nearest(path: string, kind: 'write' | 'read', from = 0): { path: string; key: string; who: string[] } | null {
-    for (const p of pathsAbove(path).slice(from)) {
+    for (const p of permissionPaths(path).slice(from)) {
       const at = this.permAt(p);
       if (at?.perm[kind]) return { path: p, key: at.key, who: at.perm[kind]! };
     }

@@ -832,6 +832,7 @@ pnpm test:e2e --project web       # the browser tests in Chromium only (or --pro
 
 The browser tests run in Chromium (`web`), WebKit (`webkit`: Safari, and a webview on macOS and
 Linux) and Firefox (`firefox`), the same tests in each ([0122](docs/decisions/0122-every-browser-engine.md)).
+GitHub runs them on every push to main and every pull request (the Browsers workflow, a job for each).
 Beside another checkout's run, give a run its own port, temporary folder and output folder:
 `KURAA_E2E_PORT=4472 TMPDIR=/private/tmp/k2 pnpm test:e2e --output /private/tmp/k2/results`.
 

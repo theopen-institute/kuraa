@@ -60,9 +60,21 @@ text still goes up into the title.
   passed on their own), and its run took 12 to 15 minutes; with them closed, nothing stops, and it
   takes about 5, as Chromium's and Firefox's do.
 
+**In CI** (`.github/workflows/browsers.yml`): on every push to main and every pull request, a job
+for each engine, on Linux, each installing its browser and keeping a failure's trace for a week. A
+workflow of its own, not part of Check: a release waits for Check alone, so a browser test failing
+does not hold one up, until they have shown they can be relied on. The desktop and dev tests are
+not run there. One test (Chromium's accessibility tree, `polish.spec.ts`) reads what only Chromium
+opens to the tests, so that part of it runs in Chromium alone.
+
 ## Not yet
 
-- The browser tests are not in CI (`check.yml` runs lint, typecheck and the unit tests): a run of the
-  three takes about 15 minutes on a laptop.
-- Spell-checking's own dictionary (*Add to dictionary*) is Chromium's (the desktop app's); a webview
-  has the system's.
+- The browser tests do not yet hold up a release.
+- Spell-checking's own dictionary (*Add to dictionary*) is Chromium's (the desktop app's). The owner:
+  *"Spell check should use native tools wherever possible, always. I don't want electron's anyway."*
+  A webview has the system's; the Tauri shell is to use it.
+- *Nothing open is a blank document* (`newfile.spec.ts`) fails now and then in a full Chromium run,
+  never on its own: after a reload, nothing has focus (the page itself), with the title there and no
+  dialog open. The editor's "start in the title" (`focusTitle`, `Editor.vue`) gives up for good if
+  the editable title is not there when it looks (it then focuses the view, and says it is done), so
+  a page slow to load can miss it. Not fixed here.

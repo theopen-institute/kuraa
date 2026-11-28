@@ -1,0 +1,55 @@
+# The browser tests (decision 0122), in each engine people browse with: Chromium
+# (Chrome, Edge, Windows' WebView2), WebKit (Safari, and the webview of a Tauri app
+# on macOS and Linux) and Firefox, on every push to main and every pull request.
+# A workflow of its own, not part of Check: a release waits only for Check
+# (release.yml), so a browser test failing here does not hold one up. The desktop
+# (Electron) and dev tests are not run here.
+name: Browsers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browsers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: web
+            browser: chromium
+          - project: webkit
+            browser: webkit
+          - project: firefox
+            browser: firefox
+    name: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The tests make commits: git needs someone to make them as.
+      - run: git config --global user.name "kuraa CI" && git config --global user.email "ci@kuraa.invalid"
+      # The browser this job runs, with what it needs from the system.
+      - run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - run: pnpm test:e2e --project ${{ matrix.project }}
+      # A failure's trace, to open with `pnpm exec playwright show-trace`.
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-${{ matrix.browser }}
+          path: test-results/
+          retention-days: 7

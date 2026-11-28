@@ -35,7 +35,7 @@ async function openFile(page: Page, path: string): Promise<void> {
 /** Where focus is: the path of the tree row that has it, or a test id near it. */
 const focusedPath = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.path ?? null);
 
-test('an empty document says how to start; ⌘/ lists the cues and keys, from the menu too', async ({ page }) => {
+test('an empty document says how to start; ⌘/ lists the cues and keys, from the menu too', async ({ page, browserName }) => {
   const path = `runs/empty-${Date.now().toString(36)}.md`;
   await create(path, '');
   await openApp(page);
@@ -50,14 +50,17 @@ test('an empty document says how to start; ⌘/ lists the cues and keys, from th
   const editor = page.getByTestId('editor');
   await expect(editor).toHaveAttribute('aria-placeholder', 'Start writing…');
   expect(await placeholder.evaluate((el) => getComputedStyle(el, '::before').content)).toContain('Start writing…');
-  const axText = async () => {
-    const cdp = await page.context().newCDPSession(page);
-    const { nodes } = await cdp.send('Accessibility.getFullAXTree');
-    await cdp.detach();
-    return nodes.filter((n) => n.role?.value === 'StaticText').map((n) => String(n.name?.value ?? '')).join('\n');
-  };
-  expect(await axText()).not.toContain('Start writing');
-  expect(await axText()).not.toMatch(/^Title$/m);
+  // The accessibility tree is read through Chromium's own protocol: WebKit's and Firefox's are not open to the tests.
+  if (browserName === 'chromium') {
+    const axText = async () => {
+      const cdp = await page.context().newCDPSession(page);
+      const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+      await cdp.detach();
+      return nodes.filter((n) => n.role?.value === 'StaticText').map((n) => String(n.name?.value ?? '')).join('\n');
+    };
+    expect(await axText()).not.toContain('Start writing');
+    expect(await axText()).not.toMatch(/^Title$/m);
+  }
   await placeholder.click();
   await page.keyboard.type('Now there is text.');
   await expect(placeholder).toHaveCount(0);

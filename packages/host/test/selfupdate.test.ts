@@ -231,6 +231,44 @@ describe('a released server', () => {
     expect(restarted).toBe(1);
   });
 
+  it('switches to a held release only once devices of two of its workspaces run its protocol, and keeps it held across a restart (0115)', async () => {
+    const root = installed();
+    const next = published('0.2.0', privateKey, PROTOCOL + 1);
+    const start = () => {
+      let newer: ((p?: number, w?: string) => void) | null = null;
+      let release: ((v: string) => void) | null = null;
+      let restarted = 0;
+      let fetched = 0;
+      const said: string[] = [];
+      autoUpdate({
+        here: join(root, 'versions', '0.1.0'), build: build(), log: (m) => void said.push(m), restart: () => void restarted++,
+        newer: (fn) => void (newer = fn), newerRelease: (fn) => void (release = fn), workspaces: () => 3,
+        latest: async () => next.release, fetch: async (url) => (fetched++, next.files.get(url)!),
+      });
+      return { newer: (p: number, w: string) => newer!(p, w), release: (v: string) => release!(v), restarted: () => restarted, fetched: () => fetched, said };
+    };
+    const first = start();
+    first.release('0.2.0');
+    for (let i = 0; i < 50 && !first.said.some((m) => m.includes('held until')); i++) await new Promise((r) => setTimeout(r, 20));
+    // One workspace's device runs it: not enough, of three.
+    first.newer(PROTOCOL + 1, 'ws-a');
+    first.newer(PROTOCOL + 1, 'ws-a');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(currentVersion(root)).toBe('0.1.0');
+    expect(first.restarted()).toBe(0);
+    // Restarted meanwhile: still held, not fetched again.
+    const second = start();
+    second.release('0.2.0');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(second.fetched()).toBe(0);
+    // Two workspaces' devices: in place, and restarted at once.
+    second.newer(PROTOCOL + 1, 'ws-a');
+    second.newer(PROTOCOL + 1, 'ws-b');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(currentVersion(root)).toBe('0.2.0');
+    expect(second.restarted()).toBe(1);
+  });
+
   it('downloads no more than it may, and from GitHub or where it was asked (0112)', async () => {
     const body = Buffer.alloc(MAX_SIGNATURE_BYTES + 1, 'x');
     const server = createServer((req, res) => {

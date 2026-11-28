@@ -77,8 +77,8 @@ export interface BridgeOptions {
   stateDir: string;
   /** A stream to a device's git service, or why there is none. */
   open(key: string, service: string, protocol: string): Duplex | string;
-  /** The most one fetch may bring, in bytes. */
-  maxBytes: number;
+  /** The most one fetch may bring, in bytes: asked as each starts (0115: the room left on the disk, too). */
+  maxBytes: number | (() => number);
   log(m: string): void;
 }
 
@@ -149,10 +149,11 @@ export class GitBridge {
       sock.write('ok\n');
       if (rest.length) stream.write(rest);
       let bytes = 0;
+      const max = typeof this.o.maxBytes === 'function' ? this.o.maxBytes() : this.o.maxBytes;
       stream.on('data', (chunk: Buffer) => {
         bytes += chunk.length;
-        if (bytes > this.o.maxBytes) {
-          this.o.log(`a fetch from ${url} passed ${this.o.maxBytes} bytes; stopped`);
+        if (bytes > max) {
+          this.o.log(`a fetch from ${url} passed ${max} bytes; stopped`);
           stream.destroy();
           sock.destroy();
           return;

@@ -10,7 +10,7 @@ export { gitIdentity, initWorkspace, inspectFolder, type FolderInfo } from './wo
 export { defaultDataDir, type RunOptions, type RunDescription } from './runner.js';
 export { loadRunComponents, type RunComponents } from './components.js';
 /** The program as released, updating itself (0052), in either role (0099: @kuraa/server's release.ts). */
-export { autoUpdate, currentVersion, defaultServerRoot, installServer, installedRoot, protocolOf, runsAsService, updateFrom, type ServerBuild } from './selfupdate.js';
+export { autoUpdate, currentVersion, defaultServerRoot, installServer, installedRoot, protocolOf, runsAsService, uncountStart, updateFrom, type ServerBuild } from './selfupdate.js';
 export { PROTOCOL } from './peers/link.js';
 /** A key pair kept in a file, made the first time (keys.ts): a server's own signing key (@kuraa/server, 0099). */
 export { keptKey, type KeyPair } from './keys.js';

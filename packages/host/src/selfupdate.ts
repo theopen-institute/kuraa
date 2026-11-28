@@ -221,8 +221,23 @@ export function protocolOf(dir: string): number | null {
   }
 }
 
+/**
+ * This start does not count against the version (0115): it stopped for a
+ * reason not its own (another server holds its folder), so the launcher does
+ * not go back from it, nor mark it failed, for that. Run from an installed
+ * release (`here`), else nothing.
+ */
+export function uncountStart(here: string): void {
+  const root = installedRoot(here);
+  if (!root) return;
+  const tries = Number(readMark(root, 'tries')) || 0;
+  if (tries > 0) writeMark(root, 'tries', String(tries - 1));
+}
+
 /** Name an installed version as the one to run from the next start, its tries counted afresh, the old ones let go of. */
 export function placeVersion(root: string, version: string): void {
+  // Not one that is not there (0115): named, it would not start, and the launcher would go back from it, marked failed.
+  if (!existsSync(join(root, 'versions', version, 'kuraa-host.mjs'))) throw new Error(`kuraa ${version} is not in place to run`);
   const before = existsSync(join(root, 'current')) ? currentVersion(root) : null;
   setCurrent(root, version);
   writeMark(root, 'tries', '0');
@@ -472,8 +487,14 @@ export function autoUpdate(o: {
   restart(): void;
   /** Take releases that change the protocol at once, not when a device runs them (--auto-update-all). */
   all?: boolean;
-  /** A device speaks a newer protocol: not syncing until updated, so at once. */
-  newer(fn: () => void): void;
+  /**
+   * A device speaks a newer protocol it does not sync in (0115: with the
+   * protocol, and the workspace it is in): a held release that speaks it is put in
+   * place once devices of enough of its workspaces do, and restarted to at once.
+   */
+  newer(fn: (protocol?: number, workspace?: string) => void): void;
+  /** How many workspaces it holds (0115): of two, a newer protocol in two of them switches it. */
+  workspaces?: () => number;
   /** A device runs a newer release, speaking the same protocol (0099): looked for now, restarting at night. */
   newerRelease?(fn: (version: string) => void): void;
   /** Where the latest release is found (tests); default: the build's repository. */
@@ -510,21 +531,62 @@ export function autoUpdate(o: {
     }, ms);
     restartTimer.unref();
   };
-  // A release held for its protocol (0112): placed once a device runs the protocol it speaks.
-  let held: string | null = null;
-  o.newer(() => {
-    outdated = true;
-    if (held && !ready) {
-      try {
-        placeVersion(root, held);
-        o.log(`a device runs a newer kuraa: kuraa ${held}, which syncs with it, is in place`);
-        ready = held;
-        held = null;
-      } catch (e) {
-        o.log(`could not put kuraa ${held} in place: ${(e as Error).message}`);
-      }
+  // A release held for its protocol (0112): placed once devices of its workspaces run the protocol it speaks (0115: of
+  // two workspaces, where it holds more than one, so one member saying so cannot switch every other workspace's
+  // members off; at once, where they did before it was found). Kept on the disk, so a restart does not fetch it again.
+  const heldFile = join(root, 'held');
+  let held: { version: string; protocol: number | null } | null = (() => {
+    try {
+      const h = JSON.parse(readFileSync(heldFile, 'utf8')) as { version?: string; protocol?: number | null };
+      return h.version && isVersion(h.version) && existsSync(join(root, 'versions', h.version, 'kuraa-host.mjs')) ? { version: h.version, protocol: h.protocol ?? null } : null;
+    } catch {
+      return null;
     }
-    restartSoon();
+  })();
+  const keepHeld = () => {
+    try {
+      if (held) writeFileSync(heldFile, JSON.stringify(held));
+      else rmSync(heldFile, { force: true });
+    } catch {
+      // Not kept: fetched again after a restart.
+    }
+  };
+  /** The workspaces whose devices were found running each newer protocol. */
+  const seen = new Map<number, Set<string>>();
+  const enough = (protocol: number | null): boolean => {
+    const ws = new Set<string>();
+    for (const [p, set] of seen) if (protocol === null || p >= protocol) for (const w of set) ws.add(w);
+    return ws.size >= Math.min(2, Math.max(1, o.workspaces?.() ?? 1));
+  };
+  const placeHeld = (why: string): void => {
+    if (!held || ready) return;
+    const h = held;
+    held = null;
+    keepHeld();
+    try {
+      if (!existsSync(join(root, 'versions', h.version, 'kuraa-host.mjs'))) throw new Error('it is no longer in place');
+      placeVersion(root, h.version);
+      o.log(`${why}: kuraa ${h.version}, which syncs with them, is in place`);
+      ready = h.version;
+      outdated = true;
+      restartSoon();
+    } catch (e) {
+      o.log(`could not put kuraa ${h.version} in place: ${(e as Error).message}`);
+    }
+  };
+  o.newer((protocol, workspace) => {
+    // Told without a protocol (an older caller): as before, at once.
+    if (protocol === undefined || !workspace) {
+      outdated = true;
+      placeHeld('a device runs a newer kuraa');
+      restartSoon();
+      void look();
+      return;
+    }
+    const set = seen.get(protocol) ?? new Set<string>();
+    set.add(workspace);
+    seen.set(protocol, set);
+    if (held && enough(held.protocol)) placeHeld('devices of its workspaces run a newer kuraa');
     void look();
   });
   let looking = false;
@@ -540,13 +602,17 @@ export function autoUpdate(o: {
     lookedAt = Date.now();
     try {
       const hold = (version: string, protocol: number | null) => {
-        if (held !== version) o.log(`kuraa ${version} changes how devices sync (${protocol === null ? 'it does not say how' : `protocol ${PROTOCOL} → ${protocol}`}): held until a device of its workspaces runs it, as devices on this one would not sync with it (--auto-update-all takes such a release at once; kuraa-host update puts it in place now)`);
-        held = version;
+        if (held?.version !== version) o.log(`kuraa ${version} changes how devices sync (${protocol === null ? 'it does not say how' : `protocol ${PROTOCOL} → ${protocol}`}): held until devices of its workspaces run it, as devices on this one would not sync with it (--auto-update-all takes such a release at once; kuraa-host update puts it in place now)`);
+        held = { version, protocol };
+        keepHeld();
+        // Devices of its workspaces ran it before it was found: in place now.
+        if (enough(protocol) && seen.size) placeHeld('devices of its workspaces run it already');
       };
-      const v = await updateFrom({ root, build: o.build, ...(o.latest ? { latest: o.latest } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.all ? {} : { hold, held }) });
+      const v = await updateFrom({ root, build: o.build, ...(o.latest ? { latest: o.latest } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.all ? {} : { hold, held: held?.version ?? null }) });
       if (v) {
         // One placed lets go of any held before it (placeVersion keeps only the versions it needs).
         held = null;
+        keepHeld();
         ready = v;
         restartSoon();
       }

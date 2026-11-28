@@ -15,7 +15,7 @@ interface Listener {
   server: Server;
   port: number;
   /** Each device of this process that takes connections, by key. */
-  handlers: Map<string, (sock: Socket) => void>;
+  handlers: Map<string, TcpHandler>;
 }
 
 let listening: Promise<Listener | null> | null = null;
@@ -23,7 +23,7 @@ let listener: Listener | null = null;
 
 function open(port: number, log: (m: string) => void): Promise<Listener | null> {
   return new Promise((resolve) => {
-    const handlers = new Map<string, (sock: Socket) => void>();
+    const handlers = new Map<string, TcpHandler>();
     const server = createServer((sock) => accept(sock, handlers));
     server.on('error', (e) => {
       log(`peers: cannot take connections over TCP${port ? ` on port ${port}` : ''}: ${e.message}`);
@@ -46,8 +46,14 @@ const MAX_WAITING = 256;
 const MAX_WAITING_FROM = 16;
 /** How long a connection has, from when it is taken, to say which device it is for (0112): a deadline, not an idle time. */
 const PRELUDE_MS = 5000;
-/** The connections waiting, oldest first; and how many from each address (an IPv6 one by its /64). */
-const waiting = new Set<Socket>();
+/**
+ * And then to be let in (0115): the encrypted handshake and the hello, counted
+ * all the while, under a deadline no byte puts off. A device in is let in at
+ * once; one that is not, is held no longer.
+ */
+const LET_IN_MS = 15_000;
+/** The connections waiting (to say which device, or to be let in), oldest first, each with how to stop counting it. */
+const waiting = new Map<Socket, () => void>();
 const waitingFrom = new Map<string, number>();
 
 /**
@@ -67,18 +73,27 @@ export function addressGroup(addr: string): string {
   return `${groups.slice(0, 4).map((g) => (parseInt(g || '0', 16) || 0).toString(16)).join(':')}::/64`;
 }
 
-function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): void {
+/**
+ * A device's handler for a connection: the socket, and `settled`, to say it has
+ * been let in (0115), after which it is no longer counted nor held to a deadline.
+ */
+export type TcpHandler = (sock: Socket, settled: () => void) => void;
+
+function accept(sock: Socket, handlers: Map<string, TcpHandler>): void {
   sock.on('error', () => undefined);
-  // A server's port is open to anyone (0099): connections that say nothing hold a socket each, so only so many; each
+  // A server's port is open to anyone (0099): connections not let in hold a socket each, so only so many; each
   // address, only so many of those; and when all are taken, the one waiting longest makes way (0112), as an honest
-  // device says which device it is for at once.
+  // device says which device it is for at once, and is let in at its hello. Counted until it is let in (0115), not
+  // only until its first line: else a handshake begun and never ended held a socket for nothing.
   const from = addressGroup(sock.remoteAddress ?? '');
   if ((waitingFrom.get(from) ?? 0) >= MAX_WAITING_FROM) return void sock.destroy();
-  if (waiting.size >= MAX_WAITING) waiting.values().next().value?.destroy();
-  waiting.add(sock);
-  waitingFrom.set(from, (waitingFrom.get(from) ?? 0) + 1);
+  if (waiting.size >= MAX_WAITING) {
+    const [oldest, stop] = waiting.entries().next().value!;
+    stop();
+    oldest.destroy();
+  }
   let counted = true;
-  const deadline = setTimeout(() => sock.destroy(), PRELUDE_MS);
+  let deadline = setTimeout(() => sock.destroy(), PRELUDE_MS);
   deadline.unref?.();
   const done = () => {
     if (!counted) return;
@@ -89,6 +104,8 @@ function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): vo
     if (left) waitingFrom.set(from, left);
     else waitingFrom.delete(from);
   };
+  waiting.set(sock, done);
+  waitingFrom.set(from, (waitingFrom.get(from) ?? 0) + 1);
   sock.once('close', done);
   let head = Buffer.alloc(0);
   const onReadable = () => {
@@ -105,8 +122,11 @@ function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): vo
       if (!handler) return void sock.destroy();
       const rest = head.subarray(nl + 1);
       if (rest.length) sock.unshift(rest);
-      done();
-      return handler(sock);
+      // Said which device: now to be let in, by a deadline of its own.
+      clearTimeout(deadline);
+      deadline = setTimeout(() => sock.destroy(), LET_IN_MS);
+      deadline.unref?.();
+      return handler(sock, done);
     }
   };
   sock.on('readable', onReadable);
@@ -118,7 +138,7 @@ function accept(sock: Socket, handlers: Map<string, (sock: Socket) => void>): vo
  * --peer-port), else any free one. Returns the port, and how to stop; null if
  * there is no listener.
  */
-export async function listenTcp(key: string, port: number | undefined, onSocket: (sock: Socket) => void, log: (m: string) => void): Promise<{ port: number; stop(): void } | null> {
+export async function listenTcp(key: string, port: number | undefined, onSocket: TcpHandler, log: (m: string) => void): Promise<{ port: number; stop(): void } | null> {
   listening ??= open(port ?? 0, log);
   const l = await listening;
   if (!l) {

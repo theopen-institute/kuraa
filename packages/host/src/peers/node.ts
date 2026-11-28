@@ -31,7 +31,7 @@ import NoiseSecretStream from '@hyperswarm/secret-stream';
 import type { Socket } from 'node:net';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
-import { dialTcp, listenTcp, parseAddress } from './tcp.js';
+import { addressGroup, dialTcp, listenTcp, parseAddress } from './tcp.js';
 import { recordKey, revokeKeyMessage, shortKey, type MemberRecord } from './records.js';
 import { outputRefs, outputsRefspec } from './outputs.js';
 import { EventEmitter } from 'node:events';
@@ -130,6 +130,13 @@ const LET_IN_MS = 10 * 60_000;
 /** How long a device that connected may take to be let in (its hello, an invite link) before its link is closed (0071). */
 const HELLO_MS = 60_000;
 
+/** Where a connection is from, as limits count it (tcp.ts, addressGroup); '' where it cannot be said (0115). */
+function addressOf(conn: unknown): string {
+  const raw = (conn as { rawStream?: { remoteHost?: string; remoteAddress?: string } }).rawStream;
+  const addr = raw?.remoteHost ?? raw?.remoteAddress ?? '';
+  return addr ? addressGroup(addr) : '';
+}
+
 /**
  * What another device said, fit to log or show (0112): a string, no control
  * characters (no new lines, no terminal escapes, so no forged log lines), and
@@ -144,6 +151,12 @@ const SERVER_HELLO_MS = 15_000;
 const MAX_UNACCEPTED = 64;
 /** Space a fetch leaves on the disk (0112): below it, a device's work is not fetched until there is more. */
 const MIN_FREE_BYTES = 1024 ** 3;
+/** Below this room, fetches go one at a time in the process (0115). */
+const LOW_FREE_BYTES = 10 * 1024 ** 3;
+/** The most one fetch brings, but a server's first copy (2 GiB). */
+const DEFAULT_FETCH_BYTES = 2 * 1024 ** 3;
+/** The fetch whose turn it is, while room is short (0115). */
+let fetchTurn: Promise<void> = Promise.resolve();
 
 /** On the local network, how long the device with the higher key waits for the lower to connect before it does (0071: the lower one's firewall may refuse). */
 const LAN_FALLBACK_MS = 5_000;
@@ -353,9 +366,11 @@ export class PeerNode {
   constructor(private readonly o: NodeOptions, events: NodeEvents = {}) {
     this.events = events;
     this.identity = new Identity(o.git, o.stateDir);
+    this.maxFetchBytes = o.maxFetchBytes ?? DEFAULT_FETCH_BYTES;
     this.bridge = new GitBridge({
       stateDir: o.stateDir,
-      maxBytes: o.maxFetchBytes ?? 2 * 1024 ** 3,
+      // As much as it may, but never past the room on the disk less what is kept free (0115).
+      maxBytes: () => Math.max(0, Math.min(this.maxFetchBytes, this.freeBytes - MIN_FREE_BYTES)),
       log: (m) => this.o.log(m),
       open: (key, service, protocol) => {
         const link = this.links.get(key);
@@ -563,7 +578,7 @@ export class PeerNode {
    * and checked with this device's key, as the DHT's connections are.
    */
   private async startTcp(): Promise<void> {
-    this.tcp = await listenTcp(this.myKey, this.o.peerPort, (sock) => this.tcpAccept(sock), (m) => this.o.log(m));
+    this.tcp = await listenTcp(this.myKey, this.o.peerPort, (sock, settled) => this.tcpAccept(sock, settled), (m) => this.o.log(m));
     if (!this.tcp || this.closing || this.o.lan === false) return;
     const port = this.tcp.port;
     this.lan = await joinLan({
@@ -622,10 +637,17 @@ export class PeerNode {
     for (const m of await this.identity.members()) for (const a of this.hints.tcp[m.key] ?? []) this.dialTcpTo(m.key, a);
   }
 
-  private tcpAccept(sock: Socket): void {
+  private tcpAccept(sock: Socket, settled: () => void): void {
     const kind = LOCAL_ADDRESS.test(sock.remoteAddress ?? '') ? 'lan' : 'tcp';
-    this.ownOpened(new NoiseSecretStream(false, sock, { keyPair: this.key, keepAlive: 5000 }), kind, () => undefined);
+    const stream = new NoiseSecretStream(false, sock, { keyPair: this.key, keepAlive: 5000 });
+    // Counted, by the listener, until it is let in (0115): said so at its hello (hello).
+    this.settles.set(stream, settled);
+    stream.once('close', () => this.settles.delete(stream));
+    this.ownOpened(stream, kind, () => undefined);
   }
+
+  /** TCP connections not let in yet, and how to tell the listener they are (tcp.ts, 0115). */
+  private readonly settles = new WeakMap<object, () => void>();
 
   /**
    * A connection of this layer's own (local network, TCP, a tunnel): once the
@@ -1313,8 +1335,15 @@ export class PeerNode {
     // So many not let in yet at once (0112): past that, the one waiting longest makes way, as a device that is in is let in
     // at its hello, a moment after connecting.
     if (!this.o.joining) {
-      const waiting = [...this.links.values()].filter((l) => !l.accepted && !l.closed);
-      if (waiting.length >= MAX_UNACCEPTED) waiting[0]!.close();
+      // Not one that has said hello (0115): it is being let in (a join through a server takes a moment); of the rest, from
+      // the address that holds the most places, the one waiting longest.
+      const waiting = [...this.links.values()].filter((l) => !l.accepted && !l.closed && !l.hello);
+      if (waiting.length >= MAX_UNACCEPTED) {
+        const counts = new Map<string, number>();
+        for (const l of waiting) counts.set(addressOf(l.conn), (counts.get(addressOf(l.conn)) ?? 0) + 1);
+        const most = [...counts].sort((a, b) => b[1] - a[1])[0]![0];
+        waiting.find((l) => addressOf(l.conn) === most)?.close();
+      }
     }
     // Not let in a while after connecting (no hello, or none that lets it in): closed, not kept up by keepalives for good;
     // on a server, sooner.
@@ -1608,6 +1637,9 @@ export class PeerNode {
       void this.membersChanged(link).catch((e: Error) => this.logUnlessClosing(e));
     }
     link.accepted = true;
+    // Let in: the listener counts it no longer (0115).
+    this.settles.get(link.conn)?.();
+    this.settles.delete(link.conn);
     link.remote = member.name;
     link.hello = h;
     link.heads = readHeads(h.heads);
@@ -1916,6 +1948,15 @@ export class PeerNode {
   private readonly fetches = new Map<string, Promise<boolean>>();
   /** The disk was found all but full at the last fetch: said once, until there is room again. */
   private lowOnSpace = false;
+  /** Room on the disk, as last looked at before a fetch (0115). */
+  private freeBytes = Infinity;
+  /** The most one fetch may bring (a server's first copy of a workspace more; each after, the usual). */
+  private maxFetchBytes = DEFAULT_FETCH_BYTES;
+
+  /** The most one fetch brings from now on (0115: a server's node, its first copy made, back to the usual). */
+  setMaxFetchBytes(bytes: number): void {
+    this.maxFetchBytes = bytes;
+  }
 
   /**
    * Fetch a paired device's branches into `<its remote>/…`, and the spaces it
@@ -1956,8 +1997,26 @@ export class PeerNode {
    */
   private async fetchNow(remote: string, refspecs: string[], progress?: (said: string) => void): Promise<boolean> {
     if (this.closing) return false;
-    // Not where the disk is all but full (0112): a device sending more and more would fill it, refused or not.
-    const free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    // Not where the disk is all but full (0112): a device sending more and more would fill it, refused or not. While
+    // room is short, one fetch at a time in this process (0115), each limited to the room left: else several, each seeing
+    // the same room, would fill it between them.
+    let free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    let release: (() => void) | null = null;
+    if (free < LOW_FREE_BYTES) {
+      const before = fetchTurn;
+      fetchTurn = new Promise<void>((r) => (release = r));
+      await before;
+      free = await statfs(this.o.dir).then((f) => f.bavail * f.bsize, () => Infinity);
+    }
+    try {
+      return await this.fetchWithin(remote, refspecs, free, progress);
+    } finally {
+      (release as (() => void) | null)?.();
+    }
+  }
+
+  private async fetchWithin(remote: string, refspecs: string[], free: number, progress?: (said: string) => void): Promise<boolean> {
+    this.freeBytes = free;
     if (free < MIN_FREE_BYTES) {
       if (!this.lowOnSpace) this.o.log(`peers: not fetching from ${remote}: less than 1 GB is free on this disk`);
       this.lowOnSpace = true;

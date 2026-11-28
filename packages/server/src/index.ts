@@ -15,9 +15,10 @@
 // - where it is reached (`server.json`: its address and access code, readable by
 //   whoever runs it alone), for those commands to ask it.
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
-import { homedir } from 'node:os';
+import { homedir, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { standardFeatures } from '@kuraa/features';
 import { standardRunComponents } from '@kuraa/run-components';
@@ -57,6 +58,8 @@ export interface ServerOptions {
   bootstrap?: PeerOptions['bootstrap'];
   relays?: string[];
   log?: (m: string) => void;
+  /** How long it keeps its copy of a workspace it was taken out of, in days (0115: a week by default). */
+  keepRemovedDays?: number;
   /** The release it runs, and how it updates itself: said in server.json, for `server status` (0112). */
   version?: string | null;
   updates?: 'off' | 'compatible' | 'all';
@@ -118,6 +121,7 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
   try {
     hub = await startHub({
     server: true,
+    ...(o.keepRemovedDays !== undefined ? { keepRemovedMs: o.keepRemovedDays * 24 * 3600_000 } : {}),
     // Each workspace's device key, apart from its folder: a join tried again is the same device (0099).
     deviceKeyFor: (workspace) => {
       if (!/^[0-9a-f]{16,64}$/.test(workspace)) throw new Error('Not a workspace id');
@@ -167,6 +171,14 @@ export async function startServer(o: ServerOptions = {}): Promise<RunningServer>
 const heldHere = new Set<string>();
 
 /** Whether a process is running (one that has gone: no). */
+/** When this computer started, in ms since 1970 (to a second or so: it is said by its uptime). */
+function bootedAt(): number {
+  return Math.round((Date.now() - uptime() * 1000) / 1000) * 1000;
+}
+
+/** Another server holds the folder (0115): a refusal, not a version that failed to start (selfupdate.ts counts none). */
+export class LockHeld extends Error {}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -185,18 +197,23 @@ async function lockFolder(data: string): Promise<() => Promise<void>> {
   const file = join(data, 'server.lock');
   // This process's own: a lock naming it is held, not left over, where it holds it (a second server in one process).
   if (heldHere.has(file)) throw new Error(`Another server is running from ${data} (this process)`);
+  // With when this computer started (0115): a lock left by a server before a restart of the computer names a process
+  // whose number another may have now, and is not held.
+  const booted = bootedAt();
   for (let tries = 0; ; tries++) {
     try {
-      await writeFile(file, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+      await writeFile(file, `${process.pid} ${booted}\n`, { flag: 'wx', mode: 0o600 });
       heldHere.add(file);
       return async () => {
         heldHere.delete(file);
-        if (Number((await readFile(file, 'utf8').catch(() => '')).trim()) === process.pid) await rm(file, { force: true });
+        if (Number((await readFile(file, 'utf8').catch(() => '')).trim().split(' ')[0]) === process.pid) await rm(file, { force: true });
       };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries > 2) throw e;
-      const pid = Number((await readFile(file, 'utf8').catch(() => '')).trim());
-      if (pid && pid !== process.pid && alive(pid)) throw new Error(`Another server is running from ${data} (process ${pid}): stop it first (as a service: systemctl --user stop kuraa)`, { cause: e });
+      const [pidText, bootText] = (await readFile(file, 'utf8').catch(() => '')).trim().split(' ');
+      const pid = Number(pidText);
+      const sameBoot = !bootText || Math.abs(Number(bootText) - booted) < 120_000;
+      if (pid && pid !== process.pid && sameBoot && alive(pid)) throw new LockHeld(`Another server is running from ${data} (process ${pid}): stop it first (as a service: systemctl --user stop kuraa)`, { cause: e });
       await rm(file, { force: true });
     }
   }
@@ -278,7 +295,7 @@ export interface ServerWorkspace {
   path: string;
   in: boolean;
   /** Out (0112): taken out by its owner, or its key blocked; its copy here goes within the minute. */
-  out?: 'removed' | 'blocked';
+  out?: 'removed' | 'blocked' | 'retired';
   opening?: boolean;
   error?: string;
 }
@@ -353,7 +370,9 @@ export async function statusServer(data = defaultServerData()): Promise<ServerSt
 export async function retireServerKey(data = defaultServerData()): Promise<{ id: string; name: string; dropped: boolean; heardBy: number; error?: string }[]> {
   const a = await readAddress(data, { waitMs: STARTING_MS });
   const { workspaces } = await ask<{ workspaces: { id: string; name: string; dropped: boolean; heardBy: number; error?: string }[] }>(a, '/hub/api/server/retire-key', { method: 'POST', body: {} });
-  await writeFile(join(resolve(data), 'retired-key'), `${a.key}\n`, { mode: 0o600 });
+  // What the second step goes by (0115): its key, and the workspaces where its drop did not count, or no member heard it.
+  const note = { key: a.key, failed: workspaces.filter((w) => !w.dropped).map((w) => w.name), unheard: workspaces.filter((w) => w.dropped && !w.heardBy).map((w) => w.name) };
+  await writeFile(join(resolve(data), 'retired-key'), `${JSON.stringify(note)}\n`, { mode: 0o600 });
   return workspaces;
 }
 
@@ -367,18 +386,28 @@ export async function retireServerKey(data = defaultServerData()): Promise<{ id:
  */
 export async function startAfresh(data = defaultServerData(), o: { force?: boolean } = {}): Promise<string[]> {
   const dir = resolve(data);
+  // A server's folder (0115), not another given by mistake: its key, or its workspaces.
+  if (!existsSync(join(dir, 'signing.json')) && !existsSync(join(dir, 'workspaces')) && !existsSync(join(dir, 'devices'))) throw new Error(`${dir} is not a server's folder`);
   const unlock = await lockFolder(dir);
   try {
-    const key = (await serverKey(dir)).publicKey.toString('hex');
-    const retired = (await readFile(join(dir, 'retired-key'), 'utf8').catch(() => '')).trim();
-    if (retired !== key && !o.force) throw new Error('This server has not given up its key in its workspaces: start it, run new-key while it runs, then again once it is stopped (or --force, and ask each owner to block it)');
+    // Its key as it is: read, never made (serverKey would make one where there is none).
+    const key = existsSync(join(dir, 'signing.json')) ? (await serverKey(dir)).publicKey.toString('hex') : null;
+    const note = await readFile(join(dir, 'retired-key'), 'utf8').then((t) => JSON.parse(t) as { key?: string; failed?: string[]; unheard?: string[] }, () => null);
+    if (!o.force) {
+      if (!key || note?.key !== key) throw new Error('This server has not given up its key in its workspaces: start it, run new-key while it runs, then again once it is stopped (or --force, and ask each owner to block it)');
+      if (note.failed?.length) throw new Error(`Its key was not blocked in ${note.failed.join(', ')}: start it, and run new-key again while it runs (or --force, and ask those owners to block it)`);
+      if (note.unheard?.length) throw new Error(`No member was online to hear its key was given up in ${note.unheard.join(', ')}: start it, wait until one is, and run new-key again while it runs (or --force: its owner then blocks it)`);
+    }
     const registry = join(dir, 'workspaces', '.kuraa-workspaces.json');
     const held = await readFile(registry, 'utf8').then((t) => (JSON.parse(t) as { name?: string }[]).map((w) => String(w.name ?? '')), () => [] as string[]);
-    const aside = join(dir, 'keys-retired');
-    await mkdir(aside, { recursive: true, mode: 0o700 });
-    await rename(join(dir, 'signing.json'), join(aside, `signing-${key.slice(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
-    await rm(join(dir, 'devices'), { recursive: true, force: true });
+    // The copies first, the key last (0115): stopped halfway, the next start is still the old server, which holds less.
     await rm(join(dir, 'workspaces'), { recursive: true, force: true });
+    await rm(join(dir, 'devices'), { recursive: true, force: true });
+    if (key) {
+      const aside = join(dir, 'keys-retired');
+      await mkdir(aside, { recursive: true, mode: 0o700 });
+      await rename(join(dir, 'signing.json'), join(aside, `signing-${key.slice(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    }
     await rm(join(dir, 'retired-key'), { force: true });
     return held;
   } finally {

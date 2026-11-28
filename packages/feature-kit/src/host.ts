@@ -179,6 +179,13 @@ export interface FeatureContext {
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
   /**
+   * The type of a file, as this host opens it (among the formats it has on),
+   * or undefined: what it is, asked of its type rather than guessed from its
+   * name (0119): whether it has words (`prose`), header fields (`header`), or
+   * is Markdown a book is made of (`markdown`).
+   */
+  typeOf(path: string): DocumentType | undefined;
+  /**
    * A file (by its name, for its kind: report.docx) converted into Markdown by
    * whatever here converts its kind (0116: pandoc for Word, OpenDocument, RTF,
    * EPUB, HTML), given nothing of the workspace: pandoc's Markdown and the

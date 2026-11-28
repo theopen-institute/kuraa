@@ -92,7 +92,7 @@ export const compileFeature = defineFeature({
           const files = await ctx.list();
           const isFolder = files.some((p) => p.startsWith(`${path}/`));
           if (!isFolder && !files.includes(path)) throw new Refused(404, `No ${path}`);
-          if (!isFolder && !isBookDocument(path)) throw new Refused(400, `${path} is not a document a book is made of`);
+          if (!isFolder && !isBookDocument(ctx.typeOf(path))) throw new Refused(400, `${path} is not a document a book is made of`);
           const all = await folders(ctx);
           const folder = folderOf(path);
           await save(withIncluded(all.get(folder) ?? empty(folder), nameOf(path), body.include), req.person);

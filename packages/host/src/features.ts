@@ -43,6 +43,8 @@ export interface FeaturePort {
   canWrite(path: string): Promise<boolean>;
   /** The workspace's files this device holds. */
   list(): Promise<string[]>;
+  /** A file's type, as this host opens it. */
+  typeFor(path: string): DocumentType | undefined;
   /** Tell the clients of rooms: those of `path`, or every one. */
   tell(feature: string, message: Json, path: string | null): void;
   /** Whether a document's room is open here (its companions are then the room's to write). */
@@ -562,6 +564,7 @@ export class HostFeatures {
         });
       },
       list: () => this.port.list(),
+      typeOf: (path) => this.port.typeFor(path),
       convert: (name, bytes) => this.port.convert(name, bytes),
       // New files only, never one it would overwrite; checked, cleaned and committed by the host (0116).
       create: (files, o) => this.port.create(files, { message: o.message, by: o.by ?? null }),

@@ -9,7 +9,10 @@
 //   status: First draft
 //   keywords: [harbour, night]
 //   ---
-import { parseDocument } from 'yaml';
+//
+// A document's type reads its header (DocumentType.header, 0119): YAML front
+// matter, for Pandoc's Markdown and R Markdown.
+import type { DocumentType } from '@kuraa/kernel';
 
 export interface Details {
   synopsis: string | null;
@@ -23,11 +26,8 @@ export const DETAIL_KEYS = ['synopsis', 'label', 'status', 'keywords'] as const;
 /** The statuses offered where the workspace names none, as Scrivener's are. */
 export const DEFAULT_STATUSES = ['To do', 'First draft', 'Revised draft', 'Final draft', 'Done'];
 
-/** The documents that have details: those with a header. */
-const DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
-export const hasDetails = (path: string): boolean => DOCUMENT.test(path);
-
-const HEADER = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
+/** The documents that have details: those whose type has header fields (0119). */
+export const hasDetails = (type: { header?: unknown } | undefined): boolean => !!type?.header;
 
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null);
 
@@ -42,16 +42,9 @@ export function detailsOf(fields: (key: string) => unknown): Details {
   return { synopsis: text(fields('synopsis')), label: text(fields('label')), status: text(fields('status')), keywords: keywordsOf(fields('keywords')) };
 }
 
-/** A document's details from its file's text (none where its header does not parse). */
-export function detailsOfText(source: string): Details {
-  const m = HEADER.exec(source);
-  let fields: Record<string, unknown> = {};
-  if (m) {
-    try {
-      const v = parseDocument(m[1]!).toJS() as unknown;
-      if (v && typeof v === 'object') fields = v as Record<string, unknown>;
-    } catch { /* a header that does not parse: no details */ }
-  }
+/** A document's details from its file's text, as its type reads its header (none where it has none, or it cannot be read). */
+export function detailsOfText(type: DocumentType | undefined, source: string): Details {
+  const fields = type?.header?.read(source) ?? {};
   return detailsOf((k) => fields[k]);
 }
 

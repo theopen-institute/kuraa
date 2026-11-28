@@ -10,15 +10,17 @@
 // is asked to be left out (a document, or a folder with all in it) is. A
 // folder may give its documents no titles: they run on, a separator between.
 
-/** The documents a book is made of: pandoc's Markdown and Quarto's (R Markdown's chunks are not run when compiled, and show as code). */
-const BOOK_DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
-export const isBookDocument = (path: string): boolean => BOOK_DOCUMENT.test(path);
-
 /** A file in the workspace as the tree knows it. */
 export interface CompileEntry {
   path: string;
   /** A document's title (null: none); absent for other files. */
   title?: string | null;
+  /**
+   * A document a book is made of: its type's text is pandoc's Markdown
+   * (DocumentType.markdown, 0119), as Pandoc markdown's and R Markdown's are
+   * (R Markdown's chunks are not run when compiled, and show as code).
+   */
+  book?: boolean;
 }
 
 /** What a book is made of, in order: folders' headings, and documents, each at its level (1: `#`). */
@@ -54,13 +56,13 @@ export function bookItems(folder: string, entries: readonly CompileEntry[], orde
     }
     // As the tree sorts them (packages/files/src/tree.ts): folders by name, then files by title, numbers in order.
     files.sort((a, b) => shownName(a).localeCompare(shownName(b), undefined, { numeric: true, sensitivity: 'base' }) || a.path.localeCompare(b.path));
-    const byName = [...[...folders].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, folder: true })), ...files.map((f) => ({ name: nameOf(f.path), folder: false }))];
+    const byName = [...[...folders].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, folder: true, book: false })), ...files.map((f) => ({ name: nameOf(f.path), folder: false, book: !!f.book }))];
     const order = orders.get(dir);
     const shown = order ? [...order.flatMap((n) => byName.filter((c) => c.name === n)), ...byName.filter((c) => !order.includes(c.name))] : byName;
     return shown.flatMap((c): BookItem[] => {
       const path = prefix + c.name;
       if (left(path) || (c.folder && (c.name === '.kuraa' || c.name === '.git'))) return [];
-      if (!c.folder) return isBookDocument(path) ? [{ kind: 'document', path, level }] : [];
+      if (!c.folder) return c.book ? [{ kind: 'document', path, level }] : [];
       const headed = !noHeading.includes(path);
       const inside = walk(path, headed ? level + 1 : level);
       if (!inside.some((i) => i.kind === 'document')) return [];

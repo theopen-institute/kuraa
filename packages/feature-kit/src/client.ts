@@ -271,6 +271,13 @@ export interface FeatureClientContext {
   moveFile(from: string, to: string): Promise<void>;
   /** Its marks on files changed (0093): navigation asks for them again. */
   marksChanged(): void;
+  /**
+   * The type of a workspace file, as the client opens it (among the formats
+   * the host has on), or undefined: what it is, asked of its type rather than
+   * guessed from its name (0119): whether it has words (`prose`), header
+   * fields (`header`), or is Markdown a book is made of (`markdown`).
+   */
+  typeOf(path: string): DocumentType | undefined;
 }
 
 /** A feature's mark on a file or folder in navigation (0093). */

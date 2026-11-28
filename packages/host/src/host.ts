@@ -5,7 +5,7 @@ import { closeSync, constants as fsConstants, existsSync, lstatSync, openSync, r
 import { lstat, mkdir, open, readdir, readFile, rm, rmdir, stat, writeFile as writeFileAsync } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { cleanImage, documentOfFiles, filesFolderOf, markdownWords, movedBy, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
+import { cleanImage, documentOfFiles, filesFolderOf, movedBy, proseWords, rewriteReferences, TypeRegistry, type DocumentType, type ParsedDocument } from '@kuraa/kernel';
 import { standardTypes } from '@kuraa/formats';
 import { Relay, decodeDoc, encodeDoc, featuresOfState, vectorOf, type ChunkRef, type FeatureView, type PresenceUser, type RoomMessage, type RoomSeed, type RunRecord } from '@kuraa/session/server';
 import { COMPANIONS_FILE, FEATURES_FILE, type ConvertedFile, type HostFeature } from '@kuraa/feature-kit/host';
@@ -27,9 +27,8 @@ import type { Peers, PeerOptions } from './peers/peers.js';
 import { POLICY_TRAILER, REFUSED_TRAILER, trailers, type GateResult } from './peers/gate.js';
 import { Spaces, spaceRef } from './spaces.js';
 import { madeFrom, missingFrom, putTogether, zipOf, type MadeFrom } from './madefrom.js';
-import { bookItems, joinBook, type BookPart } from './compile.js';
+import { bookItems, joinBook, type BookPart, type CompileEntry } from './compile.js';
 import { readOrders } from './order.js';
-import { withHeaderFields } from './header.js';
 import { WordLog, type DayWords, type Uncommitted } from './wordlog.js';
 import type { Sync, SyncSession } from '@kuraa/run-kit';
 
@@ -2751,19 +2750,21 @@ export class Host {
    * people editing it see the change, as anyone's edit. Call inside serial().
    */
   /**
-   * Set fields of a Markdown document's header (0096: a corkboard's synopsis,
-   * an outline's status), open or not: written to the file, and where it is
-   * open, the room takes it (everyone sees it at once). Not committed here.
+   * Set fields of a document's header (0096: a corkboard's synopsis, an
+   * outline's status), as its type writes them (its `header`, 0119), open or
+   * not: written to the file, and where it is open, the room takes it
+   * (everyone sees it at once). Not committed here.
    */
   async setHeader(path: string, fields: Record<string, unknown>): Promise<boolean> {
-    if (!/\.(md|markdown|qmd|rmd)$/i.test(path) || !this.typeFor(path)) throw new HttpError(400, `${path} is not a document with a header`);
+    const header = this.typeFor(path)?.header;
+    if (!header) throw new HttpError(400, `${path} is not a document with a header`);
     const rec = this.records.get(`${await this.git.branch()}:${path}`);
     if (rec) await this.flushNow(rec);
     const abs = this.resolvePath(path);
     const text = await this.readText(abs, path);
     let next: string;
     try {
-      next = withHeaderFields(text, fields);
+      next = header.write(text, fields);
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
@@ -2900,15 +2901,23 @@ export class Host {
    * committed yet, credited to whoever typed it.
    */
   async wordsByDay(since: string): Promise<DayWords[]> {
-    this.wordLog ??= new WordLog({ git: this.git, isCompanion: (p) => this.belongsTo(p) !== null });
+    this.wordLog ??= new WordLog({
+      git: this.git,
+      proseOf: (p) => {
+        const type = this.belongsTo(p) === null ? this.typeFor(p) : undefined;
+        return type?.prose ? (text) => type.prose!(text) : null;
+      },
+    });
     const branch = await this.git.branch();
     const uncommitted: Uncommitted[] = [];
     for (const rec of this.records.values()) {
-      if (rec.branch !== branch || !rec.contributors.size || !/\.(md|markdown|qmd|rmd)$/i.test(rec.path)) continue;
+      const type = rec.type;
+      if (rec.branch !== branch || !rec.contributors.size || !type.prose) continue;
+      const prose = (text: string) => type.prose!(text);
       const before = await this.git.run(['show', `HEAD:${rec.path}`], { allowFail: true });
       uncommitted.push({
-        before: before.code === 0 ? before.stdout : null,
-        after: rec.type.serialize(this.current(rec), rec.previous),
+        before: before.code === 0 ? prose(before.stdout) : null,
+        after: prose(rec.type.serialize(this.current(rec), rec.previous)),
         people: [...rec.contributors.values()].map((u) => ({ name: u.name, email: u.email })),
       });
     }
@@ -2937,15 +2946,20 @@ export class Host {
    */
   async bookContents(folder: string): Promise<{ kind: 'folder' | 'document'; path: string; title: string; depth: number; words?: number }[]> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
+    const entries = await this.bookEntries(paths);
     const titles = new Map(entries.map((e) => [e.path, e.title ?? null]));
     const out = [];
     for (const i of bookItems(folder, entries, await readOrders(this, paths), [])) {
       // A document's words (0094), as its file has them.
-      const words = i.kind === 'document' ? markdownWords(await readFile(this.resolvePath(i.path), 'utf8').catch(() => '')) : undefined;
+      const words = i.kind === 'document' ? proseWords(this.typeFor(i.path), await readFile(this.resolvePath(i.path), 'utf8').catch(() => '')) ?? undefined : undefined;
       out.push({ kind: i.kind, path: i.path, title: i.kind === 'folder' ? i.name : titles.get(i.path) || basename(i.path), depth: i.level, ...(words !== undefined ? { words } : {}) });
     }
     return out;
+  }
+
+  /** The workspace's files as a book sees them: not those kept beside documents; each saying whether it is a document a book is made of (its type's text is Markdown, 0119). */
+  private async bookEntries(paths: string[]): Promise<CompileEntry[]> {
+    return (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path)).map((e) => ({ ...e, book: !!this.typeFor(e.path)?.markdown }));
   }
 
   /**
@@ -2956,7 +2970,7 @@ export class Host {
    */
   async compileFolder(folder: string, o: CompileOptions, format: RenderFormat = 'html'): Promise<CompiledBook | string> {
     const paths = await this.listFiles();
-    const entries = (await this.treeEntries(paths, await this.git.branch())).filter((e) => !this.belongsTo(e.path));
+    const entries = await this.bookEntries(paths);
     const orders = await readOrders(this, paths);
     const items = bookItems(folder, entries, orders, o.exclude, o.noHeading);
     const docs = items.flatMap((i) => (i.kind === 'document' ? [i.path] : []));
@@ -3151,6 +3165,7 @@ export class Host {
       spaceOf: (p) => this.spaceOf(p),
       canWrite: async (p) => (this.peers ? (await this.peers.access(p)).canWrite : true),
       list: () => this.listFiles(),
+      typeFor: (p) => this.typeFor(p),
       tell: (feature, message, path) => {
         const m: RoomMessage = { type: 'feature', feature, message, path };
         if (path) this.broadcastPath(path, m);

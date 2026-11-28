@@ -8,10 +8,7 @@
 //   its routes   GET cards?folder=
 import { defineFeature, type FeatureContext, type Json } from '@kuraa/feature-kit/host';
 import { detailsOfText } from '@kuraa/details/details';
-import { markdownWords } from '@kuraa/kernel';
-
-const DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
-const HEADER = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)/;
+import { proseWords } from '@kuraa/kernel';
 
 /** A document's card: its details, words and target. */
 export interface DocumentCard {
@@ -28,10 +25,9 @@ export interface FolderCard {
   words: number;
 }
 
-/** A document's target, as its header says it (target-words, 0094). */
-function targetOf(text: string): number | null {
-  const m = /^target-words:\s*["']?([\d,_ ]+)["']?\s*$/m.exec(HEADER.exec(text)?.[1] ?? '');
-  const n = m ? Number(m[1]!.replace(/[,_ ]/g, '')) : NaN;
+/** A document's target, as its header's field says it (target-words, 0094): a whole number above nought, or null. */
+function targetOf(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d[\d,_ ]*\s*$/.test(v) ? Number(v.replace(/[,_ ]/g, '')) : NaN;
   return Number.isFinite(n) && n >= 1 ? Math.round(n) : null;
 }
 
@@ -41,14 +37,16 @@ export async function cards(ctx: FeatureContext, folder: string): Promise<{ docu
   const documents: Record<string, DocumentCard> = {};
   const folders: Record<string, FolderCard> = {};
   for (const p of await ctx.list()) {
-    if (!p.startsWith(prefix) || !DOCUMENT.test(p) || ctx.documentOf(p) !== null) continue;
+    // Documents of prose (0119): those whose type says what a reader reads.
+    const type = p.startsWith(prefix) && ctx.documentOf(p) === null ? ctx.typeOf(p) : undefined;
+    if (!type?.prose) continue;
     const rest = p.slice(prefix.length);
     const slash = rest.indexOf('/');
     const text = (await ctx.read(p)) ?? '';
-    const words = markdownWords(text);
+    const words = proseWords(type, text) ?? 0;
     if (slash < 0) {
-      const d = detailsOfText(text);
-      documents[p] = { synopsis: d.synopsis, label: d.label, status: d.status, words, target: targetOf(text) };
+      const d = detailsOfText(type, text);
+      documents[p] = { synopsis: d.synopsis, label: d.label, status: d.status, words, target: targetOf(type.header?.read(text)?.['target-words']) };
     } else {
       const sub = prefix + rest.slice(0, slash);
       const f = folders[sub] ?? { documents: 0, words: 0 };

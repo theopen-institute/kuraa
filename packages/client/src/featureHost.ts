@@ -52,6 +52,8 @@ export interface FeatureHostOptions {
   codeSession?(): CodeSession | null;
   /** A feature's marks on files changed (0093): navigation asks for them again. */
   marksChanged?(): void;
+  /** A workspace file's type, as the client opens it (0119). */
+  typeOf(path: string): DocumentType | undefined;
 }
 
 /** A panel open, and how many times it has been asked for (0089). */
@@ -152,6 +154,7 @@ export function useFeatureHost(o: FeatureHostOptions) {
     keyLabel,
     moveFile: (from, to) => o.moveFile(from, to),
     marksChanged: () => o.marksChanged?.(),
+    typeOf: (p) => o.typeOf(p),
     changed: () => void load(),
   };
   const contexts = new FeatureContexts(app, messages, () => status.value);

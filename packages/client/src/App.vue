@@ -166,6 +166,11 @@ const fh = useFeatureHost({
   codeSession: () => (status.value?.runner ? codeSessionOf(status.value.runner) : null),
   // A feature's marks on files changed (0093): navigation asks for them again.
   marksChanged: () => void marksAsked.value++,
+  // A file's type (0119): as the file list says it, else as its name says it, among the types the host has on.
+  typeOf: (p) => {
+    const id = files.value.find((f) => f.path === p)?.type;
+    return id !== undefined ? (id ? registry.value.get(id) : undefined) : hostRegistry.value.resolve(p);
+  },
 });
 watch(() => status.value?.runner, () => fh.codeChanged());
 const features = fh.features;

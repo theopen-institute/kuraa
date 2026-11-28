@@ -6,7 +6,7 @@ import type { MergeResult, MergeSide } from './merge.js';
 
 export { countMarkers, diff3, matches, mergeLines, mergeWords, wordTokens, type MergeChunk, type MergeResult, type MergeSide } from './merge.js';
 export { alignedSourceMap, sourceMapOf, type SourceMap } from './sourcemap.js';
-export { countWords, markdownWords, wordChange } from './words.js';
+export { countWords, proseWords, wordChange } from './words.js';
 export { documentOfFiles, filesFolderOf, FILES_SUFFIX, movedBy, relativeTarget, rewriteReferences, workspacePath, type Reference } from './references.js';
 export { folderName, pathForTitle, slugify } from './filenames.js';
 export { cleanImage, sniffImage, IMAGE_DETAILS, IMAGE_MIME, LARGE_FILE_BYTES, MAX_IMAGE_BYTES, type CleanedImage, type ImageDetail, type ImageType } from './images.js';
@@ -97,6 +97,25 @@ export interface DocumentType {
    * source files) are known by their filename.
    */
   title?: DocumentTitle;
+  /**
+   * A document of prose: the words a reader reads in a text (not its header,
+   * code, markup, addresses or keys), for counting words the same way
+   * everywhere (`proseWords`, `wordChange`: 0094). Without it, a file of this
+   * type has no words (word counts, targets and the corkboard pass it over: 0119).
+   * Must not throw.
+   */
+  prose?(text: string): string;
+  /**
+   * Its header's fields, read and written by name (0096, 0119): a document's
+   * details, its target, what the corkboard edits. Without it, a file of this
+   * type has no fields to show or set.
+   */
+  header?: DocumentHeaderFields;
+  /**
+   * Its text is pandoc's Markdown with a YAML header (0119), so that documents
+   * of it can be joined into one (a folder compiled into a book: 0093).
+   */
+  markdown?: boolean;
   /** The small icon a file of this type is shown with (in the sidebar); none: a plain mark. */
   icon?(path: string): FileIcon | undefined;
   /**
@@ -147,6 +166,19 @@ export interface DocumentTitle {
   read(text: string): string | null;
   /** The text with this title, the rest kept as it was. Throws if the title cannot be put in (a header that does not parse). */
   write(text: string, title: string): string;
+}
+
+export interface DocumentHeaderFields {
+  /** The fields in a text's header, by name ({} where it has none); null where its header cannot be read as fields. Never throws. */
+  read(text: string): Record<string, unknown> | null;
+  /**
+   * The text with these fields set (undefined, null, '' or [] takes one
+   * away), the rest of the header and the text after it kept as they were. A
+   * header is made where there is none and a field is set; one left with no
+   * fields goes. Throws, in words for people, where the header there cannot be
+   * read as fields, rather than write over it.
+   */
+  write(text: string, fields: Record<string, unknown>): string;
 }
 
 export class TypeRegistry {

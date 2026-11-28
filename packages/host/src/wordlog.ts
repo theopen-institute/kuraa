@@ -1,8 +1,9 @@
 // Words written, by day and by person, from the workspace's history (0094).
 //
 // Each commit that is not a merge is counted on its own: for each document it
-// changed (Markdown, Quarto's, R Markdown; renames followed), the words before
-// and after it (kernel's wordChange): net (how many more) and added (words
+// changed (a file whose type has prose, 0119: Markdown, R Markdown; renames
+// followed), its words before and after it (kernel's wordChange): net (how
+// many more) and added (words
 // written, so a rewrite counts). Merges are passed over: they bring together
 // work already counted in the commits on each side, whichever device made
 // them, so what was written on another device counts on the day it was
@@ -20,8 +21,8 @@ import { join } from 'node:path';
 import { wordChange } from '@kuraa/kernel';
 import type { Git } from './git.js';
 
-const DOCUMENT = /\.(md|markdown|qmd|rmd)$/i;
-const CACHE_VERSION = 1;
+/** 2: documents are those whose type has prose (0119), not those named .md, .markdown, .qmd or .Rmd. */
+const CACHE_VERSION = 2;
 
 export interface WordPerson {
   name: string;
@@ -43,7 +44,7 @@ export interface DayWords {
   people: (WordPerson & { net: number; added: number })[];
 }
 
-/** Changes not committed yet: a document's text at its last commit and now, and who changed it. */
+/** Changes not committed yet: a document's prose (its type's, 0119) at its last commit and now, and who changed it. */
 export interface Uncommitted {
   before: string | null;
   after: string;
@@ -120,8 +121,12 @@ export class WordLog {
 
   constructor(private readonly o: {
     git: Git;
-    /** Files a feature keeps beside documents: not documents. */
-    isCompanion(path: string): boolean;
+    /**
+     * What a reader reads of a file's text, by its type (DocumentType.prose,
+     * 0119); null for a file that is not a document of prose (and for those
+     * kept beside documents: a feature's companions, a document's own files).
+     */
+    proseOf(path: string): ((text: string) => string) | null;
   }) {}
 
   private async cacheFile(): Promise<string> {
@@ -155,11 +160,12 @@ export class WordLog {
     // Every version needed, asked of git at once.
     const asks: string[] = [];
     const plan = todo.map((c) => {
-      const files = (changes.get(c.hash) ?? []).filter(([a, b]) => [a, b].some((p) => p && DOCUMENT.test(p) && !this.o.isCompanion(p)));
-      return files.map(([from, to]) => {
-        const before = from ? asks.push(`${c.hash}^:${from}`) - 1 : -1;
-        const after = to ? asks.push(`${c.hash}:${to}`) - 1 : -1;
-        return { before, after };
+      const files = (changes.get(c.hash) ?? []).map(([a, b]) => [a ? this.o.proseOf(a) : null, b ? this.o.proseOf(b) : null, a, b] as const).filter(([pa, pb]) => pa || pb);
+      // A side whose type has no prose (renamed from a text file, say) counts as nothing there.
+      return files.map(([proseBefore, proseAfter, from, to]) => {
+        const before = from && proseBefore ? asks.push(`${c.hash}^:${from}`) - 1 : -1;
+        const after = to && proseAfter ? asks.push(`${c.hash}:${to}`) - 1 : -1;
+        return { before, after, proseBefore, proseAfter };
       });
     });
     const texts = asks.length ? parseBatch((await this.o.git.run(['cat-file', '--batch'], { input: asks.join('\n') + '\n', allowFail: true })).bytes, asks.length) : [];
@@ -167,7 +173,9 @@ export class WordLog {
       let net = 0;
       let added = 0;
       for (const f of plan[i]!) {
-        const w = wordChange(f.before >= 0 ? texts[f.before] ?? null : null, f.after >= 0 ? texts[f.after] ?? null : null);
+        const was = f.before >= 0 ? texts[f.before] ?? null : null;
+        const now = f.after >= 0 ? texts[f.after] ?? null : null;
+        const w = wordChange(was === null ? null : f.proseBefore!(was), now === null ? null : f.proseAfter!(now));
         net += w.net;
         added += w.added;
       }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// New file…, from a menu (＋'s, a folder's: 0114's revision of 0097): its kind
+// New file…, from a menu (＋'s, a folder's: 0116's revision of 0097): its kind
 // chosen first. A document (Markdown, R Markdown) is asked for its title, and
 // its filename is made from that (./filenames.ts); a text or source file is
 // asked for its filename, whose extension and type follow each other.

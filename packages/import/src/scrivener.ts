@@ -1,4 +1,4 @@
-// A Scrivener project (2 or 3) made into a folder (0114). Its binder is its
+// A Scrivener project (2 or 3) made into a folder (0116). Its binder is its
 // structure: folders and documents in the binder's order; a document with
 // documents under it a folder, its own text first, untitled (the folder's name
 // is its heading in a book). Each document's synopsis, label, status and

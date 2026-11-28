@@ -180,13 +180,13 @@ export interface FeatureContext {
   list(): Promise<string[]>;
   /**
    * A file (by its name, for its kind: report.docx) converted into Markdown by
-   * whatever here converts its kind (0114: pandoc for Word, OpenDocument, RTF,
+   * whatever here converts its kind (0116: pandoc for Word, OpenDocument, RTF,
    * EPUB, HTML), given nothing of the workspace: pandoc's Markdown and the
    * media it held, by the names the Markdown gives them; or why not.
    */
   convert(name: string, bytes: Uint8Array): Promise<ConvertedFile>;
   /**
-   * New files, all or none, committed together (0114: importing): documents,
+   * New files, all or none, committed together (0116: importing): documents,
    * folders' orders, images and other files, `text` or `bytes`. Each must be
    * new (nothing is overwritten) and somewhere this host's person may write;
    * an image is kept without its details (0108), one whose details could not

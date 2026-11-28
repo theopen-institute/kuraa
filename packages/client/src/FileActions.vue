@@ -305,7 +305,7 @@ function menuItems(path: string, plus = false): ContextItem[] {
 
 /** The menu for a file, a folder (ending in `/`) or the top level (''), at a point. */
 function fileMenu(path: string, at: { x: number; y: number }) {
-  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once), and what features add for it (as the folder `/`: 0114).
+  // The top level's: what the views add to ＋ too (0097: ＋ itself makes a document at once), and what features add for it (as the folder `/`: 0116).
   const extra = path === '' ? topItems() : [];
   menu.value = { x: at.x, y: at.y, items: [...menuItems(path), ...extra] };
 }

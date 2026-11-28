@@ -49,9 +49,9 @@ export interface FeaturePort {
   roomOpen(path: string): boolean;
   /** This host's person: their identity ID, whose own files it writes; null until there is one. */
   person(): Promise<string | null>;
-  /** A file converted into Markdown by a renderer that converts its kind (0114). */
+  /** A file converted into Markdown by a renderer that converts its kind (0116). */
   convert(name: string, bytes: Uint8Array): Promise<ConvertedFile>;
-  /** New files, all or none, committed together (0114). */
+  /** New files, all or none, committed together (0116). */
   create(files: NewFile[], o: { message: string; by?: Person | null }): Promise<{ created: string[]; skipped: { path: string; why: string }[] }>;
 }
 
@@ -563,7 +563,7 @@ export class HostFeatures {
       },
       list: () => this.port.list(),
       convert: (name, bytes) => this.port.convert(name, bytes),
-      // New files only, never one it would overwrite; checked, cleaned and committed by the host (0114).
+      // New files only, never one it would overwrite; checked, cleaned and committed by the host (0116).
       create: (files, o) => this.port.create(files, { message: o.message, by: o.by ?? null }),
       me: () => this.me,
       companionOf: (doc, o) => ownFile(doc, o?.suffix ?? f.room?.companion ?? f.companions?.[0] ?? `.${f.id}`, o?.person ?? this.me ?? '', o?.extension ?? f.room?.extension ?? '.json'),

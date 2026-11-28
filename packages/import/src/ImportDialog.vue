@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Import's dialog (0114): what to import, dropped or chosen; for a Word
+// Import's dialog (0116): what to import, dropped or chosen; for a Word
 // document, where to split it; then sent, a part at a time, and made into a
 // folder by the host half, which says what it made and what it could not bring.
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';

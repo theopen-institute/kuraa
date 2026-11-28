@@ -9,7 +9,7 @@
 //
 // Listening only on this computer (the default), whoever has the access code is
 // its owner (decision 0047): Preferences, Open a folder…, their identity and the
-// online copy are in the app. With --host naming a network address, they are not.
+// personal backup are in the app. With --host naming a network address, they are not.
 //
 // The owner's settings (settings.ts; Preferences in the app) can also be given as
 // flags, which win over them for as long as the host runs:
@@ -27,7 +27,7 @@
 //                                              networks that block UDP; told to members, and put in invite links
 //                 [--dht-port N]               its DHT node on a fixed port, for members to start from
 //                 [--no-serve-dht]             never serve the public DHT (a public address does, by default)
-//                 (see peers/cli.ts for invite, join, devices, online, fork)
+//                 (see peers/cli.ts for invite, join, devices, backup, fork)
 //   saving:       [--flush-ms N] [--commit-ms N]
 //   updating:     [--auto-update]   a release (@kuraa/server, release.ts) updates itself and restarts (0052);
 //                                   one that changes how devices sync, once a device of its runs it (0112)
@@ -58,7 +58,7 @@ if (PEER_COMMANDS.includes(process.argv[2] ?? '')) {
 // Flags that are gone (decision 0047): what they turned on now follows from where the server listens.
 const GONE: Record<string, string> = {
   '--manage-person': 'your identity is managed from the app whenever the host listens only on this computer',
-  '--manage-online': 'the online copy is managed from the app whenever the host listens only on this computer',
+  '--manage-online': 'the personal backup is managed from the app whenever the host listens only on this computer',
   '--allow-invites': 'people may always invite others from the app',
 };
 for (const arg of process.argv.slice(2)) {

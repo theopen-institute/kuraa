@@ -1,7 +1,8 @@
-// Online copies (docs/decisions/0039-online-copy.md, a component since 0059):
-// plain git servers (GitHub, GitLab, any git host, or a folder) that this
-// workspace keeps a copy on, so devices that cannot reach each other directly
-// still meet there.
+// Personal backups (docs/decisions/0039-online-copy.md, a component since 0059,
+// a person's own since 0115): plain git servers (GitHub, GitLab, any git host,
+// or a folder) that one person keeps a copy of this workspace on, so their
+// devices that cannot reach each other directly still meet there. What comes in
+// from one is judged as work from one of their devices (the host's bringIn).
 //
 // - Each save is pushed to it (a while after the last), and so is everything
 //   at start.

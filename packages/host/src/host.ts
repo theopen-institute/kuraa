@@ -2616,7 +2616,11 @@ export class Host {
     this.log(`committed ${commit.slice(0, 7)} ${message.split('\n')[0]}`);
   }
 
-  /** Bring an online copy's branches in, as fetched (SyncContext.bringIn): what the merge into the open branch kept, to say. */
+  /**
+   * Bring a personal backup's branches in, as fetched (SyncContext.bringIn): what
+   * the merge into the open branch kept, to say. A backup is its person's (0115):
+   * what it holds is judged as work from one of their devices, this one.
+   */
   async bringInFrom(name: string): Promise<string> {
     const prefix = `refs/remotes/${name}/`;
     const refs = (await this.git.out(['for-each-ref', '--format=%(refname)', prefix])).split('\n').filter((r) => r && r !== `${prefix}HEAD`);
@@ -2625,7 +2629,7 @@ export class Host {
       let said = '';
       for (const ref of refs) {
         const branch = ref.slice(prefix.length);
-        const outcome = await this.bringBranch(branch, ref);
+        const outcome = this.peers ? await this.peers.asOwnDevice(() => this.bringBranch(branch, ref)) : await this.bringBranch(branch, ref);
         if (branch === current) said = `/${branch}${describeOutcome(outcome)}`;
       }
       return said;
@@ -3036,7 +3040,7 @@ export class Host {
   }
 
   /**
-   * A file converted into Markdown (0114: importing) by a renderer that
+   * A file converted into Markdown (0116: importing) by a renderer that
    * converts its kind (pandoc.wasm: Word, RTF, …), in a scratch folder of its
    * own, given nothing of the workspace: the Markdown, and the media it held,
    * by the names the Markdown gives them. A refusal, in words, where nothing
@@ -3068,7 +3072,7 @@ export class Host {
   }
 
   /**
-   * New files, all or none, in one commit for each space they go into (0114:
+   * New files, all or none, in one commit for each space they go into (0116:
    * importing): documents, folders' orders, images and other files. Each must
    * be new (nothing overwritten), portable, and somewhere this host's person
    * may write; an image is kept without its details (0108: cleanImage), and

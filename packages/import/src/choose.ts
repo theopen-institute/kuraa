@@ -1,4 +1,4 @@
-// What was chosen to import (0114), made into files with their places: a Word
+// What was chosen to import (0116), made into files with their places: a Word
 // file, as it is; a Scrivener project (a folder, dropped or picked, or a .zip
 // of one) as only what the import reads of it: its project file, its texts,
 // synopses, notes and research files. Not its snapshots, search indexes,

@@ -7,7 +7,7 @@
 //   @kuraa/sidebar       navigation down the left (0087; on by default)
 //   @kuraa/files         the file tree, a navigation view (0087; on by default)
 //   @kuraa/compile       any folder compiled into one book, its documents in the file tree's order (0093)
-//   @kuraa/import        a Word document or a Scrivener project made into a folder of documents (0114)
+//   @kuraa/import        a Word document or a Scrivener project made into a folder of documents (0116)
 //   @kuraa/annotations   comments and coding on documents, kept beside them
 //   @kuraa/preview       the document rendered beside it, and saved (0089; on by default)
 //   @kuraa/search        every file searched (0089; on by default)

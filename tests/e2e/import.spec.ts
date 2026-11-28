@@ -1,4 +1,4 @@
-// Importing (docs/decisions/0114-importing.md): Import… on a folder's menu, a
+// Importing (docs/decisions/0116-importing.md): Import… on a folder's menu, a
 // Word document chosen and made into a folder of chapters, opened; a Scrivener
 // project's folder chosen and made into a folder as its binder is.
 import { expect, test } from '@playwright/test';

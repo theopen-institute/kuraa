@@ -374,7 +374,7 @@ export class Runner {
     return this.o.options?.renderTimeoutMs ?? 10 * 60_000;
   }
 
-  /** A renderer that converts files of a kind (an extension, '.docx') into Markdown (0114), if one is loaded. */
+  /** A renderer that converts files of a kind (an extension, '.docx') into Markdown (0116), if one is loaded. */
   converterFor(ext: string): Renderer | null {
     for (const r of this.o.components.renderers?.values() ?? []) if (r.convert && r.convertsFrom?.includes(ext.toLowerCase())) return r;
     return null;

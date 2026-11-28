@@ -1,4 +1,4 @@
-// A file converted into Markdown by pandoc.wasm (decision 0114: importing):
+// A file converted into Markdown by pandoc.wasm (decision 0116: importing):
 // Word, OpenDocument, RTF, EPUB or HTML in; pandoc's Markdown out, with the
 // images it held extracted beside it. pandoc sees only the render's scratch
 // folder (the file, copied there by the host, and where it writes), as for

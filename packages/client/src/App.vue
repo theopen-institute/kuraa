@@ -305,7 +305,7 @@ const layoutMount = computed(() => {
 
 /** Open a file at a range of its text (a feature asked). */
 async function openAtText(p: string, at?: { from: number; to: number }) {
-  // A file the list does not have yet (just made by a feature: an import, 0114): the list as the host has it, first.
+  // A file the list does not have yet (just made by a feature: an import, 0116): the list as the host has it, first.
   if (!files.value.some((f) => f.path === p)) await refreshTree();
   if (p !== path.value) select(p);
   else view(null);

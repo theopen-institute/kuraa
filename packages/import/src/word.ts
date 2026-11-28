@@ -1,5 +1,5 @@
 // A Word document (or OpenDocument, RTF, EPUB, HTML), as pandoc's Markdown,
-// made into a folder of documents (0114): split where its chapters begin
+// made into a folder of documents (0116): split where its chapters begin
 // (its level-1 headings), or its sections too (level 2, its chapters then
 // folders), or kept whole. A part's heading is its document's title; the
 // headings below it move up a level, as a document's own headings go below its

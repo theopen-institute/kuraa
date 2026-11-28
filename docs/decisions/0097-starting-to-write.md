@@ -1,6 +1,6 @@
 # 0097 · Starting to write
 
-*Since [0114](0114-importing.md):* **New file…** in a menu (＋'s, right-clicked; a folder's; the space below the files) asks the file's kind first, then a document's title or a file's name, and makes it at once; ＋ itself and a folder's own ＋ still make an untitled document as below.
+*Since [0116](0116-importing.md):* **New file…** in a menu (＋'s, right-clicked; a folder's; the space below the files) asks the file's kind first, then a document's title or a file's name, and makes it at once; ＋ itself and a folder's own ＋ still make an untitled document as below.
 
 **Status: built.** Starting a new document is made as plain as it can be: there is always a page to
 write on, and a file is made only when something is written in it. It revises 0086 (＋ a menu of a

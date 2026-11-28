@@ -5,7 +5,7 @@
 // object of the same shape.
 //
 // The words: a document is *saved* (written to its file, and kept in its
-// history as a *version*); a workspace has an *online copy* and other
+// history as a *version*); a workspace has a *personal backup* and other
 // *devices*; the app talks to a *host* with an *access code*. Commit ids,
 // branch names and command-line flags stay behind a "Details" disclosure.
 // Spelling is British, as in the docs.
@@ -75,10 +75,10 @@ export const S = {
     noHost: 'Cannot reach the host',
     devices: (online: number, total: number, servers = 0) => (total === 1 && servers === 1 ? (online ? 'Syncing with the server' : 'The server is not connected') : total === 1 ? (online ? 'Syncing with your other device' : 'Your other device is not connected') : `Syncing with ${online.toLocaleString()} of ${total.toLocaleString()} devices`),
     alone: 'Not shared with other devices',
-    onlineSyncing: 'Online copy: syncing…',
-    onlineFailed: 'Online copy: the last sync did not go through',
-    onlinePending: (n: number) => `Online copy: ${count(n, 'save', 'saves')} not there yet`,
-    onlineUpToDate: 'Online copy: up to date',
+    onlineSyncing: 'Personal backup: syncing…',
+    onlineFailed: 'Personal backup: the last sync did not go through',
+    onlinePending: (n: number) => `Personal backup: ${count(n, 'save', 'saves')} not there yet`,
+    onlineUpToDate: 'Personal backup: up to date',
   },
 
   /** The banners at the top of the page while the connection is lost. */
@@ -963,7 +963,7 @@ export const S = {
     connectionAbout: 'The host this app works with, and the access code it lets you in with.',
     host: 'This computer’s host',
     network: 'Other computers',
-    syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through the online copy where it has one.',
+    syncHint: 'A workspace you invited people to, or joined from an invite link, syncs with the other computers it is on: edits and history go directly between them, and through a server where it has one.',
     advanced: 'Advanced',
     bootstrap: 'Starting points for finding other computers, one per line as address:port. Leave empty to use the public ones; a private network names its own.',
     relays: 'Relays, one key per line, for computers that cannot connect to each other directly (some office, campus and phone networks). The other computers of a workspace relay for each other already; name one here when a workspace is on only two. Whoever runs one gets its key from kuraa-host relay. A relay passes on what it cannot read.',
@@ -1031,7 +1031,7 @@ export const S = {
     settings: 'Workspace settings',
     allSettings: 'Settings…',
     syncNow: 'Sync now',
-    syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not on the online copy yet)`,
+    syncPending: (n: number) => `Sync now (${count(n, 'save', 'saves')} not in your backup yet)`,
     syncing: 'Syncing…',
     /** How syncing a workspace that is not open went, said with its name. */
     syncedOther: (name: string, message: string) => `${quote(name)}: ${message}`,
@@ -1042,10 +1042,10 @@ export const S = {
     accessCode: 'The host did not accept your access code. Check it in Settings.',
     gitBusy: 'Another program is using this folder’s history just now. Try again in a moment.',
     gitOperation: 'Saving is paused while a git operation outside the app (a merge or rebase) is under way in this folder. Finish it there, then try again.',
-    remoteAuth: 'The online copy did not accept your sign-in. Check your SSH key or git sign-in for it.',
-    remoteUnreachable: 'Cannot reach the online copy. Check its address and your connection.',
-    remoteMissing: 'There is no repository at the online copy’s address. Check the address, and that the repository exists.',
-    remoteAhead: 'The online copy has work this computer does not have yet. Sync again to bring it in first.',
+    remoteAuth: 'The backup did not accept your sign-in. Check your SSH key or git sign-in for it.',
+    remoteUnreachable: 'Cannot reach the backup. Check its address and your connection.',
+    remoteMissing: 'There is no repository at the backup’s address. Check the address, and that the repository exists.',
+    remoteAhead: 'The backup has work this computer does not have yet. Sync again to bring it in first.',
     permission: 'This computer did not allow the file to be written. Check the folder’s permissions.',
     diskFull: 'The disk is full. Free some space; your edits are kept meanwhile.',
     notFound: 'That file or folder is not there any more: it may have been moved or deleted elsewhere.',

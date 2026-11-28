@@ -1,4 +1,4 @@
-// Import (docs/decisions/0114-importing.md): a Word document (or OpenDocument,
+// Import (docs/decisions/0116-importing.md): a Word document (or OpenDocument,
 // RTF, EPUB, HTML) or a Scrivener project made into a folder of the
 // workspace. Its host half takes the files the page sends (staged here, in
 // memory, for one import: at most 1 GiB, forgotten after half an hour unused),

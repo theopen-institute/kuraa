@@ -85,7 +85,7 @@ export interface GateContext {
   cacheKey?: string;
   /**
    * Who the device the commits came from is (0099): a person, or a server's key;
-   * null, no one in the workspace; undefined, from no device (the online copy, a
+   * null, no one in the workspace; undefined, from no device (this one's own, a
    * push). A commit no one known signed (unsigned, or by a key that is no one's
    * here) is that device's: else a server would change anything by not signing.
    */

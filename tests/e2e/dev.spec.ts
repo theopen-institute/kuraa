@@ -115,7 +115,7 @@ test('pnpm dev without --dir serves a folder of workspaces, starting with Scratc
     await page.getByTestId('kind:syncs').click();
     await expect(page.getByTestId('component-sync:online')).toContainText('not set up');
     await page.getByTestId('sync-settings:online').click();
-    await expect(page.getByTestId('subpanel-title')).toHaveText('Online copy');
+    await expect(page.getByTestId('subpanel-title')).toHaveText('Personal backup');
     const online = page.getByTestId('subpanel-sync:online').getByTestId('sync:online');
     await online.getByTestId('sync-address').fill(bare);
     await online.getByTestId('sync-add').click();

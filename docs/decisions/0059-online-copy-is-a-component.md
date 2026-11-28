@@ -1,5 +1,7 @@
 # 0059 · The online copy is a component
 
+*Since [0115](0115-a-personal-backup.md): the online copy is a personal backup, one person's, called **Personal backup**.*
+
 *Since [0076](0076-a-quieter-sidebar.md): the online copy is set up from its component, in Settings › Server, in a subpanel of its own.*
 
 *Since [0064](0064-four-kinds-of-settings.md): the online copy is set up in Settings › Workspace.*

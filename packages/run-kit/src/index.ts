@@ -388,7 +388,7 @@ export interface Renderer {
   render(ctx: RendererContext, req: RenderRequest): Promise<RenderResult>;
   /**
    * File extensions it converts into Markdown, lower case, with the dot
-   * (['.docx', '.rtf']): an import (0114). With `convert`.
+   * (['.docx', '.rtf']): an import (0116). With `convert`.
    */
   convertsFrom?: string[];
   /**
@@ -399,7 +399,7 @@ export interface Renderer {
   convert?(ctx: RendererContext, req: ConvertRequest): Promise<ConvertResult>;
 }
 
-/** A file to convert into Markdown (0114). */
+/** A file to convert into Markdown (0116). */
 export interface ConvertRequest {
   /** The file, in the render's scratch folder. */
   input: string;
@@ -558,10 +558,12 @@ export interface ToolParts {
 
 // ---------------------------------------------------------------------------
 // Syncs: places a workspace keeps a copy of itself beyond its own devices, and
-// syncs with (decision 0059). The online copy (sync-git: GitHub, GitLab, any git
-// server) is the first. Unlike engines, environments and tools, a sync runs in
+// syncs with (decision 0059). The personal backup (sync-git: GitHub, GitLab, any
+// git server) is the first. Unlike engines, environments and tools, a sync runs in
 // the host, with the host's rights and its person's git credentials: it is given
-// the workspace's repository, never a process to start.
+// the workspace's repository, never a process to start. A sync is its person's
+// (0115): what it brings in (`bringIn`) is judged as work from one of their own
+// devices, this one, so it is no way for other people to meet.
 
 /** The workspace's git repository, as a sync may use it. */
 export interface SyncGit {
@@ -633,7 +635,7 @@ export interface SyncSession {
 export interface Sync {
   /** Its id, which the API names it by: 'online'. */
   id: string;
-  /** What people call it: 'Online copy'. */
+  /** What people call it: 'Personal backup'. */
   label: string;
   /** A sentence on what it does. */
   description?: string;

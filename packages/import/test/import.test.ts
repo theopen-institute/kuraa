@@ -1,4 +1,4 @@
-// Importing (0114): a Word document split into documents; a Scrivener project's
+// Importing (0116): a Word document split into documents; a Scrivener project's
 // binder, details, compile settings, research and notes; what the plan writes.
 import { describe, expect, it } from 'vitest';
 import { headingsUp, plainTitle, planWord } from '../src/word.js';

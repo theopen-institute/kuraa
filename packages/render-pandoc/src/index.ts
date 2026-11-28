@@ -40,7 +40,7 @@ export const pandocRenderer: Renderer = {
     if (!wasm) return { ok: false, message: NO_PANDOC, log: '' };
     return renderMarkdown(ctx, req, { wasm, typst: typstParts() });
   },
-  // Importing (0114): Word, OpenDocument, RTF, EPUB and HTML into Markdown.
+  // Importing (0116): Word, OpenDocument, RTF, EPUB and HTML into Markdown.
   convertsFrom: Object.keys(READERS),
   async convert(ctx, req) {
     const wasm = pandocWasm();

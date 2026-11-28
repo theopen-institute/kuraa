@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app",
+  "description": "The app's own pages (the starting page, the launcher, the updates window's): what the launcher asks, and the updates window's buttons.",
+  "windows": ["main", "updates"],
+  "permissions": [
+    "allow-open-folder",
+    "allow-join",
+    "allow-home",
+    "allow-leave",
+    "allow-updates-ready",
+    "allow-updates-choose",
+    "allow-updates-size",
+    "allow-closing-saved",
+    "allow-quit-now",
+    "allow-test-result"
+  ]
+}

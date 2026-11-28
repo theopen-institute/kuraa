@@ -1,0 +1,20 @@
+{
+  "name": "@kuraa/tauri",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kuraa's desktop app as a Tauri shell: the web client in the system's webview, the hub in a Node of its own (decision 0127).",
+  "type": "module",
+  "scripts": {
+    "gather": "pnpm --filter @kuraa/web build && node scripts/fetch-node.mjs && node ../desktop/scripts/fetch-git.mjs && node scripts/stage.mjs",
+    "build": "pnpm run gather && node scripts/build.mjs",
+    "build:test": "pnpm run gather && node scripts/build.mjs --test",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@kuraa/client": "workspace:*",
+    "@kuraa/features": "workspace:*",
+    "@kuraa/host": "workspace:*",
+    "@kuraa/run-components": "workspace:*",
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

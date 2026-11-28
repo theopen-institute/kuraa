@@ -353,10 +353,10 @@ export function wordAt(doc: PMNode, pos: number): { word: string; from: number; 
   return { word: text.slice(a, b), from: start + a, to: start + b };
 }
 
-/** A misspelled word's lines for the menu: its suggestions (each replacing it), then Add to Dictionary. None if it is spelled right. */
-function spellingItems(view: EditorView, spelling: Spelling | undefined, at: number): MenuItem[] {
+/** A misspelled word's lines for the menu: its suggestions (each replacing it), then Add to Dictionary. None if it is spelled right, or the spell checker cannot be asked. */
+async function spellingItems(view: EditorView, spelling: Spelling | undefined, at: number): Promise<MenuItem[]> {
   const found = spelling ? wordAt(view.state.doc, at) : null;
-  const suggestions = found ? spelling!.suggest(found.word) : null;
+  const suggestions = found ? await Promise.resolve(spelling!.suggest(found.word)).catch(() => null) : null;
   if (!found || !suggestions) return [];
   const { word, from, to } = found;
   const replace = (by: string) => () => {
@@ -471,7 +471,9 @@ export function tablePlugins(ctx?: EditorContext): Plugin[] {
             if (!cellAt(state)) return false;
             e.preventDefault();
             view.dispatch(view.state.tr.setSelection(sel));
-            openTableMenu(view, e.clientX, e.clientY, spellingItems(view, ctx?.ui.spelling, hit.pos));
+            // Once the spell checker has answered: at once in the Electron app, a moment later in the Tauri app.
+            const { clientX, clientY } = e;
+            void spellingItems(view, ctx?.ui.spelling, hit.pos).then((before) => openTableMenu(view, clientX, clientY, before));
             return true;
           },
         },

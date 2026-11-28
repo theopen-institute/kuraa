@@ -1,0 +1,25 @@
+# What the Tauri app is built and tested with on Linux, on any computer with
+# Podman (scripts/test-linux.mjs): Rust, WebKitGTK and GTK (what Tauri builds
+# against, as the Tauri workflow installs them), Node 24.20.0 (nodejs.org's,
+# checked against its checksum) with pnpm, git, and a display of its own (Xvfb)
+# with a session bus, for the app's window.
+FROM docker.io/library/rust:1-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev \
+    xvfb xauth dbus dbus-x11 rsync git ca-certificates curl xz-utils file \
+  && rm -rf /var/lib/apt/lists/*
+
+ARG NODE=24.20.0
+RUN set -e; \
+  case "$(dpkg --print-architecture)" in \
+    arm64) arch=arm64; sum=5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465f7 ;; \
+    amd64) arch=x64; sum=2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2 ;; \
+    *) echo "no Node for $(dpkg --print-architecture)"; exit 1 ;; \
+  esac; \
+  curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v$NODE/node-v$NODE-linux-$arch.tar.xz"; \
+  echo "$sum  /tmp/node.tar.xz" | sha256sum -c -; \
+  tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \
+  rm /tmp/node.tar.xz; \
+  npm install -g pnpm@12.21.0

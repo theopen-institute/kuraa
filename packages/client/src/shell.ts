@@ -124,8 +124,8 @@ export interface ShellBridge {
   onUpdateReady?(show: (version: string) => void): void;
   /** Save everything, quit, put the update in place and start again. */
   restartToUpdate?(): void;
-  /** A misspelled word's suggestions (perhaps none), or null if it is spelled right: asked at once, of the app's spell checker. */
-  spellingSuggestions?(word: string): string[] | null;
+  /** A misspelled word's suggestions (perhaps none), or null if it is spelled right: of the app's spell checker, at once (Electron's) or once it answers (the system's, in the Tauri app). */
+  spellingSuggestions?(word: string): string[] | null | Promise<string[] | null>;
   /** Add a word to the spell checker's dictionary. */
   addToDictionary?(word: string): void;
 }

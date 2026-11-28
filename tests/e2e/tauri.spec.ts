@@ -70,6 +70,11 @@ async function clickButton(app: Launched, text: string, within = 'body'): Promis
   await app.waitFor(inPage(`const e = byText(${JSON.stringify(`${within} button`)}, ${JSON.stringify(text)}); if (!shown(e)) return false; e.click(); return true;`));
 }
 
+/** A button of the launcher (the app's own page), once it shows: the window says its address as it starts going there. */
+async function clickLauncher(app: Launched, id: string): Promise<void> {
+  await app.waitFor(`(() => { const b = location.protocol === 'tauri:' && document.getElementById(${JSON.stringify(id)}); if (!b) return false; b.click(); return true; })()`);
+}
+
 const textOf = (app: Launched, testid: string) => app.evaluate<string>(inPage(`return $t(${JSON.stringify(testid)})?.textContent ?? '';`));
 
 async function pressEscape(app: Launched): Promise<void> {
@@ -88,6 +93,8 @@ async function openSettings(app: Launched): Promise<void> {
 
 /** Type at the end of the paragraph that has `paragraph` in it, as the system would put typed text in. */
 async function typeAtEnd(app: Launched, paragraph: string, text: string): Promise<void> {
+  // Its text may show a moment after the editor says it is connected.
+  await app.waitFor(inPage(`return [...document.querySelectorAll('[data-testid="editor"] p')].some((p) => p.textContent.includes(${JSON.stringify(paragraph)}));`));
   await app.evaluate(
     inPage(`
       const p = [...document.querySelectorAll('[data-testid="editor"] p')].find((p) => p.textContent.includes(${JSON.stringify(paragraph)}));
@@ -215,7 +222,7 @@ test('opens folders with the system’s dialog: from the page, from the menu, an
     writeFileSync(join(another, 'notes.md'), NOTES);
     await app.answerFolder(another);
     await app.answerConfirm(`Use “${basename(another)}”`, true);
-    await app.evaluate(`document.getElementById('open').click(), true`);
+    await clickLauncher(app, 'open');
     await openNotes(app);
     expect(await app.asked()).toContain(`Use “${basename(another)}” as a workspace?`);
     await app.waitFor(inPage(`return $t('workspace-name')?.textContent.trim() === ${JSON.stringify(basename(another))};`));
@@ -226,12 +233,12 @@ test('opens folders with the system’s dialog: from the page, from the menu, an
     const declined = mkdtempSync(join(tmpdir(), 'kuraa-plain-'));
     await app.answerFolder(declined);
     await app.answerConfirm(`Use “${basename(declined)}”`, false);
-    await app.evaluate(`document.getElementById('open').click(), true`);
+    await clickLauncher(app, 'open');
     await expect.poll(async () => (await app.asked()).includes(`Use “${basename(declined)}” as a workspace?`)).toBe(true);
     expect(existsSync(join(declined, '.git'))).toBe(false);
     expect(await app.url()).toBe('tauri://localhost/launcher.html');
     // Your workspaces, from the launcher: all three.
-    await app.evaluate(`document.getElementById('home').click(), true`);
+    await clickLauncher(app, 'home');
     await click(app, 'workspace-switcher');
     for (const d of [plain, repo, another]) await app.waitFor(inPage(`return document.body.textContent.includes(${JSON.stringify(basename(d))});`));
   } finally {

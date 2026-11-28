@@ -112,12 +112,9 @@ impl Host {
         rx.await.unwrap_or_else(|_| Err("Kuraa's host stopped.".into()))
     }
 
-    /// A line for its log (which it also writes out, as this process's own lines).
-    pub fn log(&self, text: impl Into<String>) {
-        let text = text.into();
-        if self.send(&json!({ "op": "log", "text": text })).is_err() {
-            eprintln!("{text}");
-        }
+    /// A line for its log (which it also writes out, as this process's own lines): false if it has stopped.
+    pub fn log(&self, text: &str) -> bool {
+        self.send(&json!({ "op": "log", "text": text })).is_ok()
     }
 
     /// Ask it to stop (it writes and commits what is pending), and wait for it to; after `wait`, stop it.

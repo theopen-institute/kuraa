@@ -8,7 +8,8 @@
 // Updates: KURAA_UPDATES says where the app looks for newer releases, as for the
 // Electron app: `github:<owner>/<repo>` (each release's latest.json, at
 // releases/latest/download/latest.json) or an https URL (a folder holding
-// latest.json and the updates). Tauri's updater takes only updates signed with the
+// latest.json and the updates; or http://127.0.0.1:<port>, to try updating out).
+// Tauri's updater takes only updates signed with the
 // key whose public half is built in: TAURI_UPDATER_PUBKEY (from `tauri signer
 // generate`), with TAURI_SIGNING_PRIVATE_KEY (and its password,
 // TAURI_SIGNING_PRIVATE_KEY_PASSWORD) to sign this build's. Without KURAA_UPDATES,
@@ -33,15 +34,17 @@ function endpoint() {
   if (!where) return null;
   const gh = /^github:([\w.-]+)\/([\w.-]+)$/.exec(where);
   if (gh) return `https://github.com/${gh[1]}/${gh[2]}/releases/latest/download/latest.json`;
-  if (/^https:\/\//.test(where)) return `${where.replace(/\/$/, '')}/latest.json`;
+  if (/^https:\/\//.test(where) || loopback(where)) return `${where.replace(/\/$/, '')}/latest.json`;
   throw new Error(`KURAA_UPDATES should be github:<owner>/<repo> or an https URL, not "${where}"`);
 }
+/** Plain HTTP only on this computer: for trying updates out (a folder served here). */
+const loopback = (url) => /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url);
 
 const config = {};
-const updates = test ? null : endpoint();
+const updates = endpoint();
 if (updates) {
   if (!env.TAURI_UPDATER_PUBKEY) throw new Error('KURAA_UPDATES names where the app updates from, so TAURI_UPDATER_PUBKEY must name the key its updates are signed with');
-  config.plugins = { updater: { pubkey: env.TAURI_UPDATER_PUBKEY, endpoints: [updates], windows: { installMode: 'passive' } } };
+  config.plugins = { updater: { pubkey: env.TAURI_UPDATER_PUBKEY, endpoints: [updates], windows: { installMode: 'passive' }, ...(loopback(updates) ? { dangerousInsecureTransportProtocol: true } : {}) } };
   // Windows and Linux: Tauri makes the update files itself (signed with TAURI_SIGNING_PRIVATE_KEY). A Mac's are made
   // by package-mac.mjs, after it signs the app.
   if (platform !== 'darwin') config.bundle = { createUpdaterArtifacts: true };

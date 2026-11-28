@@ -1,84 +1,127 @@
-# 0127 · A Tauri shell, prototyped
+# 0127 · A Tauri shell
 
-**Status: a prototype, on macOS (Apple silicon).** `apps/tauri` is the desktop app as a Tauri 2
-shell: the web client in the system's webview (WKWebView), the host as released run by a Node the
-app carries. It is not released and changes nothing in the Electron app, which stays the desktop app
-until the shell does everything it does.
+**Status: built; not yet released.** `apps/tauri` is the desktop app as a Tauri 2 shell: the web client
+in the system's webview (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), its hub in a Node
+the app carries. It does what the Electron app (`apps/desktop`) does. The Electron app stays the one
+released until a release hands installed copies over (below).
 
-The owner, weighing the Electron app's size (about 100 MB of Chromium in every download) against a
-shell on the system's webview, and given that the web client must work in every browser anyway
-([0122](0122-every-browser-engine.md)): *"let's focus on shifting over to Tauri, since that seems like
-the correct approach"*; then, of the steps proposed, *"Yes, move forward with steps 1 and 2"* (the
-browser tests in CI, 0122; and this prototype, measured against Electron), and: *"Spell check should
-use native tools wherever possible, always. I don't want electron's anyway."*
+The owner, weighing the Electron app's size (about 100 MB of Chromium in every download) against a shell
+on the system's webview, and given that the web client must work in every browser anyway
+([0122](0122-every-browser-engine.md)): *"let's focus on shifting over to Tauri, since that seems like the
+correct approach"*; of the steps proposed, *"Yes, move forward with steps 1 and 2"* (the browser tests in
+CI; a prototype, measured against Electron); *"Spell check should use native tools wherever possible,
+always. I don't want electron's anyway."*; and, the prototype measured: *"Keep developing the Tauri app. I
+want full functionality before I merge to main."*
 
 ## What it is
 
-- **The shell** (`src-tauri/src/main.rs`, about 150 lines of Rust): a window on a loading page; the
-  host started as `node kuraa-host.mjs --port 0 --token <random> --settings … --workspaces …`, its
-  data in the app's own folder (`~/Library/Application Support/org.kuraa.tauri-prototype`), never the
-  Electron app's; when the host prints its address, the window goes there, with the access code. The
-  window shows only the host's pages and the loading page; other web addresses open in the default
-  browser. Quitting sends the host SIGTERM, which writes and commits pending edits, and waits up to
-  15 seconds.
-- **No bridge yet.** The page is the web client as a browser has it (0047): Preferences, Open a
-  folder… (the page's folder picker), identity and the personal backup work, as on any loopback host.
-  The Electron app's ShellBridge (0009: its menus, folder dialogs, Restart to update, the context
-  menu) is not there.
-- **What it carries**, gathered by `scripts/stage.mjs`: the host as released (`scripts/build-server.mjs`:
-  `kuraa-host.mjs`, the web client, pandoc's and Typst's WebAssembly, the native addons, this
-  platform's only, without the source map), the git the Electron app ships, and Node 24.20.0
-  (`scripts/fetch-node.mjs`, nodejs.org's build, checked against its SHA-256, only the `node`
-  program), as Tauri's `externalBin` beside the shell.
-- **The host's git, by environment** (`KURAA_GIT_DIR`, read by `@kuraa/host`'s cli.ts): the git a
-  shell ships, run instead of the computer's. `useGitFolder` (git.ts) is what the Electron app did
-  itself; both now call it.
+- **The hub, in Node** (`src/host.ts`, bundled as `kuraa-desktop.mjs`): what the Electron app's main
+  process did with the host, without its windows: the hub started on loopback with the Electron app's
+  flags and settings, its edits written and committed when it stops, its log kept in a file
+  (0053's rules), the version said to other devices (0099). The shell asks it things over its stdin, one
+  JSON line each (`start`, `stop`, `inspect`, `add`, `identity`, `join`, `log`, `quit`); it answers on
+  stdout. A pipe, not a signal, so quitting works the same on Windows, and the hub stops by itself if the
+  shell goes.
+- **Its data is the Electron app's**: preferences, the list of workspaces and the log where the
+  Electron app keeps them (`~/Library/Application Support/kuraa`, `%APPDATA%\kuraa`, `~/.config/kuraa`),
+  and the same identifier (`org.kuraa.desktop`) and program name (`Kuraa`). Moving from one app to the
+  other moves nothing.
+- **The shell** (`src-tauri/`, Rust): the window, the Electron app's menus (Settings on ⌥⌘,, Open Folder
+  on ⌘O, Reload, the developer tools on ⌥⌘J, zoom, Markdown and Shortcuts on ⌘/, Show Log File, Check for
+  Updates…), the system's folder and question dialogs, the launcher, joining a host, saving downloads,
+  updating, quitting. The app's own pages (starting, launcher, updates) are the Electron app's
+  `static/`.
+- **The page and the shell.** The page is the web client served by the hub, at the hub's own address,
+  as a browser has it (0047). The ShellBridge (0009) is `window.kuraa` again, put in each page before its
+  own scripts (`src/bridge.ts`). Tauri has no synchronous calls, so the connection the client reads at
+  start (`config()`) comes in the page's address (`#kuraa-config=…`), taken out at once and kept for the
+  tab, so a reload keeps it. What the shell tells the page (the menu's Settings, an update ready) waits
+  until the page has loaded and someone listens.
+- **Who may ask what.** Each command answers only the pages it is for (as the Electron app's bridge
+  answered only its own pages), and Tauri's capabilities say the same: the app's own pages, this app's
+  hub's page (at its port), and a joined host's page, which is not this app's code and may only go back
+  (`leave`, `home`) and ask the spell checker. The window shows only those pages (and frames' blank
+  pages, and files the page made); other web addresses open in the default browser, and it opens no
+  other windows.
+- **Joining a shared host** shows the host's own pages, as a browser would: the Electron app showed its
+  own copy of the client against the host, but a page from the app's own origin would be another origin
+  to the host, which lets no other origin in (origins.ts). A host that serves no pages cannot be joined
+  from the app; the app says so. App Transport Security allows such a host over plain HTTP, as the
+  Electron app did.
+- **Spell checking is the system's** (the owner's direction): the webview checks as you type with the
+  system's dictionary, in its own right-click menu (on a Mac, set on unless the person turned it off).
+  The editor's own menus (a table's) ask the system's spell checker through the shell (NSSpellChecker on
+  a Mac); so `Spelling.suggest` (editor-kit) may answer later, and the table's menu opens once it has.
+  Elsewhere none yet: the webview's own checking goes on (WebView2's, WebKitGTK's), and the editor's menus
+  offer no suggestions.
+- **Saving.** A rendered file handed over by the page (`<a download>`) is saved where the person says,
+  with the system's save dialog, as the Electron app (Chromium) asked. WKWebView would otherwise drop it.
+- **Updating itself** with Tauri's updater, as 0051 had it: looked for a minute after starting, every
+  four hours, when the menu asks, and when a device runs a newer kuraa (the hub says so); downloaded in
+  the background, checked against the key built in, put in place when the app quits or at once
+  (Restart now). Check for Updates… shows how it goes, in the Electron app's window (its page and
+  `update-view.ts`, drawn from the shell's status). Without `KURAA_UPDATES` at build, it does not look.
+- **What it carries** (`scripts/stage.mjs`): the hub, the web client, pandoc's and Typst's WebAssembly
+  with Typst's fonts, this platform's native addons, the git the Electron app ships, and Node 24.20.0
+  (`scripts/fetch-node.mjs`: nodejs.org's builds, checked against nodejs.org's checksums, for macOS,
+  Windows and Linux on x64 and arm64).
+- **Git's links become scripts.** Tauri's bundler copies a symbolic link as the file it points at, on
+  every platform: git's 148 links (each to the 3.5 MB git) made a 749 MB app. Each is staged as a
+  two-line script that runs what it pointed at (`exec "$(dirname "$0")/git" fetch "$@"`); git runs its
+  own commands as `git <command>` anyway.
+- **Signing, on a Mac** (`scripts/package-mac.mjs`): inside out, with the hardened runtime: every
+  program and library in its resources (git's, the native addons), Node (allowed to compile as it runs:
+  `entitlements.mac.plist`), then the app; notarized and stapled when Apple's credentials are there.
+  Without a Developer ID, ad hoc and without the hardened runtime, which would stop Node loading addons
+  of no team.
 
-`pnpm --filter @kuraa/tauri build` builds the host, fetches git and Node, stages them, builds the app
-and makes its downloads (`scripts/package-mac.mjs`). Rust is needed (`rustup`).
+## The downloads
 
-## What was measured
+`pnpm --filter @kuraa/tauri build` makes, on a Mac, a DMG, the zip the Electron app's updater
+downloads with its `latest-mac.yml`, and the `.app.tar.gz` Tauri's updater downloads with its signature
+and this platform's part of `latest.json` (`scripts/updater-manifest.mjs` merges the platforms' parts);
+on Windows an NSIS installer for the person alone, on Linux a .deb, an .rpm and an AppImage (Tauri makes
+their update files itself).
 
-Against the Electron app's v0.12.0 release, both on an M-series Mac, each with an empty workspaces
-folder of its own, showing the first-run page:
+Measured against the Electron app's 0.12.0, on an M-series Mac, idle on the first-run page: the zip
+87 MB against 159, the DMG 98 against 165; memory (`footprint`, every process) about 161 MB against 169;
+launch to the hub ready about 360 ms against 400. Node is now the largest part (37 MB of the zip), as
+Chromium was.
 
-| | Electron 0.12.0 | Tauri prototype |
-| --- | --- | --- |
-| zip (what updates download) | 158.9 MB | **87.2 MB** |
-| DMG | 164.7 MB | **97.8 MB** |
-| Memory, all its processes (`footprint`) | ≈169 MB (main and host 87, GPU 36, renderer 38, network 8) | ≈161 MB (shell 26, host 42, WebKit content 70, GPU 15, network 8) |
-| Launch to host ready, warm | ≈400 ms | ≈360 ms |
+## Tested
 
-The download is 45% smaller; memory and starting are about the same. In the Tauri zip, compressed:
-Node 37.4 MB, pandoc.wasm 16.2, git 13.7, typst.ts 10.4, Typst's fonts 6.1, the shell 1.3, the host's
-code 0.7, the web client 0.6. Node is now the largest part, as Chromium was.
+`tests/e2e/tauri.spec.ts` (the `tauri` project), the Electron app's desktop tests for this app, on a
+Mac. Playwright drives Electron, not the system's webview, and Tauri's WebDriver has no macOS driver, so
+a build with the `test-control` feature (`build:test`, never released; `src/testing.rs`) takes a test's
+requests on loopback, with a code: work something out in a page, choose from the menu, answer the
+dialogs ahead of time, read the title, quit (`tests/e2e/tauri-app.ts`). They open a folder, edit, reload
+and quit with what is pending committed; join a shared host; open folders with the dialog from the
+page, the menu and the launcher (and decline one); render with the pandoc and Typst it carries and save
+the file where the dialog says; take the flags; keep the window on its own pages; show the updates
+window and a ready update; apply and keep preferences; run git-remote-kuraa with the Node it carries;
+make you from your name; ask the system's spell checker; open the Help sheet.
 
-## Found on the way
+Updating was tried end to end by hand, with a throwaway key and a release served on loopback
+(`KURAA_UPDATES=http://127.0.0.1:<port>` is allowed for that): found, downloaded with its progress shown,
+checked, said ready in the window and the page, put in place by Restart now, and started again.
 
-- **App Transport Security** stops WKWebView loading the host's page (plain HTTP on loopback)
-  without a word: the window stayed on its loading page. `src-tauri/Info.plist` allows local
-  networking (`NSAllowsLocalNetworking`) and nothing else without TLS.
-- **Tauri's bundler copies a symbolic link as the file it points at.** Git's 148 links in
-  `libexec/git-core`, each to the 3.5 MB git, became 148 copies: a 749 MB app. `package-mac.mjs` makes
-  them again in the app after bundling; a release would then sign and notarize it, and make its
-  downloads, itself.
-- **The page needs nothing of Chromium's.** It loaded, connected and showed its first-run page in
-  WKWebView as it does in Safari (0122's WebKit tests).
+The Tauri workflow builds it on macOS, Windows and Linux and runs these tests on macOS, on every push
+to main and every pull request; no release waits for it.
 
 ## Not yet
 
-In the order proposed:
-
-- **The bridge** (0009's ShellBridge, through Tauri's commands, offered only to the host's pages):
-  the native folder dialog, menus (Open a folder…, Preferences, Help, Check for updates), Restart to
-  update.
-- **Spell check, the system's** (the owner's direction): misspelled words left to the webview's own
-  menu and the system's dictionary, not suggestions rebuilt in the app's context menu.
-- **Updates and moving over**: Tauri's updater, signed; one last Electron release that hands
-  installed apps to the Tauri one, with the data in `…/kuraa` (preferences, workspaces, identity) carried
-  over.
-- **Signing and notarizing**, the Node beside the shell included.
-- **Desktop tests**: Playwright drives Electron, not Tauri, and Tauri's WebDriver has no macOS driver;
-  WebdriverIO's Tauri service embeds one.
-- **Windows (WebView2) and Linux (WebKitGTK)**, and an x64 Mac.
+- **Handing installed copies over.** One last Electron release whose update is this app: its zip and
+  `latest-mac.yml` are made for that, and the same identifier, program name and data folder make it a
+  drop-in for Squirrel.Mac once signed with the same Developer ID. On Windows, the Electron app's NSIS
+  installer and Tauri's install in different places (`%LOCALAPPDATA%\Programs\kuraa`, and Tauri's): the
+  handover there needs an installer that removes the old copy. On Linux an AppImage or a package of the
+  same name replaces the old. Untried until a signed release.
+- **The release workflow** (release.yml) still builds the Electron app; building, signing and
+  publishing this one there (with `latest.json` merged from every platform) is the switch.
+- **Windows and Linux** are built by CI but not yet run or tested by anyone; WebView2 and WebKitGTK
+  should behave as the browser tests' Chromium and WebKit do. Windows signing is given to Tauri as a
+  command (`KURAA_WINDOWS_SIGN_COMMAND`).
+- **Spell suggestions on Windows and Linux** in the editor's own menus (the system's spell checker
+  there: ISpellChecker, Enchant).
+- **An icon** (as the Electron app, it has none of its own; the placeholders are the system's).
 - A smaller Node (a build with less of ICU, say), now the largest part.

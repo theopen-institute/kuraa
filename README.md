@@ -822,18 +822,28 @@ KURAA_DESKTOP_APP=$(node apps/desktop/scripts/testable-copy.mjs apps/desktop/dis
 
 The app has no icon of its own yet: put `icon.png` (1024×1024) in `apps/desktop/build-resources`.
 
-### A Tauri shell (a prototype)
+### The Tauri app
 
-`apps/tauri` is the desktop app as a Tauri 2 shell, on macOS for now: the web client in the system's
-webview, the host as released run by a Node the app carries ([0127](docs/decisions/0127-a-tauri-shell.md)).
-With Rust installed (`rustup`):
+`apps/tauri` is the desktop app as a Tauri 2 shell ([0127](docs/decisions/0127-a-tauri-shell.md)): the web
+client in the system's webview (WKWebView, WebView2, WebKitGTK), its hub in a Node the app carries, with the
+same git, pandoc and Typst. It does what the Electron app does (menus, the system's folder dialogs, the
+launcher, joining a shared host, saving rendered files, updating itself, its log) with the system's spell
+checker, and keeps its data where the Electron app does (`~/Library/Application Support/kuraa`), so moving
+from one to the other keeps everything. The Electron app is still the one released. With Rust installed
+(`rustup`):
 
 ```sh
-pnpm --filter @kuraa/tauri build   # the app, a zip and a DMG, in apps/tauri/src-tauri/target/release/bundle
+pnpm --filter @kuraa/tauri build        # this platform's app and packages, in apps/tauri/src-tauri/target/release/bundle
+pnpm --filter @kuraa/tauri build:test   # the app the desktop tests drive (macOS)
+pnpm test:e2e --project tauri           # those tests (KURAA_TAURI_BUILT=1: the app built already)
 ```
 
-Its data is its own (`~/Library/Application Support/org.kuraa.tauri-prototype`), never the Electron
-app's. It has no menus, native dialogs or updates yet.
+It takes the Electron app's flags (`Kuraa.app/Contents/MacOS/Kuraa --open <folder>`, `--join <url> --token
+<code>`, `--workspaces`, `--engine`, …). Signing and updates come from the environment, as `apps/tauri/scripts/build.mjs` says:
+`KURAA_SIGN_IDENTITY` (a Developer ID) and Apple's credentials to notarize on a Mac; `KURAA_UPDATES` with
+`TAURI_UPDATER_PUBKEY` and `TAURI_SIGNING_PRIVATE_KEY` (from `pnpm --filter @kuraa/tauri tauri signer
+generate`) for updating itself. GitHub builds it on macOS, Windows and Linux, and runs its tests on macOS,
+on every push to main and every pull request (the Tauri workflow).
 
 ## Checks
 

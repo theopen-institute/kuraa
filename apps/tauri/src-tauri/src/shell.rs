@@ -88,12 +88,20 @@ pub fn open_outside(app: &AppHandle, url: &Url) {
     }
 }
 
-/// A line for the log (the host keeps it).
+/// A line for the log: the host keeps it; once it has stopped (quitting, putting an update in place), the shell adds it to the file itself.
 pub fn log(app: &AppHandle, text: impl Into<String>) {
     let text = text.into();
-    match app.try_state::<Shared>().and_then(|s| s.host.get().cloned()) {
-        Some(host) => host.log(text),
-        None => eprintln!("{text}"),
+    let Some(shell) = app.try_state::<Shared>() else { return eprintln!("{text}") };
+    if shell.host.get().is_some_and(|h| h.log(&text)) {
+        return;
+    }
+    eprintln!("{text}");
+    if let Some(file) = shell.log_file() {
+        use std::io::Write;
+        let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(file) {
+            let _ = writeln!(f, "[{seconds}] {text}");
+        }
     }
 }
 

@@ -96,7 +96,7 @@ mod control {
         WAITING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id, tx);
         let script = format!(
             "(async () => {{ const say = (a) => window.__TAURI_INTERNALS__.invoke('test_result', {{ id: {id}, ...a }}); \
-             try {{ const v = await ({js}); say({{ ok: v === undefined ? null : v }}); }} catch (e) {{ say({{ error: String(e && e.stack || e) }}); }} }})()"
+             try {{ const v = await ({js}); say({{ ok: v === undefined ? null : v }}); }} catch (e) {{ say({{ error: String(e) + (e && e.stack ? ' at ' + e.stack : '') }}); }} }})()"
         );
         w.eval(script).map_err(|e| e.to_string())?;
         rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "the page did not answer".to_string())?
